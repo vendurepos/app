@@ -17,8 +17,8 @@ vi.mock('@tallyui/database', async (importActual) => {
     createTallyDatabase: vi.fn(actual.createTallyDatabase),
     getStorageHealth: vi.fn(actual.getStorageHealth),
     startStockReconcile: vi.fn(() => ({ reconcileStock: vi.fn(async () => ({})), stop: vi.fn() })),
-    startIdReconcile: vi.fn(() => ({ stop: vi.fn() })),
-    startFingerprintReconcile: vi.fn(() => ({ stop: vi.fn() })),
+    startIdReconcile: vi.fn(() => ({ reconcileIds: vi.fn(async () => ({})), stop: vi.fn() })),
+    startFingerprintReconcile: vi.fn(() => ({ reconcile: vi.fn(async () => ({})), stop: vi.fn() })),
     startReplication: vi.fn(() => ({
       cancel: vi.fn(async () => {}), reSync: vi.fn(),
       active$: new Subject<boolean>(), error$: new Subject<Error>(), received$: new Subject(),
@@ -75,6 +75,7 @@ describe('catalogue sync lifecycle', () => {
       expect(start).toHaveBeenCalledWith({
         collection, adapter, context,
         ...(start === startStockReconcile ? {} : { reSync: expect.any(Function) }),
+        ...(start === startFingerprintReconcile ? { startDelayMs: 60_000 } : {}),
       });
       expect(vi.mocked(start).mock.calls[0][0].context.signal).toBe(context.signal);
     }
@@ -107,7 +108,7 @@ describe('catalogue sync lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('cancels the replication when stopped after starting', async () => {
+  it.each([0, 1, 2])('awaits runner %i after stopping before cancelling replication', async (pendingRunner) => {
     const { catalogueConnector, startCatalogueSync, stopCatalogueSync } = await import('./catalogue');
     const { replication } = await startCatalogueSync(session, catalogueConnector(session));
     const signal = vi.mocked(startReplication).mock.calls[0][0].context.signal;
@@ -117,11 +118,29 @@ describe('catalogue sync lifecycle', () => {
     stops.forEach((stop) => vi.mocked(stop).mockImplementation(() => {
       expect(signal?.aborted).toBe(false);
     }));
+    const runs = [
+      vi.mocked(startStockReconcile).mock.results[0].value.reconcileStock,
+      vi.mocked(startIdReconcile).mock.results[0].value.reconcileIds,
+      vi.mocked(startFingerprintReconcile).mock.results[0].value.reconcile,
+    ];
+    let finish!: () => void;
+    const pass = new Promise<void>((resolve) => { finish = resolve; });
+    runs.forEach((run, index) => vi.mocked(run).mockClear().mockImplementationOnce(() => {
+      stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
+      expect(signal?.aborted).toBe(true);
+      return index === pendingRunner ? pass : Promise.reject(new Error('Stopped'));
+    }));
     vi.mocked(replication.cancel).mockImplementationOnce(async () => {
       expect(signal?.aborted).toBe(true);
       stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
     });
-    await stopCatalogueSync();
+    let stopped = false;
+    const stopping = stopCatalogueSync().then(() => { stopped = true; });
+    await vi.waitFor(() => runs.forEach((run) => expect(run).toHaveBeenCalledTimes(1)));
+    expect(stopped).toBe(false);
+    expect(replication.cancel).not.toHaveBeenCalled();
+    finish();
+    await stopping;
     expect(signal?.aborted).toBe(true);
     expect(replication.cancel).toHaveBeenCalledTimes(1);
   });
@@ -188,6 +207,35 @@ describe('catalogue sync lifecycle', () => {
     ]);
   });
 
+  it.each([startStockReconcile, startIdReconcile, startFingerprintReconcile])('cancels replication when %s throws at start', async (start) => {
+    const { catalogueConnector, startCatalogueSync, stopCatalogueSync } = await import('./catalogue');
+    const error = new Error('Runner failed to start');
+    vi.mocked(start).mockImplementationOnce(() => { throw error; });
+    await expect(startCatalogueSync(session, catalogueConnector(session))).rejects.toBe(error);
+    await stopCatalogueSync();
+    const replication = vi.mocked(startReplication).mock.results[0].value;
+    expect(replication.cancel).toHaveBeenCalledTimes(1);
+    for (const runner of [startStockReconcile, startIdReconcile, startFingerprintReconcile]) {
+      const result = vi.mocked(runner).mock.results[0];
+      if (result?.type === 'return') expect(result.value.stop).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('does not warn when the initial stock pass rejects after a stop', async () => {
+    const { catalogueConnector, startCatalogueSync, stopCatalogueSync } = await import('./catalogue');
+    let rejectPass!: (error: Error) => void;
+    const reconcileStock = vi.fn<ReturnType<typeof startStockReconcile>['reconcileStock']>()
+      .mockRejectedValue(new Error('Stopped'))
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectPass = reject; }));
+    vi.mocked(startStockReconcile).mockReturnValueOnce({
+      reconcileStock, stop: vi.fn(() => rejectPass(new Error('Aborted'))), state$: new Subject(),
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await startCatalogueSync(session, catalogueConnector(session));
+    await stopCatalogueSync();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('times out a removal that never settles', async () => {
     const { catalogueConnector, startCatalogueSync, removeCatalogueDatabaseWithin } = await import('./catalogue');
     const { db } = await startCatalogueSync(session, catalogueConnector(session));
@@ -248,6 +296,22 @@ describe('catalogue sync lifecycle', () => {
     (cleanup as (() => void) | undefined)?.();
   });
 
+  it('returns reconciled stock for the chooser without mutating raw products', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const raw = { id: 'product-1', variants: [{ id: 'variant-1', stockOnHand: 3 }] };
+    const overlay = new Map([['variant-1', [{ stockLocationId: '1', stockOnHand: 9, stockAllocated: 0 }]]]);
+    vi.mocked(useMemo).mockImplementation((create) => create());
+    vi.mocked(useState).mockReturnValueOnce([[raw], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const { products, connector, stockOverlay } = catalogueHook(session);
+    expect(connector.traits.product.getVariants!(products[0])[0].stock?.quantity).toBe(7);
+    expect(connector.traits.product.getVariants!(raw)[0].stock?.quantity).toBe(1);
+    expect(products[0]).not.toBe(raw);
+    expect(raw).toEqual({ id: 'product-1', variants: [{ id: 'variant-1', stockOnHand: 3 }] });
+    expect(stockOverlay).toBe(overlay);
+  });
+
   it('subscribes to reconciled stock and its last successful pass until cleanup', async () => {
     const { useCatalogue: catalogueHook } = await import('./use-catalogue');
     const { stopCatalogueSync } = await import('./catalogue');
@@ -273,9 +337,19 @@ describe('catalogue sync lifecycle', () => {
     (cleanup as (() => void) | undefined)?.();
     setOverlay.mockClear();
     setAsOf.mockClear();
+    const liveRows = vi.fn();
+    const liveAsOf = vi.fn();
+    const rowsSubscription = stockLevels.find().$.subscribe(liveRows);
+    const asOfSubscription = stockLevels.getLocal$(STOCK_LEVELS_LAST_PASS).subscribe(liveAsOf);
     await stockLevels.upsert({ id: 'variant-1', value: { stockOnHand: 3 }, updatedAt: completedAt });
     await stockLevels.upsertLocal(STOCK_LEVELS_LAST_PASS, { completedAt: '2026-09-29T12:05:00.000Z' });
+    await vi.waitFor(() => {
+      expect(liveRows.mock.lastCall?.[0][0].toJSON().value).toEqual({ stockOnHand: 3 });
+      expect(liveAsOf.mock.lastCall?.[0].get('completedAt')).toBe('2026-09-29T12:05:00.000Z');
+    });
     expect(setOverlay).not.toHaveBeenCalled();
     expect(setAsOf).not.toHaveBeenCalled();
+    rowsSubscription.unsubscribe();
+    asOfSubscription.unsubscribe();
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { TallyConnector } from '@tallyui/core';
+import { withStockOverlay, type TallyConnector } from '@tallyui/core';
 import { getStorageHealth } from '@tallyui/database';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import { isStorageWorkerStartError } from '@tallyui/storage-sqlite/web';
@@ -19,8 +19,9 @@ export function useCatalogue(session: Session): {
   const [products, setProducts] = useState<any[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [stockOverlay, setStockOverlay] = useState<ReadonlyMap<string, unknown>>();
+  const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [stockOverlayAsOf, setStockOverlayAsOf] = useState<string>();
+  const overlaidProducts = useMemo(() => products.map(doc => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay)), [products, connector, stockOverlay]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,5 +86,5 @@ export function useCatalogue(session: Session): {
     };
   }, [session, connector]);
 
-  return { connector, products, lastSyncedAt, error, stockOverlay, stockOverlayAsOf };
+  return { connector, products: overlaidProducts, lastSyncedAt, error, stockOverlay, stockOverlayAsOf };
 }

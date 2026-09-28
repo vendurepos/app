@@ -15,12 +15,14 @@ export function databaseName({ url, channelToken, barcodeField }: Pick<Session, 
 }
 // Vendure's feeds have no push stream, so re-pull on this interval.
 export const RESYNC_INTERVAL_MS = 60_000;
+// The default skips the start pass and restarts a 24 h wait on every start, so a till reloaded daily would never run one.
+export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 // A hung storage worker must not prevent the cashier from signing out.
 export const SIGN_OUT_WAIT_MS = 5_000;
 
 let storage: RxStorage<any, any> | undefined;
 let database: Promise<TallyDatabase> | undefined;
-let sync: { replication: RxReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; stops: (() => void)[] } | undefined;
+let sync: { replication: RxReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[] } | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -70,11 +72,14 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     live: true,
   });
   const stockLevels = db[STOCK_LEVELS_COLLECTION];
+  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS) };
   const stock = startStockReconcile({ collection: stockLevels, adapter: connector.reconcile!.stock!, context });
+  sync.runners.push({ stop: stock.stop, runNow: stock.reconcileStock });
   const ids = startIdReconcile({ collection: db.products, adapter: connector.reconcile!.ids!, context, reSync: () => replication.reSync() });
-  const prices = startFingerprintReconcile({ collection: db.products, adapter: connector.reconcile!.prices!, context, reSync: () => replication.reSync() });
-  stock.reconcileStock().catch(error => console.warn('Stock reconcile failed:', error));
-  sync = { replication, controller, stops: [stock.stop, ids.stop, prices.stop], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS) };
+  sync.runners.push({ stop: ids.stop, runNow: ids.reconcileIds });
+  const prices = startFingerprintReconcile({ collection: db.products, adapter: connector.reconcile!.prices!, context, reSync: () => replication.reSync(), startDelayMs: PRICE_RECONCILE_START_DELAY_MS });
+  sync.runners.push({ stop: prices.stop, runNow: prices.reconcile });
+  stock.reconcileStock().catch(error => { if (!controller.signal.aborted) console.warn('Stock reconcile failed:', error); });
   return { db, replication, stockLevels };
 }
 
@@ -86,8 +91,9 @@ async function stopUnqueued(): Promise<void> {
   if (!sync) return;
   const current = sync;
   clearInterval(current.timer);
-  current.stops.forEach((stop) => stop());
+  current.runners.forEach(({ stop }) => stop());
   current.controller.abort();
+  await Promise.allSettled(current.runners.map(({ runNow }) => runNow()));
   await current.replication.cancel();
   if (sync === current) sync = undefined;
 }
