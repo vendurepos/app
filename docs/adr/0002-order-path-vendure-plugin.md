@@ -1,4 +1,4 @@
-# The order path: `order.create` v3 as one transaction in a Vendure plugin
+# The order path: `order.create` v3 as one transaction per command in a Vendure plugin
 
 Status: Proposed
 Date: 2026-09-29
@@ -15,32 +15,38 @@ TallyUI command. The client side is already built and platform-neutral:
 - **The results.** Each command comes back `applied`, `duplicate` or
   `rejected`, with `serverRefs` of `orderId`, `displayId` and `totalMinor`.
   The error codes are those of ADR-038/039 (`idempotency_mismatch`,
-  `unknown_variant`, `underpaid`, `insufficient_stock`, `invalid_payload`,
-  `store_configuration`, `unsupported_version`, …), plus the `total_mismatch`
-  warning, HTTP 409 `in_progress` and 503 for a transient failure.
-- **Versions.** v2 adds pre-tax discounts (ADR-062). v3 adds the frozen
-  `display` and `taxByRate` receipt snapshots, the register `sessionId` and a
-  soft `customer.customerId` (ADR-065). The server advertises what it
-  accepts with `GET /tally/v1/info` (`{"contracts":{"order.create":[…]}}`).
-  The outbox falls back to a lower version with the **same** command id when
-  the server refuses a version (ADR-062, ADR-065).
+  `unknown_variant`, `underpaid`, `unsupported_currency`,
+  `insufficient_stock`, `invalid_payload`, `store_configuration`,
+  `unsupported_version`, …). Warnings such as `total_mismatch` come back in
+  `totalWarnings`. HTTP 409 `in_progress` stops the batch; 503 means a
+  transient failure.
+- **Versions.** v2 adds pre-tax discounts, allocated per line in each
+  line's own tax mode (ADR-062). v3 adds the frozen `display` and
+  `taxByRate` receipt snapshots, the register `sessionId` and a soft
+  `customer.customerId` (ADR-065). The server advertises what it accepts
+  with `GET /tally/v1/info`. The outbox falls back to a lower version with
+  the **same** command id when the server refuses a version.
 - **The outbox.** It retries with backoff and honours `Retry-After`. A 409
-  retries the batch; three 401s in a row pause it for sign-in. A rejected
-  order is kept as a dead letter that the user can requeue under a new id
-  (TallyUI `packages/pos/src/outbox`).
+  retries the batch, and earlier members then replay as `duplicate`. Three
+  401s in a row pause it for sign-in. A rejected order is kept as a dead
+  letter that the user can requeue under a new id. This command outbox is
+  temporary: TallyUI moves to the WCPOS sync engine's mutation queue
+  (ADR-067 decision 7).
 
 TallyUI has already sketched the Vendure side: Admin API only for reads, a
 plugin for the write, and one database transaction (ADR-046, ADR-047). Tax
-parity comes from a rounding surcharge rather than a change to the
-merchant's configuration (ADR-048). None of it is built, and spike S1 in
-the plan has not yet proved the recipe.
+parity comes from one rounding surcharge rather than a change to the
+merchant's configuration (ADR-048). medusapos has built the same contract
+on Medusa (its plugin's `process.ts`, `execute.ts`, the ledger, and its
+ADRs 0012, 0017, 0019 and 0020). None of the Vendure side is built, and
+spike S1 has not yet proved the recipe.
 
 The principle for this decision is Paul's (TallyUI ADR-067, 2026-09-28):
 **"the engine's mechanics are the input, its constraints are not."** In his
 words: "The WCPOS sync engine and core may be limited by PHP or server
 considerations that do not apply to Medusa or Vendure." So we adopt
 Vendure's own mechanics wherever they do the job, and we do not carry over
-workarounds that exist only because of WooCommerce, PHP or Medusa.
+workarounds that exist only because another engine could not do the same.
 
 ## Decision
 
@@ -54,102 +60,196 @@ The write goes through a server plugin (`@vendurepos/plugin`, in
 - a sale would take a dozen separate mutations, so a crash half-way through
   leaves a half-built order that the client would have to find and repair.
 
-A plugin can call `OrderService`, `PaymentService` and
-`StockMovementService` inside **one `TransactionalConnection` transaction**.
-That is the Vendure mechanic that makes the rest simple. The plugin
-registers a Nest controller for `POST /tally/v1/commands` and
+A plugin calls `OrderService`, `PaymentService`, `CustomerService` and
+`StockMovementService` inside one `TransactionalConnection` transaction per
+command. Service calls reuse the request context's query runner, so they
+join that transaction.
+
+The plugin registers a Nest controller for `POST /tally/v1/commands` and
 `GET /tally/v1/info`, behind Vendure's own auth. Authentication is the same
 bearer token (or API key) the app already uses, and the channel is chosen by
 `vendure-token`. The permission is `@Allow(Permission.CreateOrder)` for the
 MVP, and a custom `TallyPosSell` permission later.
 
-### 2. Idempotency: the ledger row commits or rolls back with the order
+Those services do not check permissions themselves. So `CreateOrder` on this
+route also lets the caller fulfil orders, move stock and create customers,
+within the recipe. That is accepted for the MVP, and it is the reason for
+`TallyPosSell`.
 
-A `TallyCommand` entity (command id as primary key, fingerprint, status,
-result JSON) is claimed **inside the same transaction as the order**:
+**Postgres only.** The claim below relies on Postgres semantics
+(`INSERT … ON CONFLICT` waiting on an uncommitted row, and
+`SET LOCAL lock_timeout`). The plugin supports Postgres only, and says so
+in its README.
 
-- `INSERT … ON CONFLICT DO NOTHING` on the id. A second request for the same
-  id blocks on the uncommitted row. After a 5 s `lock_timeout` it answers
-  409 `in_progress`, which the outbox already retries.
+**Shared contract code.** The payload shape, fiscal figures, fingerprint,
+money helpers, `validateBatch`, the version rules, `totalWarnings` and the
+command result are not rewritten here. They move from medusapos into a
+TallyUI server-side package, `@tallyui/core/server`; that is a queued
+TallyUI job, and later the register validators and the expected-cash
+derivation follow. Spike S1 uses a vendored copy of the medusapos files,
+marked temporary. The plugin's first PR after S1 consumes the package.
+
+### 2. Transactions, idempotency and error classes
+
+**One transaction per command, never per batch.** The controller has no
+`@Transaction()`:
+
+1. It first validates every envelope in the batch (`validateBatch`).
+2. It then runs the pre-claim checks for each command. A shape or version
+   refusal (`invalid_payload`, `unsupported_version`) and a store that
+   cannot take the sale (`store_configuration`: no tax zone, no `tally-pos`
+   payment method, no in-store shipping method) are answered here, before
+   any write or claim.
+3. It runs each remaining command in its own `withTransaction`.
+4. It stops at the first 409 or 503, as medusapos's `process.ts` does.
+   Earlier commands have already committed, so on the retry they replay as
+   `duplicate` (ADR-039).
+
+**The claim.** A `TallyCommand` entity (command id as primary key,
+`clientOrderId`, fingerprint, status, result JSON) is claimed inside the
+command's transaction:
+
+- `SET LOCAL lock_timeout = '5s'`, then `INSERT … ON CONFLICT DO NOTHING`.
+  A second request for the same id waits on the uncommitted row. After 5 s
+  it answers 409 `in_progress`, which the outbox retries. The timeout is
+  reset right after the claim, so it does not also govern the stock and
+  order locks that follow.
 - Once the first request commits, a replay reads the stored result
   (`duplicate`, same `serverRefs`). A different fingerprint gives
   `idempotency_mismatch`.
-- If the first request fails, the ledger row rolls back with the order, so
-  a retry starts clean.
-- `Order.tallyClientOrderId` has a unique index as a second guard.
-- If the client times out while the server commits, it retries with the
-  same id and gets `duplicate` with the original `serverRefs`. That is the
-  outbox's normal path, and needs no resume logic.
+- A different command id for a `clientOrderId` that already has an order
+  (a requeue, which mints a new id) returns `ok` with that order's current
+  refs and writes nothing, as medusapos's lookup does.
+  `Order.tallyClientOrderId` is unique, as the last guard.
+- If the transaction fails, the ledger row rolls back with the order, so a
+  retry starts clean. If the client times out while the server commits, it
+  retries with the same id and gets `duplicate`. That is the outbox's
+  normal path, and needs no resume logic.
 
-This **replaces** medusapos's 120 s claim lease, its fencing token, the
-advisory lock and the compensation/resume code (about 600 of its 988
-lines). Those exist because Medusa workflows and WooCommerce's PHP requests
-cannot put the whole sale in one transaction. Vendure can.
+**Error results become throws.** Every Vendure service method that returns
+an `ErrorResult` (a state transition refused, stock, a payment declined) is
+turned into a throw, so the transaction rolls back. A half-built order never
+commits.
 
-`invalid_payload`, `store_configuration` and `unsupported_version` are
-decided **before** the claim, so nothing is written for them.
+**Stored rejections, never retry loops.** A business refusal found after
+the claim is a final answer: `unknown_variant` (a variant missing or
+disabled), `underpaid`, and so on. The order transaction rolls back. The
+`rejected` result is then written to the ledger in its own short
+transaction, so a replay returns the same rejection without re-running the
+recipe. Only genuinely transient failures answer 503.
+
+**What this retires, measured.** medusapos's lease, fencing token, advisory
+lock and resume are 310 physical lines on its `main` (5c23a74):
+`tally-ledger/service.ts` 150, `execute.ts` 104, `resume.ts` 56. They exist
+because a Medusa workflow spans modules and cannot be one database
+transaction (its ADR 0020). The Vendure ledger keeps the claim and result
+parts of `service.ts`, and drops the lease, the fencing token, the advisory
+lock and `resume.ts`.
 
 ### 3. A POS sale is a Vendure Order
 
 | POS concept | Vendure mechanism (adopted) | Replaces (not carried over) |
 |---|---|---|
-| The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on that last transition, so it is the sync time (Vendure's `DefaultOrderPlacedStrategy`) | WooCommerce statuses and WCPOS's `pos-open`/`pos-partial` states; a sale that reaches the server is always paid |
-| As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice` with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`). Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no workaround | Rewriting line totals through post meta |
-| Discounts (v2/v3) | Each discounted line gets one negative, **taxable** `Surcharge` (`POS discount`, SKU `TALLY-DISCOUNT`) of `-discountMinor`, in the line's tax mode and with the line's tax rates. It lowers that line's taxable base as ADR-062 requires. A net unit price was rejected: `(unit × qty − discount) / qty` is not an integer in general | Coupon or promotion emulation |
-| Server promotions | **None on POS orders.** The POS has already applied its own discounts, and a server promotion would change Vendure's tax lines, which an untaxed surcharge cannot repair. Vendure's `OrderCalculator.applyPriceAdjustments` takes the promotion list as an argument, so the plugin prices POS orders with an empty list | Settling promotion differences in the rounding surcharge |
-| Tax | The channel's default tax zone and the merchant's tax strategy, unchanged. With the prices, modes and discounts above, Vendure's tax lines should equal the POS `taxByRate`, up to per-line rounding. That rounding difference, and only that, is settled by the untaxed ADR-048 surcharge (`TALLY-ROUNDING`). A larger difference is reported as `total_mismatch`, and the stored v3 snapshot remains the fiscal record | WooCommerce's single "prices include tax" option, and changing store settings to match the POS |
-| Payment | A `tally-pos` `PaymentMethodHandler`: one settled `Payment` per tender (`cash` or `external`), with tendered, change and reference in its metadata. The payments cover exactly `totalMinor` (ADR-039), and split tender works natively | Payment-gateway emulation and gateway meta |
-| Collection | An in-store `ShippingMethod` whose eligibility checker accepts only POS orders, with a zero calculator | Hiding shipping lines |
-| Stock | A manual fulfilment, which records `SALE` stock movements. For `insufficient_stock`, the paid sale is still applied: a temporary top-up and take-back inside the transaction, plus a warning (ADR-039) | WooCommerce stock-reduction hooks and reservation tables |
-| Customer | Existing customer by `customer.customerId` (v3) or email; otherwise one walk-in placeholder customer per channel | Guest-order meta |
-| Register and cashier | Order custom fields: `tallyRegisterId` (the drawer, not the device), `tallySessionId` (v3), `tallyCashierRef`, `tallyDeviceId` and `tallySaleAt` (the sale time, since `orderPlacedAt` is the sync time). Register sessions, movements and closures become their own commands and entities later (ADR-068); the order only references them | `_wcpos_register`, `_wcpos_session` and `_pos_user` post meta; the WooCommerce sale counter, which TallyUI's payload does not carry and this plugin does not add |
+| The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on the last transition; the plugin overwrites it with `tallySaleAt` (the payload's sale time) in the same transaction, so Vendure's reports match the till | Status workarounds such as WCPOS's `pos-open`/`pos-partial`; a sale that reaches the server is always paid |
+| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is refused as `unsupported_currency` before the claim | Repricing lines in the channel's default currency |
+| Lines | One `OrderLine` per POS line. Vendure merges equal lines, so a read-only line custom field `tallyClientLineId` keeps them 1:1 | — |
+| Stock | A manual fulfilment records `SALE` stock movements at the location that Vendure's `StockLocationStrategy` allocates from. `payload.locationId` is not used in the MVP (TallyUI does not send it yet). A shortage is topped up **before** `addItemToOrder`, because `constrainQuantityToSaleable` would otherwise silently cut the quantity, and before `ArrangingPayment`. The top-up is taken back after fulfilment, inside the transaction, and the result carries an `insufficient_stock` warning (ADR-039) | Stock-reduction hooks and reservation tables |
+| As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice`, with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`). Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no workaround | Rewriting line totals through post meta |
+| Discounts (v2/v3) | One negative, **taxable** `Surcharge` per discounted line (`POS discount`, SKU `TALLY-DISCOUNT`) of `-discountMinor`, in that line's tax mode. Its tax lines copy the line's rate and description, so the order-level tax group for that rate shrinks by the discount. A net unit price was rejected: `(unit × qty − discount) / qty` is not an integer in general | Coupon emulation |
+| Server promotions | **None on POS orders.** The POS has already applied its own discounts. Four calls re-apply the channel's active promotions while the order is built: `addItemsToOrder`, `addSurchargeToOrder`, `setShippingMethod`, and the coupon revalidation inside `addPaymentToOrder`. So the recipe ends with one final pricing pass, `orderCalculator.applyPriceAdjustments(ctx, order, [])`, followed by explicit saves of the order, its lines and its shipping lines. `order.promotions` and every line's promotion adjustments are saved empty. A later edit in the Dashboard would re-apply the channel's promotions; POS orders are not meant to be edited there | Settling promotion differences in a surcharge |
+| Tax and money authority | The configured `TaxZoneStrategy` and the merchant's tax strategy, unchanged. **The till's totals are the fiscal record** (as in medusapos ADR 0012). One untaxed `TALLY-ROUNDING` surcharge bridges **any** difference between Vendure's total and `totalMinor` (ADR-048). The order is always recorded, and is never refused as `total_mismatch`. The size of the bridge comes back as a `totalWarnings` entry. The surcharge is added through the repository followed by `calculateOrderTotals`, so it causes no promotion pass. A negative tie rounds half away from zero, using the plugin's own rounding rather than `Math.round`. ADR-048's bound widens to ⌈(lines + surcharges) / 2⌉ minor units. Per-rate figures are compared with that tolerance against the v3 `taxByRate`, and any difference is reported as a warning, never refused | WooCommerce's single "prices include tax" option, and changing store settings to match the POS |
+| Payment | A `tally-pos` `PaymentMethod` per channel. Its handler returns `Settled` payments created with `PaymentService.createPayment`, one per tender (`cash` or `external`) as given. A sum of tenders above the total is allowed (ADR-039): the covering tender's Vendure payment is capped, so Vendure accepts the payments as covering the order exactly. The **full tender list, including change, is stored on the order** in a read-only `tallyPayments` field, as medusapos's `tally_payments` is. That list is the fiscal record, and a register's expected cash derives from it, never from Vendure's payment rows. A zero-total sale has no payment, so the plugin makes the `PaymentSettled` transition itself | Payment-gateway emulation |
+| Collection | An in-store `ShippingMethod` with a zero calculator | Hiding shipping lines |
+| Closed to the storefront | The `tally-pos` payment method and the in-store shipping method each have an eligibility checker that accepts only orders carrying `tallyClientOrderId` created through the plugin's authenticated route. The payment handler also refuses unless `ctx.apiType === 'custom'`. A Shop API customer can never settle an order with `tally-pos` or pick the in-store method | — |
+| Customer | In order: the customer from `customer.customerId` (v3) when it exists in this channel; else the customer found or created by email with `CustomerService.createOrUpdate` (ADR-047); else one walk-in placeholder customer per channel. An unknown or foreign `customerId` falls back; it never rejects the sale | Guest-order meta |
+| No customer email | POS orders send no order-confirmation email, matching Medusa's `no_notification`. The plugin's configured email handlers filter `OrderPlacedEvent` on `tallyClientOrderId`, or an equivalent that S1 proves | — |
+| Till, drawer and cashier | Order custom fields: `tallyRegisterId` is the till's **device** id (medusapos ADR 0017/0019); `tallySessionId` (v3) identifies the drawer session (ADR-068); `tallyCashierRef`; `tallySaleAt`. Register sessions, movements and closures are their own commands and entities later (ADR-068); the order only references them. TallyUI records the device meaning in ADR-038/068 | `_wcpos_register`, `_wcpos_session` and `_pos_user` post meta; the WooCommerce sale counter, which TallyUI's payload does not carry and this plugin does not add |
 | Receipt snapshot (v3) | `display` and `taxByRate` are stored unchanged in a read-only `Order.tallySnapshot` text field, so the order carries the receipt exactly as the cashier printed it | Rebuilding a receipt from server totals |
 | Order number | Vendure's own order `code`, returned as `serverRefs.displayId` | — |
 
-The custom fields are typed and indexed (`tallyClientOrderId` is unique),
-and they are read-only in the Admin API, so only the plugin writes them.
+**Custom fields.** All are read-only in the Admin API. Vendure enforces that
+only at the API layer, so the plugin writes them directly. `unique` gives
+`tallyClientOrderId` its index. The plugin's migration adds plain indexes on
+`tallyRegisterId` and `tallySessionId`, because custom fields have no index
+option.
 
-### 4. What stays in TallyUI, unchanged
+**Store configuration.** A bootstrap creates the `tally-pos` payment method,
+the in-store shipping method and the walk-in customer per channel when they
+are missing. If one is still missing when a sale arrives, or the channel
+has no tax zone, the sale is refused as `store_configuration` before the
+claim, and the till retries it by hand after the store is repaired.
 
-The command envelope and its UUIDv7 id, the fingerprint rule and the
-result/error vocabulary are all TallyUI's. So are:
+### 4. TallyUI's contract, and the WCPOS engine it moves to
 
-- the durable outbox: retry, `Retry-After`, 409, the pause after repeated
-  401s, dead letters, requeue, and the version fallback;
-- capability discovery and the exact integer tax maths (ADR-037);
-- the local `PosOrder` with its frozen fiscal snapshots, and register
-  sessions (ADR-032, ADR-068).
+The command envelope, the fingerprint rule, the result and error
+vocabulary, capability discovery and the exact integer tax maths (ADR-037)
+are TallyUI's, and the plugin only serves them. The local `PosOrder`, with
+its frozen fiscal snapshots, and register sessions (ADR-032, ADR-068) stay
+on the client.
 
-The plugin is a server for that contract. It adds nothing to the client.
+The command outbox itself is temporary (ADR-067 decision 7). The
+`TallyCommand` ledger is the idempotency store that a later Vendure driver
+for the WCPOS engine reuses: the engine's `Idempotency-Key` is the command
+id. Against the engine's mechanisms, as medusapos ADR 0020 does for Medusa:
+
+| WCPOS engine mechanism | Vendure driver | Vendure primitive and reason |
+|---|---|---|
+| Mutation queue: durable, `Idempotency-Key`, drain lease, dead letters | **Keep** | Client-side and engine-owned. The server half is the `TallyCommand` ledger (§2), keyed by the command id |
+| Conflict states and dead-letter recovery | **Keep; the driver maps codes** | The plugin answers business refusals per command in a 200 (§2). `unsupported_version` keeps its own state, so the version fallback survives the move |
+| Money authority: the server's totals win | **Replace (inverted)** | The till's totals and `tallyPayments` are the fiscal record; Vendure's totals are a reconciliation view, with the bridge reported in `totalWarnings` (§3) |
+| Full-document REST writes | **Replace with commands** | The till states intent (`order.create`, later `register.*`), and the plugin runs Vendure's services |
+| Cross-resource transactions: none in WordPress | **Replace with one real transaction** | Vendure services share one `TransactionalConnection` transaction per command, so the claim, order, payments, stock and ledger commit together (§2). No lease, lock or resume |
+| Revisions (`If-Match`) | **Replace later with typed revisions** | Orders are created, never edited, by the till, so the order path needs no revision; a later driver can use the ledger's result and the order's `updatedAt` |
+| Web multi-tab write leader | **Drop** | Single-instance storage: one tab, one database (Paul, 2026-09-24) |
+| Sale counter and `_wcpos_*` meta | **Drop** | Typed, indexed custom fields replace the meta (§3); TallyUI's payload carries no sale counter |
 
 ### 5. Versions
 
 The plugin advertises `{"contracts":{"order.create":[1,2,3]}}` from its
 first release, because v3 is what TallyUI `main` sends:
 
-- v1 and v2 are accepted for older clients;
+- each version is validated strictly against its own shape, and v3 is
+  pinned by ADR-065's `order-create-v3.json` fixture;
 - a higher version gets `unsupported_version` with `data.orderCreate: 3`
   before the claim;
 - v1 and v2 orders simply have no snapshot or session id.
 
 ## Consequences
 
-- **Spike S1 comes first.** It proves the recipe on vendure-dev in one
-  transaction: the read-only `tallyUnitPrice` written from the plugin, the
-  settled `tally-pos` payment, `SALE` movements, rollback on a thrown error,
-  and the surcharge. It also has to prove three things this ADR relies on:
-  - Negative taxable `TALLY-DISCOUNT` surcharges give tax lines equal to
-    the POS `taxByRate`, within ADR-048's bound, in all four combinations
-    of pricing mode and tax strategy (this answers ADR-062's question).
-  - Pricing with an empty promotion list sticks. Some `OrderService`
-    methods (`addItemToOrder`, `transitionToState`) re-run price
-    adjustments with the channel's active promotions. The recipe must avoid
-    them, or re-price with `[]` last, and S1 shows which.
-  - Event subscribers and jobs that react to the new order (emails, the
-    search index) run only after commit, never inside the transaction.
-- The plugin is smaller than medusapos's, because the transaction removes
-  the lease, lock and resume code. The ADR-051 KPI is still measured, not
-  assumed.
+**Spike S1 comes first.** On vendure-dev, with the vendored contract code,
+it proves each of these with a test:
+
+1. **Tax parity.** With the widened bound, the discount surcharges give
+   order totals and per-rate tax within tolerance of the POS figures. This
+   covers all four combinations of pricing mode and tax strategy, mixed
+   per-line `taxInclusive` orders, and negative ties.
+2. **No promotions.** After each of the four re-pricing calls, the final
+   pass saves `order.promotions` and every line's adjustments empty.
+3. **No customer email** for a POS order.
+4. **Storefront.** The `tally-pos` payment method and the in-store shipping
+   method are unusable from the Shop API.
+5. **Error results.** Every returned `ErrorResult` rolls the order back.
+6. **Batches.** Each command in a batch gets its own transaction, and a
+   batch stops at a 409.
+7. **Stock.** The top-up happens before `addItemsToOrder`, and the sold
+   quantity is never cut.
+8. **Lines.** POS lines stay 1:1 with order lines, including two lines of
+   the same variant.
+9. **Tenders.** Split tender and overpayment: the payments cover the order
+   exactly, and `tallyPayments` holds the tenders as given, with change.
+10. **Stored rejections.** A disabled variant gives a stored `unknown_variant`,
+    and a channel without a tax zone gives `store_configuration`; neither
+    leads to a 503 retry loop.
+11. **Idempotency.** A concurrent duplicate id gives 409 and then
+    `duplicate`, and a new id for an existing `clientOrderId` returns `ok`
+    and writes nothing.
+12. **Crash safety.** A crash after commit leaves no duplicate order on
+    retry.
+
+Other consequences:
+
+- The plugin needs no lease, fencing token, advisory lock or resume code.
+  The ADR-051 KPI is still measured, not assumed.
 - **The app cannot send v3 yet.** The published `@tallyui/*` 2.0.0 types
   know only command versions 1 and 2, so v3 waits for the next TallyUI 2.x
   publish. The plugin accepts all three, so nothing blocks on it.
