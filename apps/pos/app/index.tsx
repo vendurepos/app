@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { Button, Catalogue, HStack, Text, VStack } from '@tallyui/components';
 import { ConnectorProvider } from '@tallyui/core';
@@ -20,9 +21,13 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   async function handleSignOut() {
     setPending(true);
-    await removeCatalogueDatabaseWithin();
+    const result = await removeCatalogueDatabaseWithin();
     setPending(false);
     signOut();
+    if (result === 'timed_out' && Platform.OS === 'web') {
+      // A hung storage worker is recovered by a reload (ADR-061).
+      window.location.reload();
+    }
   }
 
   return (

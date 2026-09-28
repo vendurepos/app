@@ -54,8 +54,9 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByText(/Failed to fetch/).first()).toBeVisible();
+  await expect(page.getByText('Tally Fixture Mug', { exact: true })).toHaveCount(0);
   await expect(page.getByText('No products yet.', { exact: true })).toBeVisible();
-  await expect(page.getByText('Tally Fixture Mug', { exact: true })).not.toBeVisible();
   await page.unroute('**/admin-api');
   await page.reload();
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
