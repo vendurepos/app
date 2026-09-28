@@ -1,0 +1,27 @@
+{
+  "name": "vendurepos-s1-order-recipe",
+  "private": true,
+  "description": "TEMPORARY spike S1: proves ADR 0002's order recipe on Vendure 3.7.3 + Postgres. Evidence, not product code.",
+  "engines": {
+    "node": "^20.19 || >=22.12"
+  },
+  "scripts": {
+    "db:up": "docker compose -p vendurepos-s1 up -d --wait",
+    "db:down": "docker compose -p vendurepos-s1 down -v",
+    "test": "vitest run --maxWorkers=1",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vendure/core": "3.7.3",
+    "@vendure/email-plugin": "3.7.3",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@swc/core": "1.16.2",
+    "@types/node": "24.19.0",
+    "@vendure/testing": "3.7.3",
+    "typescript": "~5.8.3",
+    "unplugin-swc": "2.0.0",
+    "vitest": "4.0.18"
+  }
+}

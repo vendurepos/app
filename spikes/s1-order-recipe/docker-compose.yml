@@ -1,0 +1,17 @@
+# TEMPORARY spike S1 database. Project name vendurepos-s1 (package.json scripts), loopback :5444,
+# so it never collides with the dev store (:5442) or the smoke store (:5443).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vendure
+      POSTGRES_PASSWORD: vendure
+      POSTGRES_DB: s1
+      TZ: UTC
+      PGTZ: UTC
+    ports: ["127.0.0.1:5444:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vendure", "-d", "s1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
