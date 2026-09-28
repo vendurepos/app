@@ -20,6 +20,7 @@ describe('normalizeStoreUrl', () => {
     '10.255.255.255', '172.16.0.0', '172.31.255.255', '192.168.1.20', 'foo.local',
   ])('allows HTTP for %s', (host) => {
     expect(normalizeStoreUrl(`http://${host}`)).toEqual({ ok: true, url: `http://${host}` });
+    expect(normalizeStoreUrl(`http://${host}`, 'http:')).toEqual({ ok: true, url: `http://${host}` });
   });
 
   it.each([
@@ -31,6 +32,24 @@ describe('normalizeStoreUrl', () => {
       ok: false,
       error: 'Use https:// for this server. Plain http:// is only allowed for local and private network addresses.',
     });
+    expect(normalizeStoreUrl(`http://${host}`, 'http:')).toEqual(normalizeStoreUrl(`http://${host}`));
+  });
+
+  it.each([
+    'http://192.168.1.20', 'http://shop.example.com', 'http://10.0.0.1',
+    'http://172.16.0.1', 'http://foo.local', 'http://localhost.example.com',
+  ])('refuses mixed content from an HTTPS page for %s', (input) => {
+    expect(normalizeStoreUrl(input, 'https:')).toEqual({
+      ok: false,
+      error: 'This POS is served over https://, so the browser blocks a plain http:// store. Use https:// for the store.',
+    });
+  });
+
+  it.each([
+    'http://127.0.0.1:3200', 'http://localhost:3000', 'https://shop.example.com',
+    'http://pos.localhost', 'http://127.255.0.2', 'http://[::1]',
+  ])('allows %s from an HTTPS page', (url) => {
+    expect(normalizeStoreUrl(url, 'https:')).toEqual({ ok: true, url });
   });
 
   it.each(['ftp://x', 'shop.example.com', 'https://', 'http://10.256.0.1'])('refuses %s', (input) => {

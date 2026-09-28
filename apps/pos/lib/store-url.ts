@@ -1,6 +1,6 @@
 export type StoreUrlResult = { ok: true; url: string } | { ok: false; error: string };
 
-export function normalizeStoreUrl(input: string): StoreUrlResult {
+export function normalizeStoreUrl(input: string, pageProtocol: string | undefined = globalThis.location?.protocol): StoreUrlResult {
   const value = input.trim();
   if (!value) return { ok: false, error: 'Enter your Vendure server URL.' };
   let parsed: URL;
@@ -14,6 +14,14 @@ export function normalizeStoreUrl(input: string): StoreUrlResult {
   if (parsed.protocol === 'http:') {
     const host = parsed.hostname;
     const octets = /^\d+\.\d+\.\d+\.\d+$/.test(host) ? host.split('.').map(Number) : [];
+    const loopback = host === 'localhost' || host.endsWith('.localhost') ||
+      host === '[::1]' || octets[0] === 127;
+    if (pageProtocol === 'https:' && !loopback) {
+      return {
+        ok: false,
+        error: 'This POS is served over https://, so the browser blocks a plain http:// store. Use https:// for the store.',
+      };
+    }
     const privateIpv4 = octets.length === 4 && octets.every((n) => n >= 0 && n <= 255) && (
       octets[0] === 127 || octets[0] === 10 ||
       (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
