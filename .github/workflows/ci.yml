@@ -15,10 +15,14 @@ concurrency:
 jobs:
   app:
     name: Typecheck and unit tests
+    # Fork PRs get no RXDB_PREMIUM secret, so the licensed install cannot run there.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       # No pnpm store cache: this public repo installs rxdb-premium with a
       # licence, and fork PR workflows can restore caches saved on main.
@@ -49,14 +53,20 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-  # No artifacts are uploaded: dist, public and Playwright traces contain
-  # licensed rxdb-premium code.
+  # No artifacts are uploaded: dist, public, apps/pos/test-results and
+  # Playwright traces contain or can capture licensed rxdb-premium code.
+  # Accepted risk: a build error inside rxdb-premium would print a code frame
+  # of it to this public log; a healthy build never does.
   web-smoke:
     name: Web smoke (Vendure dev store + Playwright)
+    # Fork PRs get no RXDB_PREMIUM secret, so the licensed install cannot run there.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
