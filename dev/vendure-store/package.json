@@ -1,0 +1,23 @@
+{
+  "name": "vendurepos-dev-store",
+  "private": true,
+  "description": "Vendure dev store for VendurePOS development and tests. Runs on this machine only.",
+  "engines": {
+    "node": "^20.19 || >=22.12"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "seed": "tsx src/seed.ts",
+    "smoke:check": "tsx src/smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vendure/core": "3.7.3",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "tsx": "4.23.15",
+    "typescript": "~5.8.3"
+  }
+}
