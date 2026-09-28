@@ -3,7 +3,10 @@ import {
 } from '@tallyui/connector-vendure';
 import { SignInError, StoreSettingsError } from '@tallyui/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { logout } from './logout';
 import { signIn } from './sign-in';
+
+vi.mock('./logout', () => ({ logout: vi.fn() }));
 
 vi.mock('@tallyui/connector-vendure', async (importActual) => ({
   ...await importActual<typeof import('@tallyui/connector-vendure')>(),
@@ -24,6 +27,7 @@ const stock = { trackInventory: true, outOfStockThreshold: 2 };
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(logout).mockResolvedValue('failed');
   vi.mocked(vendureSignIn).mockResolvedValue({ token: 'test-token' });
   vi.mocked(vendureStoreSettings).mockResolvedValue(settings);
   vi.mocked(vendureGlobalStockSettings).mockResolvedValue(stock);
@@ -48,6 +52,7 @@ describe('signIn', () => {
     };
     expect(vendureStoreSettings).toHaveBeenCalledExactlyOnceWith(context);
     expect(vendureGlobalStockSettings).toHaveBeenCalledExactlyOnceWith(context);
+    expect(logout).not.toHaveBeenCalled();
   });
 
   it.each([undefined, '   '])('uses the default channel for %j', async (channel_token) => {
@@ -68,6 +73,7 @@ describe('signIn', () => {
   ])('returns the sign-in failure message for %s', async (error, message) => {
     vi.mocked(vendureSignIn).mockRejectedValue(error);
     expect(await signIn(values)).toEqual({ ok: false, error: message });
+    expect(logout).not.toHaveBeenCalled();
     expect(vendureStoreSettings).not.toHaveBeenCalled();
     expect(vendureGlobalStockSettings).not.toHaveBeenCalled();
   });
@@ -84,7 +90,21 @@ describe('signIn', () => {
     expect(await signIn({ ...values, channel_token })).toEqual({
       ok: false, error: `Could not read the store settings: ${message}${hint}`,
     });
+    expect(logout).toHaveBeenCalledExactlyOnceWith({
+      url: 'https://shop.example.com', token: 'test-token',
+    });
   });
+
+  it('returns the settings error promptly when logout never resolves', async () => {
+    vi.mocked(logout).mockReturnValue(new Promise(() => {}));
+    vi.mocked(vendureStoreSettings).mockRejectedValue(new StoreSettingsError('failed', 'Settings unavailable.'));
+    expect(await signIn(values)).toEqual({
+      ok: false, error: 'Could not read the store settings: Settings unavailable. Check the channel token.',
+    });
+    expect(logout).toHaveBeenCalledExactlyOnceWith({
+      url: 'https://shop.example.com', token: 'test-token',
+    });
+  }, 1_000);
 
   it.each([
     [{ url: 'shop.example.com' }, 'Enter the full server URL, starting with https://.'],
@@ -108,6 +128,10 @@ describe('signIn', () => {
       : stage === 'settings' ? vendureStoreSettings : vendureGlobalStockSettings;
     vi.mocked(operation).mockRejectedValue(controller.signal.reason);
     await expect(signIn(values, { signal: controller.signal })).rejects.toBe(controller.signal.reason);
+    if (stage === 'sign-in') expect(logout).not.toHaveBeenCalled();
+    else expect(logout).toHaveBeenCalledExactlyOnceWith({
+      url: 'https://shop.example.com', token: 'test-token',
+    });
   });
 
   it('rethrows the signal AbortError when store settings wraps it', async () => {
@@ -118,5 +142,8 @@ describe('signIn', () => {
       throw new StoreSettingsError('failed', 'This operation was aborted');
     });
     await expect(signIn(values, { signal: controller.signal })).rejects.toBe(abortError);
+    expect(logout).toHaveBeenCalledExactlyOnceWith({
+      url: 'https://shop.example.com', token: 'test-token',
+    });
   });
 });

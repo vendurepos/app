@@ -40,8 +40,19 @@ test('signs in to the dev store', async ({ page }) => {
   expect(storedSession).not.toBeNull();
   const session = JSON.parse(storedSession!);
   expect(session).not.toHaveProperty('password');
+  const token = session.token;
+  const beforeSignOut = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { query: '{ activeAdministrator { id } }' },
+  });
+  expect((await beforeSignOut.json()).data.activeAdministrator.id).not.toBeNull();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  const response = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { query: '{ activeAdministrator { id } }' },
+  });
+  expect((await response.json()).data.activeAdministrator).toBeNull();
   await page.route('**/admin-api', (route) => {
     const request = route.request();
     const body = request.postData() ?? '';

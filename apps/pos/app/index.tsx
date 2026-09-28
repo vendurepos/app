@@ -4,6 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { Button, Catalogue, HStack, Text, VStack } from '@tallyui/components';
 import { ConnectorProvider } from '@tallyui/core';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
+import { logout } from '../lib/logout';
 import type { Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useCatalogue } from '../lib/use-catalogue';
@@ -22,7 +23,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   async function handleSignOut() {
     setPending(true);
     const result = await removeCatalogueDatabaseWithin();
-    setPending(false);
+    await logout(session);
     signOut();
     if (result === 'timed_out' && Platform.OS === 'web') {
       // A hung storage worker is recovered by a reload (ADR-061).

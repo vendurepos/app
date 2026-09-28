@@ -2,6 +2,7 @@ import {
   vendureSignIn, vendureStoreSettings, vendureGlobalStockSettings,
 } from '@tallyui/connector-vendure';
 import { SignInError } from '@tallyui/core';
+import { logout } from './logout';
 import { sessionContext, type Session } from './session';
 import { normalizeStoreUrl } from './store-url';
 
@@ -19,8 +20,9 @@ export async function signIn(
   if (!email || !password) return { ok: false, error: 'Enter your email and password.' };
   const channelToken = values.channel_token?.trim() || undefined;
   let signedIn = false;
+  let token = '';
   try {
-    const { token } = await vendureSignIn(normalized.url, { email, password }, { signal: init?.signal });
+    ({ token } = await vendureSignIn(normalized.url, { email, password }, { signal: init?.signal }));
     signedIn = true;
     // Provisional settings are used only to build the authenticated context.
     const session: Session = {
@@ -35,6 +37,7 @@ export async function signIn(
     ]);
     return { ok: true, session: { ...session, settings, stock } };
   } catch (error) {
+    if (signedIn) void logout({ url: normalized.url, token });
     if ((error as { name?: unknown })?.name === 'AbortError') throw error;
     // StoreSettingsError may wrap the signal's original AbortError.
     if (init?.signal?.aborted && init.signal.reason?.name === 'AbortError') throw init.signal.reason;
