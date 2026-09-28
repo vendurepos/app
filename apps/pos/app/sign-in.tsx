@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { vendureAuth } from '@tallyui/connector-vendure';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
@@ -9,7 +9,6 @@ import { signIn } from '../lib/sign-in';
 
 export default function SignInScreen() {
   const { session, setSignedIn } = useSession();
-  const router = useRouter();
   const [values, setValues] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +27,6 @@ export default function SignInScreen() {
       if (controller.signal.aborted) return;
       if (result.ok) {
         setSignedIn(result.session);
-        router.replace('/');
       } else {
         setError(result.error);
       }

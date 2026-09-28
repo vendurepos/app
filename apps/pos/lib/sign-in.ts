@@ -39,7 +39,10 @@ export async function signIn(
     // StoreSettingsError may wrap the signal's original AbortError.
     if (init?.signal?.aborted && init.signal.reason?.name === 'AbortError') throw init.signal.reason;
     const message = error instanceof Error ? error.message : String(error);
-    if (signedIn) return { ok: false, error: `Signed in, but could not read the store: ${message}` };
+    if (signedIn) return {
+      ok: false,
+      error: `Could not read the store settings: ${message}${channelToken ? ' Check the channel token.' : ''}`,
+    };
     return {
       ok: false,
       error: error instanceof SignInError && error.code === 'invalid_credentials'

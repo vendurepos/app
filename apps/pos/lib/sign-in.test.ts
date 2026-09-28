@@ -72,12 +72,17 @@ describe('signIn', () => {
     expect(vendureGlobalStockSettings).not.toHaveBeenCalled();
   });
 
-  it.each(['settings', 'stock'])('reports a %s read failure', async (stage) => {
+  it.each([
+    ['settings', values.channel_token, ' Check the channel token.'],
+    ['stock', values.channel_token, ' Check the channel token.'],
+    ['settings', undefined, ''],
+    ['stock', undefined, ''],
+  ])('reports a %s read failure with channel token %j', async (stage, channel_token, hint) => {
     const message = 'Vendure GraphQL error: No Channel with the token "x" could be found';
     vi.mocked(stage === 'settings' ? vendureStoreSettings : vendureGlobalStockSettings)
       .mockRejectedValue(new StoreSettingsError('failed', message));
-    expect(await signIn(values)).toEqual({
-      ok: false, error: `Signed in, but could not read the store: ${message}`,
+    expect(await signIn({ ...values, channel_token })).toEqual({
+      ok: false, error: `Could not read the store settings: ${message}${hint}`,
     });
   });
 

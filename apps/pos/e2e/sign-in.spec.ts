@@ -28,6 +28,12 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await page.reload();
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  const storedSession = await page.evaluate(() => localStorage.getItem('vendurepos.session'));
+  expect(storedSession).not.toBeNull();
+  const session = JSON.parse(storedSession!);
+  expect(session).not.toHaveProperty('password');
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
 });
