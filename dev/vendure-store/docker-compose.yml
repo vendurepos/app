@@ -1,0 +1,22 @@
+name: vendurepos-dev-store
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vendure
+      POSTGRES_PASSWORD: vendure
+      POSTGRES_DB: vendure
+      TZ: UTC
+      PGTZ: UTC
+    ports: ["127.0.0.1:${VENDURE_DB_PORT:-5442}:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vendure", "-d", "vendure"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pgdata:
