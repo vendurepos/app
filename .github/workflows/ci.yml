@@ -48,3 +48,39 @@ jobs:
           fi
       - run: pnpm typecheck
       - run: pnpm test
+
+  # No artifacts are uploaded: dist, public and Playwright traces contain
+  # licensed rxdb-premium code.
+  web-smoke:
+    name: Web smoke (Vendure dev store + Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Install (licence token filtered)
+        run: '{ pnpm install --frozen-lockfile; } 2>&1 | grep -vi accessToken'
+        shell: bash
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - name: Assert the pnpm store holds no decrypted rxdb-premium
+        shell: bash
+        run: |
+          index="$(pnpm store path)/index"
+          entries=$(grep -rl '"name":"rxdb-premium"' "$index" || true)
+          [ -n "$entries" ] || { echo "rxdb-premium is missing from the store index" >&2; exit 1; }
+          if grep -l '"sideEffects"' $entries; then
+            echo "the pnpm store holds rxdb-premium's post-install build" >&2
+            exit 1
+          fi
+      - name: Install Playwright Chromium
+        run: pnpm --filter @vendurepos/pos exec playwright install --with-deps chromium
+      - name: Web smoke
+        run: pnpm smoke:web
+      - name: Vendure log on failure
+        if: failure()
+        run: tail -n 150 dev/vendure-store/.run/vendure.log || true
