@@ -21,6 +21,7 @@ export function useCatalogue(session: Session): {
     let cancelled = false;
     let wasActive = false;
     let failed = false;
+    let errorShown = false;
     let dead = false;
     const subscriptions: Subscription[] = [];
     void startCatalogueSync(session, connector).then(({ db, replication }) => {
@@ -34,6 +35,7 @@ export function useCatalogue(session: Session): {
         if (active && !wasActive) failed = false;
         if (wasActive && !active && !failed) {
           setLastSyncedAt(new Date());
+          errorShown = false;
           setError(null);
         }
         wasActive = active;
@@ -43,11 +45,13 @@ export function useCatalogue(session: Session): {
         failed = true;
         let inner: any = error;
         while (inner.parameters?.errors?.[0]) inner = inner.parameters.errors[0];
+        errorShown = true;
         setError(inner.message ?? String(inner));
       }));
       subscriptions.push(replication.received$.subscribe(() => {
-        if (cancelled || dead || !failed) return;
+        if (cancelled || dead || !errorShown) return;
         failed = false;
+        errorShown = false;
         setError(null);
       }));
       const health = getStorageHealth(db);
