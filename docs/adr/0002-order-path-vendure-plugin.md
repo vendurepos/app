@@ -77,6 +77,9 @@ result JSON) is claimed **inside the same transaction as the order**:
 - If the first request fails, the ledger row rolls back with the order, so
   a retry starts clean.
 - `Order.tallyClientOrderId` has a unique index as a second guard.
+- If the client times out while the server commits, it retries with the
+  same id and gets `duplicate` with the original `serverRefs`. That is the
+  outbox's normal path, and needs no resume logic.
 
 This **replaces** medusapos's 120 s claim lease, its fencing token, the
 advisory lock and the compensation/resume code (about 600 of its 988
@@ -90,10 +93,11 @@ decided **before** the claim, so nothing is written for them.
 
 | POS concept | Vendure mechanism (adopted) | Replaces (not carried over) |
 |---|---|---|
-| The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `AddingItems → ArrangingPayment → PaymentSettled`, then fulfilled | WooCommerce statuses and WCPOS's `pos-open`/`pos-partial` states; a sale that reaches the server is always paid |
-| As-sold price | An `OrderItemPriceCalculationStrategy` that wraps the configured one and, only on orders with `tallyClientOrderId`, uses the read-only line custom field `tallyUnitPrice` | Rewriting line totals through post meta |
-| Discounts (v2/v3) | A pre-tax discount per line, carried into the order as Vendure price adjustments. The mechanism is spike S1's first question (see Consequences) | — |
-| Tax | The channel's `pricesIncludeTax`, its default tax zone and the merchant's tax strategy, unchanged. Any difference is settled by the ADR-048 surcharge (`TALLY-ROUNDING`, with a `total_mismatch` warning) | WooCommerce's single "prices include tax" option, and changing store settings to match the POS |
+| The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on that last transition, so it is the sync time (Vendure's `DefaultOrderPlacedStrategy`) | WooCommerce statuses and WCPOS's `pos-open`/`pos-partial` states; a sale that reaches the server is always paid |
+| As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice` with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`). Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no workaround | Rewriting line totals through post meta |
+| Discounts (v2/v3) | Each discounted line gets one negative, **taxable** `Surcharge` (`POS discount`, SKU `TALLY-DISCOUNT`) of `-discountMinor`, in the line's tax mode and with the line's tax rates. It lowers that line's taxable base as ADR-062 requires. A net unit price was rejected: `(unit × qty − discount) / qty` is not an integer in general | Coupon or promotion emulation |
+| Server promotions | **None on POS orders.** The POS has already applied its own discounts, and a server promotion would change Vendure's tax lines, which an untaxed surcharge cannot repair. Vendure's `OrderCalculator.applyPriceAdjustments` takes the promotion list as an argument, so the plugin prices POS orders with an empty list | Settling promotion differences in the rounding surcharge |
+| Tax | The channel's default tax zone and the merchant's tax strategy, unchanged. With the prices, modes and discounts above, Vendure's tax lines should equal the POS `taxByRate`, up to per-line rounding. That rounding difference, and only that, is settled by the untaxed ADR-048 surcharge (`TALLY-ROUNDING`). A larger difference is reported as `total_mismatch`, and the stored v3 snapshot remains the fiscal record | WooCommerce's single "prices include tax" option, and changing store settings to match the POS |
 | Payment | A `tally-pos` `PaymentMethodHandler`: one settled `Payment` per tender (`cash` or `external`), with tendered, change and reference in its metadata. The payments cover exactly `totalMinor` (ADR-039), and split tender works natively | Payment-gateway emulation and gateway meta |
 | Collection | An in-store `ShippingMethod` whose eligibility checker accepts only POS orders, with a zero calculator | Hiding shipping lines |
 | Stock | A manual fulfilment, which records `SALE` stock movements. For `insufficient_stock`, the paid sale is still applied: a temporary top-up and take-back inside the transaction, plus a warning (ADR-039) | WooCommerce stock-reduction hooks and reservation tables |
@@ -133,15 +137,16 @@ first release, because v3 is what TallyUI `main` sends:
 - **Spike S1 comes first.** It proves the recipe on vendure-dev in one
   transaction: the read-only `tallyUnitPrice` written from the plugin, the
   settled `tally-pos` payment, `SALE` movements, rollback on a thrown error,
-  and the surcharge. Its first new question is **discounts**:
-  - either as a price adjustment on the line, through the price strategy
-    with the unit price net of discount and the remainder in the surcharge;
-  - or as negative `Surcharge`s that carry the line's tax rate.
-
-  Whichever keeps Vendure's tax lines right wins. ADR-062 requires this
-  answer. Server-side promotions still run on POS orders; any change they
-  make to the total is settled by the surcharge and reported as
-  `total_mismatch`, rather than being disabled.
+  and the surcharge. It also has to prove three things this ADR relies on:
+  - Negative taxable `TALLY-DISCOUNT` surcharges give tax lines equal to
+    the POS `taxByRate`, within ADR-048's bound, in all four combinations
+    of pricing mode and tax strategy (this answers ADR-062's question).
+  - Pricing with an empty promotion list sticks. Some `OrderService`
+    methods (`addItemToOrder`, `transitionToState`) re-run price
+    adjustments with the channel's active promotions. The recipe must avoid
+    them, or re-price with `[]` last, and S1 shows which.
+  - Event subscribers and jobs that react to the new order (emails, the
+    search index) run only after commit, never inside the transaction.
 - The plugin is smaller than medusapos's, because the transaction removes
   the lease, lock and resume code. The ADR-051 KPI is still measured, not
   assumed.
