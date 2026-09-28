@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { TallyConnector } from '@tallyui/core';
+import { getStorageHealth } from '@tallyui/database';
 import { isStorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
@@ -20,6 +21,7 @@ export function useCatalogue(session: Session): {
     let cancelled = false;
     let wasActive = false;
     let failed = false;
+    let dead = false;
     const subscriptions: Subscription[] = [];
     void startCatalogueSync(session, connector).then(({ db, replication }) => {
       if (cancelled) return;
@@ -27,8 +29,7 @@ export function useCatalogue(session: Session): {
         if (!cancelled) setProducts(docs.map((doc) => doc.toJSON()));
       }));
       subscriptions.push(replication.active$.subscribe((active) => {
-        if (cancelled) return;
-        if (active && !wasActive) failed = false;
+        if (cancelled || dead) return;
         if (wasActive && !active && !failed) {
           setLastSyncedAt(new Date());
           setError(null);
@@ -36,14 +37,25 @@ export function useCatalogue(session: Session): {
         wasActive = active;
       }));
       subscriptions.push(replication.error$.subscribe((error) => {
-        if (cancelled) return;
+        if (cancelled || dead) return;
         failed = true;
         let inner: any = error;
         while (inner.parameters?.errors?.[0]) inner = inner.parameters.errors[0];
         setError(inner.message ?? String(inner));
       }));
+      subscriptions.push(replication.received$.subscribe(() => {
+        if (cancelled || dead || !failed) return;
+        failed = false;
+        setError(null);
+      }));
+      const health = getStorageHealth(db);
+      if (health) subscriptions.push(health.subscribe(({ status }) => {
+        if (cancelled || status !== 'dead') return;
+        dead = true;
+        setError('Local storage stopped responding. Reload this page.');
+      }));
     }).catch((error) => {
-      if (cancelled) return;
+      if (cancelled || dead) return;
       setError(isStorageWorkerStartError(error)
         ? 'VendurePOS is open in another tab. Close it, then reload this page.'
         : error.message ?? String(error));
@@ -52,7 +64,7 @@ export function useCatalogue(session: Session): {
       cancelled = true;
       subscriptions.forEach((subscription) => subscription.unsubscribe());
       // Queued behind any pending start so its replication is stopped too.
-      void stopCatalogueSync();
+      void stopCatalogueSync().catch((error) => console.warn('Failed to stop catalogue sync', error));
     };
   }, [session, connector]);
 

@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Redirect, Stack } from 'expo-router';
 import { Button, Catalogue, HStack, Text, VStack } from '@tallyui/components';
 import { ConnectorProvider } from '@tallyui/core';
-import { removeCatalogueDatabase } from '../lib/catalogue';
+import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import type { Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useCatalogue } from '../lib/use-catalogue';
@@ -16,15 +16,13 @@ export default function HomeScreen() {
 function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): void }) {
   const { connector, products, lastSyncedAt, error } = useCatalogue(session);
   const [pending, setPending] = useState(false);
+  const traitContext = useMemo(() => ({ currency: session.settings.currency }), [session.settings.currency]);
 
   async function handleSignOut() {
     setPending(true);
-    try {
-      await removeCatalogueDatabase();
-    } finally {
-      setPending(false);
-      signOut();
-    }
+    await removeCatalogueDatabaseWithin();
+    setPending(false);
+    signOut();
   }
 
   return (
@@ -36,7 +34,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           <Text>Sign out</Text>
         </Button>
       </HStack>
-      <ConnectorProvider connector={connector} traitContext={{ currency: session.settings.currency }}>
+      <ConnectorProvider connector={connector} traitContext={traitContext}>
         <Catalogue
           products={products}
           traits={connector.traits.product}
