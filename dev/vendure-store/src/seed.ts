@@ -1,0 +1,134 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  bootstrapWorker, Channel, ChannelService, CurrencyCode, isGraphQlErrorResult, LanguageCode,
+  ProductService, ProductVariant, ProductVariantService, RequestContextService, SearchService,
+  StockLocationService, TaxCategoryService, TaxRateService, TransactionalConnection, User, ZoneService,
+} from '@vendure/core';
+import { importProductsFromCsv, populateInitialData } from '@vendure/core/cli';
+import { CATALOGUE, PRODUCT_COUNT, VARIANT_COUNT, barcodeOf } from './catalogue';
+import { DEFAULT_CHANNEL_TOKEN, POS_CHANNEL_CODE, POS_CHANNEL_TOKEN, SUPERADMIN_USERNAME } from './constants';
+import { config } from './vendure-config';
+
+async function seed() {
+  const { app } = await bootstrapWorker({
+    ...config, dbConnectionOptions: { ...config.dbConnectionOptions, synchronize: true },
+  });
+  const connection = app.get(TransactionalConnection);
+  if (await connection.rawConnection.getRepository(Channel).findOneBy({ code: POS_CHANNEL_CODE })) {
+    throw new Error('database already seeded; run ./reset.sh');
+  }
+  async function adminCtx(channelOrToken?: string) {
+    const user = await connection.rawConnection.getRepository(User).findOneOrFail({
+      where: { identifier: SUPERADMIN_USERNAME }, relations: ['roles', 'roles.channels'],
+    });
+    return app.get(RequestContextService).create({ apiType: 'admin', user, channelOrToken });
+  }
+  let ctx = await adminCtx();
+  const channels = app.get(ChannelService);
+  let defaultChannel = await channels.getDefaultChannel(ctx);
+  const updated = await channels.update(ctx, {
+    id: defaultChannel.id, defaultCurrencyCode: CurrencyCode.EUR,
+    availableCurrencyCodes: [CurrencyCode.EUR], pricesIncludeTax: false,
+  });
+  if (isGraphQlErrorResult(updated)) throw new Error(updated.message);
+  await populateInitialData(app, {
+    defaultLanguage: LanguageCode.en, defaultZone: 'Denmark',
+    countries: [
+      { code: 'DK', name: 'Denmark', zone: 'Denmark' },
+      { code: 'DE', name: 'Germany', zone: 'Germany' },
+    ],
+    taxRates: [], shippingMethods: [], paymentMethods: [], collections: [],
+  });
+  const { items: zones } = await app.get(ZoneService).findAll(ctx, { take: 100 });
+  const denmark = zones.find(zone => zone.name === 'Denmark');
+  const germany = zones.find(zone => zone.name === 'Germany');
+  defaultChannel = await channels.getDefaultChannel(ctx);
+  if (!denmark || !germany || defaultChannel.defaultTaxZone?.id !== denmark.id) {
+    throw new Error('Initial data did not set Denmark as the default tax zone or create both zones');
+  }
+  const categories = app.get(TaxCategoryService);
+  const standard = await categories.create(ctx, { name: 'Standard', isDefault: true });
+  const reduced = await categories.create(ctx, { name: 'Reduced' });
+  // Denmark has no reduced VAT rate.
+  for (const [category, zone, name, value] of [
+    [standard, denmark, 'Standard DK', 25], [standard, germany, 'Standard DE', 19],
+    [reduced, denmark, 'Reduced DK', 25], [reduced, germany, 'Reduced DE', 7],
+  ] as const) {
+    await app.get(TaxRateService).create(ctx, {
+      name, value, enabled: true, categoryId: category.id, zoneId: zone.id,
+    });
+  }
+  const locations = app.get(StockLocationService);
+  const warehouse = await locations.defaultStockLocation(ctx);
+  await locations.update(ctx, { id: warehouse.id, name: 'Warehouse' });
+
+  const rows: string[][] = [[
+    'name', 'slug', 'description', 'assets', 'facets', 'optionGroups', 'optionValues', 'sku',
+    'price', 'taxCategory', 'stockOnHand', 'trackInventory', 'variantAssets', 'variantFacets', 'variant:barcode',
+  ]];
+  let variantIndex = 0;
+  for (const product of CATALOGUE) {
+    product.variants.forEach((variant, i) => rows.push([
+      i === 0 ? product.name : '', i === 0 ? product.slug : '',
+      i === 0 ? `${product.name} (VendurePOS dev seed)` : '', '', '',
+      i === 0 ? product.optionGroups.join('|') : '', variant.options.join('|'), variant.sku,
+      (variant.priceMinor / 100).toFixed(2), product.taxCategory, String(variant.warehouseStock),
+      String(product.trackInventory), '', '', barcodeOf(variantIndex++),
+    ]));
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'vendurepos-seed-'));
+  try {
+    const csvPath = join(directory, 'catalogue.csv');
+    writeFileSync(csvPath, rows.map(row => row.map(field => `"${field.replace(/"/g, '""')}"`).join(',')).join('\n'));
+    const result = await importProductsFromCsv(app, csvPath, LanguageCode.en);
+    if (result.errors.length > 0 || result.imported !== PRODUCT_COUNT) {
+      throw new Error(`Imported ${result.imported}/${PRODUCT_COUNT} products: ${result.errors.join('\n')}`);
+    }
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
+  const posChannel = await channels.create(ctx, {
+    code: POS_CHANNEL_CODE, token: POS_CHANNEL_TOKEN, defaultLanguageCode: LanguageCode.en,
+    defaultCurrencyCode: CurrencyCode.EUR, availableCurrencyCodes: [CurrencyCode.EUR], pricesIncludeTax: false,
+    defaultTaxZoneId: denmark.id, defaultShippingZoneId: denmark.id, sellerId: defaultChannel.sellerId,
+  });
+  if (isGraphQlErrorResult(posChannel)) throw new Error(posChannel.message);
+  // Reload the superadmin's roles after channel creation, before any channel assignment.
+  ctx = await adminCtx();
+  const posCtx = await adminCtx(POS_CHANNEL_TOKEN);
+  const products = app.get(ProductService);
+  const { items } = await products.findAll(ctx, { take: 100 });
+  await products.assignProductsToChannel(ctx, {
+    productIds: items.map(product => product.id), channelId: posChannel.id, priceFactor: 1,
+  });
+  const shopFloor = await locations.create(posCtx, {
+    name: 'Shop floor', description: 'POS stock, VendurePOS dev seed',
+  });
+  if (!shopFloor.channels.some(channel => channel.id === posChannel.id)) {
+    await locations.assignStockLocationsToChannel(posCtx, {
+      stockLocationIds: [shopFloor.id], channelId: posChannel.id,
+    });
+  }
+  for (const product of CATALOGUE) {
+    if (!product.trackInventory) continue;
+    for (const variant of product.variants) {
+      const entity = await connection.rawConnection.getRepository(ProductVariant).findOneByOrFail({ sku: variant.sku });
+      await app.get(ProductVariantService).update(posCtx, [{
+        id: entity.id, stockLevels: [{ stockLocationId: shopFloor.id, stockOnHand: variant.shopFloorStock }],
+      }]);
+    }
+  }
+  await app.get(SearchService).reindex(ctx);
+  await app.get(SearchService).reindex(posCtx);
+  console.log(`Channels: ${defaultChannel.code} (${DEFAULT_CHANNEL_TOKEN}), ${posChannel.code} (${POS_CHANNEL_TOKEN})`);
+  console.log(`Seeded ${PRODUCT_COUNT} products, ${VARIANT_COUNT} variants; superadmin: ${SUPERADMIN_USERNAME}`);
+  await app.close();
+  process.exit(0);
+}
+
+seed().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
