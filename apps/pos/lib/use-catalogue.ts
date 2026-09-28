@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { TallyConnector } from '@tallyui/core';
 import { getStorageHealth } from '@tallyui/database';
+import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import { isStorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
@@ -11,11 +12,15 @@ export function useCatalogue(session: Session): {
   products: any[];
   lastSyncedAt: Date | null;
   error: string | null;
+  stockOverlay: ReadonlyMap<string, unknown> | undefined;
+  stockOverlayAsOf: string | undefined;
 } {
   const connector = useMemo(() => catalogueConnector(session), [session]);
   const [products, setProducts] = useState<any[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stockOverlay, setStockOverlay] = useState<ReadonlyMap<string, unknown>>();
+  const [stockOverlayAsOf, setStockOverlayAsOf] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
@@ -24,10 +29,16 @@ export function useCatalogue(session: Session): {
     let errorShown = false;
     let dead = false;
     const subscriptions: Subscription[] = [];
-    void startCatalogueSync(session, connector).then(({ db, replication }) => {
+    void startCatalogueSync(session, connector).then(({ db, replication, stockLevels }) => {
       if (cancelled) return;
       subscriptions.push(db.products.find().$.subscribe((docs) => {
         if (!cancelled) setProducts(docs.map((doc) => doc.toJSON()));
+      }));
+      subscriptions.push(stockOverlay$(stockLevels).subscribe((overlay) => {
+        if (!cancelled) setStockOverlay(overlay);
+      }));
+      subscriptions.push(stockOverlayAsOf$(stockLevels).subscribe((asOf) => {
+        if (!cancelled) setStockOverlayAsOf(asOf);
       }));
       subscriptions.push(replication.active$.subscribe((active) => {
         if (cancelled || dead) return;
@@ -74,5 +85,5 @@ export function useCatalogue(session: Session): {
     };
   }, [session, connector]);
 
-  return { connector, products, lastSyncedAt, error };
+  return { connector, products, lastSyncedAt, error, stockOverlay, stockOverlayAsOf };
 }

@@ -1,4 +1,4 @@
-import { createTallyDatabase, getStorageHealth, startReplication } from '@tallyui/database';
+import { createTallyDatabase, getStorageHealth, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, STOCK_LEVELS_LAST_PASS } from '@tallyui/database';
 import { useEffect, useMemo, useState } from 'react';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { Subject } from 'rxjs';
@@ -16,6 +16,9 @@ vi.mock('@tallyui/database', async (importActual) => {
     ...actual,
     createTallyDatabase: vi.fn(actual.createTallyDatabase),
     getStorageHealth: vi.fn(actual.getStorageHealth),
+    startStockReconcile: vi.fn(() => ({ reconcileStock: vi.fn(async () => ({})), stop: vi.fn() })),
+    startIdReconcile: vi.fn(() => ({ stop: vi.fn() })),
+    startFingerprintReconcile: vi.fn(() => ({ stop: vi.fn() })),
     startReplication: vi.fn(() => ({
       cancel: vi.fn(async () => {}), reSync: vi.fn(),
       active$: new Subject<boolean>(), error$: new Subject<Error>(), received$: new Subject(),
@@ -56,6 +59,31 @@ afterEach(async () => {
 });
 
 describe('catalogue sync lifecycle', () => {
+  it('starts each reconcile runner with the replication context and runs stock immediately', async () => {
+    const { catalogueConnector, startCatalogueSync } = await import('./catalogue');
+    const connector = catalogueConnector(session);
+    const { db, replication, stockLevels } = await startCatalogueSync(session, connector);
+    const { context } = vi.mocked(startReplication).mock.calls[0][0];
+    expect(context.signal).toBeInstanceOf(AbortSignal);
+    expect(stockLevels).toBe(db[STOCK_LEVELS_COLLECTION]);
+    for (const [start, collection, adapter] of [
+      [startStockReconcile, stockLevels, connector.reconcile!.stock!],
+      [startIdReconcile, db.products, connector.reconcile!.ids!],
+      [startFingerprintReconcile, db.products, connector.reconcile!.prices!],
+    ] as const) {
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(start).toHaveBeenCalledWith({
+        collection, adapter, context,
+        ...(start === startStockReconcile ? {} : { reSync: expect.any(Function) }),
+      });
+      expect(vi.mocked(start).mock.calls[0][0].context.signal).toBe(context.signal);
+    }
+    expect(vi.mocked(startStockReconcile).mock.results[0].value.reconcileStock).toHaveBeenCalledTimes(1);
+    vi.mocked(startIdReconcile).mock.calls[0][0].reSync();
+    vi.mocked(startFingerprintReconcile).mock.calls[0][0].reSync();
+    expect(replication.reSync).toHaveBeenCalledTimes(2);
+  });
+
   it('names each store and channel deterministically with a valid RxDB name', async () => {
     const { databaseName } = await import('./catalogue');
     const name = databaseName(session);
@@ -84,8 +112,14 @@ describe('catalogue sync lifecycle', () => {
     const { replication } = await startCatalogueSync(session, catalogueConnector(session));
     const signal = vi.mocked(startReplication).mock.calls[0][0].context.signal;
     expect(signal?.aborted).toBe(false);
+    const stops = [startStockReconcile, startIdReconcile, startFingerprintReconcile]
+      .map((start) => vi.mocked(start).mock.results[0].value.stop);
+    stops.forEach((stop) => vi.mocked(stop).mockImplementation(() => {
+      expect(signal?.aborted).toBe(false);
+    }));
     vi.mocked(replication.cancel).mockImplementationOnce(async () => {
       expect(signal?.aborted).toBe(true);
+      stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
     });
     await stopCatalogueSync();
     expect(signal?.aborted).toBe(true);
@@ -109,6 +143,14 @@ describe('catalogue sync lifecycle', () => {
     expect(startReplication).toHaveBeenCalledTimes(2);
     expect(first.replication.cancel).toHaveBeenCalledTimes(1);
     expect(second.replication.cancel).not.toHaveBeenCalled();
+    for (const start of [startStockReconcile, startIdReconcile, startFingerprintReconcile]) {
+      expect(start).toHaveBeenCalledTimes(2);
+      const [previous, current] = vi.mocked(start).mock.results.map((result) => result.value);
+      expect(previous.stop).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(previous.stop).mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(first.replication.cancel).mock.invocationCallOrder[0]);
+      expect(current.stop).not.toHaveBeenCalled();
+    }
   });
 
   it('cancels and removes the database so a later start creates it again', async () => {
@@ -181,7 +223,8 @@ describe('catalogue sync lifecycle', () => {
     const setError = vi.fn();
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
-      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, setError]);
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, setError])
+      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
     let cleanup: (() => void) | void = undefined;
     vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
     const health = new Subject<{ status: 'ok' | 'stalled' | 'dead'; stalledWrites: number }>();
@@ -203,5 +246,36 @@ describe('catalogue sync lifecycle', () => {
     replication.active$.next(false);
     expect(setError).toHaveBeenLastCalledWith('Local storage stopped responding. Reload this page.');
     (cleanup as (() => void) | undefined)?.();
+  });
+
+  it('subscribes to reconciled stock and its last successful pass until cleanup', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { stopCatalogueSync } = await import('./catalogue');
+    const setOverlay = vi.fn();
+    const setAsOf = vi.fn();
+    vi.mocked(useMemo).mockImplementation((create) => create());
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
+      .mockReturnValueOnce([undefined, setOverlay]).mockReturnValueOnce([undefined, setAsOf]);
+    let cleanup: (() => void) | void = undefined;
+    vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
+    catalogueHook(session);
+    await stopCatalogueSync();
+    const stockLevels = vi.mocked(startStockReconcile).mock.lastCall![0].collection;
+    await vi.waitFor(() => expect(setOverlay).toHaveBeenLastCalledWith(new Map()));
+    const completedAt = '2026-09-29T12:00:00.000Z';
+    await stockLevels.insert({ id: 'variant-1', value: { stockOnHand: 7 }, updatedAt: completedAt });
+    await stockLevels.upsertLocal(STOCK_LEVELS_LAST_PASS, { completedAt });
+    await vi.waitFor(() => {
+      expect(setOverlay).toHaveBeenLastCalledWith(new Map([['variant-1', { stockOnHand: 7 }]]));
+      expect(setAsOf).toHaveBeenLastCalledWith(completedAt);
+    });
+    (cleanup as (() => void) | undefined)?.();
+    setOverlay.mockClear();
+    setAsOf.mockClear();
+    await stockLevels.upsert({ id: 'variant-1', value: { stockOnHand: 3 }, updatedAt: completedAt });
+    await stockLevels.upsertLocal(STOCK_LEVELS_LAST_PASS, { completedAt: '2026-09-29T12:05:00.000Z' });
+    expect(setOverlay).not.toHaveBeenCalled();
+    expect(setAsOf).not.toHaveBeenCalled();
   });
 });

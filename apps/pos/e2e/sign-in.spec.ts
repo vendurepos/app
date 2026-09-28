@@ -27,8 +27,13 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-barcode_field').fill('barcode');
+  const stockRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/admin-api') && (request.postData() ?? '').includes('VariantStock'));
+  const idsRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/admin-api') && (request.postData() ?? '').includes('GetProductIds'));
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await Promise.all([stockRequest, idsRequest]);
   for (const name of [
     'Tally Fixture Mug', 'Espresso Beans', 'Filter Coffee', 'Tally T-Shirt', 'Tally Hoodie',
     'Tote Bag', 'Notebook', 'Postcard Set', 'Limited Print', 'Gift Card',
