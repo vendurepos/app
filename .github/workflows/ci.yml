@@ -27,7 +27,8 @@ jobs:
       # rxdb-premium's postinstall decrypts the licensed plugins with this token
       # and echoes it as `accessToken: …`, so the whole install output is
       # filtered. `shell: bash` runs with pipefail, so a failed install still fails.
-      - run: '{ pnpm install --frozen-lockfile; } 2>&1 | grep -vi accessToken'
+      - name: Install (licence token filtered)
+        run: '{ pnpm install --frozen-lockfile; } 2>&1 | grep -vi accessToken'
         shell: bash
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
