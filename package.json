@@ -7,6 +7,7 @@
     "dev:pos": "turbo dev --filter=@vendurepos/pos",
     "build": "turbo build",
     "test": "vitest run",
+    "smoke:web": "bash scripts/smoke-web.sh",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"
