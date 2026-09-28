@@ -33,5 +33,16 @@ jobs:
         shell: bash
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      # The store must hold only the published tarball, never the decrypted build.
+      - name: Assert the pnpm store holds no decrypted rxdb-premium
+        shell: bash
+        run: |
+          index="$(pnpm store path)/index"
+          entries=$(grep -rl '"name":"rxdb-premium"' "$index" || true)
+          [ -n "$entries" ] || { echo "rxdb-premium is missing from the store index" >&2; exit 1; }
+          if grep -l '"sideEffects"' $entries; then
+            echo "the pnpm store holds rxdb-premium's post-install build" >&2
+            exit 1
+          fi
       - run: pnpm typecheck
       - run: pnpm test

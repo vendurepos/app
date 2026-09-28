@@ -30,6 +30,8 @@ export function useCatalogue(session: Session): {
       }));
       subscriptions.push(replication.active$.subscribe((active) => {
         if (cancelled || dead) return;
+        // A new run starts clean; received$ also clears an error recovered by a retry within the same run.
+        if (active && !wasActive) failed = false;
         if (wasActive && !active && !failed) {
           setLastSyncedAt(new Date());
           setError(null);
