@@ -2,7 +2,7 @@ import {
   vendureSignIn, vendureStoreSettings, vendureGlobalStockSettings,
 } from '@tallyui/connector-vendure';
 import { SignInError } from '@tallyui/core';
-import { hasVariantCustomField, isFieldName } from './barcode-field';
+import { checkBarcodeField, isFieldName } from './barcode-field';
 import { logout } from './logout';
 import { sessionContext, type Session } from './session';
 import { normalizeStoreUrl } from './store-url';
@@ -40,9 +40,15 @@ export async function signIn(
       vendureStoreSettings(context),
       vendureGlobalStockSettings(context),
     ]);
-    if (barcodeField && !await hasVariantCustomField(context, barcodeField)) {
-      void logout({ url: normalized.url, token });
-      return { ok: false, error: `This store's product variants have no custom field named "${barcodeField}".` };
+    if (barcodeField) {
+      const check = await checkBarcodeField(context, barcodeField);
+      if (check !== 'ok') {
+        void logout({ url: normalized.url, token });
+        return { ok: false, error: check === 'missing'
+          ? `This store's product variants have no custom field named "${barcodeField}".`
+          : check === 'wrong_type' ? `The custom field "${barcodeField}" is not a single text field, so it cannot hold barcodes.`
+            : `Could not check the barcode field: ${check.error}` };
+      }
     }
     return { ok: true, session: { ...session, settings, stock } };
   } catch (error) {

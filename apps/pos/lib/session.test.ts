@@ -43,6 +43,7 @@ describe('session storage', () => {
   it.each([
     '{', 'null', '[]', '{}', '"text"',
     JSON.stringify({ ...session, barcodeField: 123 }),
+    JSON.stringify({ ...session, barcodeField: 'bad name' }),
     ...['url', 'email', 'token'].map((key) => JSON.stringify({ ...session, [key]: 1 })),
     ...['settings', 'stock'].flatMap((key) =>
       [undefined, null, 'bad', []].map((value) => JSON.stringify({ ...session, [key]: value }))),

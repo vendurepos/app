@@ -3,13 +3,13 @@ import {
 } from '@tallyui/connector-vendure';
 import { SignInError, StoreSettingsError } from '@tallyui/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { hasVariantCustomField } from './barcode-field';
+import { checkBarcodeField } from './barcode-field';
 import { logout } from './logout';
 import { signIn } from './sign-in';
 
 vi.mock('./logout', () => ({ logout: vi.fn() }));
 vi.mock('./barcode-field', async (importActual) => ({
-  ...await importActual<typeof import('./barcode-field')>(), hasVariantCustomField: vi.fn(),
+  ...await importActual<typeof import('./barcode-field')>(), checkBarcodeField: vi.fn(),
 }));
 
 vi.mock('@tallyui/connector-vendure', async (importActual) => ({
@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.mocked(vendureSignIn).mockResolvedValue({ token: 'test-token' });
   vi.mocked(vendureStoreSettings).mockResolvedValue(settings);
   vi.mocked(vendureGlobalStockSettings).mockResolvedValue(stock);
-  vi.mocked(hasVariantCustomField).mockResolvedValue(true);
+  vi.mocked(checkBarcodeField).mockResolvedValue('ok');
 });
 
 describe('signIn', () => {
@@ -44,28 +44,32 @@ describe('signIn', () => {
       ok: false, error: 'Enter the custom field name, such as barcode.',
     });
     expect(vendureSignIn).not.toHaveBeenCalled();
-    expect(hasVariantCustomField).not.toHaveBeenCalled();
+    expect(checkBarcodeField).not.toHaveBeenCalled();
   });
 
-  it('reports a missing barcode field and starts logout without waiting', async () => {
-    vi.mocked(hasVariantCustomField).mockResolvedValue(false);
+  it.each([
+    ['missing', 'This store\'s product variants have no custom field named "barcode".'],
+    ['wrong_type', 'The custom field "barcode" is not a single text field, so it cannot hold barcodes.'],
+    [{ error: 'HTTP 403' }, 'Could not check the barcode field: HTTP 403'],
+  ] as const)('reports barcode check %j and starts logout without waiting', async (check, error) => {
+    vi.mocked(checkBarcodeField).mockResolvedValue(check);
     vi.mocked(logout).mockReturnValue(new Promise(() => {}));
     expect(await signIn({ ...values, barcode_field: 'barcode' })).toEqual({
-      ok: false, error: 'This store\'s product variants have no custom field named "barcode".',
+      ok: false, error,
     });
     expect(logout).toHaveBeenCalledExactlyOnceWith({ url: 'https://shop.example.com', token: 'test-token' });
   }, 1_000);
 
   it('checks and stores the trimmed barcode field after reading settings and stock', async () => {
     const signal = new AbortController().signal;
-    vi.mocked(hasVariantCustomField).mockImplementation(async () => {
+    vi.mocked(checkBarcodeField).mockImplementation(async () => {
       expect(vendureStoreSettings).toHaveBeenCalledTimes(1);
       expect(vendureGlobalStockSettings).toHaveBeenCalledTimes(1);
-      return true;
+      return 'ok';
     });
     const result = await signIn({ ...values, barcode_field: ' barcode ' }, { signal });
     expect(result.ok && result.session.barcodeField).toBe('barcode');
-    expect(hasVariantCustomField).toHaveBeenCalledExactlyOnceWith({
+    expect(checkBarcodeField).toHaveBeenCalledExactlyOnceWith({
       connectorId: 'vendure', baseUrl: 'https://shop.example.com', signal,
       headers: { Authorization: 'Bearer test-token', 'vendure-token': 'channel-1' },
     }, 'barcode');
@@ -75,7 +79,7 @@ describe('signIn', () => {
   it.each([undefined, '   '])('omits barcode field %j without checking it', async (barcode_field) => {
     const result = await signIn({ ...values, barcode_field });
     expect(result.ok && result.session.barcodeField).toBeUndefined();
-    expect(hasVariantCustomField).not.toHaveBeenCalled();
+    expect(checkBarcodeField).not.toHaveBeenCalled();
   });
 
   it('returns the full session and sends credentials and channel headers at the correct stages', async () => {
@@ -165,13 +169,13 @@ describe('signIn', () => {
     expect(vendureGlobalStockSettings).not.toHaveBeenCalled();
   });
 
-  it.each(['sign-in', 'settings', 'stock'])('rethrows AbortError at the %s stage', async (stage) => {
+  it.each(['sign-in', 'settings', 'stock', 'barcode'])('rethrows AbortError at the %s stage', async (stage) => {
     const controller = new AbortController();
     controller.abort();
     const operation = stage === 'sign-in' ? vendureSignIn
-      : stage === 'settings' ? vendureStoreSettings : vendureGlobalStockSettings;
+      : stage === 'settings' ? vendureStoreSettings : stage === 'stock' ? vendureGlobalStockSettings : checkBarcodeField;
     vi.mocked(operation).mockRejectedValue(controller.signal.reason);
-    await expect(signIn(values, { signal: controller.signal })).rejects.toBe(controller.signal.reason);
+    await expect(signIn({ ...values, barcode_field: 'barcode' }, { signal: controller.signal })).rejects.toBe(controller.signal.reason);
     if (stage === 'sign-in') expect(logout).not.toHaveBeenCalled();
     else expect(logout).toHaveBeenCalledExactlyOnceWith({
       url: 'https://shop.example.com', token: 'test-token',

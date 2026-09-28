@@ -1,6 +1,6 @@
 import type { SyncContext } from '@tallyui/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hasVariantCustomField, isFieldName } from './barcode-field';
+import { checkBarcodeField, isFieldName } from './barcode-field';
 
 const context: SyncContext = {
   connectorId: 'vendure', baseUrl: 'https://shop.example.com',
@@ -11,41 +11,62 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('isFieldName', () => {
   it.each(['barcode', 'ean_13'])('accepts %s', (name) => expect(isFieldName(name)).toBe(true));
-  it.each(['bar code', '1abc', 'x{y}'])('refuses %s', (name) => expect(isFieldName(name)).toBe(false));
+  it.each(['bar code', '1abc', 'x{y}', '__typename'])('refuses %s', (name) => expect(isFieldName(name)).toBe(false));
 });
 
-describe('hasVariantCustomField', () => {
-  it('accepts data and sends the field, authenticated channel headers and signal', async () => {
+describe('checkBarcodeField', () => {
+  it.each(['string', 'text'])('accepts %s and sends the config query, authenticated channel headers and signal', async (type) => {
     const fetch = vi.fn().mockResolvedValue(Response.json({
-      data: { productVariants: { items: [{ customFields: { barcode: '2000000000015' } }] } },
+      data: { globalSettings: { serverConfig: { entityCustomFields: [
+        { entityName: 'Product', customFields: [{ name: 'barcode', type: 'int', list: false }] },
+        { entityName: 'ProductVariant', customFields: [{ name: 'other', type: 'int', list: false }, { name: 'barcode', type, list: false }] },
+      ] } } },
     }));
     vi.stubGlobal('fetch', fetch);
-    expect(await hasVariantCustomField(context, 'barcode')).toBe(true);
+    expect(await checkBarcodeField(context, 'barcode')).toBe('ok');
     expect(fetch).toHaveBeenCalledExactlyOnceWith(`${context.baseUrl}/admin-api`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
       signal: context.signal,
-      body: JSON.stringify({ query: '{ productVariants(options: { take: 1 }) { items { customFields { barcode } } } }' }),
+      body: JSON.stringify({ query: '{ globalSettings { serverConfig { entityCustomFields { entityName customFields { ... on CustomField { name type list } } } } } }' }),
     });
   });
 
   it.each([
-    [{ errors: [{ message: 'Unknown field' }] }, 200],
-    [{ data: { productVariants: { items: [] } }, errors: [{ message: 'Failure' }] }, 200],
-    [{ data: { productVariants: { items: [] } } }, 400],
-    [{ data: {} }, 200],
-    [{ data: { productVariants: null } }, 200],
-  ])('rejects unsuccessful body %j with status %s', async (body, status) => {
+    ['int', false, 'wrong_type'], ['string', true, 'wrong_type'], ['string', false, 'missing'],
+  ] as const)('checks %s with list %s and result %s', async (type, list, result) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      data: { globalSettings: { serverConfig: { entityCustomFields: [
+        { entityName: 'ProductVariant', customFields: [{ name: result === 'missing' ? 'other' : 'barcode', type, list }] },
+      ] } } },
+    })));
+    expect(await checkBarcodeField(context, 'barcode')).toBe(result);
+  });
+
+  it.each([
+    [{ errors: [{ message: 'Unknown field' }, { message: 'Second error' }] }, 200, 'Unknown field'],
+    [{ data: { globalSettings: null }, errors: [{ message: 'Failure' }] }, 200, 'Failure'],
+    [{}, 403, 'HTTP 403'],
+    [{ data: {} }, 200, expect.any(String)],
+    [{ data: { globalSettings: null } }, 200, expect.any(String)],
+  ])('reports unsuccessful body %j with status %s', async (body, status, error) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body, { status })));
-    expect(await hasVariantCustomField(context, 'barcode')).toBe(false);
+    expect(await checkBarcodeField(context, 'barcode')).toEqual({ error });
   });
 
-  it('returns false for a network error', async () => {
+  it('reports a network error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-    expect(await hasVariantCustomField(context, 'barcode')).toBe(false);
+    expect(await checkBarcodeField(context, 'barcode')).toEqual({ error: 'Failed to fetch' });
   });
 
-  it('returns false for invalid JSON', async () => {
+  it('reports invalid JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not JSON')));
-    expect(await hasVariantCustomField(context, 'barcode')).toBe(false);
+    expect(await checkBarcodeField(context, 'barcode')).toEqual({ error: expect.any(String) });
+  });
+
+  it('rethrows when the signal is aborted', async () => {
+    const controller = new AbortController();
+    const error = new TypeError('Failed to fetch');
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => { controller.abort(); throw error; }));
+    await expect(checkBarcodeField({ ...context, signal: controller.signal }, 'barcode')).rejects.toBe(error);
   });
 });

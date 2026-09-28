@@ -41,6 +41,14 @@ it('uses distinct database names for different barcode fields', async () => {
   expect(barcode).not.toBe(databaseName({ ...session, barcodeField: 'ean_13' }));
 });
 
+it('keeps the original database name when no barcode field is set', async () => {
+  const { databaseName } = await import('./catalogue');
+  let hash = 0x811c9dc5;
+  for (const char of 'https://shop.example.com\npos') hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193);
+  expect(databaseName({ url: 'https://shop.example.com', channelToken: 'pos' }))
+    .toBe(`vendurepos_${(hash >>> 0).toString(16).padStart(8, '0')}`);
+});
+
 afterEach(async () => {
   const { removeCatalogueDatabase } = await import('./catalogue');
   await removeCatalogueDatabase();
