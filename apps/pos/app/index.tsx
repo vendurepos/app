@@ -1,21 +1,52 @@
+import { useState } from 'react';
 import { Redirect, Stack } from 'expo-router';
-import { Button, Text, VStack } from '@tallyui/components';
+import { Button, Catalogue, HStack, Text, VStack } from '@tallyui/components';
+import { ConnectorProvider } from '@tallyui/core';
+import { removeCatalogueDatabase } from '../lib/catalogue';
+import type { Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { useCatalogue } from '../lib/use-catalogue';
 
 export default function HomeScreen() {
   const { session, signOut } = useSession();
   if (!session) return <Redirect href="/sign-in" />;
+  return <SignedInCatalogue session={session} signOut={signOut} />;
+}
+
+function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): void }) {
+  const { connector, products, lastSyncedAt, error } = useCatalogue(session);
+  const [pending, setPending] = useState(false);
+
+  async function handleSignOut() {
+    setPending(true);
+    try {
+      await removeCatalogueDatabase();
+    } finally {
+      setPending(false);
+      signOut();
+    }
+  }
 
   return (
-    <VStack className="flex-1 items-center justify-center bg-background p-6" space="lg">
+    <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ title: 'VendurePOS' }} />
-      <Text className="text-3xl font-bold">VendurePOS</Text>
-      <Text testID="signed-in-store">Signed in to {session.url}</Text>
-      <Text className="text-muted-foreground">{session.email}</Text>
-      {session.channelToken && <Text>Channel: {session.channelToken}</Text>}
-      <Button testID="sign-out" variant="secondary" onPress={signOut}>
-        <Text>Sign out</Text>
-      </Button>
+      <HStack className="items-center justify-between border-b border-border px-4 py-2" space="sm">
+        <Text testID="signed-in-store" className="flex-1 text-sm text-muted-foreground">Signed in to {session.url}</Text>
+        <Button testID="sign-out" variant="secondary" disabled={pending} onPress={handleSignOut}>
+          <Text>Sign out</Text>
+        </Button>
+      </HStack>
+      <ConnectorProvider connector={connector} traitContext={{ currency: session.settings.currency }}>
+        <Catalogue
+          products={products}
+          traits={connector.traits.product}
+          currency={session.settings.currency}
+          lastSyncedAt={lastSyncedAt}
+          // Cart integration is a later job.
+          onSelect={() => {}}
+          statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
+        />
+      </ConnectorProvider>
     </VStack>
   );
 }

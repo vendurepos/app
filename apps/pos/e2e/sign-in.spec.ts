@@ -34,6 +34,18 @@ test('signs in to the dev store', async ({ page }) => {
   expect(storedSession).not.toBeNull();
   const session = JSON.parse(storedSession!);
   expect(session).not.toHaveProperty('password');
+  for (const name of [
+    'Tally Fixture Mug', 'Espresso Beans', 'Filter Coffee', 'Tally T-Shirt', 'Tally Hoodie',
+    'Tote Bag', 'Notebook', 'Postcard Set', 'Limited Print', 'Gift Card',
+  ]) {
+    await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+  }
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
 });

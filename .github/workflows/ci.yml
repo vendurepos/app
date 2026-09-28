@@ -25,5 +25,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        env:
+          # rxdb-premium's postinstall decrypts the licensed plugins with this token.
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
       - run: pnpm typecheck
       - run: pnpm test
