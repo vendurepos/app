@@ -83,8 +83,9 @@ async function seed() {
     const csvPath = join(directory, 'catalogue.csv');
     writeFileSync(csvPath, rows.map(row => row.map(field => `"${field.replace(/"/g, '""')}"`).join(',')).join('\n'));
     const result = await importProductsFromCsv(app, csvPath, LanguageCode.en);
-    if (result.errors.length > 0 || result.imported !== PRODUCT_COUNT) {
-      throw new Error(`Imported ${result.imported}/${PRODUCT_COUNT} products: ${result.errors.join('\n')}`);
+    const errors = result.errors ?? [];
+    if (errors.length > 0 || result.imported !== PRODUCT_COUNT) {
+      throw new Error(`Imported ${result.imported}/${PRODUCT_COUNT} products: ${errors.join('\n')}`);
     }
   } finally {
     rmSync(directory, { recursive: true });
