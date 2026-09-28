@@ -19,18 +19,18 @@ afterEach(() => {
 });
 
 describe('logout', () => {
-  it('posts the mutation with session headers and returns ok on success', async () => {
+  it('posts the mutation without a channel header even when the session has a channel token', async () => {
     fetchMock.mockResolvedValue(Response.json({ data: { logout: { success: true } } }));
     expect(await logout(session)).toBe('ok');
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`${session.url}/admin-api`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json', Authorization: `Bearer ${session.token}`,
-        'vendure-token': session.channelToken,
       },
       body: JSON.stringify({ query: 'mutation { logout { success } }' }),
       signal: expect.any(AbortSignal),
     });
+    expect(fetchMock.mock.calls[0][1]?.headers).not.toHaveProperty('vendure-token');
     expect(console.warn).not.toHaveBeenCalled();
   });
 

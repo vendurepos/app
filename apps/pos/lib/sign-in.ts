@@ -37,11 +37,11 @@ export async function signIn(
     ]);
     return { ok: true, session: { ...session, settings, stock } };
   } catch (error) {
+    if (signedIn) void logout({ url: normalized.url, token });
     if ((error as { name?: unknown })?.name === 'AbortError') throw error;
     // StoreSettingsError may wrap the signal's original AbortError.
     if (init?.signal?.aborted && init.signal.reason?.name === 'AbortError') throw init.signal.reason;
     const message = error instanceof Error ? error.message : String(error);
-    if (signedIn) await logout({ url: normalized.url, token, channelToken });
     if (signedIn) return {
       ok: false,
       error: `Could not read the store settings: ${message}${channelToken ? ' Check the channel token.' : ''}`,
