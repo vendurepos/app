@@ -1,6 +1,6 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { TallyConnector } from '@tallyui/core';
-import { createTallyDatabase, startReplication, type TallyDatabase } from '@tallyui/database';
+import { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, type TallyDatabase } from '@tallyui/database';
 import type { RxStorage } from 'rxdb';
 import type { RxReplicationState } from 'rxdb/plugins/replication';
 import { sessionContext, type Session } from './session';
@@ -15,12 +15,14 @@ export function databaseName({ url, channelToken, barcodeField }: Pick<Session, 
 }
 // Vendure's feeds have no push stream, so re-pull on this interval.
 export const RESYNC_INTERVAL_MS = 60_000;
+// The default skips the start pass and restarts a 24 h wait on every start, so a till reloaded daily would never run one.
+export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 // A hung storage worker must not prevent the cashier from signing out.
 export const SIGN_OUT_WAIT_MS = 5_000;
 
 let storage: RxStorage<any, any> | undefined;
 let database: Promise<TallyDatabase> | undefined;
-let sync: { replication: RxReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval> } | undefined;
+let sync: { replication: RxReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[] } | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -39,7 +41,7 @@ export function catalogueConnector(session: Session): TallyConnector {
 }
 
 export async function startCatalogueSync(session: Session, connector: TallyConnector): Promise<{
-  db: TallyDatabase; replication: RxReplicationState<any, any>;
+  db: TallyDatabase; replication: RxReplicationState<any, any>; stockLevels: TallyDatabase[typeof STOCK_LEVELS_COLLECTION];
 }> {
   return enqueue(() => startUnqueued(session, connector));
 }
@@ -62,14 +64,23 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     throw error;
   });
   const controller = new AbortController();
+  const context = { ...sessionContext(session), signal: controller.signal };
   const replication = startReplication({
     collection: db.products,
     adapter: connector.replication!.products!,
-    context: { ...sessionContext(session), signal: controller.signal },
+    context,
     live: true,
   });
-  sync = { replication, controller, timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS) };
-  return { db, replication };
+  const stockLevels = db[STOCK_LEVELS_COLLECTION];
+  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS) };
+  const stock = startStockReconcile({ collection: stockLevels, adapter: connector.reconcile!.stock!, context });
+  sync.runners.push({ stop: stock.stop, runNow: stock.reconcileStock });
+  const ids = startIdReconcile({ collection: db.products, adapter: connector.reconcile!.ids!, context, reSync: () => replication.reSync() });
+  sync.runners.push({ stop: ids.stop, runNow: ids.reconcileIds });
+  const prices = startFingerprintReconcile({ collection: db.products, adapter: connector.reconcile!.prices!, context, reSync: () => replication.reSync(), startDelayMs: PRICE_RECONCILE_START_DELAY_MS });
+  sync.runners.push({ stop: prices.stop, runNow: prices.reconcile });
+  stock.reconcileStock().catch(error => { if (!controller.signal.aborted) console.warn('Stock reconcile failed:', error); });
+  return { db, replication, stockLevels };
 }
 
 export async function stopCatalogueSync(): Promise<void> {
@@ -80,7 +91,9 @@ async function stopUnqueued(): Promise<void> {
   if (!sync) return;
   const current = sync;
   clearInterval(current.timer);
+  current.runners.forEach(({ stop }) => stop());
   current.controller.abort();
+  await Promise.allSettled(current.runners.map(({ runNow }) => runNow()));
   await current.replication.cancel();
   if (sync === current) sync = undefined;
 }

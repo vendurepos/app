@@ -16,7 +16,7 @@ export default function HomeScreen() {
 }
 
 function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): void }) {
-  const { connector, products, lastSyncedAt, error } = useCatalogue(session);
+  const { connector, products, lastSyncedAt, error, stockOverlay, stockOverlayAsOf } = useCatalogue(session);
   const [pending, setPending] = useState(false);
   const traitContext = useMemo(() => ({ currency: session.settings.currency }), [session.settings.currency]);
 
@@ -40,12 +40,13 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           <Text>Sign out</Text>
         </Button>
       </HStack>
-      <ConnectorProvider connector={connector} traitContext={traitContext}>
+      <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
         <Catalogue
           products={products}
           traits={connector.traits.product}
           currency={session.settings.currency}
           lastSyncedAt={lastSyncedAt}
+          lastStockCheckAt={stockOverlayAsOf ? new Date(stockOverlayAsOf) : null}
           // Cart integration is a later job.
           onSelect={() => {}}
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
