@@ -38,3 +38,15 @@ yet published. That needed a second checkout in CI (`TALLYUI_REF`), tsconfig
   which picks up an unreleased commit.
 - The app uses TallyUI's compiled `dist/` output, so it needs neither
   tsconfig `paths` nor a Metro resolver hook.
+
+## Amendments
+
+- 2026-09-29: Two points above no longer hold.
+  - **Metro resolver hook.** `apps/pos/metro.config.js` now has one: it
+    bundles each `@tallyui/*` package from its published `src/`, so that
+    Uniwind compiles the components' classes with the app (#3). It is still
+    the published package, not a local checkout, and no tsconfig `paths`
+    were added.
+  - **storage-sqlite.** `@tallyui/storage-sqlite` is in, with `rxdb-premium`,
+    because RxDB Premium covers every platform POS app, which closes plan
+    V-D5 (#4).
