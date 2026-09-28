@@ -1,2 +1,7 @@
 packages:
   - "apps/*"
+
+# rxdb-premium's postinstall decrypts licensed code into its package; the
+# side-effects cache would copy that build into the pnpm store (and so into
+# any CI cache of the store). Keep the store to the published tarballs.
+sideEffectsCache: false

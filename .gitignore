@@ -10,5 +10,5 @@ playwright-report/
 test-results/
 
 # Built by tallyui-build-sqlite-worker; links licensed rxdb-premium code, never commit.
-apps/pos/public/tallyui-sqlite-worker.js
-apps/pos/public/sqlite3.wasm
+**/tallyui-sqlite-worker.js
+**/sqlite3.wasm

@@ -20,10 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
+      # No pnpm store cache: this public repo installs rxdb-premium with a
+      # licence, and fork PR workflows can restore caches saved on main.
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
       # rxdb-premium's postinstall decrypts the licensed plugins with this token
       # and echoes it as `accessToken: …`, so the whole install output is
       # filtered. `shell: bash` runs with pipefail, so a failed install still fails.
