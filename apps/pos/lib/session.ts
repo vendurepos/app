@@ -1,11 +1,13 @@
 import { vendureAuth } from '@tallyui/connector-vendure';
 import type { StoreSettings, SyncContext } from '@tallyui/core';
+import { isFieldName } from './barcode-field';
 
 export interface Session {
   /** Server root, as returned by normalizeStoreUrl. */
   url: string;
   /** vendure-token of the channel; absent means the default channel. */
   channelToken?: string;
+  barcodeField?: string;
   email: string;
   token: string;
   settings: StoreSettings;
@@ -46,6 +48,7 @@ export function loadSession(store: KeyValueStore = defaultStore()): Session | nu
     const session = JSON.parse(store.getItem(SESSION_KEY) ?? 'null');
     if (!session || typeof session.url !== 'string' || typeof session.email !== 'string' ||
       typeof session.token !== 'string' ||
+      (session.barcodeField !== undefined && (typeof session.barcodeField !== 'string' || !isFieldName(session.barcodeField))) ||
       !session.settings || typeof session.settings !== 'object' || Array.isArray(session.settings) ||
       !session.stock || typeof session.stock !== 'object' || Array.isArray(session.stock)) return null;
     return session;

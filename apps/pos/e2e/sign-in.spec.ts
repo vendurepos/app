@@ -26,6 +26,7 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-email').fill(USERNAME);
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-barcode_field').fill('barcode');
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   for (const name of [
@@ -34,6 +35,11 @@ test('signs in to the dev store', async ({ page }) => {
   ]) {
     await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
   }
+  const search = page.getByPlaceholder('Search or scan barcode / SKU');
+  await search.fill('2000000000015');
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Espresso Beans', { exact: true })).toHaveCount(0);
+  await search.fill('');
   await page.reload();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   const storedSession = await page.evaluate(() => localStorage.getItem('vendurepos.session'));
