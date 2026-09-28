@@ -3,8 +3,8 @@
 Open source, modular point of sale for [Vendure](https://vendure.io). Built on
 [TallyUI](https://github.com/TallyUI/tallyui).
 
-> **Status: pre-MVP.** The app signs in to a Vendure store (web first). It
-> does not sell yet.
+> **Status: pre-MVP.** The app signs in to a Vendure store and shows its
+> catalogue, synced to local SQLite (web first). It does not sell yet.
 
 ## What it will be
 
@@ -33,9 +33,12 @@ the plan.
 ## Getting started
 
 Requires Node.js 22 and pnpm (the version is pinned in `package.json`).
+The web storage uses RxDB Premium, whose install script needs the licence
+token in `RXDB_PREMIUM` (CI reads the repository secret of that name).
 
 ```bash
 pnpm install
+pnpm --filter @vendurepos/pos exec tallyui-build-sqlite-worker public/   # the SQLite web worker
 pnpm --filter @vendurepos/pos web   # http://localhost:8081
 ```
 
@@ -50,8 +53,9 @@ pnpm lint
 CI runs install, typecheck and test on every pull request.
 
 The web smoke resets and starts the dev store on port 3200, exports the web
-app, serves it on 127.0.0.1:8099 and signs in through the UI in Playwright
-Chromium. It needs Docker (Colima on the Mac mini) and stops the store when
+app, serves it on 127.0.0.1:8099, signs in through the UI in Playwright
+Chromium and checks the seeded catalogue appears. It needs Docker (Colima on
+the Mac mini) and stops the store when
 it ends:
 
 ```bash

@@ -5,6 +5,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
+  // Vendure's bcrypt login and the first sync run against a real server on a shared machine.
+  expect: { timeout: 15_000 },
   reporter: 'list',
   use: {
     // The dev store's CORS allows the web export on port 8099.

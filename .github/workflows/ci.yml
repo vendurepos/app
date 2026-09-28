@@ -20,10 +20,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
+      # No pnpm store cache: this public repo installs rxdb-premium with a
+      # licence, and fork PR workflows can restore caches saved on main.
+      # setup-node v5 caches automatically when package.json names a packageManager.
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          package-manager-cache: false
+      # rxdb-premium's postinstall decrypts the licensed plugins with this token
+      # and echoes it as `accessToken: …`, so the whole install output is
+      # filtered. `shell: bash` runs with pipefail, so a failed install still fails.
+      - name: Install (licence token filtered)
+        run: '{ pnpm install --frozen-lockfile; } 2>&1 | grep -vi accessToken'
+        shell: bash
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      # The store must hold only the published tarball, never the decrypted build.
+      - name: Assert the pnpm store holds no decrypted rxdb-premium
+        shell: bash
+        run: |
+          index="$(pnpm store path)/index"
+          entries=$(grep -rl '"name":"rxdb-premium"' "$index" || true)
+          [ -n "$entries" ] || { echo "rxdb-premium is missing from the store index" >&2; exit 1; }
+          if grep -l '"sideEffects"' $entries; then
+            echo "the pnpm store holds rxdb-premium's post-install build" >&2
+            exit 1
+          fi
       - run: pnpm typecheck
       - run: pnpm test

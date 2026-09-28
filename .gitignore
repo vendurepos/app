@@ -8,3 +8,7 @@ expo-env.d.ts
 .env.local
 playwright-report/
 test-results/
+
+# Built by tallyui-build-sqlite-worker; links licensed rxdb-premium code, never commit.
+**/tallyui-sqlite-worker.js
+**/sqlite3.wasm

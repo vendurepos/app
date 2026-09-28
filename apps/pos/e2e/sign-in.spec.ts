@@ -28,6 +28,12 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  for (const name of [
+    'Tally Fixture Mug', 'Espresso Beans', 'Filter Coffee', 'Tally T-Shirt', 'Tally Hoodie',
+    'Tote Bag', 'Notebook', 'Postcard Set', 'Limited Print', 'Gift Card',
+  ]) {
+    await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+  }
   await page.reload();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   const storedSession = await page.evaluate(() => localStorage.getItem('vendurepos.session'));
@@ -36,4 +42,22 @@ test('signs in to the dev store', async ({ page }) => {
   expect(session).not.toHaveProperty('password');
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  await page.route('**/admin-api', (route) => {
+    const request = route.request();
+    const body = request.postData() ?? '';
+    return request.method() === 'POST' && (body.includes('products(') || body.includes('productVariants('))
+      ? route.abort()
+      : route.continue();
+  });
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByText(/Failed to fetch/).first()).toBeVisible();
+  await expect(page.getByText('Tally Fixture Mug', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('No products yet.', { exact: true })).toBeVisible();
+  await page.unroute('**/admin-api');
+  await page.reload();
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
 });
