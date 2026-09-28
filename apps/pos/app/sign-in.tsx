@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Redirect, Stack } from 'expo-router';
 import { vendureAuth } from '@tallyui/connector-vendure';
+import type { AuthField } from '@tallyui/core';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
 import { useSession } from '../lib/session-context';
 import { signIn } from '../lib/sign-in';
+
+// The app's own setting (MVP §1.2), not the connector's.
+const BARCODE_FIELD: AuthField = {
+  key: 'barcode_field', label: 'Barcode field (optional)', placeholder: 'barcode', type: 'text',
+};
 
 export default function SignInScreen() {
   const { session, setSignedIn } = useSession();
@@ -48,7 +54,7 @@ export default function SignInScreen() {
         </CardHeader>
         <CardContent>
           <VStack space="lg">
-            {vendureAuth.fields.map((field) => (
+            {[...vendureAuth.fields, BARCODE_FIELD].map((field) => (
               <VStack key={field.key} space="sm">
                 <Label nativeID={`sign-in-${field.key}-label`}>{field.label}</Label>
                 <Input>
@@ -62,8 +68,8 @@ export default function SignInScreen() {
                     secureTextEntry={field.type === 'password'}
                     keyboardType={field.type === 'url' ? 'url' : field.key === 'email' ? 'email-address' : 'default'}
                     autoComplete={field.key === 'email' ? 'email' : undefined}
-                    autoCapitalize={['url', 'email', 'channel_token'].includes(field.key) ? 'none' : undefined}
-                    autoCorrect={['url', 'email', 'channel_token'].includes(field.key) ? false : undefined}
+                    autoCapitalize={['url', 'email', 'channel_token', 'barcode_field'].includes(field.key) ? 'none' : undefined}
+                    autoCorrect={['url', 'email', 'channel_token', 'barcode_field'].includes(field.key) ? false : undefined}
                     onSubmitEditing={submit}
                   />
                 </Input>

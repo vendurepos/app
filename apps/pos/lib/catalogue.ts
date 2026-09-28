@@ -6,9 +6,9 @@ import type { RxReplicationState } from 'rxdb/plugins/replication';
 import { sessionContext, type Session } from './session';
 import { createStorage } from './storage';
 
-// One database per store and channel so another store's rows and checkpoint cannot be reused.
-export function databaseName({ url, channelToken }: Pick<Session, 'url' | 'channelToken'>): string {
-  const key = `${url}\n${channelToken ?? ''}`;
+// One database per store, channel and barcode field so rows and checkpoints cannot be reused across settings.
+export function databaseName({ url, channelToken, barcodeField }: Pick<Session, 'url' | 'channelToken' | 'barcodeField'>): string {
+  const key = `${url}\n${channelToken ?? ''}\n${barcodeField ?? ''}`;
   let hash = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 0x01000193);
   return `vendurepos_${(hash >>> 0).toString(16).padStart(8, '0')}`;
@@ -31,6 +31,7 @@ function enqueue<T>(operation: () => Promise<T>): Promise<T> {
 
 export function catalogueConnector(session: Session): TallyConnector {
   return createVendureConnector({
+    barcodeField: session.barcodeField,
     pricesIncludeTax: session.settings.pricesIncludeTax,
     globalTrackInventory: session.stock.trackInventory,
     globalOutOfStockThreshold: session.stock.outOfStockThreshold,

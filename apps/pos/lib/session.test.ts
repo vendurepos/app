@@ -24,6 +24,12 @@ afterEach(() => {
 });
 
 describe('session storage', () => {
+  it('round trips the barcode field', () => {
+    const withBarcode = { ...session, barcodeField: 'barcode' };
+    saveSession(withBarcode, store);
+    expect(loadSession(store)).toEqual(withBarcode);
+  });
+
   it('saves exactly the session and loads it', () => {
     saveSession(session, store);
     expect(store.getItem(SESSION_KEY)).toBe(JSON.stringify(session));
@@ -36,6 +42,7 @@ describe('session storage', () => {
 
   it.each([
     '{', 'null', '[]', '{}', '"text"',
+    JSON.stringify({ ...session, barcodeField: 123 }),
     ...['url', 'email', 'token'].map((key) => JSON.stringify({ ...session, [key]: 1 })),
     ...['settings', 'stock'].flatMap((key) =>
       [undefined, null, 'bad', []].map((value) => JSON.stringify({ ...session, [key]: value }))),

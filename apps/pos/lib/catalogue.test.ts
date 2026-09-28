@@ -34,6 +34,13 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+it('uses distinct database names for different barcode fields', async () => {
+  const { databaseName } = await import('./catalogue');
+  const barcode = databaseName({ ...session, barcodeField: 'barcode' });
+  expect(barcode).not.toBe(databaseName(session));
+  expect(barcode).not.toBe(databaseName({ ...session, barcodeField: 'ean_13' }));
+});
+
 afterEach(async () => {
   const { removeCatalogueDatabase } = await import('./catalogue');
   await removeCatalogueDatabase();
