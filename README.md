@@ -3,8 +3,8 @@
 Open source, modular point of sale for [Vendure](https://vendure.io). Built on
 [TallyUI](https://github.com/TallyUI/tallyui).
 
-> **Status: pre-MVP.** This repository is a skeleton. The app boots to a
-> placeholder screen and does not talk to Vendure yet.
+> **Status: pre-MVP.** The app signs in to a Vendure store (web first). It
+> does not sell yet.
 
 ## What it will be
 
@@ -25,9 +25,10 @@ repo are in [docs/adr/](docs/adr/).
 - `apps/pos` — Expo Router app (iOS, Android, Web). It depends on the
   published `@tallyui/*` 2.0.0 packages from npm, including
   `@tallyui/connector-vendure`.
+- `dev/vendure-store` — the local Vendure 3.7.3 dev store (see its README).
 
-The Vendure plugin (`packages/vendure-plugin`) and the dev store
-(`dev/vendure-store`) arrive with later jobs in the plan.
+The Vendure plugin (`packages/vendure-plugin`) arrives with a later job in
+the plan.
 
 ## Getting started
 
@@ -47,6 +48,15 @@ pnpm lint
 ```
 
 CI runs install, typecheck and test on every pull request.
+
+The web smoke resets and starts the dev store on port 3200, exports the web
+app, serves it on 127.0.0.1:8099 and signs in through the UI in Playwright
+Chromium. It needs Docker (Colima on the Mac mini) and stops the store when
+it ends:
+
+```bash
+pnpm smoke:web
+```
 
 ## License
 
