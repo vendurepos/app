@@ -9,6 +9,7 @@ export default defineConfig({
     },
   })],
   test: {
+    env: { S1_TEST_HOOKS: '1' },
     include: ['test/**/*.e2e.ts'],
     fileParallelism: false,
     testTimeout: 120_000,

@@ -203,14 +203,15 @@ describe('S1 order.create recipe through HTTP', () => {
     console.log('S1-NUM', JSON.stringify({ proof: '9-zero', totalMinor: order.totalWithTax, payments: order.payments.length, transitions }));
   });
 
-  it('proof 5: returned OrderStateTransitionError for underpayment rolls back order, lines, ledger, payments and stock movements', async () => {
+  it('proof 5: returned OrderStateTransitionError for underpayment rolls back order, lines, payments and stock movements; rejection is stored', async () => {
     const before = await counts();
     const stockBefore = await stock(variantIds.mug[0]);
     // These spies call Vendure unchanged: no mock implementation or synthetic ErrorResult.
     const transition = vi.spyOn(server.app.get(OrderService), 'transitionToState');
     const payment = vi.spyOn(server.app.get(PaymentService), 'createPayment');
     try {
-      const result = await submit(orderCommand([mug()], [{ method: 'cash', amountMinor: 500 }]));
+      const command = orderCommand([mug()], [{ method: 'cash', amountMinor: 500 }]);
+      const result = await submit(command);
       expect(result).toMatchObject({ status: 'rejected', error: { code: 'ORDER_STATE_TRANSITION_ERROR' } });
       expect(transition.mock.calls.at(-1)?.[2]).toBe('PaymentSettled');
       const returned = await transition.mock.results.at(-1)!.value;
@@ -219,7 +220,10 @@ describe('S1 order.create recipe through HTTP', () => {
       expect(payment).toHaveBeenCalledTimes(1);
       expect(await payment.mock.results[0].value).toMatchObject({ amount: 500, state: 'Settled' });
       const after = await counts();
-      expect(after).toEqual(before);
+      expect(after).toEqual({ ...before, commands: before.commands + 1 });
+      const ledger = await connection.rawConnection.getRepository(TallyCommand).find({ where: { id: command.id } });
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0]).toMatchObject({ status: 'rejected', result });
       expect(await stock(variantIds.mug[0])).toBe(stockBefore);
       console.log('S1-NUM', JSON.stringify({ proof: 5, error: returned.__typename, before, after }));
     } finally {

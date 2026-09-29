@@ -1,14 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import {
-  CustomerService, Order, OrderCalculator, OrderLine, OrderService, PaymentService,
+  CustomerService, Order, OrderCalculator, OrderLine, OrderService, PaymentService, ProductVariant,
   RequestContext, ShippingLine, ShippingMethod, Surcharge, TransactionalConnection, manualFulfillmentHandler,
 } from '@vendure/core';
+import { IsNull } from 'typeorm';
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { roundHalfAwayFromZero } from './rounding';
 import { TallyCommand } from './tally-command.entity';
-import { unwrap } from './unwrap';
+import { BusinessRejection, unwrap } from './unwrap';
 
 export type TotalWarning =
   | { code: 'total_mismatch'; expectedMinor: number; serverMinor: number; bridgeMinor: number }
@@ -71,6 +72,12 @@ export class OrderCreateService {
     };
     await this.connection.getRepository(ctx, Order).save(order);
     for (const line of payload.lines) {
+      const variant = await this.connection.getRepository(ctx, ProductVariant).findOne({
+        where: { id: line.variantId, deletedAt: IsNull(), channels: { id: ctx.channelId } },
+      });
+      if (!variant || !variant.enabled) {
+        throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
+      }
       order = unwrap(await this.orders.addItemToOrder(ctx, order.id, line.variantId, line.quantity, {
         tallyUnitPrice: line.unitPriceMinor,
         tallyClientLineId: line.clientLineId,
