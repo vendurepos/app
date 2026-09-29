@@ -4,6 +4,7 @@ import {
 import { SignInError } from '@tallyui/core';
 import { checkBarcodeField, isFieldName } from './barcode-field';
 import { logout } from './logout';
+import { merchantTextError } from './merchant-text';
 import { sessionContext, type Session } from './session';
 import { normalizeStoreUrl } from './store-url';
 
@@ -21,6 +22,8 @@ export async function signIn(
   if (!email || !password) return { ok: false, error: 'Enter your email and password.' };
   const channelToken = values.channel_token?.trim() || undefined;
   const barcodeField = values.barcode_field?.trim() || undefined;
+  const textError = barcodeField ? merchantTextError('Barcode field', barcodeField) : null;
+  if (textError) return { ok: false, error: textError };
   if (barcodeField && !isFieldName(barcodeField)) {
     return { ok: false, error: 'Enter the custom field name, such as barcode.' };
   }

@@ -48,6 +48,15 @@ describe('signIn', () => {
   });
 
   it.each([
+    ['a 256-character value', 'a'.repeat(256), 'Barcode field is too long: use at most 255 characters.'],
+    ['a NUL character', 'bar\u0000code', 'Barcode field contains a NUL character; remove it.'],
+  ])('rejects a barcode field with %s before signing in', async (_label, barcode_field, error) => {
+    expect(await signIn({ ...values, barcode_field })).toEqual({ ok: false, error });
+    expect(vendureSignIn).not.toHaveBeenCalled();
+    expect(checkBarcodeField).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['missing', 'This store\'s product variants have no custom field named "barcode".'],
     ['wrong_type', 'The custom field "barcode" is not a single text field, so it cannot hold barcodes.'],
     [{ error: 'HTTP 403' }, 'Could not check the barcode field: HTTP 403'],
