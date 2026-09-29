@@ -61,7 +61,8 @@ export function payloadShapeErrors(payload: unknown): string[] {
     }
     if (object(payload.customer) && payload.customer.customerId !== undefined) {
       const id = payload.customer.customerId
-      check(typeof id === 'string' && id.length > 0 && id.length <= 64, 'customer.customerId', 'a string of at most 64 characters')
+      // VP2a (Front desk): over 64 is ignored by the recipe (customer_ignored), never refused here.
+      check(typeof id === 'string' && id.length > 0, 'customer.customerId', 'a non-empty string')
     }
   }
   if (payload.sessionId !== undefined) {

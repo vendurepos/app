@@ -1,26 +1,24 @@
 import type { GraphQLErrorResult } from '@vendure/core';
-import {
-  BusinessRejection, ErrorResultThrown, PLATFORM_ERROR_CODE, PluginBugError, StoreConfigurationRefusal, transientKind,
-} from './errors';
+import { BusinessRejection, ErrorResultThrown, PluginBugError, StoreConfigurationRefusal, transientKind } from './errors';
 import type { TransientKind } from './errors';
 
 /**
- * Front desk ruling 1 and TallyUI ADR-038's `platform_error` amendment: how every failure after
- * the claim is answered, as origin × outcome. The sale's steps run in a savepoint, so every
- * outcome below starts from a sale that has been rolled back completely, claim kept. Ruling (A):
- * every deterministic refusal (unknown_variant, underpaid, the order limits as invalid_payload, the
- * permanent-list configuration as store_configuration) is answered before the claim and not stored,
- * so after the claim these rows are the safety net for races; their events leak (README).
+ * Front desk ruling 1, TallyUI ADR-038's `platform_error` amendment and the re-rulings: how every
+ * failure of the recipe is answered, as origin × outcome. The deterministic refusals (variant,
+ * limits, underpaid, configuration, values, currency) are checked after the claim and before the
+ * recipe's first write, and stored on the claim. The recipe publishes its first event at its first
+ * write, so none of its errors becomes a stored rejection (its events would outlive it): each
+ * rolls everything back, events included, unless part of the sale must stay for an admin.
  */
 export const CLASSIFICATION = {
-  rejection: 'stored', // the plugin's own refusal: unknown_variant, underpaid, idempotency_mismatch
-  mapped: 'stored', // an ErrorResult with a contract code: insufficient_stock
-  permanent: 'stored', // an ErrorResult on PERMANENT_ERROR_RESULTS: platform_error
+  rejection: 'transient', // a race on the plugin's own checks (unknown_variant, underpaid): the retry's checks answer it
+  mapped: 'transient', // a stock race (insufficient_stock despite the top-up): the retry tops up again
+  permanent: 'transient', // a configuration race on PERMANENT_ERROR_RESULTS: the retry's checks answer it
   unlisted: 'transient', // any other ErrorResult: 503
-  programming: 'stored', // a PluginBugError the plugin raised: internal_error (before the claim: 503)
-  storeConfiguration: 'notStored', // a refused PaymentSettled with a configuration cause: store_configuration
-  // The unique tallyClientOrderId. This channel: the new id stored applied with the result of the order's
-  // applied command; 409 while that command awaits an admin or is in progress. Another channel: idempotency_mismatch.
+  programming: 'needsAdmin', // a PluginBugError with part of the sale written (before any write: 503)
+  storeConfiguration: 'notStored', // a declined payment or a refused PaymentSettled with a configuration cause
+  // The unique tallyClientOrderId, met after the first event: roll back and run the command again, so that the
+  // collision guard answers it before any write (applied, 409, or another channel's idempotency_mismatch).
   clientOrderCollision: 'collision',
   database: 'transient', // driver, network, any SQLSTATE and anything else: 503 (409 only for the claim's lock)
 } as const;
@@ -56,33 +54,26 @@ export const PERMANENT_ERROR_RESULTS: Record<string, string> = {
   INELIGIBLE_PAYMENT_METHOD_ERROR: 'the POS payment method\'s checker refuses this order',
 };
 
+
 export type Classification =
-  | { origin: 'rejection' | 'mapped' | 'permanent' | 'programming'; outcome: 'stored'; rejection?: BusinessRejection }
-  | { origin: 'unlisted' | 'database'; outcome: 'transient'; kind: TransientKind }
+  | { origin: 'rejection' | 'mapped' | 'permanent' | 'unlisted' | 'database'; outcome: 'transient'; kind: TransientKind }
+  | { origin: 'programming'; outcome: 'needsAdmin' }
   | { origin: 'storeConfiguration'; outcome: 'notStored' }
   | { origin: 'clientOrderCollision'; outcome: 'collision' };
 
-/** Classifies an error raised by the sale's steps. `clientOrderIndex` names the unique index on tallyClientOrderId. */
+/** Classifies an error raised by the recipe. `clientOrderIndex` names the unique index on tallyClientOrderId. */
 export function classify(error: unknown, clientOrderIndex: string): Classification {
-  if (error instanceof BusinessRejection) return { origin: 'rejection', outcome: 'stored', rejection: error };
+  if (error instanceof BusinessRejection) return { origin: 'rejection', outcome: 'transient', kind: 'unclassified' };
   if (error instanceof StoreConfigurationRefusal) return { origin: 'storeConfiguration', outcome: 'notStored' };
   if (error instanceof ErrorResultThrown) {
-    const { errorCode, message, __typename, ...fields } = error.result as GraphQLErrorResult & Record<string, unknown>;
-    // Outside GraphQL an ErrorResult's message is its untranslated key; its specifics are separate fields.
-    const details = Object.fromEntries(Object.entries(fields).filter(([, value]) => value === null || typeof value !== 'object'));
-    const readable = Object.keys(details).length ? `${message}: ${JSON.stringify(details)}` : message;
-    const mapped = MAPPED_ERROR_RESULTS[errorCode];
-    if (mapped) return { origin: 'mapped', outcome: 'stored', rejection: new BusinessRejection(mapped, readable) };
-    if (PERMANENT_ERROR_RESULTS[errorCode]) {
-      return { origin: 'permanent', outcome: 'stored', rejection: new BusinessRejection(PLATFORM_ERROR_CODE,
-        `${errorCode}: ${readable}`, { platformCode: errorCode, platformMessage: readable }) };
-    }
-    return { origin: 'unlisted', outcome: 'transient', kind: 'unclassified' };
+    const { errorCode } = error.result as GraphQLErrorResult;
+    const origin = MAPPED_ERROR_RESULTS[errorCode] ? 'mapped' : PERMANENT_ERROR_RESULTS[errorCode] ? 'permanent' : 'unlisted';
+    return { origin, outcome: 'transient', kind: 'unclassified' };
   }
   const driverError = (error as { driverError?: { code?: unknown; constraint?: unknown } })?.driverError;
   if (driverError?.code === '23505' && driverError.constraint === clientOrderIndex) {
     return { origin: 'clientOrderCollision', outcome: 'collision' };
   }
-  if (error instanceof PluginBugError) return { origin: 'programming', outcome: 'stored' };
+  if (error instanceof PluginBugError) return { origin: 'programming', outcome: 'needsAdmin' };
   return { origin: 'database', outcome: 'transient', kind: transientKind(error) ?? 'unclassified' };
 }

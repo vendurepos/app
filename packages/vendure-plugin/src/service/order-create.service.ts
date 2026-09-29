@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import {
   ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
@@ -9,7 +8,8 @@ import {
 import type { CurrencyCode } from '@vendure/core';
 import { In, IsNull } from 'typeorm';
 import {
-  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute, tallyPaymentChecker, tallyShippingChecker,
+  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute, tallyPaymentChecker, tallyPaymentHandler,
+  tallyShippingChecker,
 } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
@@ -20,18 +20,25 @@ import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
 import { classify } from './classification';
 import {
-  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
+  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, loggerCtx, pluginBug,
   transientKind, unwrap,
 } from './errors';
 import { roundHalfAwayFromZero } from './rounding';
-import { MAX_INT4, MAX_STRING, maxMoneyMinor, valueRangeErrors } from './value-ranges';
+import { CUSTOMER_ID_MAX, MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
 export type TotalWarning =
   | { code: 'total_mismatch'; expectedMinor: number; serverMinor: number; bridgeMinor: number }
   | { code: 'tax_rate_mismatch'; ratePpm: number; expectedMinor: number; serverMinor: number };
 
-export type OrderCreateResult = CommandResult & { totalWarnings?: TotalWarning[] };
+/** A customerId treated as absent (the fallback chain); the till ignores the code as unknown. */
+export type CustomerIgnored = { code: 'customer_ignored'; customerId: string; reason: 'too_long' | 'unknown' };
+
+export type OrderCreateResult = Omit<CommandResult, 'warnings'>
+  & { warnings?: Array<CommandWarning | CustomerIgnored>; totalWarnings?: TotalWarning[] };
+
+/** Where a sale's stock top-up was made, kept on the ledger row for an admin's take-back. */
+export type TopUp = { variantId: string; stockLocationId: string; quantity: number };
 
 export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSave' | 'finalPass' | 'payments';
 
@@ -46,8 +53,23 @@ export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
 const ADMIN_REJECTED = 'TALLY_ADMIN_REJECTED';
 
-type TestHook = 'afterSavepointRollback' | 'afterCommit';
+type TestHook = 'beforeStoringRejection' | 'afterCommit';
 type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensationError?: unknown };
+/** A clientOrderId collision after the recipe's first event: roll everything back and run the command again. */
+class Rerun extends Error {}
+/** What the recipe has written so far, for an admin when it cannot finish. */
+type SaleProgress = { order?: Order; topUps: TopUp[] };
+
+/** The path of the first string holding U+0000 in an envelope, or undefined. */
+function nulPath(value: unknown, path: string): string | undefined {
+  if (typeof value === 'string') return value.includes('\u0000') ? path : undefined;
+  if (value === null || typeof value !== 'object') return undefined;
+  for (const [key, item] of Object.entries(value)) {
+    const found = nulPath(item, path ? `${path}.${key}` : key);
+    if (found) return found;
+  }
+  return undefined;
+}
 
 const createdAtError = (value: unknown, path: string) => {
   const time = typeof value === 'string' ? Date.parse(value) : NaN;
@@ -84,27 +106,15 @@ export class OrderCreateService {
   /**
    * Runs one order.create command in its own transaction (ADR 0002 §2). Returns the command's
    * result; throws TransientCommandError for every failure that may be retried (classification.ts),
-   * and with kind `needs_admin` once a sale's compensation has failed.
+   * and with kind `needs_admin` once part of a sale remains that the plugin cannot finish or undo.
    */
   async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult> {
+    // 1. Shape, NUL included, before any database access.
     const invalid = this.shapeRefusal(command);
     if (invalid) return invalid;
     const { payload } = command;
     let outcome: SaleOutcome;
     try {
-      // Front desk ordering ruling: 1. a command the ledger already holds replays (review 1); 2. a sale
-      // recorded in any channel goes to the collision guard after the claim; 3. only then the checks below.
-      if (!await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id })
-        && !await this.recordedAnywhere(ctx, payload.clientOrderId)) {
-        const invalidValue = this.valueRefusal(command);
-        if (invalidValue) return invalidValue;
-        if (!ctx.channel.availableCurrencyCodes.includes(payload.currency as CurrencyCode)) {
-          return rejected(command.id, 'unsupported_currency', `The channel does not offer ${payload.currency}`);
-        }
-        if (!await this.storeCanSell(ctx)) return storeConfiguration(command.id);
-        const refusal = await this.deterministicRefusal(ctx, command);
-        if (refusal) return refusal;
-      }
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       const commandCtx = new RequestContext({
         req: ctx.req, apiType: ctx.apiType, channel: ctx.channel, session: ctx.session,
@@ -113,12 +123,24 @@ export class OrderCreateService {
       });
       if (isTallyRoute(ctx)) markTallyRoute(commandCtx);
       outcome = await this.connection.withTransaction(commandCtx, async txCtx => {
+        // 2. The ledger replay and 4. the claim, in one statement; 3. the collision lookup.
         const replay = await this.claim(txCtx, command);
         if (replay) return { result: replay };
         const requeued = await this.requeueResult(txCtx, command);
-        return requeued ? { result: requeued } : await this.runSale(txCtx, command);
+        if (requeued) return { result: requeued };
+        // 5. The deterministic checks, stored on the claim: nothing of the sale is written, no event fires.
+        const refusal = await this.deterministicRefusal(txCtx, command);
+        if (refusal) {
+          await this.runTestHook('beforeStoringRejection', command.id);
+          await this.connection.getRepository(txCtx, TallyCommand).update(command.id, { status: 'rejected', result: { ...refusal } });
+          return { result: refusal };
+        }
+        // 6. The recipe.
+        return await this.runSale(txCtx, command);
       });
     } catch (error) {
+      // A collision after the recipe's first event: everything rolled back (its events with it), so start again.
+      if (error instanceof Rerun) return this.create(ctx, command);
       if (error instanceof StoreConfigurationRefusal) return storeConfiguration(command.id);
       if (error instanceof TransientCommandError) throw error;
       throw new TransientCommandError(command.id, transientKind(error) ?? 'unclassified', error);
@@ -128,35 +150,40 @@ export class OrderCreateService {
   }
 
   /**
-   * TallyUI ADR-038's `platform_error` amendment: the sale's steps run in a savepoint after the
-   * claim. A stored outcome rolls back to the savepoint, keeps the claim, stores the rejection on it
-   * and commits, so a resend of the id waits on the claim and never runs the recipe a second time.
+   * Front desk re-ruling 3: the recipe publishes its first event at its first write (a new
+   * customer's CustomerEvent in createOrUpdate, else createDraft's OrderEvent), and a committed
+   * stored rejection would deliver it for an order that does not exist. So no error from the recipe
+   * becomes a stored rejection: a race or any other failure rolls everything back (its events are
+   * then dropped), a clientOrderId collision starts the command again, and a plugin bug with part of
+   * the sale written is kept for an admin (needs_admin).
    */
   private async runSale(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<SaleOutcome> {
+    const progress: SaleProgress = { topUps: [] };
     try {
-      // Vendure's withTransaction inside a transaction is a SAVEPOINT on the same query runner.
-      return await this.connection.withTransaction(ctx, saleCtx => this.recipe(saleCtx, command));
+      return await this.recipe(ctx, command, progress);
     } catch (error) {
-      // The savepoint has rolled back. Had the rollback failed, `error` would be that failure: transient.
       if (error instanceof TransientCommandError) throw error;
       const verdict = classify(error, this.clientOrderIdIndex());
       if (verdict.outcome === 'notStored') throw error;
-      if (verdict.outcome === 'transient') {
-        // N5: after the claim, a lock timeout is a timeout, not another request's claim.
-        throw new TransientCommandError(command.id, verdict.kind === 'lock' ? 'timeout' : verdict.kind, error);
-      }
-      if (verdict.outcome === 'collision') {
-        // Two commands for one sale raced and the other committed first (ADR 0002 §2 "Requeue path").
-        const requeued = await this.requeueResult(ctx, command);
-        if (requeued) return { result: requeued };
-        throw new TransientCommandError(command.id, 'unclassified', error);
-      }
-      const rejection = verdict.rejection ?? internalErrorFor(command.id, error);
-      const result = rejected(command.id, rejection.code, rejection.message, rejection.data);
-      await this.runTestHook('afterSavepointRollback', command.id);
-      await this.connection.getRepository(ctx, TallyCommand).update(command.id, { status: 'rejected', result: { ...result } });
-      return { result };
+      if (verdict.outcome === 'collision') throw new Rerun();
+      if (verdict.outcome === 'needsAdmin' && progress.order) return this.markNeedsAdmin(ctx, command, progress, error);
+      // N5: after the claim, a lock timeout is a timeout, not another request's claim.
+      const kind = verdict.outcome === 'transient' ? verdict.kind : 'unclassified';
+      throw new TransientCommandError(command.id, kind === 'lock' ? 'timeout' : kind, error);
     }
+  }
+
+  /** Keeps a sale the plugin cannot finish or undo for an admin: the row is needs_admin, resends answer 409. */
+  private async markNeedsAdmin(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress, error: unknown) {
+    const order = progress.order!;
+    const result: OrderCreateResult = { id: command.id, status: 'applied',
+      serverRefs: { orderId: this.encodeId(order.id), displayId: order.code, totalMinor: order.totalWithTax } };
+    await this.connection.getRepository(ctx, TallyCommand).update(command.id, {
+      status: 'needs_admin', result: { ...result }, topUps: progress.topUps.length ? progress.topUps : null,
+    });
+    Logger.error(`order.create ${command.id} needs an admin: order ${order.code} is partly recorded `
+      + `(${error instanceof Error ? error.message : String(error)})`, loggerCtx, error instanceof Error ? error.stack : undefined);
+    return { result, needsAdmin: true, compensationError: error };
   }
 
   /**
@@ -170,16 +197,16 @@ export class OrderCreateService {
       const row = await ledger.findOne({ where: { id: commandId }, lock: { mode: 'pessimistic_write' } });
       if (row?.status !== 'needs_admin') throw new Error(`Command ${commandId} does not need an admin`);
       const stored = row.result as unknown as OrderCreateResult;
+      // Either resolution takes back the top-up the failed take-back left, exactly where it was made
+      // (the admin's channel may have another default location), in the resolution's transaction.
+      for (const topUp of row.topUps ?? []) await this.adjustStock(txCtx, topUp.variantId, topUp.stockLocationId, -topUp.quantity);
       if (resolution === 'rejected') {
-        // Front desk rulings 4 and N4: a rejected row never keeps a live order. The top-up the failed
-        // take-back left, the settled POS payments, Vendure's cancellation (stock restored as it restores
-        // it) and freeing the clientOrderId all commit with the rejection, or none of them does.
+        // Rulings 4, N4 and re-ruling 1: a rejected row never keeps a live order. The top-up, the settled
+        // POS payments, Vendure's cancellation (stock restored as it restores it) and releasing the
+        // clientOrderId commit with the rejection, or none of them does.
         const refuse = (reason: string) => new Error(`Command ${commandId} is not rejected: ${reason}`);
         const orderId = this.decodeId(stored.serverRefs!.orderId)!;
-        const location = await this.stockLocations.defaultStockLocation(txCtx);
-        for (const warning of stored.warnings ?? []) {
-          if (warning.code === 'insufficient_stock') await this.adjustStock(txCtx, this.decodeId(warning.variantId)!, location.id, -warning.quantity);
-        }
+        const order = await this.orders.findOne(txCtx, orderId) ?? pluginBug(`Order ${orderId} of ${commandId} is missing`);
         for (const payment of await this.orders.getOrderPayments(txCtx, orderId)) {
           if (payment.method !== TALLY_PAYMENT_METHOD_CODE || payment.state !== 'Settled') continue;
           const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
@@ -187,19 +214,24 @@ export class OrderCreateService {
             throw refuse(`payment ${payment.id} cannot be cancelled`);
           }
         }
-        const cancelled = await this.orders.cancelOrder(txCtx, { orderId, reason: note, cancelShipping: true });
+        // Idempotent: an order an admin already cancelled is left as it is. Vendure refuses an empty line selection.
+        const cancelled = order.state === 'Cancelled' ? order : order.lines.length
+          ? await this.orders.cancelOrder(txCtx, { orderId, reason: note, cancelShipping: true })
+          : await this.orders.transitionToState(txCtx, orderId, 'Cancelled');
         if (isGraphQlErrorResult(cancelled)) {
           throw refuse(`order ${stored.serverRefs!.displayId} cannot be cancelled (${cancelled.errorCode}: ${cancelled.message})`);
         }
-        // N3: a unique replacement that fits the 255-character column whatever the original's length.
-        const suffix = `#rej:${createHash('sha256').update(commandId).digest('hex').slice(0, 12)}`;
-        await this.connection.getRepository(txCtx, Order).update(orderId, {
-          customFields: { tallyClientOrderId: row.clientOrderId.slice(0, MAX_STRING - suffix.length) + suffix },
-        });
+        // Re-ruling 1: release the client id (the Retry's new sale takes it) and keep it, flagged, on the
+        // cancelled order. Re-ruling 2: a tallyRejected order counts as never placed in any register figure.
+        await this.connection.getRepository(txCtx, Order).update(orderId, { customFields: {
+          tallyClientOrderId: null, tallyRejectedClientOrderId: row.clientOrderId, tallyRejected: true,
+        } });
       }
       const result = resolution === 'applied' ? stored
         : rejected(commandId, PLATFORM_ERROR_CODE, `${ADMIN_REJECTED}: ${note}`, { platformCode: ADMIN_REJECTED, platformMessage: note });
-      await ledger.update(commandId, { status: resolution, result: { ...result } });
+      // Compare-and-set: only a row still awaiting an admin is resolved.
+      const updated = await ledger.update({ id: commandId, status: 'needs_admin' }, { status: resolution, result: { ...result } });
+      if (updated.affected !== 1) throw new Error(`Command ${commandId} was resolved meanwhile`);
       Logger.warn(`order.create ${commandId}: needs_admin resolved as ${resolution} (${note})`, loggerCtx);
       return result;
     });
@@ -218,6 +250,9 @@ export class OrderCreateService {
     if (!command || typeof command !== 'object' || Array.isArray(command)) {
       return rejected(id, 'invalid_payload', 'Expected command object');
     }
+    // Review: Postgres text cannot hold U+0000, so a string carrying it is refused before any database access.
+    const nul = nulPath(command, '');
+    if (nul) return rejected(id, 'invalid_payload', `${nul}: must not contain U+0000`);
     const errors: string[] = [];
     if (!id.length || id.length > 64) errors.push('Invalid id');
     if (command.type !== 'order.create') errors.push('type: expected order.create');
@@ -256,20 +291,26 @@ export class OrderCreateService {
       where: { zoneId: zone.id, enabled: true, customerGroup: IsNull() },
     });
     // Front desk ruling (A): the permanent-list configuration errors, found before any write. The
-    // plugin's own checkers accept every POS order; a replaced checker or a missing manual handler would not.
-    const checkers = (!payment?.checker || payment.checker.code === tallyPaymentChecker.code)
+    // plugin's own checkers and handler accept every POS order; a replaced one or a missing manual handler would not.
+    const checkers = (!payment?.checker || payment.checker.code === tallyPaymentChecker.code) && payment?.handler.code === tallyPaymentHandler.code
       && shipping?.checker.code === tallyShippingChecker.code
       && this.config.shippingOptions.fulfillmentHandlers.some(handler => handler.code === manualFulfillmentHandler.code);
     return !!payment && !!shipping && !!rates && checkers;
   }
 
   /**
-   * Front desk ruling (A): the sale's deterministic refusals, answered before the claim so that
-   * nothing is written and no event fires. Not stored, like `invalid_payload`. The recipe keeps
-   * the same checks after the claim for races.
+   * Front desk re-ruling 4, step 5: the sale's deterministic refusals, checked after the claim and
+   * before the recipe writes anything, so no event fires; the rejection is stored on the claim. The
+   * recipe keeps the same checks for races, which roll back as transient.
    */
   private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
-    const { lines, payments, totalMinor } = command.payload;
+    const invalidValue = this.valueRefusal(command);
+    if (invalidValue) return invalidValue;
+    const { lines, payments, totalMinor, currency } = command.payload;
+    if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
+      return rejected(command.id, 'unsupported_currency', `The channel does not offer ${currency}`);
+    }
+    if (!await this.storeCanSell(ctx)) return storeConfiguration(command.id);
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines.
@@ -403,10 +444,15 @@ export class OrderCreateService {
 
   // The S1 recipe (docs/spikes/s1-order-recipe.md). Its money and tax logic is unchanged; VP1 adds
   // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
-  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<SaleOutcome> {
+  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress): Promise<SaleOutcome> {
     const payload = command.payload;
-    const customerId = payload.customer?.customerId ? this.decodeId(payload.customer.customerId) : undefined;
+    // ADR 0002 "Customer": a customerId over its bound, or unknown here, is treated as absent, with a warning.
+    const given = payload.customer?.customerId;
+    const tooLong = !!given && given.length > CUSTOMER_ID_MAX;
+    const customerId = given && !tooLong ? this.decodeId(given) : undefined;
     let customer = customerId !== undefined ? await this.customers.findOne(ctx, customerId) : undefined;
+    const ignored: CustomerIgnored[] = given && !customer
+      ? [{ code: 'customer_ignored', customerId: given.slice(0, CUSTOMER_ID_MAX), reason: tooLong ? 'too_long' : 'unknown' }] : [];
     if (!customer) {
       // Review: createOrUpdate matches a customer of any channel and overwrites its names, so find it the
       // same way first (and add this channel, as createOrUpdate did); create only a missing one.
@@ -419,7 +465,9 @@ export class OrderCreateService {
         await customers.createQueryBuilder().relation('channels').of(customer).add(ctx.channelId);
       }
     }
+    // The recipe's first event is published here (a new customer's CustomerEvent comes just before it).
     let order = await this.orders.createDraft(ctx);
+    progress.order = order;
     order.customer = customer;
     order.customFields = {
       ...order.customFields,
@@ -449,6 +497,7 @@ export class OrderCreateService {
     }
     // ADR 0002 "Stock": top up a shortage before addItemToOrder, which would otherwise save the
     // line at the saleable quantity, and before ArrangingPayment, which checks saleable stock again.
+    // Vendure creates a stock location at start and falls back to the oldest, so none at all is a bug, not a pre-check.
     const location = await this.stockLocations.defaultStockLocation(ctx) ?? pluginBug('Vendure returned no default stock location');
     const topUps: Array<{ variantId: string; id: ID; quantity: number }> = [];
     for (const [variantId, { variant, quantity }] of requested) {
@@ -456,6 +505,8 @@ export class OrderCreateService {
       if (shortfall <= 0) continue;
       await this.adjustStock(ctx, variant.id, location.id, shortfall);
       topUps.push({ variantId, id: variant.id, quantity: shortfall });
+      // The exact location of each top-up, for an admin's take-back from any channel's context.
+      progress.topUps.push({ variantId: String(variant.id), stockLocationId: String(location.id), quantity: shortfall });
     }
     for (const line of payload.lines) {
       const variantId = requested.get(line.variantId)!.variant.id;
@@ -529,12 +580,13 @@ export class OrderCreateService {
       if (remaining === 0) break;
       const amount = Math.min(tender.amountMinor, remaining);
       const payment = unwrap(await this.payments.createPayment(ctx, order, amount, TALLY_PAYMENT_METHOD_CODE, { tender }));
-      // N1: the payload covers the total (pre-claim), so a declined tally-pos payment is the store's
+      // N1: the payload covers the total (pre-claim), so any tally-pos payment not Settled is the store's
       // configuration (a replaced handler, a missing route mark), never underpaid.
-      if (payment.state === 'Declined') throw new StoreConfigurationRefusal();
+      if (payment.state !== 'Settled') throw new StoreConfigurationRefusal();
       remaining -= amount;
     }
     order = await this.orders.findOne(ctx, order.id) ?? pluginBug(`Order ${order.id} vanished inside its own transaction`);
+    progress.order = order;
     await this.testObserver?.('payments', ctx, order);
     if (order.state !== 'PaymentSettled') {
       const settled = await this.orders.transitionToState(ctx, order.id, 'PaymentSettled');
@@ -577,7 +629,9 @@ export class OrderCreateService {
         compensation = { error };
       }
     }
-    const warnings: CommandWarning[] = topUps.map(({ variantId, quantity }) => ({ code: 'insufficient_stock', variantId, quantity }));
+    const warnings: Array<CommandWarning | CustomerIgnored> = [
+      ...topUps.map(({ variantId, quantity }) => ({ code: 'insufficient_stock' as const, variantId, quantity })), ...ignored,
+    ];
     const result: OrderCreateResult = {
       id: command.id, status: 'applied',
       serverRefs: { orderId: this.encodeId(order.id), displayId: order.code, totalMinor: order.totalWithTax },
@@ -586,7 +640,7 @@ export class OrderCreateService {
     };
     await this.connection.getRepository(ctx, TallyCommand).save({
       id: command.id, channelId: String(ctx.channelId), clientOrderId: payload.clientOrderId, fingerprint: commandFingerprint(command),
-      status: compensation ? 'needs_admin' : 'applied', result: { ...result },
+      status: compensation ? 'needs_admin' : 'applied', result: { ...result }, topUps: progress.topUps.length ? progress.topUps : null,
     });
     if (compensation) {
       const { error } = compensation;

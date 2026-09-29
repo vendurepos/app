@@ -65,7 +65,7 @@ describe('order.create recipe through OrderCreateService', () => {
     return levels.reduce((sum, level) => sum + level.stockOnHand, 0);
   }
 
-  it('refuses malformed envelopes, invalid payloads and unsupported versions before the claim, writing nothing', async () => {
+  it('refuses malformed envelopes, invalid payloads and unsupported versions writing no sale', async () => {
     const before = await counts();
     const command = orderCommand([mug()]);
     const invalid = [
@@ -81,7 +81,8 @@ describe('order.create recipe through OrderCreateService', () => {
       ...Array(6).fill(['rejected', 'invalid_payload']), ['rejected', 'unsupported_version'],
     ]);
     expect(results.at(-1)!.error!.data).toEqual({ orderCreate: 3 });
-    expect(await counts()).toEqual(before);
+    // Re-ruling 4: the fiscal-figures refusal (the display total) is stored on the claim; the others are shape refusals.
+    expect(await counts()).toEqual({ ...before, commands: before.commands + 1 });
   });
 
   it('happy path: Mug x1 + Beans(500) x2 is Delivered, priced, backdated and records SALE movements', async () => {
@@ -204,7 +205,7 @@ describe('order.create recipe through OrderCreateService', () => {
     }
   });
 
-  it('review 3: out-of-range values are invalid_payload before the claim, writing nothing', async () => {
+  it('review 3: out-of-range values are invalid_payload, writing no sale', async () => {
     const before = await counts();
     const long = 'x'.repeat(256);
     const cases: Array<[string, (payload: OrderCreatePayload) => void]> = [
@@ -238,15 +239,18 @@ describe('order.create recipe through OrderCreateService', () => {
       ['clientLineId over 255', payload => { payload.lines[0].clientLineId = long; }],
       ['clientPaymentId over 255', payload => { payload.payments[0].clientPaymentId = long; }],
       ['reference over 255', payload => { payload.payments[0].reference = long; }],
-      ['customerId over 64', payload => { payload.customer = { customerId: 'x'.repeat(65) }; }],
     ];
+    let stored = 0;
     for (const [name, mutate] of cases) {
       const command = orderCommand([mug()]);
       mutate(command.payload);
+      // Re-ruling 4: a shape refusal is answered before the claim; a value refusal is stored on it.
+      if (!payloadShapeErrors(command.payload).length) stored += 1;
       const result = await run(command);
       expect(result, name).toMatchObject({ id: command.id, status: 'rejected', error: { code: 'invalid_payload' } });
     }
-    expect(await counts()).toEqual(before);
+    expect(stored).toBeGreaterThan(0);
+    expect(await counts()).toEqual({ ...before, commands: before.commands + stored });
     // N2: tenderedMinor and changeMinor are stored only in the tallyPayments text, so any safe integer applies.
     const tendered = orderCommand([mug()], [{
       method: 'cash', amountMinor: 1000, tenderedMinor: Number.MAX_SAFE_INTEGER, changeMinor: Number.MAX_SAFE_INTEGER - 1000,
@@ -277,7 +281,7 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(order.totalWithTax).toBe(0);
   });
 
-  it('proof 5, ruling (A): an underpaid sale is refused before the claim: no order, line, payment, stock movement, surcharge, shipping line, history, customer or ledger row', async () => {
+  it('proof 5, re-ruling 4: an underpaid sale is stored on the claim: no order, line, payment, stock movement, surcharge, shipping line, history or customer', async () => {
     const before = await rollbackCounts();
     const stockBefore = await stock(serviceIds.mug[0]);
     // These spies call Vendure unchanged: no mock implementation or synthetic ErrorResult.
@@ -293,8 +297,8 @@ describe('order.create recipe through OrderCreateService', () => {
       } });
       expect(transition).not.toHaveBeenCalled();
       expect(payment).not.toHaveBeenCalled();
-      expect(await rollbackCounts()).toEqual(before);
-      expect(await connection.rawConnection.getRepository(TallyCommand).count({ where: { id: command.id } })).toBe(0);
+      expect(await rollbackCounts()).toEqual({ ...before, commands: before.commands + 1 });
+      expect(await connection.rawConnection.getRepository(TallyCommand).count({ where: { id: command.id } })).toBe(1);
       expect(await stock(serviceIds.mug[0])).toBe(stockBefore);
     } finally {
       transition.mockRestore();

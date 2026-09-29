@@ -27,6 +27,10 @@ export class TallyCommand {
   @Column('simple-json', { nullable: true })
   result: Record<string, unknown> | null;
 
+  /** The sale's stock top-ups and their exact locations, for an admin's take-back (migration TallyPosVp2a). */
+  @Column('simple-json', { nullable: true })
+  topUps: Array<{ variantId: string; stockLocationId: string; quantity: number }> | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

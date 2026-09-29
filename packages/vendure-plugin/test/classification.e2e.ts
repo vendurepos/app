@@ -22,29 +22,27 @@ describe('error classification (ruling 1, the platform_error amendment)', () => 
     }
     throw new Error('expected a throw');
   };
-
   it('is the table the ADR states', () => {
     expect(CLASSIFICATION).toEqual({
-      rejection: 'stored', mapped: 'stored', permanent: 'stored', unlisted: 'transient', programming: 'stored',
+      rejection: 'transient', mapped: 'transient', permanent: 'transient', unlisted: 'transient', programming: 'needsAdmin',
       storeConfiguration: 'notStored', clientOrderCollision: 'collision', database: 'transient',
     });
   });
 
-  it('rejection: the plugin\'s own business refusal is stored with its contract code', () => {
+  it('rejection, re-ruling 3: a race on the plugin\'s own checks inside the recipe is transient, never stored', () => {
     for (const code of ['unknown_variant', 'underpaid']) {
-      const rejection = new BusinessRejection(code, 'refused');
-      expect(classify(rejection, INDEX)).toEqual({ origin: 'rejection', outcome: 'stored', rejection });
+      expect(classify(new BusinessRejection(code, 'refused'), INDEX)).toEqual({ origin: 'rejection', outcome: 'transient', kind: 'unclassified' });
     }
   });
 
-  it('mapped: a stock ErrorResult is stored as insufficient_stock', () => {
+  it('mapped, re-ruling 3: a stock race inside the recipe is transient, never a stored insufficient_stock', () => {
     expect(MAPPED_ERROR_RESULTS).toEqual({ INSUFFICIENT_STOCK_ERROR: 'insufficient_stock', INSUFFICIENT_STOCK_ON_HAND_ERROR: 'insufficient_stock' });
-    expect(classify(thrown(new InsufficientStockError({ quantityAvailable: 2, order: undefined as never })), INDEX)).toMatchObject({
-      origin: 'mapped', outcome: 'stored', rejection: { code: 'insufficient_stock' },
+    expect(classify(thrown(new InsufficientStockError({ quantityAvailable: 2, order: undefined as never })), INDEX)).toEqual({
+      origin: 'mapped', outcome: 'transient', kind: 'unclassified',
     });
   });
 
-  it('permanent: every listed ErrorResult is a stored platform_error in platformErrorResult\'s shape', () => {
+  it('permanent, re-ruling 3: every listed ErrorResult met inside the recipe is a configuration race, transient', () => {
     const samples: GraphQLErrorResult[] = [
       new OrderLimitError({ maxItems: 1 }), new NegativeQuantityError(), new EmptyOrderLineSelectionError(),
       new InvalidFulfillmentHandlerError(), new IneligibleShippingMethodError(),
@@ -53,18 +51,11 @@ describe('error classification (ruling 1, the platform_error amendment)', () => 
     ];
     expect(samples.map(sample => sample.errorCode).sort()).toEqual(Object.keys(PERMANENT_ERROR_RESULTS).sort());
     for (const sample of samples) {
-      const verdict = classify(thrown(sample), INDEX);
-      expect(verdict, sample.errorCode).toMatchObject({ origin: 'permanent', outcome: 'stored' });
-      const { code, message, data } = (verdict as { rejection: BusinessRejection }).rejection;
-      expect(code).toBe('platform_error');
-      expect(data).toEqual({ platformCode: sample.errorCode, platformMessage: expect.any(String) });
-      expect(message).toBe(`${data!.platformCode}: ${data!.platformMessage}`);
+      expect(classify(thrown(sample), INDEX), sample.errorCode).toEqual({ origin: 'permanent', outcome: 'transient', kind: 'unclassified' });
     }
-    expect((classify(thrown(new OrderLimitError({ maxItems: 1 })), INDEX) as { rejection: BusinessRejection }).rejection.data)
-      .toEqual({ platformCode: 'ORDER_LIMIT_ERROR', platformMessage: 'ORDER_LIMIT_ERROR: {"maxItems":1}' });
   });
 
-  it('unlisted: state-dependent and merchant-code ErrorResults are transient, never platform_error', () => {
+  it('unlisted: state-dependent and merchant-code ErrorResults are transient', () => {
     const samples: GraphQLErrorResult[] = [
       new OrderStateTransitionError({ transitionError: 'no', fromState: 'ArrangingPayment', toState: 'PaymentSettled' }),
       new FulfillmentStateTransitionError({ transitionError: 'no', fromState: 'Pending', toState: 'Delivered' }),
@@ -78,10 +69,10 @@ describe('error classification (ruling 1, the platform_error amendment)', () => 
     }
   });
 
-  it('programming (N5): only an explicit PluginBugError is stored internal_error; any native error, the plugin\'s own included, is transient', () => {
+  it('programming (N5): only an explicit PluginBugError is kept for an admin; any native error, the plugin\'s own included, is transient', () => {
     const bug = raise(() => pluginBug('invariant broke'));
     expect(bug).toBeInstanceOf(PluginBugError);
-    expect(classify(bug, INDEX)).toEqual({ origin: 'programming', outcome: 'stored' });
+    expect(classify(bug, INDEX)).toEqual({ origin: 'programming', outcome: 'needsAdmin' });
     const own = raise(() => commandFingerprint(null as never)); // A TypeError inside the plugin's own module.
     for (const error of [own, raise(() => new URL('not a url')), new TypeError('test'), new RangeError('test'), new Error('x')]) {
       expect(classify(error, INDEX), String(error)).toEqual({ origin: 'database', outcome: 'transient', kind: 'unclassified' });

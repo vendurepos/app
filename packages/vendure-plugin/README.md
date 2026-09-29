@@ -7,19 +7,22 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/spikes/s1-order-recipe.md`).
 
 Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
-commands, a 1 MB body) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`. A sale
-whose stock take-back fails is marked `needs_admin` in the `tally_command` ledger and answers
-409 until an admin calls `OrderCreateService.resolveNeedsAdmin`. Rejecting it cancels the order
-with Vendure's own cancellation, or is refused if the order cannot be cancelled.
+commands, a 1 MB body) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`.
 
-**Events of a rejected sale.** Every deterministic refusal (an unknown variant, an underpayment,
-the order limits, the store's configuration) is answered before anything is written, so it emits
-no event. A sale refused after that point (a race, such as stock that changed meanwhile, or a
-plugin `internal_error`) is rolled back to a savepoint inside the command's transaction, but
-Vendure's EventBus still delivers the events it emitted (`OrderStateTransitionEvent`,
-`OrderPlacedEvent`, …) when the rejection commits, **for an order that does not exist**. The
-plugin's `tallyOrderConfirmationHandler` ignores them, as it ignores every POS order; your own
-subscribers should check that the order still exists.
+**Rejections and events.** Every deterministic refusal (an unknown variant, an underpayment, the
+order limits, the store's configuration, the currency) is stored on the command's ledger claim
+before the sale writes anything, so it emits no event. Once the sale has started writing, a
+failure rolls the whole transaction back as a transient 503, and Vendure drops the events it had
+emitted; the resend is checked again.
+
+**Needs an admin.** A sale whose stock take-back fails, or that a plugin bug stops part-way, is
+kept as far as it got and marked `needs_admin` in the `tally_command` ledger; it answers 409
+until an admin calls `OrderCreateService.resolveNeedsAdmin`. Either resolution takes the leftover
+top-up back at the stock location recorded when it was made. Rejecting also cancels the POS
+payments and the order with Vendure's own cancellation, releases its client id (kept in
+`tallyRejectedClientOrderId`) and flags it `tallyRejected`; if a step fails, it is refused and
+changes nothing. **An order flagged `tallyRejected` counts as never placed**: leave it out of any
+register or sales figure; the till's Retry makes the sale that counts.
 
 ## Requirements
 
@@ -33,14 +36,14 @@ subscribers should check that the order still exists.
 1. Add the plugin to your Vendure config:
 
    ```ts
-   import { TallyPosPlugin, TallyPos1790648006022 } from '@vendurepos/plugin';
+   import { TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000 } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
      plugins: [TallyPosPlugin /* , … */],
      dbConnectionOptions: {
        type: 'postgres',
        synchronize: false,
-       migrations: [TallyPos1790648006022 /* , your own migrations */],
+       migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000 /* , your own migrations */],
        // …
      },
    };

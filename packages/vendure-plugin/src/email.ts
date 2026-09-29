@@ -16,8 +16,6 @@ import {
 export const tallyOrderConfirmationHandler = new EmailEventListener('order-confirmation')
   .on(OrderStateTransitionEvent)
   .filter(event => event.toState === 'PaymentSettled' && event.fromState !== 'Modifying' && !!event.order.customer)
-  // Also drops the events a POS sale rolled back after the claim still emits for an order that does
-  // not exist (ruling A): every such order carries tallyClientOrderId. The plugin has no other subscriber.
   .filter(event => !event.order.customFields.tallyClientOrderId)
   .loadData(async ({ event, injector }) => {
     await injector.get(EntityHydrator).hydrate(event.ctx, event.order, {

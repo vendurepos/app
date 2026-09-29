@@ -95,13 +95,21 @@ marked temporary. The plugin's first PR after S1 consumes the package.
 `@Transaction()`:
 
 1. It first validates every envelope in the batch (`validateBatch`).
-2. It then runs the pre-claim checks for each command. A shape or version
-   refusal (`invalid_payload`, `unsupported_version`) and a store that
-   cannot take the sale (`store_configuration`: no tax zone, no `tally-pos`
-   payment method, no in-store shipping method) are answered here, before
-   any write or claim.
-3. It runs each remaining command in its own `withTransaction`.
-4. It stops at the first 409 or 503, as medusapos's `process.ts` does.
+2. Each command then goes through, in this order (Front desk re-ruling 4):
+   1. shape and version validation (`invalid_payload`, `unsupported_version`),
+      including U+0000 in any string, before any database access; not stored;
+   2. in its own `withTransaction`: the ledger replay and the claim (one
+      `INSERT … ON CONFLICT`), then the `clientOrderId` collision lookup;
+   3. the deterministic checks: variant, product and channel
+      (`unknown_variant`), the order limits, value bounds and `createdAt`
+      (`invalid_payload`), `underpaid`, `unsupported_currency` and the
+      store's configuration (`store_configuration`: tax zone, the POS
+      methods and their plugin checkers and handler, the manual fulfilment
+      handler). Their rejection is **stored on the claim**, before the
+      recipe writes anything, so no event fires; the till's Retry mints a new
+      id and is checked again;
+   4. the recipe.
+3. It stops at the first 409 or 503, as medusapos's `process.ts` does.
    Earlier commands have already committed, so on the retry they replay as
    `duplicate` (ADR-039).
 
@@ -139,77 +147,79 @@ an `ErrorResult` (a state transition refused, stock, a payment declined) is
 turned into a throw, so the sale's writes roll back. A half-built order
 never commits.
 
-**Error classes** (Front desk ruling 1, VP2; TallyUI ADR-038's
-`platform_error` amendment). The table is `src/service/classification.ts`,
-with a test per row.
+**Error classes** (Front desk ruling 1 and re-rulings 1–5, VP2a; TallyUI
+ADR-038's `platform_error` amendment). The table is
+`src/service/classification.ts`, with a test per row.
 
-- **Deterministic refusals come before the claim** (Front desk ruling A).
-  An unknown or disabled variant (`unknown_variant`), payments below
-  `totalMinor` (`underpaid`), the configured order limits
-  (`invalid_payload`) and the permanent-list configuration errors (a missing
-  manual fulfilment handler, a replaced checker on the POS payment or
-  shipping method: `store_configuration`) are answered before any write, so
-  they emit no event, and they are not stored. After the claim only races
-  and `internal_error` reach the savepoint path below. Their events leak:
-  Vendure's EventBus waits only for the outer transaction, so the events a
-  rolled-back savepoint emitted are delivered when the rejection commits,
-  for an order that does not exist. `tallyOrderConfirmationHandler`
-  ignores them (it ignores every POS order), and the README warns
-  merchants' own subscribers.
-- **The savepoint keeps the claim.** After the claim, the sale's steps run
-  in a savepoint inside the command's transaction (Vendure's
-  `withTransaction` inside a transaction). A stored outcome rolls back to
-  the savepoint, stores the rejection on the claim row and commits. A
-  rejection is never committed together with any of the sale's writes, and
-  never written in a separate transaction after a full rollback, so a resend
-  of the same id waits on the claim (409) and never runs the recipe twice.
-- **Stored rejections**, replayed without re-running the recipe:
-  - `unknown_variant` for a variant disabled or removed during the sale;
-  - `underpaid` when the `PaymentSettled` transition is refused and the
-    payments really are below the bridged total (a safety net);
-  - `insufficient_stock` if a shortage survives the top-up;
-  - `platform_error` only for an `ErrorResult` on the plugin's explicit
-    permanent list (one that depends only on the payload and the store's
-    configuration), as `platformErrorResult` shapes it. State-dependent
-    errors (a state transition, stock, a declined payment) are not on it;
-  - `internal_error` only for a `PluginBugError`, which the plugin raises
-    explicitly where one of its own invariants breaks, after the claim and
-    the complete rollback of the sale, with a generic message and a
-    correlation id. Any native error, the plugin's own `TypeError`
-    included, is transient; nothing parses stacks.
-- **Unclassifiable is transient.** Any other `ErrorResult`, and every
-  database, driver, network or unknown-SQLSTATE error, answers 503 and
-  stores nothing; the claim is released and the till resends the same id.
-  Only the claim's own lock timeout answers 409. A refused `PaymentSettled`
-  transition whose payments do cover the total counts as
-  `store_configuration` (not stored) when a configuration cause is found,
-  and otherwise as transient.
-- **The collision guard.** A `clientOrderId` this channel has already
-  recorded, whether found before the recipe or through a unique violation
-  on `tallyClientOrderId`, answers `applied` only when the order's own
-  command row is `applied`: the new command id is then stored as `applied`
-  with that result's refs and warnings, and replays as `duplicate`. A row
-  that is `needs_admin` answers 409, and so does a sale still in progress,
-  whose unique key the new command waits on for the claim's 5 s. A new
-  command id never gets round a 409 or an admin mark. In another channel,
-  the collision is a stored `idempotency_mismatch`, including from the
-  default channel, where Vendure also places every channel's orders: the
-  order's own command row decides whose sale it is.
-- **`needs_admin`.** The one compensating write is the stock take-back
-  after fulfilment, in a savepoint of its own. If it fails, the plugin
-  never answers `platform_error` and never releases the claim: the sale
-  commits, the row is marked `needs_admin`, `Logger.error` names the
-  command id, and every resend answers 409 `in_progress`. An admin resolves
-  the row as `applied` or `rejected` with
-  `OrderCreateService.resolveNeedsAdmin`, and replays then answer that.
-  `rejected` (`platform_error`, `platformCode: 'TALLY_ADMIN_REJECTED'`)
-  takes back the top-up the failed take-back left, cancels the settled
-  `tally-pos` payments, cancels the order with Vendure's `cancelOrder`,
-  which restores its stock, and frees its `clientOrderId` (a truncated
-  prefix and a hash of the command id, within 255 characters), all in the
-  rejection's transaction; if any step fails, the rejection is refused and
-  nothing changes. A rejected row never
-  keeps a live order, so the till's Retry under a new id is a new sale.
+- **Stored rejections are decided before the recipe's first event.** The
+  deterministic checks above run after the claim and before any write, and
+  their rejections are stored on the claim. The recipe publishes its first
+  event at its first write: `CustomerService.createOrUpdate` for a new
+  buyer (a `CustomerEvent`), otherwise `OrderService.createDraft` (an
+  `OrderEvent` and the transition to `Draft`), both before the transition
+  to `ArrangingPayment`. Vendure's EventBus delivers an event when the outer
+  transaction commits, even if it came from a rolled-back savepoint, so no
+  error from the recipe is ever turned into a stored rejection:
+  - **a race** (a variant disabled, stock taken, a limit or the
+    configuration changed during the sale: `unknown_variant`,
+    `insufficient_stock`, a permanent-list `ErrorResult`), and any other
+    `ErrorResult` or database, driver, network or unknown-SQLSTATE error,
+    is **transient**: the whole transaction rolls back, its events are
+    dropped, the claim is released, and the resend's checks answer it. Only
+    the claim's own lock timeout, and the unique `tallyClientOrderId` wait
+    below, answer 409;
+  - a declined or otherwise not `Settled` `tally-pos` payment, or a refused
+    `PaymentSettled` with enough payment and a configuration cause, answers
+    `store_configuration` after a full rollback, not stored;
+  - a `clientOrderId` collision met in the recipe rolls back and runs the
+    command again, so the collision guard answers it before any write;
+  - a `PluginBugError` (an invariant of the plugin's own code, raised
+    explicitly; nothing parses stacks) after the first write keeps the
+    partial sale for an admin (`needs_admin`). A native error, the plugin's
+    own `TypeError` included, is transient. `internal_error` stays in the
+    contract but no step before the first event raises it today.
+- **`platform_error`** comes only from an admin's rejection of a
+  `needs_admin` row, with `platformCode: 'TALLY_ADMIN_REJECTED'` and the
+  admin's reason as `platformMessage`. `TALLY_` is the reserved prefix of
+  the platform codes the plugin makes up itself. The permanent list
+  (`PERMANENT_ERROR_RESULTS`) documents the conditions the checks cover.
+- **The collision guard.** A `clientOrderId` already recorded in this
+  channel answers `applied` only when the order's own command row is
+  `applied`: the new command id is then stored as `applied` with that
+  result's refs and warnings, and replays as `duplicate`. A row that is
+  `needs_admin` answers 409, and so does a sale still in progress, whose
+  unique key the new command waits on for the claim's 5 s. A new command id
+  never gets round a 409 or an admin mark. In another channel, the
+  collision is a stored `idempotency_mismatch`, including from the default
+  channel, where Vendure also places every channel's orders: the order's own
+  command row decides whose sale it is.
+- **`needs_admin`.** The sale is committed as far as it got and kept for
+  an admin when the stock take-back after fulfilment (in a savepoint of its
+  own) fails, or when a `PluginBugError` stops the recipe after its first
+  write. The plugin never answers `platform_error` for it and never
+  releases the claim: the row is marked `needs_admin` with the sale's refs
+  and the exact location and quantity of every stock top-up,
+  `Logger.error` names the command id, and every resend, and every new id
+  for the same `clientOrderId`, answers 409 `in_progress`. An admin resolves
+  it with `OrderCreateService.resolveNeedsAdmin`:
+  - either resolution first takes back the leftover top-up, at the recorded
+    location (the admin's channel may have another default location);
+  - `applied` then replays the stored refs as `duplicate`;
+  - `rejected` cancels the settled `tally-pos` payments, cancels the order
+    with Vendure's `cancelOrder` (or leaves an order the admin already
+    cancelled), then **releases** the client id: `tallyClientOrderId` is
+    cleared and the id moves to the non-unique `tallyRejectedClientOrderId`,
+    and the order is flagged `tallyRejected`. All of it commits with a
+    compare-and-set of the row to `rejected`, or none of it does: a failed
+    step refuses the rejection, and a crash leaves the row `needs_admin` for
+    a repeat. A rejected row never keeps a live order and there is never a
+    second live order for one client id, so the till's Retry under a new id
+    is a new sale.
+  - **Register figures.** An order flagged `tallyRejected` counts as never
+    placed: any register figure the plugin computes (expected cash,
+    session totals, ADR-068) must exclude it, and only the Retry's new sale
+    counts. The plugin computes no register figure yet; the register work
+    inherits this rule.
 
 **What this retires, measured.** medusapos's lease, fencing token, advisory
 lock and resume are 310 physical lines on its `main` (5c23a74):
@@ -224,7 +234,7 @@ lock and `resume.ts`.
 | POS concept | Vendure mechanism (adopted) | Replaces (not carried over) |
 |---|---|---|
 | The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on the last transition; the plugin overwrites it with `tallySaleAt` (the payload's sale time) in the same transaction, so Vendure's reports match the till | Status workarounds such as WCPOS's `pos-open`/`pos-partial`; a sale that reaches the server is always paid |
-| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is refused as `unsupported_currency` before the claim. Like `store_configuration`, that refusal is not stored, so the same command id applies once the channel is fixed. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
+| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is `unsupported_currency`, stored on the claim before the recipe writes anything (re-ruling 4); once the channel is fixed, the Retry's new id applies. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
 | Lines | One `OrderLine` per POS line. Vendure merges equal lines, so a read-only line custom field `tallyClientLineId` keeps them 1:1 | — |
 | Stock | A manual fulfilment records `SALE` stock movements at the location that Vendure's `StockLocationStrategy` allocates from. `payload.locationId` is not used in the MVP (TallyUI does not send it yet). A shortage is topped up **before** `addItemToOrder`, because otherwise `addItemToOrder` saves the line at the saleable quantity and returns `InsufficientStockError` (and `addItemsToOrder` cuts it silently; S1), and before `ArrangingPayment`. The top-up is taken back after fulfilment, inside the transaction, and the result carries an `insufficient_stock` warning (ADR-039) | Stock-reduction hooks and reservation tables |
 | As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice`, with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`), which it reads from a second read-only line field, `tallyPriceIncludesTax`, because the strategy sees only the order and the line's custom fields. Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no other workaround (proved in S1) | Rewriting line totals through post meta |
@@ -234,7 +244,7 @@ lock and `resume.ts`.
 | Payment | One shared `tally-pos` `PaymentMethod`, assigned to every channel. Its handler returns `Settled` payments created with `PaymentService.createPayment`, one per tender (`cash` or `external`) as given. A sum of tenders above the total is allowed (ADR-039): the covering tender's Vendure payment is capped, so Vendure accepts the payments as covering the order exactly. The **full tender list, including change, is stored on the order** in a read-only `tallyPayments` field, as medusapos's `tally_payments` is. That list is the fiscal record, and a register's expected cash derives from it, never from Vendure's payment rows. A zero-total sale has no payment, so the plugin makes the `PaymentSettled` transition itself | Payment-gateway emulation |
 | Collection | One shared in-store `tally-in-store` `ShippingMethod` with a zero calculator, assigned to every channel | Hiding shipping lines |
 | Closed to the storefront | The `tally-pos` payment method and the in-store shipping method each have an eligibility checker that accepts only orders carrying `tallyClientOrderId` created through the plugin's authenticated route. The payment handler also refuses unless `ctx.apiType === 'custom'`. A Shop API customer can never settle an order with `tally-pos` or pick the in-store method | — |
-| Customer | In order: the customer from `customer.customerId` (v3) when it exists in this channel; else the customer found or created by email with `CustomerService.createOrUpdate` (ADR-047); else one walk-in placeholder customer per channel. An unknown or foreign `customerId` falls back; it never rejects the sale | Guest-order meta |
+| Customer | In order: the customer from `customer.customerId` (v3) when it exists in this channel; else the customer found by email in any channel (and added to this one; never renamed), or created with `CustomerService.createOrUpdate` only when none exists (ADR-047); else the walk-in placeholder customer. An unknown, foreign or over-long (above 64) `customerId` falls back with a `customer_ignored` warning; it never rejects the sale | Guest-order meta |
 | No customer email | POS orders send no order-confirmation email, matching Medusa's `no_notification`. The plugin exports a wrapped `orderConfirmationHandler` that skips orders with `tallyClientOrderId`, and the quick-start tells merchants to install it in their `EmailPlugin` handlers. In 3.7.3 the order confirmation fires on `OrderStateTransitionEvent` to `PaymentSettled`. S1 proved the filter with a testing transport; the first plugin e2e proves it with a real transport | — |
 | Till, drawer and cashier | Order custom fields: `tallyRegisterId` is the till's **device** id (medusapos ADR 0017/0019); `tallySessionId` (v3) identifies the drawer session (ADR-068); `tallyCashierRef`; `tallySaleAt`. Register sessions, movements and closures are their own commands and entities later (ADR-068); the order only references them. TallyUI records the device meaning in ADR-038/068 | `_wcpos_register`, `_wcpos_session` and `_pos_user` post meta; the WooCommerce sale counter, which TallyUI's payload does not carry and this plugin does not add |
 | Receipt snapshot (v3) | `display` and `taxByRate` are stored unchanged in a read-only `Order.tallySnapshot` text field, so the order carries the receipt exactly as the cashier printed it | Rebuilding a receipt from server totals |
@@ -244,14 +254,16 @@ lock and `resume.ts`.
 only at the API layer, so the plugin writes them directly. `unique` gives
 `tallyClientOrderId` its index. The plugin's migration adds plain indexes on
 `tallyRegisterId` and `tallySessionId`, because custom fields have no index
-option.
+option. The second migration (`TallyPosVp2a1790720000000`) adds the
+non-unique `tallyRejectedClientOrderId` and the `tallyRejected` flag of an
+admin-rejected order, and the ledger's `topUps`.
 
 **Store configuration.** There is one shared `tally-pos` payment method and
 one shared `tally-in-store` shipping method, created once in the default
 channel and assigned to every channel, and a walk-in customer per channel.
 A bootstrap creates or assigns them when they are missing. If one is still missing when a sale arrives, or the channel
-has no tax zone, the sale is refused as `store_configuration` before the
-claim, and the till retries it by hand after the store is repaired.
+has no tax zone, the sale is `store_configuration`, stored on the claim before the
+recipe writes anything, and the till's Retry (a new id) applies once the store is repaired.
 
 ### 4. TallyUI's contract, and the WCPOS engine it moves to
 

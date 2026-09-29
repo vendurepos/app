@@ -1,7 +1,7 @@
 import { RequestContextService, TransactionalConnection, runMigrations } from '@vendure/core';
 import { TestServer } from '@vendure/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, TallyPos1790648006022 } from '../src';
+import { OrderCreateService, TallyPos1790648006022, TallyPosVp2a1790720000000 } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import { createPluginTestEnvironment, dbConnectionOptions, pluginTestConfig } from './env';
 import { orderCommand } from './payloads';
@@ -24,7 +24,8 @@ describe('the TallyPos migration', () => {
     const [{ database }] = await raw.query('SELECT current_database() AS database');
     await raw.query('DROP TABLE "tally_command"');
     for (const [table, columns] of [
-      ['order', ['Tallyclientorderid', 'Tallysaleat', 'Tallyregisterid', 'Tallysessionid', 'Tallycashierref', 'Tallypayments', 'Tallysnapshot']],
+      ['order', ['Tallyclientorderid', 'Tallysaleat', 'Tallyregisterid', 'Tallysessionid', 'Tallycashierref', 'Tallypayments', 'Tallysnapshot',
+        'Tallyrejectedclientorderid', 'Tallyrejected']],
       ['order_line', ['Tallyunitprice', 'Tallyclientlineid', 'Tallypriceincludestax']],
     ] as const) {
       for (const column of columns) await raw.query(`ALTER TABLE "${table}" DROP COLUMN "customFields${column}"`);
@@ -36,14 +37,14 @@ describe('the TallyPos migration', () => {
     await seeded.server.destroy();
 
     const config = pluginTestConfig({ dbConnectionOptions: {
-      ...dbConnectionOptions, database, synchronize: false, migrations: [TallyPos1790648006022],
+      ...dbConnectionOptions, database, synchronize: false, migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000],
     } });
     // runMigrations prints "Your database schema does not match…" when the schema diff is not empty.
     const printed = vi.spyOn(console, 'log');
     try {
-      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022']);
+      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022', 'TallyPosVp2a1790720000000']);
       const output = printed.mock.calls.flat().join('\n');
-      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022/);
+      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000/);
       expect(output).not.toMatch(/does not match/);
     } finally {
       printed.mockRestore();
@@ -56,8 +57,8 @@ describe('the TallyPos migration', () => {
       expect(migrated.options.synchronize).toBe(false);
       const migratedQuery: Query = sql => migrated.query(sql);
       expect(await tallyColumns(migratedQuery)).toEqual([
-        'customFieldsTallycashierref', 'customFieldsTallyclientlineid', 'customFieldsTallyclientorderid',
-        'customFieldsTallypayments', 'customFieldsTallypriceincludestax', 'customFieldsTallyregisterid',
+        'customFieldsTallycashierref', 'customFieldsTallyclientlineid', 'customFieldsTallyclientorderid', 'customFieldsTallypayments',
+        'customFieldsTallypriceincludestax', 'customFieldsTallyregisterid', 'customFieldsTallyrejected', 'customFieldsTallyrejectedclientorderid',
         'customFieldsTallysaleat', 'customFieldsTallysessionid', 'customFieldsTallysnapshot', 'customFieldsTallyunitprice',
       ]);
       expect(await tallyIndexes(migratedQuery)).toEqual([

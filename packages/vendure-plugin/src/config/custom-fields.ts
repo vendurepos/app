@@ -11,6 +11,8 @@ declare module '@vendure/core/dist/entity/custom-entity-fields' {
     tallyCashierRef?: string | null;
     tallyPayments?: string | null;
     tallySnapshot?: string | null;
+    tallyRejectedClientOrderId?: string | null;
+    tallyRejected?: boolean | null;
   }
   interface CustomOrderLineFields {
     tallyUnitPrice?: number | null;
@@ -29,6 +31,9 @@ export const orderCustomFields: CustomFieldConfig[] = [
   { name: 'tallyCashierRef', type: 'string', readonly: true, nullable: true },
   { name: 'tallyPayments', type: 'text', readonly: true, nullable: true },
   { name: 'tallySnapshot', type: 'text', readonly: true, nullable: true },
+  // Re-rulings 1 and 2: an admin-rejected order keeps its released client id here, and counts as never placed.
+  { name: 'tallyRejectedClientOrderId', type: 'string', readonly: true, nullable: true },
+  { name: 'tallyRejected', type: 'boolean', readonly: true, nullable: true },
 ];
 
 export const orderLineCustomFields: CustomFieldConfig[] = [

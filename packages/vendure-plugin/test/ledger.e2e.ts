@@ -4,8 +4,9 @@ import {
 } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, TallyCommand, TransientCommandError, internalErrorCount } from '../src';
-import { markTallyRoute } from '../src/config/strategies';
+import { OrderCreateService, TallyCommand, TransientCommandError } from '../src';
+import { markTallyRoute, tallyPaymentHandler } from '../src/config/strategies';
+import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -67,7 +68,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   }
   afterEach(() => { recipe.testObserver = undefined; });
 
-  it.each(['disabled', 'missing', 'disabled-product'] as const)('proof 10, ruling (A), B1: a %s variant is unknown_variant before the claim; nothing is stored and the recipe never runs', async kind => {
+  it.each(['disabled', 'missing', 'disabled-product'] as const)('proof 10, re-ruling 4, B1: a %s variant is unknown_variant stored on the claim; the recipe never runs', async kind => {
     const input = command(kind === 'disabled' ? variantIds.print[0] : kind === 'missing' ? encode(999999) : variantIds.beans[0]);
     // B1: an enabled variant of a disabled product, which addItemToOrder would throw on after the claim.
     const { productVariant } = await adminClient.query<{ productVariant: { product: { id: string } } }>(parse(`query Product($id: ID!) {
@@ -83,22 +84,22 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'unknown_variant' } });
       expect(replay).toEqual(result);
       expect(createDraft).not.toHaveBeenCalled();
-      expect(await counts()).toEqual(before);
-      expect(await ledgerFor(input)).toBeNull();
+      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected', result });
     } finally {
       createDraft.mockRestore();
       if (kind === 'disabled-product') await setProduct(true);
     }
   });
 
-  it('S1: a customer email above 254 characters is invalid_payload before the claim', async () => {
+  it('S1: a customer email above 254 characters is invalid_payload, stored on the claim', async () => {
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
       { email: `${'a'.repeat(243)}@example.com` });
     expect(input.payload.customer!.email).toHaveLength(255);
     expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
       code: 'invalid_payload', message: 'customer.email: expected at most 254 characters',
     } });
-    expect(await ledgerFor(input)).toBeNull();
+    expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
   });
 
   it('N1: a declined tally-pos payment (here, a context without the route mark) is store_configuration, not stored, never underpaid', async () => {
@@ -112,7 +113,62 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('proof 10: a default tax zone with all its rates disabled gives pre-claim store_configuration', async () => {
+  it('review 1: a tally-pos payment Authorized by its handler is store_configuration, not stored, never underpaid; a replaced handler is refused before the claim', async () => {
+    const input = command();
+    const before = await counts();
+    const handler = vi.spyOn(tallyPaymentHandler, 'createPayment')
+      .mockImplementationOnce(async (_ctx, _order, amount) => ({ amount, state: 'Authorized' as const, metadata: {}, method: 'tally-pos' }));
+    try {
+      expect(await run(input)).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'store_configuration' } });
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      handler.mockRestore();
+    }
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
+    // A method whose handler is no longer the plugin's is refused before the claim.
+    const methods = connection.rawConnection.getRepository(PaymentMethod);
+    const method = await methods.findOneByOrFail({ code: 'tally-pos' });
+    await methods.update(method.id, { handler: { code: 'dummy-payment-handler', args: [] } });
+    try {
+      expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
+      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+    } finally {
+      await methods.update(method.id, { handler: method.handler });
+    }
+    expect(await run({ ...input, id: command().id })).toMatchObject({ status: 'applied' });
+  });
+
+  it('review 4: U+0000 in any string is invalid_payload during shape validation, before any database access', async () => {
+    const repositories = vi.spyOn(connection, 'getRepository');
+    try {
+      for (const [path, set] of [
+        ['payload.clientOrderId', (input: ReturnType<typeof command>) => { input.payload.clientOrderId = 'a\u0000b'; }],
+        ['payload.registerId', (input: ReturnType<typeof command>) => { input.payload.registerId = 'till\u0000'; }],
+        ['payload.customer.email', (input: ReturnType<typeof command>) => { input.payload.customer = { email: 'a\u0000@example.com' }; }],
+      ] as const) {
+        const input = command();
+        set(input);
+        expect(await run(input), path).toEqual({ id: input.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: `${path}: must not contain U+0000`,
+        } });
+      }
+      expect(repositories).not.toHaveBeenCalled();
+    } finally {
+      repositories.mockRestore();
+    }
+  });
+
+  it('nit: a customerId over 64 characters or unknown is ignored with a customer_ignored warning, never refused', async () => {
+    for (const [customerId, reason] of [['T_'.padEnd(80, '9'), 'too_long'], [encode(999999), 'unknown']] as const) {
+      const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { customerId });
+      const result = await run(input);
+      expect(result, reason).toMatchObject({ status: 'applied' });
+      expect(result.warnings, reason).toEqual([{ code: 'customer_ignored', customerId: customerId.slice(0, 64), reason }]);
+    }
+  });
+
+  it('proof 10, re-ruling 4: a default tax zone with all its rates disabled is store_configuration stored on the claim', async () => {
     const repo = connection.rawConnection.getRepository(TaxRate);
     const rates = await repo.find({ where: { zoneId: channel.defaultTaxZone.id, enabled: true } });
     expect(rates.length).toBeGreaterThan(0);
@@ -121,16 +177,16 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     try {
       for (const rate of rates) await repo.update(rate.id, { enabled: false });
       expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
-      expect(await counts()).toEqual(before);
-      expect(await ledgerFor(input)).toBeNull();
+      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
     } finally {
       for (const rate of rates) await repo.update(rate.id, { enabled: true });
     }
-    // Not stored: the same id applies once the store is repaired.
-    expect(await run(input)).toMatchObject({ status: 'applied' });
+    // Stored: the till's Retry mints a new id, which applies once the store is repaired.
+    expect(await run({ ...input, id: command().id })).toMatchObject({ status: 'applied' });
   });
 
-  it.each(['payment', 'shipping'] as const)('a missing channel POS %s method is refused before the claim', async kind => {
+  it.each(['payment', 'shipping'] as const)('re-ruling 4: a missing channel POS %s method is store_configuration stored on the claim', async kind => {
     const entity = kind === 'payment' ? PaymentMethod : ShippingMethod;
     const repo = connection.rawConnection.getRepository(entity);
     const method = await repo.findOneOrFail({
@@ -141,8 +197,8 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     try {
       await repo.createQueryBuilder().relation(entity, 'channels').of(method).remove(channel);
       expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
-      expect(await counts()).toEqual(before);
-      expect(await ledgerFor(input)).toBeNull();
+      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
     } finally {
       await repo.createQueryBuilder().relation(entity, 'channels').of(method).add(channel);
     }
@@ -370,7 +426,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('ruling: createdAt runs from the epoch to one day from now; anything else is invalid_payload before the claim', async () => {
+  it('ruling: createdAt runs from the epoch to one day from now; anything else is invalid_payload stored on the claim', async () => {
     const day = 24 * 60 * 60 * 1000;
     const at = (ms: number) => new Date(ms).toISOString();
     const expected = (path: string) => `${path}: expected a time from 1970-01-01T00:00:00Z to one day from now`;
@@ -385,9 +441,9 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       expect(await run(input), `${path} ${value}`).toEqual({ id: input.id, status: 'rejected', error: {
         code: 'invalid_payload', message: expected(path),
       } });
-      expect(await ledgerFor(input)).toBeNull();
+      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
     }
-    expect(await counts()).toEqual(before);
+    expect(await counts()).toEqual({ ...before, ledger: before.ledger + 6 });
     for (const value of ['1970-01-01T00:00:00Z', at(Date.now() + day - 60_000)]) {
       const input = command();
       input.createdAt = value;
@@ -427,43 +483,37 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await ledgerFor(input)).toBeNull();
   });
 
-  it('ruling 1, N5: a PluginBugError the plugin raises is a stored internal_error after a complete rollback, logged and counted; a replay returns it', async () => {
+  it('re-ruling 3, N5: a PluginBugError after the first event keeps the partial sale for an admin; the rejection releases the id and flags the order', async () => {
     // Beans: 11 sold of 10 on hand, so the recipe tops up at the default location, which this
-    // stub makes undefined: the recipe's own invariant check raises a PluginBugError.
-    const beans = () => orderCommand([{ variantId: variantIds.beans[0], quantity: 11, unitPriceMinor: 800 }]);
-    const input = beans();
-    const before = await counts();
-    const count = internalErrorCount();
+    // stub makes undefined after createDraft (the first event): the recipe's invariant check raises a PluginBugError.
+    const input = orderCommand([{ variantId: variantIds.beans[0], quantity: 11, unitPriceMinor: 800 }]);
     const logged = vi.spyOn(Logger, 'error');
-    const locations = vi.spyOn(server.app.get(StockLocationService), 'defaultStockLocation');
+    const locations = vi.spyOn(server.app.get(StockLocationService), 'defaultStockLocation').mockResolvedValueOnce(undefined as never);
     try {
-      locations.mockResolvedValueOnce(undefined as never);
-      const result = await run(input);
-      expect(result).toEqual({ id: input.id, status: 'rejected', error: {
-        code: 'internal_error', message: 'The server could not record the order',
-        data: { message: 'Internal error', correlationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) },
-      } });
-      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-      const row = await ledgerFor(input);
-      expect(row).toMatchObject({ status: 'rejected', result });
-      // N7: no part of the raw message is returned or stored; the log has it under the correlation id.
-      for (const part of ['default stock location']) {
-        expect(JSON.stringify(result)).not.toContain(part);
-        expect(JSON.stringify(row)).not.toContain(part);
-      }
-      expect(internalErrorCount()).toBe(count + 1);
-      const { correlationId } = result.error!.data as { correlationId: string };
-      expect(logged).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${correlationId}.*Vendure returned no default stock location`)),
-        'TallyPosPlugin', expect.stringContaining('order-create.service.ts'));
-      // The stub has run out, so a second recipe run would apply; the replay returns the stored answer.
-      expect(await run(input)).toEqual(result);
-      expect(internalErrorCount()).toBe(count + 1);
-      // A second failure gets its own id.
-      locations.mockResolvedValueOnce(undefined as never);
-      expect((await run(beans())).error!.data!.correlationId).not.toBe(correlationId);
+      await expect(run(input)).rejects.toMatchObject({ commandId: input.id, kind: 'needs_admin' });
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining(`order.create ${input.id} needs an admin`), 'TallyPosPlugin', expect.any(String));
     } finally {
       locations.mockRestore();
       logged.mockRestore();
     }
+    const orders = connection.rawConnection.getRepository(Order);
+    const [draft] = await orders.find({ where: { customFields: { tallyClientOrderId: input.payload.clientOrderId } } });
+    expect(draft.state).toBe('Draft');
+    expect(await ledgerFor(input)).toMatchObject({ status: 'needs_admin', result: { serverRefs: { orderId: encode(draft.id) } } });
+    // Resends and a new id for the same sale answer 409; nothing runs again.
+    await expect(run(input)).rejects.toMatchObject({ kind: 'needs_admin' });
+    const retry = { ...input, id: command().id };
+    await expect(run(retry)).rejects.toMatchObject({ kind: 'needs_admin' });
+    // Re-rulings 1 and 2: the rejection cancels the order, moves its client id to tallyRejectedClientOrderId and flags it.
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    await recipe.resolveNeedsAdmin(ctx, input.id, 'rejected', 'partial sale discarded');
+    expect(await orders.findOneByOrFail({ id: draft.id })).toMatchObject({ state: 'Cancelled', customFields: {
+      tallyClientOrderId: null, tallyRejectedClientOrderId: input.payload.clientOrderId, tallyRejected: true,
+    } });
+    // Idempotent: a repeat finds the row resolved and changes nothing.
+    await expect(recipe.resolveNeedsAdmin(ctx, input.id, 'rejected', 'again')).rejects.toThrow('does not need an admin');
+    // The Retry's new id is a new sale, the only live order for the client id.
+    expect(await run(retry)).toMatchObject({ id: retry.id, status: 'applied' });
+    expect(await ordersFor(input)).toBe(1);
   });
 });

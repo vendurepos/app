@@ -1,11 +1,12 @@
 import {
   ChannelService, ConfigService, Customer, Logger, Order, PaymentMethod, ProcessContext, ProductVariantService, RequestContextService, ShippingMethod,
+  StockLevel, StockMovementService,
   TransactionalConnection, User,
 } from '@vendure/core';
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { TallyCommand, TallyPosPlugin } from '../src';
+import { OrderCreateService, TallyCommand, TallyPosPlugin } from '../src';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
@@ -97,11 +98,11 @@ describe('store configuration in every channel, and a sale recorded in another c
     expect(await connection.rawConnection.getRepository(Order).count()).toBe(orders);
   });
 
-  it('addendum: a variant not available in the order\'s channel is unknown_variant before the claim', async () => {
+  it('addendum: a variant not available in the order\'s channel is unknown_variant, stored on the claim', async () => {
     // Beans are never assigned to the second channel; Vendure's assignment makes this reachable from a till there.
     const input = orderCommand([{ variantId: variantIds.beans[0], quantity: 1, unitPriceMinor: 800 }]);
     expect(await run(input, second.token)).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'unknown_variant' } });
-    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id })).toBeNull();
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id })).toMatchObject({ status: 'rejected' });
   });
 
   it('review 8: the recipe skips a deleted tally-in-store; after delete and a new bootstrap, a sale applies', async () => {
@@ -254,25 +255,68 @@ describe('store configuration in every channel, and a sale recorded in another c
     expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: other.id })).toMatchObject({ status: 'rejected', result });
   });
 
-  it('customer fix: a POS sale for the email of another channel\'s customer uses that customer and never blanks its names', async () => {
-    const emailAddress = 'vp2-other-channel@example.com';
-    const defaultToken = (await server.app.get(ChannelService).getDefaultChannel()).token;
-    adminClient.setChannelToken(second.token);
-    try {
-      await adminClient.query(parse(`mutation Customer($email: String!) {
-        createCustomer(input: { emailAddress: $email, firstName: "Anna", lastName: "Other" }) { ... on Customer { id } } }`), { email: emailAddress });
-    } finally {
-      adminClient.setChannelToken(defaultToken);
-    }
-    const result = await run(orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: emailAddress }));
+  it('customer fix: a sale in the second channel for a default-channel customer\'s email keeps the names and adds the channel', async () => {
+    const emailAddress = 'vp2-default-only@example.com';
+    await adminClient.query(parse(`mutation Customer($email: String!) {
+      createCustomer(input: { emailAddress: $email, firstName: "Anna", lastName: "Default" }) { ... on Customer { id } } }`), { email: emailAddress });
+    const repository = connection.rawConnection.getRepository(Customer);
+    const created = await repository.findOneOrFail({ where: { emailAddress }, relations: ['channels'] });
+    expect(created.channels.map(channel => String(channel.id))).toEqual([defaultChannelId]);
+    // The Mug is sold in the second channel since the N4 tests.
+    const result = await run(orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: emailAddress }), second.token);
     expect(result).toMatchObject({ status: 'applied' });
-    const customers = await connection.rawConnection.getRepository(Customer).find({ where: { emailAddress }, relations: ['channels'] });
+    const customers = await repository.find({ where: { emailAddress }, relations: ['channels'] });
     expect(customers).toHaveLength(1);
-    expect(customers[0]).toMatchObject({ firstName: 'Anna', lastName: 'Other' });
-    expect(customers[0].channels.map(channel => String(channel.id))).toEqual(expect.arrayContaining([defaultChannelId, second.id]));
+    expect(customers[0]).toMatchObject({ id: created.id, firstName: 'Anna', lastName: 'Default' });
+    expect(customers[0].channels.map(channel => String(channel.id)).sort()).toEqual([defaultChannelId, second.id].sort());
     const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
       where: { id: decode(result.serverRefs!.orderId) }, relations: ['customer'],
     });
-    expect(order.customer!.id).toBe(customers[0].id);
+    expect(order.customer!.id).toBe(created.id);
+  });
+
+  it('review 3: an admin resolution in the default channel takes a second-channel top-up back at that channel\'s location', async () => {
+    await plugin.onApplicationBootstrap();
+    const defaultToken = (await server.app.get(ChannelService).getDefaultChannel()).token;
+    const user = await connection.rawConnection.getRepository(User).findOneOrFail({
+      where: { identifier: 'superadmin' }, relations: ['roles', 'roles.channels'],
+    });
+    const adminCtx = await server.app.get(RequestContextService).create({ apiType: 'admin', user });
+    await server.app.get(ProductVariantService).assignProductVariantsToChannel(adminCtx, {
+      productVariantIds: [serviceIds.print[0]], channelId: second.id,
+    });
+    // The second channel gets a stock location of its own, which is its default; the default channel keeps its older one.
+    adminClient.setChannelToken(second.token);
+    let secondLocation: string;
+    try {
+      ({ createStockLocation: { id: secondLocation } } = await adminClient.query<{ createStockLocation: { id: string } }>(
+        parse('mutation { createStockLocation(input: { name: "vp2-second" }) { id } }')));
+      await adminClient.query(parse(`mutation Stock($input: [UpdateProductVariantInput!]!) { updateProductVariants(input: $input) { id } }`),
+        { input: [{ id: variantIds.print[0], stockLevels: [{ stockLocationId: secondLocation, stockOnHand: 1 }] }] });
+    } finally {
+      adminClient.setChannelToken(defaultToken);
+    }
+    const levels = async () => Object.fromEntries((await connection.rawConnection.getRepository(StockLevel).find({
+      where: { productVariantId: serviceIds.print[0] } })).map(level => [String(level.stockLocationId), level.stockOnHand]));
+    const before = await levels();
+    expect(before[decode(secondLocation)]).toBe(1);
+    // Print: 3 sold of 1 on hand at the second location, so 2 are topped up there, and the take-back fails.
+    const stock = server.app.get(StockMovementService);
+    const adjust = stock.adjustProductVariantStock.bind(stock);
+    const spy = vi.spyOn(stock, 'adjustProductVariantStock').mockImplementationOnce(adjust)
+      .mockImplementationOnce(() => Promise.reject(new Error('injected take-back failure')));
+    const input = orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]);
+    try {
+      await expect(run(input, second.token)).rejects.toMatchObject({ kind: 'needs_admin' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneByOrFail({ id: input.id })).toMatchObject({
+      status: 'needs_admin', topUps: [{ variantId: serviceIds.print[0], stockLocationId: decode(secondLocation), quantity: 2 }],
+    });
+    const defaultCtx = await server.app.get(RequestContextService).create({ apiType: 'admin', user });
+    await server.app.get(OrderCreateService).resolveNeedsAdmin(defaultCtx, input.id, 'applied', 'top-up checked');
+    // Per location: the second location ends at 1 - 3 (the sale without its top-up); the default location is untouched.
+    expect(await levels()).toEqual({ ...before, [decode(secondLocation)]: -2 });
   });
 });

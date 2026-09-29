@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Controller, Post } from '@nestjs/common';
 import {
   Allow, Ctx, Logger, Order, OrderService, Payment, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
@@ -216,29 +216,26 @@ describe('POST /tally/v1/commands', () => {
   });
 
   it('item 4: while a rejection is being recorded, a resend of the same id gets 409, never a second recipe run', async () => {
-    // An after-claim race: the recipe's saleable check sees plenty, so it skips the top-up for Print
-    // (2 on hand), and Vendure's own check inside addItemToOrder refuses 3.
-    const input = orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]);
-    const saleable = vi.spyOn(server.app.get(ProductVariantService), 'getSaleableStockLevel').mockResolvedValueOnce(1000);
+    // A deterministic refusal (an unknown variant), stored on the claim before the recipe (re-ruling 4).
+    const input = orderCommand([{ variantId: encode(999999), quantity: 1, unitPriceMinor: 800 }]);
     const barrier = gate();
-    recipe.testHooks.afterSavepointRollback = async id => {
+    recipe.testHooks.beforeStoringRejection = async id => {
       if (id === input.id) await barrier.hold();
     };
     const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
     try {
       const first = post({ commands: [input] });
       await barrier.reached;
-      // The savepoint has rolled back and the claim is still held: the resend waits out the claim's lock_timeout.
+      // The claim is held while the rejection is being stored: the resend waits out the claim's lock_timeout.
       expect(await post({ commands: [input] })).toEqual({ status: 409, body: { code: 'in_progress', id: input.id } });
       barrier.release();
       const result = (await first).body.results[0];
-      expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'insufficient_stock' } });
+      expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'unknown_variant' } });
       expect((await post({ commands: [input] })).body.results[0]).toEqual(result);
-      expect(createDraft).toHaveBeenCalledTimes(1);
+      expect(createDraft).not.toHaveBeenCalled();
       expect(await ordersFor(input)).toHaveLength(0);
     } finally {
       createDraft.mockRestore();
-      saleable.mockRestore();
     }
   });
 
@@ -312,7 +309,7 @@ describe('POST /tally/v1/commands', () => {
       expect(replay.body.results[0].serverRefs.orderId).toBe(encode(orders[0].id));
 
       // Ruling 4: rejecting cancels the order; while it cannot be cancelled, the rejection is refused.
-      // N3: a clientOrderId of the full 255 characters, whose replacement must still fit.
+      // A clientOrderId of the full 255 characters, which the rejection moves to tallyRejectedClientOrderId.
       const longInput = print();
       longInput.payload.clientOrderId = randomUUID().padEnd(255, 'x');
       const printStock = async () => (await connection.rawConnection.getRepository(StockLevel).find({
@@ -346,10 +343,10 @@ describe('POST /tally/v1/commands', () => {
       expect(await paymentStates()).toEqual(['Settled']);
 
       await recipe.resolveNeedsAdmin(ctx, rejectedInput.id, 'rejected', 'order cancelled by the admin');
-      const renamed = `${longInput.payload.clientOrderId.slice(0, 238)}#rej:${createHash('sha256').update(rejectedInput.id).digest('hex').slice(0, 12)}`;
-      expect(renamed).toHaveLength(255);
       expect(await orderRepository.findOneByOrFail({ id: live.id })).toMatchObject({
-        state: 'Cancelled', customFields: { tallyClientOrderId: renamed },
+        state: 'Cancelled', customFields: {
+          tallyClientOrderId: null, tallyRejectedClientOrderId: longInput.payload.clientOrderId, tallyRejected: true,
+        },
       });
       expect(await cancellations()).toBe(cancellationsBefore + 1);
       // N4: the top-up is taken back and Vendure's cancellation restocks the sale: the stock is as before the sale.

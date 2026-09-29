@@ -67,7 +67,7 @@ describe('proof 3: the exported tallyOrderConfirmationHandler skips POS orders a
     expect(sent.filter(email => email.recipient === controlEmail)).toHaveLength(1);
   });
 
-  it('ruling (A): an after-claim race rejection leaks the PaymentSettled event of an order that does not exist; the handler ignores it', async () => {
+  it('re-ruling 3: a race after the first event rolls everything back, so its PaymentSettled event is never delivered and nothing is emailed', async () => {
     const raceEmail = 'vp2-race-buyer@example.com';
     const controlEmail = 'vp2-shop-buyer@example.com';
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: raceEmail });
@@ -80,21 +80,21 @@ describe('proof 3: the exported tallyOrderConfirmationHandler skips POS orders a
       shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment');
     };
     try {
-      expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } });
+      await expect(run(input)).rejects.toMatchObject({ commandId: input.id, kind: 'unclassified' });
     } finally {
       shippingOptions.fulfillmentHandlers = handlers;
       recipe.testObserver = undefined;
     }
     const start = performance.now();
-    while (!settled.includes(input.payload.clientOrderId) && performance.now() - start < 5000) {
+    while (performance.now() - start < 1000) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    // The leak itself: the event arrived, but its order does not exist.
-    expect(settled).toContain(input.payload.clientOrderId);
+    // The full rollback drops the recipe's events: nothing arrives for an order that does not exist.
+    expect(settled).not.toContain(input.payload.clientOrderId);
     expect(await server.app.get(TransactionalConnection).rawConnection.getRepository(Order).count({
       where: { customFields: { tallyClientOrderId: input.payload.clientOrderId } },
     })).toBe(0);
-    // A Shop API sale afterwards is emailed, so the queue is working while the leaked event sends nothing.
+    // A Shop API sale afterwards is emailed, so the queue is working while the race sends nothing.
     const { standardShippingId, dummyPaymentCode } = storefront ??= await createStorefrontMethods(adminClient);
     const shop = await guestOrder(shopClient, variantIds.mug[0], controlEmail);
     await shop.setShipping(standardShippingId);

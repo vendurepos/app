@@ -141,15 +141,16 @@ describe('proof 7: a stock shortage is topped up before addItemToOrder and taken
     recipe.testObserver = async stage => {
       if (stage === 'payments') shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment');
     };
-    let result: OrderCreateResult;
+    let result: unknown;
     try {
-      result = await run(orderCommand([{ variantId: print, quantity: 3, unitPriceMinor: 4500 }]));
+      result = await run(orderCommand([{ variantId: print, quantity: 3, unitPriceMinor: 4500 }])).catch((error: unknown) => error);
     } finally {
       observer.restore();
       recipe.testObserver = undefined;
       shippingOptions.fulfillmentHandlers = handlers;
     }
-    expect(result).toMatchObject({ status: 'rejected', error: { code: 'platform_error', data: { platformCode: 'INVALID_FULFILLMENT_HANDLER_ERROR' } } });
+    // Re-ruling 3: a race after the first event rolls everything back as transient.
+    expect(result).toMatchObject({ kind: 'unclassified', cause: { result: { errorCode: 'INVALID_FULFILLMENT_HANDLER_ERROR' } } });
     const topUp = `adjust:${3 - before.level.onHand}`;
     expect(observer.events.indexOf(topUp)).toBeGreaterThanOrEqual(0);
     expect(observer.events.indexOf('addItemToOrder')).toBeGreaterThan(observer.events.indexOf(topUp));

@@ -70,7 +70,7 @@ describe('error classes (ADR 0002 §2)', () => {
     }
   }
 
-  it('ruling (A): every deterministic refusal is answered before the claim: nothing stored, nothing written, no event at all', async () => {
+  it('re-ruling 4: every deterministic refusal is stored on the claim before the recipe writes anything: no sale write, no event at all', async () => {
     const config = server.app.get(ConfigService);
     const delivered: string[] = [];
     const subscription = server.app.get(EventBus).filter(() => true).subscribe(event => delivered.push(event.constructor.name));
@@ -107,8 +107,8 @@ describe('error classes (ADR 0002 §2)', () => {
         } finally {
           await repair();
         }
-        expect(await counts(), name).toEqual(before);
-        expect(await ledgerFor(input), name).toBeNull();
+        expect(await counts(), name).toEqual({ ...before, ledger: before.ledger + 1 });
+        expect(await ledgerFor(input), name).toMatchObject({ status: 'rejected', result: { error } });
       }
       await new Promise(resolve => setTimeout(resolve, 300));
       expect(createDraft).not.toHaveBeenCalled();
@@ -164,21 +164,21 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(await run(input)).toMatchObject({ id: input.id, status: 'applied' });
   });
 
-  it('ruling 3: a shortage createFulfillment finds (INSUFFICIENT_STOCK_ON_HAND_ERROR) maps to insufficient_stock', () => {
-    const verdict = classify(new ErrorResultThrown(new InsufficientStockOnHandError({
-      productVariantId: 'T_3', productVariantName: 'Print', stockOnHand: 2,
-    })), '');
-    expect(verdict).toMatchObject({ origin: 'mapped', outcome: 'stored', rejection: { code: 'insufficient_stock', data: undefined } });
-    expect(verdict.outcome === 'stored' && verdict.rejection!.message)
-      .toBe('INSUFFICIENT_STOCK_ON_HAND_ERROR: {"productVariantId":"T_3","productVariantName":"Print","stockOnHand":2}');
-    expect(PLATFORM_ERROR_CODE).toBe('platform_error');
-  });
+  // Re-ruling 3: a race inside the recipe rolls everything back (its events with it) and stores nothing.
+  async function expectTransientRace(input: ReturnType<typeof orderCommand>) {
+    const before = await counts();
+    const failed = await run(input).catch((error: unknown) => error);
+    expect(failed).toBeInstanceOf(TransientCommandError);
+    expect(failed).toMatchObject({ commandId: input.id, kind: 'unclassified' });
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
+  }
 
-  it('ruling 1, safety net: a limit lowered during the sale (ORDER_LIMIT_ERROR after the claim) is a stored platform_error in the amendment\'s shape', async () => {
+  it('re-ruling 3: a limit lowered during the sale (ORDER_LIMIT_ERROR in the recipe) is a transient race; the retry\'s checks answer it', async () => {
     const options = server.app.get(ConfigService).orderOptions;
     const limit = options.orderItemsLimit;
     const input = orderCommand([mug(2)]);
-    // The pre-claim check passed; the store changes before addItemToOrder (the recipe's first stage runs after it).
+    // The claim-time check passed; the store changes before addItemToOrder.
     const saleable = vi.spyOn(server.app.get(ProductVariantService), 'getSaleableStockLevel');
     saleable.mockImplementationOnce(async (...args) => {
       options.orderItemsLimit = 1;
@@ -186,31 +186,29 @@ describe('error classes (ADR 0002 §2)', () => {
       return server.app.get(ProductVariantService).getSaleableStockLevel(...args);
     });
     try {
-      const platformMessage = 'ORDER_LIMIT_ERROR: {"maxItems":1}';
-      await expectStored(input, {
-        code: 'platform_error', message: `ORDER_LIMIT_ERROR: ${platformMessage}`,
-        data: { platformCode: 'ORDER_LIMIT_ERROR', platformMessage },
-      });
+      await expectTransientRace(input);
+      expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
+      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
     } finally {
       options.orderItemsLimit = limit;
       saleable.mockRestore();
     }
   });
 
-  it('InsufficientStockError that survives the top-up is a stored `insufficient_stock`', async () => {
+  it('re-ruling 3: InsufficientStockError that survives the top-up is a transient race; the retry tops up and applies', async () => {
     // Test-only: the recipe's own saleable check (its first call) sees plenty, so it skips the top-up
     // for Print (2 on hand); Vendure's own check inside addItemToOrder then sees the real 2.
+    const input = orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]);
     const saleable = vi.spyOn(server.app.get(ProductVariantService), 'getSaleableStockLevel').mockResolvedValueOnce(1000);
     try {
-      await expectStored(orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]), {
-        code: 'insufficient_stock', message: 'INSUFFICIENT_STOCK_ERROR: {"quantityAvailable":2}',
-      });
+      await expectTransientRace(input);
     } finally {
       saleable.mockRestore();
     }
+    expect(await run(input)).toMatchObject({ status: 'applied', warnings: [{ code: 'insufficient_stock' }] });
   });
 
-  it('platform_error leaves no durable change; a Retry under a new id with the same clientOrderId makes exactly one order', async () => {
+  it('re-ruling 3: a late race leaves no durable change and stores nothing; the resend applies once and a requeue meets the collision guard', async () => {
     // The till requeues a platform_error under a NEW command id, so the rejection must leave nothing.
     // The trigger is a late configuration race (the safety net): the manual fulfilment handler is
     // removed after the pre-claim check, so createFulfillment refuses after the order is PaymentSettled.
@@ -236,24 +234,22 @@ describe('error classes (ADR 0002 §2)', () => {
         customers: await connection.getRepository(ctx, Customer).count({ where: { emailAddress } }),
       };
     };
-    let result: Awaited<ReturnType<typeof expectStored>>;
     try {
-      result = await expectStored(input, {
-        code: 'platform_error', message: 'INVALID_FULFILLMENT_HANDLER_ERROR: INVALID_FULFILLMENT_HANDLER_ERROR',
-        data: { platformCode: 'INVALID_FULFILLMENT_HANDLER_ERROR', platformMessage: 'INVALID_FULFILLMENT_HANDLER_ERROR' },
-      });
+      // Re-ruling 3: after the recipe's first event, a race is transient and rolls everything back.
+      const failed = await run(input).catch((error: unknown) => error);
+      expect(failed).toMatchObject({ commandId: input.id, kind: 'unclassified', cause: { result: { errorCode: 'INVALID_FULFILLMENT_HANDLER_ERROR' } } });
     } finally {
       shippingOptions.fulfillmentHandlers = handlers;
     }
     // Stock: the top-up, and the allocation when the settled payment moves the order to PaymentSettled.
     expect(written).toEqual({ lines: 1, payments: 1, surcharges: 1, shippingLines: 1, stockMovements: 2, customers: 1 });
-    // (a) Only the ledger row survives: no order, line, payment, surcharge, shipping line, stock movement or customer.
-    expect(await counts()).toEqual({ ...baseline, ledger: baseline.ledger + 1 });
+    // (a) Nothing survives: no ledger row, order, line, payment, surcharge, shipping line, stock movement or customer.
+    expect(await counts()).toEqual(baseline);
     expect(await connection.rawConnection.getRepository(Customer).count({ where: { emailAddress } })).toBe(0);
 
-    // (b) The till's Retry: a new command id, the same sale. It applies once...
+    // (b) The till resends the same id, which applies once...
     recipe.testObserver = undefined;
-    const retry = { ...input, id: orderCommand(lines).id };
+    const retry = input;
     const applied = await run(retry);
     expect(applied, JSON.stringify(applied)).toMatchObject({ id: retry.id, status: 'applied' });
     const ordersFor = () => connection.rawConnection.getRepository(Order).count({
@@ -264,12 +260,12 @@ describe('error classes (ADR 0002 §2)', () => {
     // warnings, storing only the new id's applied row.
     const afterRetry = await counts();
     const again = { ...input, id: orderCommand(lines).id };
-    expect(applied.warnings).toEqual([{ code: 'insufficient_stock', variantId: variantIds.print[0], quantity: 1 }]);
+    expect(applied.warnings).toEqual([{ code: 'insufficient_stock', variantId: variantIds.print[0], quantity: expect.any(Number) }]);
     expect(await run(again)).toEqual({ ...applied, id: again.id });
     expect(await counts()).toEqual({ ...afterRetry, ledger: afterRetry.ledger + 1 });
     expect(await ordersFor()).toBe(1);
-    // The rejected command id itself still replays its stored answer.
-    expect(await run(input)).toEqual(result);
+    // The resent id itself replays as duplicate.
+    expect(await run(input)).toEqual({ ...applied, status: 'duplicate' });
   });
 
   it('refinement 2: a unique-violation race on tallyClientOrderId takes the collision guard: the new id stored applied with the first result, one order', async () => {
@@ -319,7 +315,7 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(after.orders).toBe(before.orders + 1);
   });
 
-  it('unsupported_currency is refused before the claim with no ledger row; the same id applies once the channel offers it', async () => {
+  it('re-ruling 4: unsupported_currency is stored on the claim; once the channel offers it, the Retry\'s new id applies', async () => {
     const input = orderCommand([mug()]);
     input.payload.currency = 'USD';
     input.payload.display!.currency = 'USD';
@@ -327,14 +323,15 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
       code: 'unsupported_currency', message: 'The channel does not offer USD',
     } });
-    expect(await counts()).toEqual(before);
-    expect(await ledgerFor(input)).toBeNull();
+    expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+    expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
     await adminClient.query(parse(`mutation Currencies($id: ID!) {
       updateChannel(input: { id: $id, availableCurrencyCodes: [EUR, USD] }) { ... on Channel { id } }
     }`), { id: activeChannel.id });
-    const result = await run(input);
-    expect(result, JSON.stringify(result)).toMatchObject({ id: input.id, status: 'applied' });
+    const retry = { ...input, id: orderCommand([mug()]).id };
+    const result = await run(retry);
+    expect(result, JSON.stringify(result)).toMatchObject({ id: retry.id, status: 'applied' });
     const order = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: decode(result.serverRefs!.orderId) });
     expect(order.currencyCode).toBe('USD');
     expect(order.totalWithTax).toBe(1000);

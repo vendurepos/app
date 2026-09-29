@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { Logger, isGraphQlErrorResult } from '@vendure/core';
+import { isGraphQlErrorResult } from '@vendure/core';
 import type { GraphQLErrorResult } from '@vendure/core';
 
 export const loggerCtx = 'TallyPosPlugin';
@@ -10,7 +9,7 @@ export const loggerCtx = 'TallyPosPlugin';
  * as `platformCode` and `platformMessage`.
  */
 export const PLATFORM_ERROR_CODE = 'platform_error';
-
+/** Front desk ruling 1: a contract code for a plugin bug before the recipe's first event; nothing raises it there today (re-ruling 3). */
 /** Front desk ruling 1: the plugin's own programming error after a complete rollback, stored like a refusal. */
 export const INTERNAL_ERROR_CODE = 'internal_error';
 
@@ -69,28 +68,6 @@ export class TransientCommandError extends Error {
 export function unwrap<T>(result: T): Exclude<T, GraphQLErrorResult> {
   if (isGraphQlErrorResult(result)) throw new ErrorResultThrown(result as GraphQLErrorResult);
   return result as Exclude<T, GraphQLErrorResult>;
-}
-
-let internalErrors = 0;
-
-/** How many programming errors this process has stored as `internal_error` (ruling 8). */
-export function internalErrorCount(): number {
-  return internalErrors;
-}
-
-/**
- * Logs a programming error after the claim and turns it into the stored `internal_error`.
- * The raw message goes only to the log, under a random correlation id the result carries (N7): it
- * can hold internals, so it is never stored or returned.
- */
-export function internalErrorFor(commandId: string, error: unknown): BusinessRejection {
-  internalErrors += 1;
-  const correlationId = randomUUID();
-  const message = error instanceof Error ? error.message : String(error);
-  Logger.error(`order.create ${commandId} failed unexpectedly (correlationId ${correlationId}): ${message}`, loggerCtx,
-    error instanceof Error ? error.stack : undefined);
-  return new BusinessRejection(INTERNAL_ERROR_CODE, 'The server could not record the order',
-    { message: 'Internal error', correlationId });
 }
 
 // Postgres SQLSTATEs: 55P03 lock_not_available (the claim's lock_timeout); 40P01 deadlock_detected
