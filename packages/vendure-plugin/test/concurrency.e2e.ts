@@ -1,4 +1,4 @@
-import { RequestContext, StockLevel, TransactionalConnection } from '@vendure/core';
+import { RequestContext, RequestContextService, StockLevel, StockMovementService, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TransientCommandError } from '../src';
@@ -86,12 +86,12 @@ describe('VP3-2: concurrent sales of one variant', () => {
     held.release();
     const results = await Promise.all([first, second]);
     const after = await level();
-    // A tops up 1 from on-hand 0 and leaves -1. B reads that under the lock, so it tops up 2: today's warning is the
-    // top-up size (VP3-3 rules on the warning quantity). A lost update showed B topping up 1 and on-hand falling by 1.
+    // A tops up 1 from on-hand 0 and leaves -1. B sells 1 against on-hand -1, so it tops up 2 but warns for 1:
+    // the warning covers only this sale's units, not the pre-existing negative on-hand (VP3-3).
     expect({ blocked, onHand: after.onHand - before.onHand, allocated: after.allocated - before.allocated,
       results: results.map(outcome) }).toEqual({ blocked: true, onHand: -2, allocated: 0, results: [
       { status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: mug, quantity: 1 }] },
-      { status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: mug, quantity: 2 }] },
+      { status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: mug, quantity: 1 }] },
     ] });
   });
 
@@ -151,5 +151,78 @@ describe('VP3-2: concurrent sales of one variant', () => {
       spy.mockRestore();
     }
     expect(seen).toEqual(['findVariant:10s', 'findVariant:10s', 'addItemToOrder:10s']);
+  });
+
+  it('5: stock locks follow variant-id order even when the sale lines are [high, low]', async () => {
+    const [low, high] = [
+      { variantId: mug, id: mugId, unitPriceMinor: 800 },
+      { variantId: variantIds.print[0], id: serviceIds.print[0], unitPriceMinor: 4500 },
+    ].sort((a, b) => Number(a.id) - Number(b.id));
+    await adminClient.query(parse(`mutation SetStock($input: [UpdateProductVariantInput!]!) {
+      updateProductVariants(input: $input) { id }
+    }`), { input: [low, high].map(variant => ({ id: variant.variantId, stockOnHand: 10 })) });
+    const onHand = () => Promise.all([low, high].map(async variant =>
+      (await connection.rawConnection.getRepository(StockLevel).find({ where: { productVariantId: variant.id } }))
+        .reduce((sum, item) => sum + item.stockOnHand, 0)));
+    expect(await onHand()).toEqual([10, 10]);
+    const input = orderCommand([high, low].map(({ variantId, unitPriceMinor }) => ({ variantId, unitPriceMinor, quantity: 1 })));
+    const x = connection.rawConnection.createQueryRunner();
+    const probe = connection.rawConnection.createQueryRunner();
+    let first: Promise<{ value?: OrderCreateResult; error?: unknown; ms: number }> | undefined;
+    try {
+      await x.startTransaction();
+      await x.query('SELECT id FROM stock_level WHERE "productVariantId" = $1 FOR UPDATE', [high.id]);
+      first = timed(run(input));
+      expect(await stockLockWait(3_000)).toBe(true);
+      await probe.startTransaction();
+      // A is waiting for high, but must already hold low despite the payload's reversed order.
+      await expect(probe.query('SELECT id FROM stock_level WHERE "productVariantId" = $1 FOR UPDATE NOWAIT', [low.id]))
+        .rejects.toMatchObject({ driverError: { code: '55P03' } });
+      await probe.rollbackTransaction();
+      await x.commitTransaction();
+      expect(outcome(await first).status).toBe('applied');
+      expect(await onHand()).toEqual([9, 9]);
+    } finally {
+      if (probe.isTransactionActive) await probe.rollbackTransaction();
+      if (x.isTransactionActive) await x.rollbackTransaction();
+      await probe.release();
+      await x.release();
+      await first;
+    }
+  });
+
+  it('6: resolveNeedsAdmin times out within 7 s when a POS sale holds its top-up stock lock', async () => {
+    await setOnHand(0);
+    const stock = server.app.get(StockMovementService);
+    const adjust = stock.adjustProductVariantStock.bind(stock);
+    const spy = vi.spyOn(stock, 'adjustProductVariantStock').mockImplementationOnce(adjust)
+      .mockImplementationOnce(() => Promise.reject(new Error('injected take-back failure')));
+    const input = sale();
+    try {
+      await expect(run(input)).rejects.toMatchObject({ kind: 'needs_admin' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneByOrFail({ id: input.id })).toMatchObject({
+      status: 'needs_admin', topUps: [{ variantId: mugId, stockLocationId: expect.any(String), quantity: 1 }],
+    });
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    const a = sale();
+    const held = hold(a);
+    const first = timed(run(a));
+    await held.reached;
+    // Without resolveNeedsAdmin's lock timeout, it only settles after this sale is released.
+    const timer = setTimeout(held.release, 7_000);
+    try {
+      const resolution = await timed(recipe.resolveNeedsAdmin(ctx, input.id, 'applied', 'top-up checked'));
+      expect(resolution.error).toMatchObject({ driverError: { code: '55P03' } });
+      expect(resolution.ms).toBeGreaterThanOrEqual(4_500);
+      expect(resolution.ms).toBeLessThanOrEqual(7_000);
+    } finally {
+      clearTimeout(timer);
+      held.release();
+      await first;
+    }
+    expect(outcome(await first).status).toBe('applied');
   });
 });

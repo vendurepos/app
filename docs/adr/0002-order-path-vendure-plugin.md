@@ -103,7 +103,7 @@ marked temporary. The plugin's first PR after S1 consumes the package.
       the replay key itself, so no stored row can have a longer id and a replay can
       never be refused by this bound; the duplicate-`clientLineId` refusal, because
       the till mints a UUIDv7 per line, so no applied command carries a duplicate;
-      and the vendored discount value checks (each `discountMinor` is a non-negative
+      and the vendored discount value checks (each `discountMinor`, when present, is a positive
       safe integer, and the order's `discountMinor` equals the sum of the lines'),
       because these have not tightened since any command was applied.
       The discount value checks move to step 4 when the vendored shape is next
@@ -281,7 +281,7 @@ lock and `resume.ts`.
 | The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on the last transition; the plugin overwrites it with `tallySaleAt` (the payload's sale time) in the same transaction, so Vendure's reports match the till | Status workarounds such as WCPOS's `pos-open`/`pos-partial`; a sale that reaches the server is always paid |
 | Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is `unsupported_currency`, answered after the claim and before any write with the claim rolled back and nothing stored (TallyUI #219), so the same command id applies once the channel is fixed. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
 | Lines | One `OrderLine` per POS line. Vendure merges equal lines, so a read-only line custom field `tallyClientLineId` keeps them 1:1 | — |
-| Stock | A manual fulfilment records `SALE` stock movements at the location that Vendure's `StockLocationStrategy` allocates from. `payload.locationId` is not used in the MVP (TallyUI does not send it yet). A shortage is topped up **before** `addItemToOrder`, because otherwise `addItemToOrder` saves the line at the saleable quantity and returns `InsufficientStockError` (and `addItemsToOrder` cuts it silently; S1), and before `ArrangingPayment`. The top-up is taken back after fulfilment, inside the transaction, and the result carries an `insufficient_stock` warning (ADR-039) | Stock-reduction hooks and reservation tables |
+| Stock | After the stock lock, probe `StockLocationStrategy` with a copied context: top up at the first planned location if the plan covers q, otherwise at `defaultStockLocation`. Top up by `max(0, q − saleable)` before `addItemToOrder` and `ArrangingPayment`, then check saleable ≥ q. The POS-only `TallyStockLocationStrategy` caps allocations cumulatively at q and adds any remainder at the default location; storefront plans are unchanged. After `PaymentSettled`, check Σ allocations per POS line = its quantity. Either failed check is an unstored `store_configuration`. Manual fulfilment draws where allocated; take back each top-up at its own location in the transaction. `payload.locationId` remains unused. Warn only for positive `max(0, q − max(0, onHand − allocated))`: it is the units of this sale not covered by physical stock, never more than q and never counting the out-of-stock threshold; a pre-existing negative on-hand is store state, not this sale's shortfall, and the till learns it through stock sync, not the warning (Front desk, 2026-09-29). | Stock-reduction hooks and reservation tables |
 | As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice`, with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`), which it reads from a second read-only line field, `tallyPriceIncludesTax`, because the strategy sees only the order and the line's custom fields. Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no other workaround (proved in S1) | Rewriting line totals through post meta |
 | Discounts (v2/v3) | One negative, **taxable** `Surcharge` per discounted line (`POS discount`, SKU `TALLY-DISCOUNT`) of `-discountMinor`, in that line's tax mode. Its tax lines copy the line's rate and description, so the order-level tax group for that rate shrinks by the discount. A net unit price was rejected: `(unit × qty − discount) / qty` is not an integer in general | Coupon emulation |
 | Server promotions | **None on POS orders.** The POS has already applied its own discounts. Four calls re-apply the channel's active promotions while the order is built: `addItemsToOrder`, `addSurchargeToOrder`, `setShippingMethod`, and the coupon revalidation inside `addPaymentToOrder`. So the recipe ends with one final pricing pass, `orderCalculator.applyPriceAdjustments(ctx, order, [])`, followed by explicit saves of the order, its lines and its shipping lines. `order.promotions` and every line's promotion adjustments are saved empty. A later edit in the Dashboard would re-apply the channel's promotions; POS orders are not meant to be edited there | Settling promotion differences in a surcharge |
@@ -366,8 +366,23 @@ it proves each of these with a test:
    the other types under the error classes in §2.
 6. **Batches.** Each command in a batch gets its own transaction, and a
    batch stops at a 409.
-7. **Stock.** The top-up happens before `addItemToOrder`, and the sold
-   quantity is never cut.
+7. **Stock.** After the stock lock, a copied-context probe of the configured
+   `StockLocationStrategy` chooses the first planned location if its plan covers q,
+   otherwise `defaultStockLocation`. The top-up is `max(0, q − saleable)` before
+   `addItemToOrder`, and saleable is then checked to be ≥ q. The thin POS-only
+   wrapper caps the delegated plan cumulatively at q and fills any remainder at
+   the default location. After `PaymentSettled`, Σ allocations must equal each
+   POS line's quantity; both checks refuse as unstored `store_configuration`.
+   Fulfilment draws where allocated, and each top-up is taken back at its own
+   location. Storefront plans are unchanged. The `insufficient_stock` warning is
+   emitted only for positive `max(0, q − max(0, onHand − allocated))`.
+   It is the units of this sale not covered by physical stock, never more than q
+   and never counting the out-of-stock threshold; a pre-existing negative on-hand
+   is store state, not this sale's shortfall, and the till learns it through stock
+   sync, not the warning (Front desk, 2026-09-29).
+   A threshold under-allocation's remainder goes to the default location even
+   when that location has no physical stock, per the ruling.
+   The `insufficient_stock` warning is aggregate over the channel's locations.
 8. **Lines.** POS lines stay 1:1 with order lines, including two lines of
    the same variant.
 9. **Tenders.** Split tender and overpayment: the payments cover the order
@@ -382,18 +397,27 @@ it proves each of these with a test:
     writes nothing.
 12. **Crash safety.** A crash after commit leaves no duplicate order on
     retry.
+13. **Upstream Vendure 3.7.3 findings (for Paul, not posted).** Split-allocation
+    Sale rows record the full line quantity (`stock-movement.service.js:167-171`);
+    MultiChannel over-allocates by using the full requested quantity at each
+    location (`multi-channel-stock-location-strategy.js:87-113`). Tests measure
+    per-location stock levels rather than Sale-row sums.
+    MultiChannel's per-ctx stock-level cache makes a second same-variant line in
+    one order allocate from pre-allocation levels (`multi-channel-stock-location-strategy.js`
+    `getStockLevelsForVariant`). The plugin works around it for POS lines by
+    allocating each on a copied context.
 
 S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
 
 **Follow-ups (Front desk):**
 - **The warning contract.** `tax_rate_mismatch`, and `bridgeMinor` on
   `total_mismatch`, arrive in TallyUI's `CommandWarning` (2.2.0).
-- **Several stock locations.** VP3 takes the top-up location from
-  `StockLocationStrategy`; S1 used the default location.
+- ~~**Several stock locations.**~~ Closed by VP3-3: the strategy probe, POS-only
+  allocation wrapper and both checks cover the configured `StockLocationStrategy`.
 - ~~**A real email transport.**~~ Closed by VP2b.
   `packages/vendure-plugin/test/email-smtp.e2e.ts` sends through real SMTP
   to Mailpit. A storefront order is emailed once, and a POS order is not.
-- ~~**Concurrent sales of one variant.**~~ Closed by VP3-2. Vendure's
+- ~~**Concurrent sales of one variant.**~~ Closed for concurrent POS sales by VP3-2. Vendure's own stock writers (storefront checkout, admin fulfilment, cancellation restocks, admin stock edits) stay unlocked read-modify-writes upstream, so a storefront or admin stock write alongside a POS sale can still lose an update, and a storefront order touching the same variants in another order can deadlock with a POS sale (a retried 503 `deadlock`). Vendure's
   stock update is an unlocked read-modify-write, and VP3 measured 5 of 6
   concurrent updates lost. The recipe now locks every `stock_level` row of
   the sale's variants (`FOR UPDATE`, in variant then location order, 5 s,

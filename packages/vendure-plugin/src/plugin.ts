@@ -11,7 +11,7 @@ import { TallyInfoController } from './api/info.controller';
 import { loggerCtx } from './service/errors';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import {
-  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, TallyPriceStrategy, tallyPaymentChecker, tallyPaymentHandler,
+  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
 } from './config/strategies';
 import { TallyCommand } from './entities/tally-command.entity';
@@ -63,6 +63,10 @@ function commandsBodyParser(): Middleware['handler'] {
     const { orderOptions } = config;
     if (!(orderOptions.orderItemPriceCalculationStrategy instanceof TallyPriceStrategy)) {
       orderOptions.orderItemPriceCalculationStrategy = new TallyPriceStrategy(orderOptions.orderItemPriceCalculationStrategy);
+    }
+    const { catalogOptions } = config;
+    if (!(catalogOptions.stockLocationStrategy instanceof TallyStockLocationStrategy)) {
+      catalogOptions.stockLocationStrategy = new TallyStockLocationStrategy(catalogOptions.stockLocationStrategy);
     }
     const { paymentOptions: payment, shippingOptions: shipping } = config;
     payment.paymentMethodHandlers = withMissing(payment.paymentMethodHandlers, [tallyPaymentHandler], byCode);
