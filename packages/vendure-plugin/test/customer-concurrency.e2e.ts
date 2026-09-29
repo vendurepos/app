@@ -1,4 +1,4 @@
-import { Customer, Order, ProductVariantService, RequestContextService, TransactionalConnection, User } from '@vendure/core';
+import { ChannelService, Customer, Order,ProductVariantService, RequestContextService, TransactionalConnection, User } from '@vendure/core';
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -174,5 +174,18 @@ describe('VP3-4b: concurrent customer lookups', () => {
         where: { customFields: { tallyClientOrderId: a.payload.clientOrderId } },
       }),
     }).toEqual({ customers: 1, orders: 1 });
+  });
+
+  it('#22 nit 1: a stored mixed-case email is found; no second customer', async () => {
+    // A row stored before Vendure normalised emails, or imported, keeps its case.
+    const inserted = await connection.rawConnection.getRepository(Customer).save(new Customer({
+      emailAddress: 'Mixed.Case@Example.com', firstName: 'Mixed', lastName: 'Case',
+      channels: [await server.app.get(ChannelService).getDefaultChannel()],
+    }));
+    const sale = await run(mug('mixed.case@example.com'));
+    expect(sale).toMatchObject({ status: 'applied' });
+    expect(await orderCustomer(sale)).toBe(String(inserted.id));
+    expect((await connection.rawConnection.query(`SELECT count(*)::int AS n FROM customer
+      WHERE LOWER("emailAddress") = 'mixed.case@example.com' AND "deletedAt" IS NULL`) as Array<{ n: number }>)[0].n).toBe(1);
   });
 });
