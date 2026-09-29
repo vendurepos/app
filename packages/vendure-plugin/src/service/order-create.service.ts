@@ -539,7 +539,11 @@ export class OrderCreateService {
       // same way first (and add this channel, as createOrUpdate did); create only a missing one.
       const emailAddress = normalizeEmailAddress(payload.customer?.email || WALK_IN_EMAIL);
       const customers = this.connection.getRepository(ctx, Customer);
-      const lookup = async () => await customers.findOne({ where: { emailAddress, deletedAt: IsNull() }, relations: ['channels'] }) ?? undefined;
+      // #22 review: rows stored before Vendure normalised emails (or imported) keep their case, so match case-insensitively;
+      // of several such rows the lowest id wins, so every sale picks the same one.
+      const lookup = async () => await customers.createQueryBuilder('customer').leftJoinAndSelect('customer.channels', 'channel')
+        .where('LOWER(customer.emailAddress) = LOWER(:emailAddress)', { emailAddress }).andWhere('customer.deletedAt IS NULL')
+        .orderBy('customer.id', 'ASC').getOne() ?? undefined;
       customer = await lookup();
       if (!customer) {
         // Ruling 14: emailAddress has no unique index, so a miss is checked again under a per-email lock held to
