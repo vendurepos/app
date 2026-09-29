@@ -1,5 +1,5 @@
 import {
-  ConfigService, Customer, Logger, Order, PaymentMethod, ProcessContext, ProductVariantService, RequestContextService, ShippingMethod,
+  ChannelService, ConfigService, Customer, Logger, Order, PaymentMethod, ProcessContext, ProductVariantService, RequestContextService, ShippingMethod,
   TransactionalConnection, User,
 } from '@vendure/core';
 import { parse } from 'graphql';
@@ -95,6 +95,13 @@ describe('store configuration in every channel, and a sale recorded in another c
       .toMatchObject({ status: 'rejected', result });
     expect(await run(other, second.token)).toEqual(result);
     expect(await connection.rawConnection.getRepository(Order).count()).toBe(orders);
+  });
+
+  it('addendum: a variant not available in the order\'s channel is unknown_variant before the claim', async () => {
+    // Beans are never assigned to the second channel; Vendure's assignment makes this reachable from a till there.
+    const input = orderCommand([{ variantId: variantIds.beans[0], quantity: 1, unitPriceMinor: 800 }]);
+    expect(await run(input, second.token)).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'unknown_variant' } });
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id })).toBeNull();
   });
 
   it('review 8: the recipe skips a deleted tally-in-store; after delete and a new bootstrap, a sale applies', async () => {
@@ -226,5 +233,46 @@ describe('store configuration in every channel, and a sale recorded in another c
     }
     await plugin.onApplicationBootstrap();
     expect(await storeIn(third)).toEqual({ payment: 1, shipping: 1, walkIn: 1 });
+  });
+
+  const mismatch = (id: string) => ({ id, status: 'rejected', error: {
+    code: 'idempotency_mismatch', message: 'The clientOrderId is already recorded in another channel',
+    data: { reason: 'client_order_in_other_channel' },
+  } });
+
+  it('N2: from the default channel, where Vendure also puts the other channel\'s order, a requeue is a stored idempotency_mismatch, never a 503', async () => {
+    await plugin.onApplicationBootstrap();
+    const first = mugSale();
+    expect(await run(first, second.token)).toMatchObject({ status: 'applied' });
+    const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
+      where: { customFields: { tallyClientOrderId: first.payload.clientOrderId } }, relations: ['channels'],
+    });
+    expect(order.channels.map(channel => String(channel.id)).sort()).toEqual([defaultChannelId, second.id].sort());
+    const other = { ...first, id: mugSale().id };
+    const result = await run(other);
+    expect(result).toEqual(mismatch(other.id));
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: other.id })).toMatchObject({ status: 'rejected', result });
+  });
+
+  it('customer fix: a POS sale for the email of another channel\'s customer uses that customer and never blanks its names', async () => {
+    const emailAddress = 'vp2-other-channel@example.com';
+    const defaultToken = (await server.app.get(ChannelService).getDefaultChannel()).token;
+    adminClient.setChannelToken(second.token);
+    try {
+      await adminClient.query(parse(`mutation Customer($email: String!) {
+        createCustomer(input: { emailAddress: $email, firstName: "Anna", lastName: "Other" }) { ... on Customer { id } } }`), { email: emailAddress });
+    } finally {
+      adminClient.setChannelToken(defaultToken);
+    }
+    const result = await run(orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: emailAddress }));
+    expect(result).toMatchObject({ status: 'applied' });
+    const customers = await connection.rawConnection.getRepository(Customer).find({ where: { emailAddress }, relations: ['channels'] });
+    expect(customers).toHaveLength(1);
+    expect(customers[0]).toMatchObject({ firstName: 'Anna', lastName: 'Other' });
+    expect(customers[0].channels.map(channel => String(channel.id))).toEqual(expect.arrayContaining([defaultChannelId, second.id]));
+    const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
+      where: { id: decode(result.serverRefs!.orderId) }, relations: ['customer'],
+    });
+    expect(order.customer!.id).toBe(customers[0].id);
   });
 });

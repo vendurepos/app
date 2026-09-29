@@ -6,7 +6,6 @@ import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TransientCommandError, internalErrorCount } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
-import { isPluginProgrammingError } from '../src/service/classification';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -68,8 +67,14 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   }
   afterEach(() => { recipe.testObserver = undefined; });
 
-  it.each(['disabled', 'missing'] as const)('proof 10, ruling (A): a %s variant is unknown_variant before the claim; nothing is stored and the recipe never runs', async kind => {
-    const input = command(kind === 'disabled' ? variantIds.print[0] : encode(999999));
+  it.each(['disabled', 'missing', 'disabled-product'] as const)('proof 10, ruling (A), B1: a %s variant is unknown_variant before the claim; nothing is stored and the recipe never runs', async kind => {
+    const input = command(kind === 'disabled' ? variantIds.print[0] : kind === 'missing' ? encode(999999) : variantIds.beans[0]);
+    // B1: an enabled variant of a disabled product, which addItemToOrder would throw on after the claim.
+    const { productVariant } = await adminClient.query<{ productVariant: { product: { id: string } } }>(parse(`query Product($id: ID!) {
+      productVariant(id: $id) { product { id } } }`), { id: variantIds.beans[0] });
+    const setProduct = (enabled: boolean) => adminClient.query(parse(`mutation Product($id: ID!, $enabled: Boolean!) {
+      updateProduct(input: { id: $id, enabled: $enabled }) { id } }`), { id: productVariant.product.id, enabled });
+    if (kind === 'disabled-product') await setProduct(false);
     const before = await counts();
     const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
     try {
@@ -82,7 +87,29 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       expect(await ledgerFor(input)).toBeNull();
     } finally {
       createDraft.mockRestore();
+      if (kind === 'disabled-product') await setProduct(true);
     }
+  });
+
+  it('S1: a customer email above 254 characters is invalid_payload before the claim', async () => {
+    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
+      { email: `${'a'.repeat(243)}@example.com` });
+    expect(input.payload.customer!.email).toHaveLength(255);
+    expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: 'customer.email: expected at most 254 characters',
+    } });
+    expect(await ledgerFor(input)).toBeNull();
+  });
+
+  it('N1: a declined tally-pos payment (here, a context without the route mark) is store_configuration, not stored, never underpaid', async () => {
+    const input = command();
+    const before = await counts();
+    const unmarked = await server.app.get(RequestContextService).create({ apiType: 'custom' });
+    expect(await recipe.create(unmarked, input)).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'store_configuration' } });
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
+    // Not stored: from the route, the same id applies.
+    expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
   it('proof 10: a default tax zone with all its rates disabled gives pre-claim store_configuration', async () => {
@@ -222,7 +249,6 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     const failed = await recipe.create(broken, input).catch((error: unknown) => error);
     expect(failed).toBeInstanceOf(TransientCommandError);
     expect(failed).toMatchObject({ commandId: input.id, kind: 'unclassified', cause: expect.any(TypeError) });
-    expect(isPluginProgrammingError((failed as TransientCommandError).cause)).toBe(true);
     expect(await ledgerFor(input)).toBeNull();
   });
 
@@ -401,9 +427,9 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await ledgerFor(input)).toBeNull();
   });
 
-  it('ruling 1: a TypeError raised by the plugin\'s own code is a stored internal_error after a complete rollback, logged and counted; a replay returns it', async () => {
+  it('ruling 1, N5: a PluginBugError the plugin raises is a stored internal_error after a complete rollback, logged and counted; a replay returns it', async () => {
     // Beans: 11 sold of 10 on hand, so the recipe tops up at the default location, which this
-    // stub makes undefined: the recipe's own `location.id` raises the TypeError.
+    // stub makes undefined: the recipe's own invariant check raises a PluginBugError.
     const beans = () => orderCommand([{ variantId: variantIds.beans[0], quantity: 11, unitPriceMinor: 800 }]);
     const input = beans();
     const before = await counts();
@@ -421,13 +447,13 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       const row = await ledgerFor(input);
       expect(row).toMatchObject({ status: 'rejected', result });
       // N7: no part of the raw message is returned or stored; the log has it under the correlation id.
-      for (const part of ['Cannot read', 'reading \'id\'']) {
+      for (const part of ['default stock location']) {
         expect(JSON.stringify(result)).not.toContain(part);
         expect(JSON.stringify(row)).not.toContain(part);
       }
       expect(internalErrorCount()).toBe(count + 1);
       const { correlationId } = result.error!.data as { correlationId: string };
-      expect(logged).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${correlationId}.*Cannot read properties of undefined`)),
+      expect(logged).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${correlationId}.*Vendure returned no default stock location`)),
         'TallyPosPlugin', expect.stringContaining('order-create.service.ts'));
       // The stub has run out, so a second recipe run would apply; the replay returns the stored answer.
       expect(await run(input)).toEqual(result);

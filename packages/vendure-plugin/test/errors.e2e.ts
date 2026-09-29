@@ -1,5 +1,5 @@
 import {
-  Channel, ConfigService, Customer, CustomerService, EventBus, InsufficientStockOnHandError, Order, OrderLine, OrderService,
+  Channel, ConfigService, Customer, EventBus, InsufficientStockOnHandError, Order, OrderLine, OrderService,
   Payment, PaymentMethod, ShippingMethod,
   ProductVariantService, ShippingLine, StockMovement, Surcharge, TaxRate, TransactionalConnection, defaultOrderProcess,
 } from '@vendure/core';
@@ -179,11 +179,11 @@ describe('error classes (ADR 0002 §2)', () => {
     const limit = options.orderItemsLimit;
     const input = orderCommand([mug(2)]);
     // The pre-claim check passed; the store changes before addItemToOrder (the recipe's first stage runs after it).
-    const customers = vi.spyOn(server.app.get(CustomerService), 'createOrUpdate');
-    customers.mockImplementationOnce(async (...args) => {
+    const saleable = vi.spyOn(server.app.get(ProductVariantService), 'getSaleableStockLevel');
+    saleable.mockImplementationOnce(async (...args) => {
       options.orderItemsLimit = 1;
-      customers.mockRestore();
-      return server.app.get(CustomerService).createOrUpdate(...args);
+      saleable.mockRestore();
+      return server.app.get(ProductVariantService).getSaleableStockLevel(...args);
     });
     try {
       const platformMessage = 'ORDER_LIMIT_ERROR: {"maxItems":1}';
@@ -193,7 +193,7 @@ describe('error classes (ADR 0002 §2)', () => {
       });
     } finally {
       options.orderItemsLimit = limit;
-      customers.mockRestore();
+      saleable.mockRestore();
     }
   });
 

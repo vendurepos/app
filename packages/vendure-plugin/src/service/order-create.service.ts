@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import {
-  ConfigService, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
+  ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevelService,
   StockLocationService, StockMovementService, Surcharge, TaxRate, TransactionalConnection,
-  isGraphQlErrorResult, manualFulfillmentHandler,
+  idsAreEqual, isGraphQlErrorResult, manualFulfillmentHandler, normalizeEmailAddress,
 } from '@vendure/core';
 import type { CurrencyCode } from '@vendure/core';
 import { In, IsNull } from 'typeorm';
@@ -19,11 +20,11 @@ import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
 import { classify } from './classification';
 import {
-  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx,
+  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
 } from './errors';
 import { roundHalfAwayFromZero } from './rounding';
-import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
+import { MAX_INT4, MAX_STRING, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
 export type TotalWarning =
@@ -170,16 +171,30 @@ export class OrderCreateService {
       if (row?.status !== 'needs_admin') throw new Error(`Command ${commandId} does not need an admin`);
       const stored = row.result as unknown as OrderCreateResult;
       if (resolution === 'rejected') {
-        // Front desk ruling 4: a rejected row never keeps a live order. Vendure's cancellation (stock
-        // restored as it restores it) and freeing the clientOrderId commit with the rejection, or not at all.
+        // Front desk rulings 4 and N4: a rejected row never keeps a live order. The top-up the failed
+        // take-back left, the settled POS payments, Vendure's cancellation (stock restored as it restores
+        // it) and freeing the clientOrderId all commit with the rejection, or none of them does.
+        const refuse = (reason: string) => new Error(`Command ${commandId} is not rejected: ${reason}`);
         const orderId = this.decodeId(stored.serverRefs!.orderId)!;
+        const location = await this.stockLocations.defaultStockLocation(txCtx);
+        for (const warning of stored.warnings ?? []) {
+          if (warning.code === 'insufficient_stock') await this.adjustStock(txCtx, this.decodeId(warning.variantId)!, location.id, -warning.quantity);
+        }
+        for (const payment of await this.orders.getOrderPayments(txCtx, orderId)) {
+          if (payment.method !== TALLY_PAYMENT_METHOD_CODE || payment.state !== 'Settled') continue;
+          const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
+          if (isGraphQlErrorResult(cancelledPayment) || cancelledPayment.state !== 'Cancelled') {
+            throw refuse(`payment ${payment.id} cannot be cancelled`);
+          }
+        }
         const cancelled = await this.orders.cancelOrder(txCtx, { orderId, reason: note, cancelShipping: true });
         if (isGraphQlErrorResult(cancelled)) {
-          throw new Error(`Command ${commandId} is not rejected: order ${stored.serverRefs!.displayId} cannot be cancelled `
-            + `(${cancelled.errorCode}: ${cancelled.message})`);
+          throw refuse(`order ${stored.serverRefs!.displayId} cannot be cancelled (${cancelled.errorCode}: ${cancelled.message})`);
         }
+        // N3: a unique replacement that fits the 255-character column whatever the original's length.
+        const suffix = `#rej:${createHash('sha256').update(commandId).digest('hex').slice(0, 12)}`;
         await this.connection.getRepository(txCtx, Order).update(orderId, {
-          customFields: { tallyClientOrderId: `${row.clientOrderId}#rejected:${commandId}` },
+          customFields: { tallyClientOrderId: row.clientOrderId.slice(0, MAX_STRING - suffix.length) + suffix },
         });
       }
       const result = resolution === 'applied' ? stored
@@ -275,8 +290,9 @@ export class OrderCreateService {
 
   private async findVariant(ctx: RequestContext, variantId: string) {
     const id = this.decodeId(variantId);
+    // B1: a disabled or deleted product makes addItemToOrder throw EntityNotFoundError, so it is refused here.
     const variant = id === undefined ? null : await this.connection.getRepository(ctx, ProductVariant).findOne({
-      where: { id, deletedAt: IsNull(), channels: { id: ctx.channelId } },
+      where: { id, deletedAt: IsNull(), channels: { id: ctx.channelId }, product: { enabled: true, deletedAt: IsNull() } },
     });
     return variant?.enabled ? variant : undefined;
   }
@@ -299,27 +315,30 @@ export class OrderCreateService {
    * another channel is a stored idempotency_mismatch (review 10). Without a recorded order, undefined.
    */
   private async requeueResult(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
-    const order = await this.existingOrder(ctx, command.payload.clientOrderId);
+    const { clientOrderId } = command.payload;
+    const order = await this.existingOrder(ctx, clientOrderId);
     const ledger = this.connection.getRepository(ctx, TallyCommand);
-    if (!order) {
-      if (!await this.recordedAnywhere(ctx, command.payload.clientOrderId)) return undefined;
-      const mismatch = rejected(command.id, 'idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
-        { reason: 'client_order_in_other_channel' });
-      await ledger.update(command.id, { status: 'rejected', result: { ...mismatch } });
-      return mismatch;
+    if (order) {
+      // N2: Vendure also puts every order in the default channel, so the order's command row may be another channel's.
+      const orderId = this.encodeId(order.id);
+      const rows = await ledger.find({ where: { clientOrderId, status: In(['applied', 'needs_admin']) } });
+      const source = rows.find(row => (row.result as OrderCreateResult | null)?.serverRefs?.orderId === orderId);
+      // Unreachable by construction (an admin's rejection cancels the order and frees its clientOrderId): transient.
+      if (!source) throw new TransientCommandError(command.id, 'unclassified', new Error(`Order ${orderId} has no applied command`));
+      if (source.channelId === String(ctx.channelId)) {
+        if (source.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
+        const { id: _id, status: _status, ...stored } = source.result as unknown as OrderCreateResult;
+        const result: OrderCreateResult = { id: command.id, status: 'applied', ...stored };
+        await ledger.update(command.id, { status: 'applied', result: { ...result } });
+        return result;
+      }
+    } else if (!await this.recordedAnywhere(ctx, clientOrderId)) {
+      return undefined;
     }
-    const orderId = this.encodeId(order.id);
-    const rows = await ledger.find({ where: {
-      clientOrderId: command.payload.clientOrderId, channelId: String(ctx.channelId), status: In(['applied', 'needs_admin']),
-    } });
-    const source = rows.find(row => (row.result as OrderCreateResult | null)?.serverRefs?.orderId === orderId);
-    if (source?.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
-    // Unreachable by construction (an admin's rejection cancels the order and frees its clientOrderId): transient.
-    if (!source) throw new TransientCommandError(command.id, 'unclassified', new Error(`Order ${orderId} has no applied command`));
-    const { id: _id, status: _status, ...stored } = source.result as unknown as OrderCreateResult;
-    const result: OrderCreateResult = { id: command.id, status: 'applied', ...stored };
-    await ledger.update(command.id, { status: 'applied', result: { ...result } });
-    return result;
+    const mismatch = rejected(command.id, 'idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
+      { reason: 'client_order_in_other_channel' });
+    await ledger.update(command.id, { status: 'rejected', result: { ...mismatch } });
+    return mismatch;
   }
 
   // Review 2: ids cross the wire in the configured EntityIdStrategy's encoding, as the Admin API
@@ -389,12 +408,16 @@ export class OrderCreateService {
     const customerId = payload.customer?.customerId ? this.decodeId(payload.customer.customerId) : undefined;
     let customer = customerId !== undefined ? await this.customers.findOne(ctx, customerId) : undefined;
     if (!customer) {
-      const emailAddress = payload.customer?.email || WALK_IN_EMAIL;
-      const existing = await this.customers.findAll(ctx, { filter: { emailAddress: { eq: emailAddress } } });
-      customer = unwrap(await this.customers.createOrUpdate(ctx, {
-        emailAddress,
-        firstName: existing.items[0]?.firstName ?? '', lastName: existing.items[0]?.lastName ?? '',
-      }));
+      // Review: createOrUpdate matches a customer of any channel and overwrites its names, so find it the
+      // same way first (and add this channel, as createOrUpdate did); create only a missing one.
+      const emailAddress = normalizeEmailAddress(payload.customer?.email || WALK_IN_EMAIL);
+      const customers = this.connection.getRepository(ctx, Customer);
+      customer = await customers.findOne({ where: { emailAddress, deletedAt: IsNull() }, relations: ['channels'] }) ?? undefined;
+      if (!customer) {
+        customer = unwrap(await this.customers.createOrUpdate(ctx, { emailAddress, firstName: '', lastName: '' }));
+      } else if (!customer.channels.some(channel => idsAreEqual(channel.id, ctx.channelId))) {
+        await customers.createQueryBuilder().relation('channels').of(customer).add(ctx.channelId);
+      }
     }
     let order = await this.orders.createDraft(ctx);
     order.customer = customer;
@@ -426,7 +449,7 @@ export class OrderCreateService {
     }
     // ADR 0002 "Stock": top up a shortage before addItemToOrder, which would otherwise save the
     // line at the saleable quantity, and before ArrangingPayment, which checks saleable stock again.
-    const location = await this.stockLocations.defaultStockLocation(ctx);
+    const location = await this.stockLocations.defaultStockLocation(ctx) ?? pluginBug('Vendure returned no default stock location');
     const topUps: Array<{ variantId: string; id: ID; quantity: number }> = [];
     for (const [variantId, { variant, quantity }] of requested) {
       const shortfall = quantity - await this.variants.getSaleableStockLevel(ctx, variant);
@@ -450,7 +473,7 @@ export class OrderCreateService {
     await this.testObserver?.('setShippingMethod', ctx, order);
     for (const line of payload.lines) {
       if (!(line.discountMinor! > 0)) continue;
-      const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId)!;
+      const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId) ?? pluginBug(`No order line for clientLineId ${line.clientLineId}`);
       const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
         order, description: 'POS discount', sku: 'TALLY-DISCOUNT', listPrice: -line.discountMinor!,
         listPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
@@ -505,10 +528,13 @@ export class OrderCreateService {
     for (const tender of payload.payments) {
       if (remaining === 0) break;
       const amount = Math.min(tender.amountMinor, remaining);
-      unwrap(await this.payments.createPayment(ctx, order, amount, TALLY_PAYMENT_METHOD_CODE, { tender }));
+      const payment = unwrap(await this.payments.createPayment(ctx, order, amount, TALLY_PAYMENT_METHOD_CODE, { tender }));
+      // N1: the payload covers the total (pre-claim), so a declined tally-pos payment is the store's
+      // configuration (a replaced handler, a missing route mark), never underpaid.
+      if (payment.state === 'Declined') throw new StoreConfigurationRefusal();
       remaining -= amount;
     }
-    order = (await this.orders.findOne(ctx, order.id))!;
+    order = await this.orders.findOne(ctx, order.id) ?? pluginBug(`Order ${order.id} vanished inside its own transaction`);
     await this.testObserver?.('payments', ctx, order);
     if (order.state !== 'PaymentSettled') {
       const settled = await this.orders.transitionToState(ctx, order.id, 'PaymentSettled');

@@ -27,6 +27,16 @@ export class BusinessRejection extends Error {
  */
 export class StoreConfigurationRefusal extends Error {}
 
+/**
+ * N5: one of the plugin's own invariants broke (a bug in the plugin), raised explicitly where the
+ * plugin checks it. The only error stored as `internal_error`; nothing parses stacks.
+ */
+export class PluginBugError extends Error {}
+
+export function pluginBug(message: string): never {
+  throw new PluginBugError(message);
+}
+
 /** A returned ErrorResult, turned into a throw so the sale's savepoint rolls back (ADR 0002 §2). */
 export class ErrorResultThrown extends Error {
   constructor(readonly result: GraphQLErrorResult) {

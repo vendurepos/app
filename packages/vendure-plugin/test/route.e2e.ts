@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Controller, Post } from '@nestjs/common';
 import {
   Allow, Ctx, Logger, Order, OrderService, Payment, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
-  RequestContextService, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
+  RequestContextService, StockLevel, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
   defaultOrderProcess,
 } from '@vendure/core';
 import type { OrderProcess, OrderState } from '@vendure/core';
@@ -50,7 +50,7 @@ describe('POST /tally/v1/commands', () => {
   const environment = createPluginTestEnvironment({ orderOptions: { process: [defaultOrderProcess, {
     onTransitionStart: (_from, to) => (refuseCancel && to === 'Cancelled' ? 'Test process refuses Cancelled' : undefined),
   } satisfies OrderProcess<OrderState>] } }, [MerchantCorsPlugin, TallyPosPlugin, DummyRestPlugin]);
-  const { server, adminClient, variantIds, encode } = environment;
+  const { server, adminClient, variantIds, serviceIds, encode } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
   let base: string;
@@ -273,8 +273,7 @@ describe('POST /tally/v1/commands', () => {
     const logged = vi.spyOn(Logger, 'error');
     // Print has 2 on hand, so selling 3 tops up (the first adjustment) and then takes the top-up back (the second).
     const print = () => orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]);
-    const needsAdmin = async () => {
-      const input = print();
+    const needsAdmin = async (input = print()) => {
       const spy = vi.spyOn(stock, 'adjustProductVariantStock')
         .mockImplementationOnce(adjust)
         .mockImplementationOnce(() => Promise.reject(new Error('injected take-back failure')));
@@ -313,8 +312,20 @@ describe('POST /tally/v1/commands', () => {
       expect(replay.body.results[0].serverRefs.orderId).toBe(encode(orders[0].id));
 
       // Ruling 4: rejecting cancels the order; while it cannot be cancelled, the rejection is refused.
-      const rejectedInput = await needsAdmin();
+      // N3: a clientOrderId of the full 255 characters, whose replacement must still fit.
+      const longInput = print();
+      longInput.payload.clientOrderId = randomUUID().padEnd(255, 'x');
+      const printStock = async () => (await connection.rawConnection.getRepository(StockLevel).find({
+        where: { productVariantId: serviceIds.print[0] } })).reduce((sum, level) => sum + level.stockOnHand, 0);
+      const stockBefore = await printStock();
+      const rejectedInput = await needsAdmin(longInput);
       const [live] = await ordersFor(rejectedInput);
+      const paymentStates = async () => (await connection.rawConnection.getRepository(Payment).find({
+        where: { order: { id: live.id } } })).map(payment => payment.state);
+      // N4: the top-up the failed take-back left is still on hand, and the POS payment is settled.
+      const stockNeedsAdmin = await printStock();
+      expect(stockNeedsAdmin).toBe(Math.max(stockBefore, 3) - 3);
+      expect(await paymentStates()).toEqual(['Settled']);
       const orderRepository = connection.rawConnection.getRepository(Order);
       const cancellations = () => connection.rawConnection.getRepository(StockMovement).count({ where: { type: 'CANCELLATION' as never } });
       const cancellationsBefore = await cancellations();
@@ -330,12 +341,20 @@ describe('POST /tally/v1/commands', () => {
         state: 'Delivered', customFields: { tallyClientOrderId: rejectedInput.payload.clientOrderId },
       });
       expect(await cancellations()).toBe(cancellationsBefore);
+      // N4: a refused rejection changes nothing, the take-back and the payment cancellation included.
+      expect(await printStock()).toBe(stockNeedsAdmin);
+      expect(await paymentStates()).toEqual(['Settled']);
 
       await recipe.resolveNeedsAdmin(ctx, rejectedInput.id, 'rejected', 'order cancelled by the admin');
+      const renamed = `${longInput.payload.clientOrderId.slice(0, 238)}#rej:${createHash('sha256').update(rejectedInput.id).digest('hex').slice(0, 12)}`;
+      expect(renamed).toHaveLength(255);
       expect(await orderRepository.findOneByOrFail({ id: live.id })).toMatchObject({
-        state: 'Cancelled', customFields: { tallyClientOrderId: `${rejectedInput.payload.clientOrderId}#rejected:${rejectedInput.id}` },
+        state: 'Cancelled', customFields: { tallyClientOrderId: renamed },
       });
       expect(await cancellations()).toBe(cancellationsBefore + 1);
+      // N4: the top-up is taken back and Vendure's cancellation restocks the sale: the stock is as before the sale.
+      expect(await printStock()).toBe(stockBefore);
+      expect(await paymentStates()).toEqual(['Cancelled']);
       expect((await post({ commands: [rejectedInput] })).body.results[0]).toEqual({ id: rejectedInput.id, status: 'rejected', error: {
         code: 'platform_error', message: 'TALLY_ADMIN_REJECTED: order cancelled by the admin',
         data: { platformCode: 'TALLY_ADMIN_REJECTED', platformMessage: 'order cancelled by the admin' },

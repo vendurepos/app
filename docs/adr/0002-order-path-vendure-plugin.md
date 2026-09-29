@@ -172,11 +172,11 @@ with a test per row.
     permanent list (one that depends only on the payload and the store's
     configuration), as `platformErrorResult` shapes it. State-dependent
     errors (a state transition, stock, a declined payment) are not on it;
-  - `internal_error` only for the plugin's own programming error (a
-    `TypeError`, `RangeError` or `ReferenceError` raised by the plugin's own
-    modules, not by Vendure, the database client or an HTTP client) after
-    the claim and the complete rollback of the sale, with a generic message
-    and a correlation id. Before the claim it is transient.
+  - `internal_error` only for a `PluginBugError`, which the plugin raises
+    explicitly where one of its own invariants breaks, after the claim and
+    the complete rollback of the sale, with a generic message and a
+    correlation id. Any native error, the plugin's own `TypeError`
+    included, is transient; nothing parses stacks.
 - **Unclassifiable is transient.** Any other `ErrorResult`, and every
   database, driver, network or unknown-SQLSTATE error, answers 503 and
   stores nothing; the claim is released and the till resends the same id.
@@ -192,7 +192,9 @@ with a test per row.
   that is `needs_admin` answers 409, and so does a sale still in progress,
   whose unique key the new command waits on for the claim's 5 s. A new
   command id never gets round a 409 or an admin mark. In another channel,
-  the collision is a stored `idempotency_mismatch`.
+  the collision is a stored `idempotency_mismatch`, including from the
+  default channel, where Vendure also places every channel's orders: the
+  order's own command row decides whose sale it is.
 - **`needs_admin`.** The one compensating write is the stock take-back
   after fulfilment, in a savepoint of its own. If it fails, the plugin
   never answers `platform_error` and never releases the claim: the sale
@@ -201,9 +203,12 @@ with a test per row.
   the row as `applied` or `rejected` with
   `OrderCreateService.resolveNeedsAdmin`, and replays then answer that.
   `rejected` (`platform_error`, `platformCode: 'TALLY_ADMIN_REJECTED'`)
-  cancels the order with Vendure's `cancelOrder`, which restores its stock,
-  and frees its `clientOrderId`, all in the rejection's transaction; if the
-  order cannot be cancelled, the rejection is refused. A rejected row never
+  takes back the top-up the failed take-back left, cancels the settled
+  `tally-pos` payments, cancels the order with Vendure's `cancelOrder`,
+  which restores its stock, and frees its `clientOrderId` (a truncated
+  prefix and a hash of the command id, within 255 characters), all in the
+  rejection's transaction; if any step fails, the rejection is refused and
+  nothing changes. A rejected row never
   keeps a live order, so the till's Retry under a new id is a new sale.
 
 **What this retires, measured.** medusapos's lease, fencing token, advisory

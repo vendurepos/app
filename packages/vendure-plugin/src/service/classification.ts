@@ -1,6 +1,7 @@
-import { resolve, sep } from 'node:path';
 import type { GraphQLErrorResult } from '@vendure/core';
-import { BusinessRejection, ErrorResultThrown, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, transientKind } from './errors';
+import {
+  BusinessRejection, ErrorResultThrown, PLATFORM_ERROR_CODE, PluginBugError, StoreConfigurationRefusal, transientKind,
+} from './errors';
 import type { TransientKind } from './errors';
 
 /**
@@ -16,7 +17,7 @@ export const CLASSIFICATION = {
   mapped: 'stored', // an ErrorResult with a contract code: insufficient_stock
   permanent: 'stored', // an ErrorResult on PERMANENT_ERROR_RESULTS: platform_error
   unlisted: 'transient', // any other ErrorResult: 503
-  programming: 'stored', // the plugin's own TypeError, RangeError or ReferenceError: internal_error (before the claim: 503)
+  programming: 'stored', // a PluginBugError the plugin raised: internal_error (before the claim: 503)
   storeConfiguration: 'notStored', // a refused PaymentSettled with a configuration cause: store_configuration
   // The unique tallyClientOrderId. This channel: the new id stored applied with the result of the order's
   // applied command; 409 while that command awaits an admin or is in progress. Another channel: idempotency_mismatch.
@@ -55,22 +56,6 @@ export const PERMANENT_ERROR_RESULTS: Record<string, string> = {
   INELIGIBLE_PAYMENT_METHOD_ERROR: 'the POS payment method\'s checker refuses this order',
 };
 
-// src/ or dist/, whichever this module was loaded from.
-const PLUGIN_DIR = resolve(__dirname, '..');
-
-/**
- * True when a TypeError, RangeError or ReferenceError was raised by a frame in the plugin's own
- * modules (`pluginDir`, which itself sits in node_modules once installed), not by Vendure, the
- * database client or any other package.
- */
-export function isPluginProgrammingError(error: unknown, pluginDir = PLUGIN_DIR): boolean {
-  if (!(error instanceof TypeError || error instanceof RangeError || error instanceof ReferenceError)) return false;
-  if ((error as { driverError?: unknown }).driverError !== undefined) return false;
-  const frame = error.stack?.split('\n').find(line => line.trimStart().startsWith('at '));
-  const file = frame?.match(/\(?((?:file:\/\/)?\/[^():]+):\d+:\d+\)?$/)?.[1]?.replace(/^file:\/\//, '');
-  return !!file && file.startsWith(pluginDir + sep) && !file.slice(pluginDir.length).includes(`${sep}node_modules${sep}`);
-}
-
 export type Classification =
   | { origin: 'rejection' | 'mapped' | 'permanent' | 'programming'; outcome: 'stored'; rejection?: BusinessRejection }
   | { origin: 'unlisted' | 'database'; outcome: 'transient'; kind: TransientKind }
@@ -98,6 +83,6 @@ export function classify(error: unknown, clientOrderIndex: string): Classificati
   if (driverError?.code === '23505' && driverError.constraint === clientOrderIndex) {
     return { origin: 'clientOrderCollision', outcome: 'collision' };
   }
-  if (isPluginProgrammingError(error)) return { origin: 'programming', outcome: 'stored' };
+  if (error instanceof PluginBugError) return { origin: 'programming', outcome: 'stored' };
   return { origin: 'database', outcome: 'transient', kind: transientKind(error) ?? 'unclassified' };
 }

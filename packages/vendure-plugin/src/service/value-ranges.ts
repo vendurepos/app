@@ -35,6 +35,8 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor', 'discountMinor'] as const) minor(payload[field], field, maxMoney);
   for (const field of ['clientOrderId', 'registerId', 'cashierRef', 'sessionId'] as const) text(payload[field], field);
   text(payload.customer?.customerId, 'customer.customerId', 64);
+  // The bound both plugins share (RFC 5321's 254), inside Vendure's varchar(255) emailAddress.
+  text(payload.customer?.email, 'customer.email', 254);
   payload.lines.forEach((line, index) => {
     const path = `lines[${index}]`;
     if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) errors.push(`${path}.quantity: expected a positive integer`);

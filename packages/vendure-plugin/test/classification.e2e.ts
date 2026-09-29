@@ -6,8 +6,8 @@ import {
 import type { GraphQLErrorResult } from '@vendure/core';
 import { describe, expect, it } from 'vitest';
 import { CLASSIFICATION, MAPPED_ERROR_RESULTS, PERMANENT_ERROR_RESULTS } from '../src';
-import { classify, isPluginProgrammingError } from '../src/service/classification';
-import { BusinessRejection, ErrorResultThrown, StoreConfigurationRefusal } from '../src/service/errors';
+import { classify } from '../src/service/classification';
+import { BusinessRejection, ErrorResultThrown, PluginBugError, StoreConfigurationRefusal, pluginBug } from '../src/service/errors';
 import { commandFingerprint } from '../src/vendored/fingerprint';
 
 // Front desk ruling 1: one test per row of the origin × outcome table in src/service/classification.ts.
@@ -78,25 +78,14 @@ describe('error classification (ruling 1, the platform_error amendment)', () => 
     }
   });
 
-  it('programming: only a TypeError, RangeError or ReferenceError raised in the plugin\'s own code is stored internal_error', () => {
-    const own = raise(() => commandFingerprint(null as never));
-    expect(own).toBeInstanceOf(TypeError);
-    expect(isPluginProgrammingError(own)).toBe(true);
-    expect(classify(own, INDEX)).toEqual({ origin: 'programming', outcome: 'stored' });
-    // Raised by Node, by this test file, or not one of the three types: transient.
-    for (const error of [raise(() => new URL('not a url')), new TypeError('test'), new RangeError('test'), new SyntaxError('x'), new Error('x')]) {
-      expect(isPluginProgrammingError(error), String(error)).toBe(false);
+  it('programming (N5): only an explicit PluginBugError is stored internal_error; any native error, the plugin\'s own included, is transient', () => {
+    const bug = raise(() => pluginBug('invariant broke'));
+    expect(bug).toBeInstanceOf(PluginBugError);
+    expect(classify(bug, INDEX)).toEqual({ origin: 'programming', outcome: 'stored' });
+    const own = raise(() => commandFingerprint(null as never)); // A TypeError inside the plugin's own module.
+    for (const error of [own, raise(() => new URL('not a url')), new TypeError('test'), new RangeError('test'), new Error('x')]) {
       expect(classify(error, INDEX), String(error)).toEqual({ origin: 'database', outcome: 'transient', kind: 'unclassified' });
     }
-    // Installed, the plugin itself lives under node_modules; only a package nested below it is foreign.
-    const installed = '/app/node_modules/@vendurepos/plugin/dist';
-    const at = (file: string) => Object.assign(new TypeError('x'), { stack: `TypeError: x\n    at recipe (${file}:12:34)\n    at next (/app/y.js:1:1)` });
-    expect(isPluginProgrammingError(at(`${installed}/service/order-create.service.js`), installed)).toBe(true);
-    expect(isPluginProgrammingError(at(`${installed}/node_modules/dep/index.js`), installed)).toBe(false);
-    expect(isPluginProgrammingError(at('/app/node_modules/@vendure/core/dist/service/order.service.js'), installed)).toBe(false);
-    expect(isPluginProgrammingError(at('/app/node_modules/pg/lib/client.js'), installed)).toBe(false);
-    // A driver error that happens to be a TypeError is never a programming error.
-    expect(isPluginProgrammingError(Object.assign(raise(() => commandFingerprint(null as never)) as object, { driverError: {} }))).toBe(false);
   });
 
   it('storeConfiguration: a configuration refusal after the claim is answered but not stored', () => {
