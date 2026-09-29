@@ -99,7 +99,15 @@ marked temporary. The plugin's first PR after S1 consumes the package.
    1. **shape validation**: types, presence, versions and U+0000 in any
       string (which Postgres cannot hold, even for the lookup), with no
       database access: `invalid_payload` or `unsupported_version`, not
-      stored;
+      stored. The deliberate exceptions are the envelope `id` bound (≤ 64), because the id is
+      the replay key itself, so no stored row can have a longer id and a replay can
+      never be refused by this bound; the duplicate-`clientLineId` refusal, because
+      the till mints a UUIDv7 per line, so no applied command carries a duplicate;
+      and the vendored discount value checks (each `discountMinor` is a non-negative
+      safe integer, and the order's `discountMinor` equals the sum of the lines'),
+      because these have not tightened since any command was applied.
+      The discount value checks move to step 4 when the vendored shape is next
+      re-vendored from `@tallyui/core/server`;
    2. **the replay read**: a plain `SELECT` of the ledger by command id,
       before any claim. A recorded id answers as recorded (`duplicate` with
       the stored result, the stored rejection, `idempotency_mismatch` for
