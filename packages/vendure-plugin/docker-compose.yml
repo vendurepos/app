@@ -1,5 +1,5 @@
-# Test services for @vendurepos/plugin. Project name vendurepos-plugin-test (package.json scripts),
-# loopback :5445, so it never collides with the dev store (:5442), the smoke store (:5443) or S1 (:5444).
+# Test services for @vendurepos/plugin. scripts/test-stack.sh selects the worktree project and ports.
+# Direct Compose runs retain the CI/legacy loopback port defaults.
 services:
   postgres:
     image: postgres:16
@@ -9,13 +9,13 @@ services:
       POSTGRES_DB: plugin
       TZ: UTC
       PGTZ: UTC
-    ports: ["127.0.0.1:5445:5432"]
+    ports: ["127.0.0.1:${PLUGIN_TEST_PG_PORT:-5445}:5432"]
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "vendure", "-d", "plugin"]
       interval: 2s
       timeout: 5s
       retries: 30
-  # The real SMTP transport of test/email-smtp.e2e.ts: SMTP on loopback :1045, its HTTP API on :8045.
+  # The real SMTP transport of test/email-smtp.e2e.ts, with SMTP and HTTP API on loopback.
   mailpit:
     image: axllent/mailpit:v1.31.3
-    ports: ["127.0.0.1:1045:1025", "127.0.0.1:8045:8025"]
+    ports: ["127.0.0.1:${PLUGIN_TEST_SMTP_PORT:-1045}:1025", "127.0.0.1:${PLUGIN_TEST_MAILPIT_PORT:-8045}:8025"]

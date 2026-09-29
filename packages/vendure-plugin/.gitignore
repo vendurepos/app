@@ -2,3 +2,4 @@ node_modules/
 dist/
 # Written by Vendure at runtime.
 .vendure/
+.test-stack.env
