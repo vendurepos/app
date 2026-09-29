@@ -391,6 +391,9 @@ it proves each of these with a test:
    and never counting the out-of-stock threshold; a pre-existing negative on-hand
    is store state, not this sale's shortfall, and the till learns it through stock
    sync, not the warning (Front desk, 2026-09-29).
+   A threshold under-allocation's remainder goes to the default location even
+   when that location has no physical stock, per the ruling.
+   The `insufficient_stock` warning is aggregate over the channel's locations.
 8. **Lines.** POS lines stay 1:1 with order lines, including two lines of
    the same variant.
 9. **Tenders.** Split tender and overpayment: the payments cover the order
@@ -410,6 +413,10 @@ it proves each of these with a test:
     MultiChannel over-allocates by using the full requested quantity at each
     location (`multi-channel-stock-location-strategy.js:87-113`). Tests measure
     per-location stock levels rather than Sale-row sums.
+    MultiChannel's per-ctx stock-level cache makes a second same-variant line in
+    one order allocate from pre-allocation levels (`multi-channel-stock-location-strategy.js`
+    `getStockLevelsForVariant`). The plugin works around it for POS lines by
+    allocating each on a copied context.
 
 S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
 

@@ -51,9 +51,10 @@ export class TallyStockLocationStrategy implements StockLocationStrategy {
   forSale(...args: Parameters<StockLocationStrategy['forSale']>) { return this.inner.forSale(...args); }
   forCancellation(...args: Parameters<StockLocationStrategy['forCancellation']>) { return this.inner.forCancellation(...args); }
   async forAllocation(...args: Parameters<StockLocationStrategy['forAllocation']>) {
-    const plan = await this.inner.forAllocation(...args);
-    const [ctx, , orderLine, quantity] = args;
-    if (!orderLine.customFields?.tallyClientLineId) return plan;
+    const [ctx, stockLocations, orderLine, quantity] = args;
+    if (!orderLine.customFields?.tallyClientLineId) return this.inner.forAllocation(...args);
+    // Re-read stock levels for each POS line of the same variant while retaining the transaction.
+    const plan = await this.inner.forAllocation(ctx.copy(), stockLocations, orderLine, quantity);
     let sum = 0;
     const capped = plan.flatMap(entry => {
       const kept = Math.min(entry.quantity, quantity - sum);

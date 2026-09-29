@@ -698,7 +698,7 @@ export class OrderCreateService {
     for (const line of order.lines.filter(line => line.customFields.tallyClientLineId)) {
       const allocations = await this.connection.getRepository(ctx, Allocation).find({ where: { orderLine: { id: line.id } } });
       if (allocations.reduce((sum, entry) => sum + entry.quantity, 0) !== line.quantity) throw new StoreConfigurationRefusal(
-        `Stock allocation for order line ${line.id} did not match its quantity`);
+        `Stock allocation for POS line ${line.customFields.tallyClientLineId} did not match its quantity; a custom StockLocationStrategy or StockAllocationStrategy may allocate later than PaymentSettled or not in full`);
     }
     order.customFields.tallyPayments = JSON.stringify(payload.payments);
     order.orderPlacedAt = new Date(payload.createdAt);

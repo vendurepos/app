@@ -88,6 +88,8 @@ describe('VP3-3: MultiChannel stock locations', () => {
     } finally { await threshold(0); }
   });
 
+  // Canary for Vendure's MultiChannel over-allocation: when upstream fixes it, this fails;
+  // then update the expected storefront sum to 4 and D's leftover stockAllocated to 0.
   it('4: storefront over-allocation is measured; POS caps it without leftover allocated stock', async () => {
     await setLevels(2, 3);
     expect(String((await connection.rawConnection.getRepository(StockLocation).find())[0].id)).toBe(String(x.id));
@@ -121,6 +123,24 @@ describe('VP3-3: MultiChannel stock locations', () => {
     const pos = await sell(4);
     expect(pos.rows.reduce((total, row) => total + row.quantity, 0)).toBe(4);
     expect(await state()).toEqual({ [String(d.id)]: [1, 0], [String(x.id)]: [0, 0] });
+  });
+
+  it('two POS lines of the same variant allocate from where the stock is', async () => {
+    await setLevels(2, 3);
+    expect(String((await connection.rawConnection.getRepository(StockLocation).find())[0].id)).toBe(String(x.id));
+    const input = orderCommand([
+      { variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 },
+      { variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 },
+    ]);
+    expect(input.payload.lines[0].clientLineId).not.toBe(input.payload.lines[1].clientLineId);
+    const result = await run(input);
+    expect(result.status).toBe('applied');
+    expect(await state()).toEqual({ [String(d.id)]: [1, 0], [String(x.id)]: [0, 0] });
+    const rows = await allocations(decode(result.serverRefs!.orderId));
+    expect(rows.reduce((sum, row) => sum + row.quantity, 0)).toBe(4);
+    expect(rows.filter(row => String(row.stockLocationId) === String(x.id)).reduce((sum, row) => sum + row.quantity, 0)).toBe(3);
+    expect(rows.filter(row => String(row.stockLocationId) === String(d.id)).reduce((sum, row) => sum + row.quantity, 0)).toBe(1);
+    expect(result.warnings).toBeUndefined();
   });
 
   it('5: physical shortfall excludes the threshold', async () => {
