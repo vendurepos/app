@@ -1,6 +1,6 @@
 import {
-  Channel, ConfigService, InsufficientStockOnHandError, Order, OrderLine, OrderService, Payment,
-  ProductVariantService, StockMovement, TaxRate, TransactionalConnection, defaultOrderProcess,
+  Channel, ConfigService, Customer, InsufficientStockOnHandError, Order, OrderLine, OrderService, Payment,
+  ProductVariantService, ShippingLine, StockMovement, Surcharge, TaxRate, TransactionalConnection, defaultOrderProcess,
 } from '@vendure/core';
 import type { OrderProcess, OrderState } from '@vendure/core';
 import { parse } from 'graphql';
@@ -45,6 +45,9 @@ describe('error classes (ADR 0002 §2)', () => {
       lines: await connection.rawConnection.getRepository(OrderLine).count(),
       payments: await connection.rawConnection.getRepository(Payment).count(),
       stockMovements: await connection.rawConnection.getRepository(StockMovement).count(),
+      surcharges: await connection.rawConnection.getRepository(Surcharge).count(),
+      shippingLines: await connection.rawConnection.getRepository(ShippingLine).count(),
+      customers: await connection.rawConnection.getRepository(Customer).count(),
     };
   }
   const ledgerFor = (input: CommandEnvelope) => connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id });
@@ -143,6 +146,57 @@ describe('error classes (ADR 0002 §2)', () => {
     } finally {
       saleable.mockRestore();
     }
+  });
+
+  it('platform_error leaves no durable change; a Retry under a new id with the same clientOrderId makes exactly one order', async () => {
+    // The till requeues a platform_error under a NEW command id, so the rejection must leave nothing.
+    refuseTo = 'PaymentSettled';
+    const emailAddress = 'vp1-platform-error@example.com';
+    // Before the refusal the recipe writes a new customer, a stock top-up (Print: 2 on hand), lines,
+    // a discount surcharge, a shipping line and a payment, so every count below is non-vacuous.
+    const lines = [{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500, discountMinor: 100 }];
+    const input = orderCommand(lines, undefined, { email: emailAddress });
+    let written: Record<string, number> = {};
+    const baseline = await counts();
+    recipe.testObserver = async (stage, ctx, order) => {
+      if (stage !== 'payments' || order.customFields.tallyClientOrderId !== input.payload.clientOrderId) return;
+      const ofOrder = { where: { order: { id: order.id } } };
+      written = {
+        lines: await connection.getRepository(ctx, OrderLine).count(ofOrder),
+        payments: await connection.getRepository(ctx, Payment).count(ofOrder),
+        surcharges: await connection.getRepository(ctx, Surcharge).count(ofOrder),
+        shippingLines: await connection.getRepository(ctx, ShippingLine).count(ofOrder),
+        stockMovements: await connection.getRepository(ctx, StockMovement).count() - baseline.stockMovements,
+        customers: await connection.getRepository(ctx, Customer).count({ where: { emailAddress } }),
+      };
+    };
+    const result = await expectStored(input, {
+      code: 'platform_error', message: expect.any(String),
+      data: { platformCode: 'ORDER_STATE_TRANSITION_ERROR', platformMessage: 'ORDER_STATE_TRANSITION_ERROR' },
+    });
+    expect(written).toEqual({ lines: 1, payments: 1, surcharges: 1, shippingLines: 1, stockMovements: 1, customers: 1 });
+    // (a) Only the ledger row survives: no order, line, payment, surcharge, shipping line, stock movement or customer.
+    expect(await counts()).toEqual({ ...baseline, ledger: baseline.ledger + 1 });
+    expect(await connection.rawConnection.getRepository(Customer).count({ where: { emailAddress } })).toBe(0);
+
+    // (b) The till's Retry: a new command id, the same sale. It applies once...
+    refuseTo = undefined;
+    recipe.testObserver = undefined;
+    const retry = { ...input, id: orderCommand(lines).id };
+    const applied = await run(retry);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ id: retry.id, status: 'applied' });
+    const ordersFor = () => connection.rawConnection.getRepository(Order).count({
+      where: { customFields: { tallyClientOrderId: input.payload.clientOrderId } },
+    });
+    expect(await ordersFor()).toBe(1);
+    // ...and the clientOrderId requeue path answers a further Retry with the same order, writing nothing.
+    const afterRetry = await counts();
+    const again = { ...input, id: orderCommand(lines).id };
+    expect(await run(again)).toEqual({ id: again.id, status: 'applied', serverRefs: applied.serverRefs });
+    expect(await counts()).toEqual(afterRetry);
+    expect(await ordersFor()).toBe(1);
+    // The rejected command id itself still replays its stored answer.
+    expect(await run(input)).toEqual(result);
   });
 
   it('a unique-violation race on tallyClientOrderId takes the requeue path: applied with the first order\'s refs, one order, nothing written', async () => {
