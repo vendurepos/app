@@ -11,7 +11,10 @@
     "strict": true,
     "skipLibCheck": true,
     "declaration": true,
-    "noEmit": true
+    "noEmit": true,
+    // test/email-smtp.e2e.ts imports the package's own ./email export, which runs from dist/; typecheck
+    // (before the build) reads its source.
+    "paths": { "@vendurepos/plugin/email": ["./src/email.ts"] }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

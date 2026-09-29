@@ -122,9 +122,11 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     try {
       const result = await run(input);
       expect(result).toEqual({ id: input.id, status: 'rejected', error: {
-        code: 'internal_error', message: 'The server could not record the order',
-        data: { message: 'Internal error', correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/) },
+        code: 'internal_error', message: expect.stringMatching(/^Internal error \(ref [0-9a-f-]{36}\)$/),
+        data: { correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/) },
       } });
+      // ADR-038's shape: the message names the same correlation id as the data.
+      expect(result.error!.message).toBe(`Internal error (ref ${(result.error!.data as { correlationId: string }).correlationId})`);
       expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
       expect(JSON.stringify(await ledgerFor(input))).not.toContain('injected');
       const { correlationId } = result.error!.data as { correlationId: string };
@@ -159,7 +161,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('review 1: a tally-pos payment Authorized by its handler is store_configuration, not stored, never underpaid; a replaced handler is refused before the claim', async () => {
+  it('review 1: a tally-pos payment Authorized by its handler is store_configuration, not stored, never underpaid; a replaced handler is refused after the claim, unstored', async () => {
     const input = command();
     const before = await counts();
     const handler = vi.spyOn(tallyPaymentHandler, 'createPayment')
@@ -172,7 +174,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     }
     expect(await counts()).toEqual(before);
     expect(await ledgerFor(input)).toBeNull();
-    // A method whose handler is no longer the plugin's is refused before the claim.
+    // A method whose handler is no longer the plugin's is store-wide setup: refused after the claim, which rolls back unstored.
     const methods = connection.rawConnection.getRepository(PaymentMethod);
     const method = await methods.findOneByOrFail({ code: 'tally-pos' });
     await methods.update(method.id, { handler: { code: 'dummy-payment-handler', args: [] } });
@@ -203,6 +205,26 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     } finally {
       repositories.mockRestore();
     }
+  });
+
+  it('#12 nit 5: a clientLineId repeated within one payload is invalid_payload during shape validation, unstored', async () => {
+    const inputs = ([2, 3] as const).map(version => orderCommand([
+      { clientLineId: 'vp2b-line', variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 },
+      { clientLineId: 'vp2b-line', variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 },
+    ], undefined, undefined, { version }));
+    const before = await counts();
+    const repositories = vi.spyOn(connection, 'getRepository');
+    try {
+      for (const input of inputs) {
+        expect(await run(input), `v${input.version}`).toEqual({ id: input.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'lines[1].clientLineId: expected no duplicate clientLineId',
+        } });
+      }
+      expect(repositories).not.toHaveBeenCalled();
+    } finally {
+      repositories.mockRestore();
+    }
+    expect(await counts()).toEqual(before);
   });
 
   it('nit: a customerId over 64 characters or unknown is ignored with a customer_ignored warning, never refused', async () => {

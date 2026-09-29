@@ -69,6 +69,10 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U vendure -d plugin"
           --health-interval 2s --health-timeout 5s --health-retries 30
+      # The real SMTP transport of test/email-smtp.e2e.ts, as in the package's docker-compose.yml.
+      mailpit:
+        image: axllent/mailpit:v1.31.3
+        ports: ['1045:1025', '8045:8025']
     defaults:
       run:
         working-directory: packages/vendure-plugin

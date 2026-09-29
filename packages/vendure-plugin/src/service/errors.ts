@@ -10,7 +10,10 @@ export const PLATFORM_ERROR_CODE = 'platform_error';
 /** TallyUI #219 R2: a PluginBugError before the recipe's first write, stored with a correlation id. */
 export const INTERNAL_ERROR_CODE = 'internal_error';
 
-/** A business refusal found after the claim: the sale rolls back and the rejection is stored on the claim. */
+/**
+ * A race on the pre-claim checks, found inside the recipe (unknown_variant, underpaid): always transient
+ * (CLASSIFICATION.rejection). The sale rolls back, nothing is stored, and the resend's checks answer it.
+ */
 export class BusinessRejection extends Error {
   constructor(readonly code: string, message: string, readonly data?: Record<string, unknown>) {
     super(message);
@@ -68,7 +71,8 @@ export function unwrap<T>(result: T): Exclude<T, GraphQLErrorResult> {
 }
 
 /**
- * The stored `internal_error` for a plugin bug before the recipe's first write (TallyUI #219 R2). The raw
+ * The stored `internal_error` for a plugin bug before the recipe's first write (TallyUI #219 R2), in ADR-038's
+ * shape: `Internal error (ref <correlationId>)` with `data: { correlationId }`. The raw
  * message goes only to the log, under a random correlation id the result carries (N7): it can hold internals.
  */
 export function internalErrorFor(commandId: string, error: unknown) {
@@ -76,7 +80,7 @@ export function internalErrorFor(commandId: string, error: unknown) {
   Logger.error(`order.create ${commandId} failed on a plugin bug (correlationId ${correlationId}): `
     + `${error instanceof Error ? error.message : String(error)}`, loggerCtx, error instanceof Error ? error.stack : undefined);
   return { id: commandId, status: 'rejected' as const, error: {
-    code: INTERNAL_ERROR_CODE, message: 'The server could not record the order', data: { message: 'Internal error', correlationId },
+    code: INTERNAL_ERROR_CODE, message: `Internal error (ref ${correlationId})`, data: { correlationId },
   } };
 }
 
