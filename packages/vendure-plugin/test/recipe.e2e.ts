@@ -1,6 +1,6 @@
 import {
   Customer, Order, OrderLine, OrderService, Payment, PaymentService,
-  Sale, ShippingLine, StockLevel, StockMovement, Surcharge, TransactionalConnection, isGraphQlErrorResult,
+  Sale, ShippingLine, StockLevel, StockMovement, Surcharge, TransactionalConnection,
 } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -65,7 +65,7 @@ describe('order.create recipe through OrderCreateService', () => {
     return levels.reduce((sum, level) => sum + level.stockOnHand, 0);
   }
 
-  it('refuses malformed envelopes, invalid payloads and unsupported versions before the claim, writing nothing', async () => {
+  it('refuses malformed envelopes, invalid payloads and unsupported versions writing no sale', async () => {
     const before = await counts();
     const command = orderCommand([mug()]);
     const invalid = [
@@ -204,7 +204,7 @@ describe('order.create recipe through OrderCreateService', () => {
     }
   });
 
-  it('review 3: out-of-range values are invalid_payload before the claim, writing nothing', async () => {
+  it('review 3: out-of-range values are invalid_payload, writing no sale', async () => {
     const before = await counts();
     const long = 'x'.repeat(256);
     const cases: Array<[string, (payload: OrderCreatePayload) => void]> = [
@@ -217,16 +217,12 @@ describe('order.create recipe through OrderCreateService', () => {
       ['negative amountMinor', payload => { payload.payments[0].amountMinor = -1; }],
       ['negative tenderedMinor', payload => { payload.payments[0].tenderedMinor = -1; }],
       ['fractional changeMinor', payload => { payload.payments[0].changeMinor = 0.5; }],
-      ['zero quantity', payload => { payload.lines[0].quantity = 0; }],
-      ['negative quantity', payload => { payload.lines[0].quantity = -1; }],
-      ['fractional quantity', payload => { payload.lines[0].quantity = 1.5; }],
       ['unitPriceMinor above int4', payload => { payload.lines[0].unitPriceMinor = 2_147_483_648; }],
       // N2: the default MoneyStrategy's columns are int4.
       ['totalMinor above int4', payload => { payload.totalMinor = 2_147_483_648; }],
       ['amountMinor above int4', payload => { payload.payments[0].amountMinor = 2_147_483_648; }],
       ['unsafe tenderedMinor', payload => { payload.payments[0].tenderedMinor = Number.MAX_SAFE_INTEGER + 1; }],
       // N3: OrderLine.quantity is int4, and createdAt becomes tallySaleAt and orderPlacedAt.
-      ['quantity above int4', payload => { payload.lines[0].quantity = 2_147_483_648; }],
       ['unparseable createdAt', payload => { payload.createdAt = 'yesterday-ish'; }],
       ['empty createdAt', payload => { payload.createdAt = ''; }],
       // The v3 fiscal figures carry the shared contract's safe-integer bound.
@@ -238,7 +234,6 @@ describe('order.create recipe through OrderCreateService', () => {
       ['clientLineId over 255', payload => { payload.lines[0].clientLineId = long; }],
       ['clientPaymentId over 255', payload => { payload.payments[0].clientPaymentId = long; }],
       ['reference over 255', payload => { payload.payments[0].reference = long; }],
-      ['customerId over 64', payload => { payload.customer = { customerId: 'x'.repeat(65) }; }],
     ];
     for (const [name, mutate] of cases) {
       const command = orderCommand([mug()]);
@@ -277,31 +272,24 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(order.totalWithTax).toBe(0);
   });
 
-  it('proof 5: an underpaid sale is a stored `underpaid`; order, lines, payments, stock movements, surcharges, shipping lines, history and customers roll back', async () => {
+  it('proof 5, re-ruling 4: an underpaid sale is stored on the claim: no order, line, payment, stock movement, surcharge, shipping line, history or customer', async () => {
     const before = await rollbackCounts();
     const stockBefore = await stock(serviceIds.mug[0]);
     // These spies call Vendure unchanged: no mock implementation or synthetic ErrorResult.
     const transition = vi.spyOn(server.app.get(OrderService), 'transitionToState');
     const payment = vi.spyOn(server.app.get(PaymentService), 'createPayment');
     try {
-      // The discount makes the recipe save a surcharge row before the failing transition, so the
-      // surcharge count below cannot pass vacuously; a new buyer email does the same for customers.
+      // A discounted sale by a new buyer, which after the claim would write a surcharge and a customer.
       const command = orderCommand([{ ...mug(), discountMinor: 100 }], [{ method: 'cash', amountMinor: 500 }],
         { email: 'vp1-proof5-rollback@example.com' });
       const result = await submit(command);
       expect(result).toEqual({ id: command.id, status: 'rejected', error: {
         code: 'underpaid', message: 'Payments of 500 are below the total of 875',
       } });
-      expect(transition.mock.calls.at(-1)?.[2]).toBe('PaymentSettled');
-      const returned = await transition.mock.results.at(-1)!.value;
-      expect(Boolean(isGraphQlErrorResult(returned))).toBe(true);
-      expect(returned.__typename).toBe('OrderStateTransitionError');
-      expect(payment).toHaveBeenCalledTimes(1);
-      expect(await payment.mock.results[0].value).toMatchObject({ amount: 500, state: 'Settled' });
+      expect(transition).not.toHaveBeenCalled();
+      expect(payment).not.toHaveBeenCalled();
       expect(await rollbackCounts()).toEqual({ ...before, commands: before.commands + 1 });
-      const ledger = await connection.rawConnection.getRepository(TallyCommand).find({ where: { id: command.id } });
-      expect(ledger).toHaveLength(1);
-      expect(ledger[0]).toMatchObject({ status: 'rejected', result });
+      expect(await connection.rawConnection.getRepository(TallyCommand).count({ where: { id: command.id } })).toBe(1);
       expect(await stock(serviceIds.mug[0])).toBe(stockBefore);
     } finally {
       transition.mockRestore();

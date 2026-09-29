@@ -1,11 +1,14 @@
+import { createRequire } from 'node:module';
 import { OnApplicationBootstrap } from '@nestjs/common';
 import {
-  Channel, ChannelService, ConfigService, CustomerService, LanguageCode, PaymentMethodService, PluginCommonModule,
-  ProcessContext, RequestContextService, ShippingMethodService, TransactionalConnection, User, VendurePlugin,
-  manualFulfillmentHandler,
+  Channel, ChannelService, ConfigService, CustomerService, LanguageCode, Logger, PaymentMethodService, Permission,
+  PluginCommonModule, ProcessContext, RequestContextService, ShippingMethodService, TransactionalConnection, User,
+  VendurePlugin, manualFulfillmentHandler,
 } from '@vendure/core';
-import type { ID, RequestContext } from '@vendure/core';
+import type { ID, Middleware, RequestContext } from '@vendure/core';
+import { TallyCommandsController } from './api/commands.controller';
 import { TallyInfoController } from './api/info.controller';
+import { loggerCtx } from './service/errors';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import {
   TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, TallyPriceStrategy, tallyPaymentChecker, tallyPaymentHandler,
@@ -19,12 +22,34 @@ function withMissing<T>(list: T[], items: T[], same: (a: T, b: T) => boolean): T
   return [...list, ...items.filter(item => !list.some(existing => same(existing, item)))];
 }
 
+const COMMANDS_ROUTE = '/tally/v1/commands';
+// 50 commands of up to about 20 kB each, as medusapos allows; Vendure's global parser keeps 100 kB.
+const COMMANDS_BODY_LIMIT = '1mb';
+const PROTOCOL_HEADER = 'X-Tally-Protocol';
+
+type Next = (error?: unknown) => void;
+type Reply = { status(code: number): { json(body: unknown): void } };
+type Parser = (req: unknown, res: Reply, next: Next) => void;
+
+// The JSON parser Vendure itself uses: express is @vendure/core's dependency, so it is loaded from
+// there rather than added to this package's. A body it refuses (too large, malformed) is the
+// client's fault: answered here with the parser's own 4xx, never as the 500 Nest would make of it.
+function commandsBodyParser(): Middleware['handler'] {
+  const express = createRequire(require.resolve('@vendure/core'))('express') as { json(options: { limit: string }): Parser };
+  const parse = express.json({ limit: COMMANDS_BODY_LIMIT });
+  return ((req: unknown, res: Reply, next: Next) => parse(req, res, error => {
+    const status = (error as { status?: unknown } | undefined)?.status;
+    if (typeof status !== 'number' || status < 400 || status >= 500) return next(error);
+    res.status(status).json({ code: 'invalid_payload', message: (error as Error).message });
+  })) as Middleware['handler'];
+}
+
 /** VendurePOS: TallyUI's order.create as one Postgres transaction per command (ADR 0002). */
 @VendurePlugin({
   compatibility: '^3.6.0',
   imports: [PluginCommonModule],
   entities: [TallyCommand],
-  controllers: [TallyInfoController],
+  controllers: [TallyInfoController, TallyCommandsController],
   providers: [OrderCreateService],
   exports: [OrderCreateService],
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
@@ -44,6 +69,18 @@ function withMissing<T>(list: T[], items: T[], same: (a: T, b: T) => boolean): T
     payment.paymentMethodEligibilityCheckers = withMissing(payment.paymentMethodEligibilityCheckers ?? [], [tallyPaymentChecker], byCode);
     shipping.shippingEligibilityCheckers = withMissing(shipping.shippingEligibilityCheckers, [tallyShippingChecker], byCode);
     shipping.shippingCalculators = withMissing(shipping.shippingCalculators, [tallyShippingCalculator], byCode);
+    const api = config.apiOptions;
+    api.middleware = withMissing(api.middleware, [{ route: COMMANDS_ROUTE, handler: commandsBodyParser(), beforeListen: true }],
+      (a, b) => a.route === b.route);
+    // A preflight carrying X-Tally-Protocol passes without auth. Vendure's default CORS reflects the
+    // requested headers; a merchant's explicit allowedHeaders list gets the header added.
+    const cors = api.cors;
+    if (typeof cors === 'object' && cors.allowedHeaders !== undefined) {
+      const headers = typeof cors.allowedHeaders === 'string' ? cors.allowedHeaders.split(',').map(h => h.trim()) : cors.allowedHeaders;
+      if (!headers.some(header => header.toLowerCase() === PROTOCOL_HEADER.toLowerCase())) {
+        cors.allowedHeaders = [...headers, PROTOCOL_HEADER];
+      }
+    }
     return config;
   },
 })
@@ -67,21 +104,27 @@ export class TallyPosPlugin implements OnApplicationBootstrap {
     if (!this.processContext.isServer) return;
     // The assign mutations check the active user's permissions on the target channel.
     const identifier = this.config.authOptions.superadminCredentials?.identifier;
-    const user = identifier ? await this.connection.rawConnection.getRepository(User).findOne({
+    const found = identifier ? await this.connection.rawConnection.getRepository(User).findOne({
       where: { identifier }, relations: ['roles', 'roles.channels'],
     }) : null;
+    // Review nit 3: without a usable superadmin, skip the assignment rather than stop the server.
+    const user = found?.roles.some(role => role.permissions.includes(Permission.SuperAdmin)) ? found : undefined;
+    if (!user) {
+      Logger.error(`The superadmin "${identifier}" (authOptions.superadminCredentials.identifier) ${found ? 'lacks the SuperAdmin '
+        + 'permission' : 'was not found'}, so the POS payment and shipping methods are not assigned to the other channels`, loggerCtx);
+    }
     // Contexts come from the channel token, so the channel carries the relations Vendure loads.
-    const context = (token: string) => this.contexts.create({ apiType: 'admin', channelOrToken: token, user: user ?? undefined });
+    const context = (token: string) => this.contexts.create({ apiType: 'admin', channelOrToken: token, user });
     const defaultCtx = await context((await this.channels.getDefaultChannel()).token);
     const paymentMethodId = await this.ensurePayment(defaultCtx);
     const shippingMethodId = await this.ensureShipping(defaultCtx);
     for (const channel of await this.connection.rawConnection.getRepository(Channel).find({ order: { id: 'ASC' } })) {
       const ctx = await context(channel.token);
       const byCode = (code: string) => ({ filter: { code: { eq: code } } });
-      if (!(await this.paymentMethods.findAll(ctx, byCode(TALLY_PAYMENT_METHOD_CODE))).items.length) {
+      if (user && !(await this.paymentMethods.findAll(ctx, byCode(TALLY_PAYMENT_METHOD_CODE))).items.length) {
         await this.paymentMethods.assignPaymentMethodsToChannel(defaultCtx, { paymentMethodIds: [paymentMethodId], channelId: channel.id });
       }
-      if (!(await this.shippingMethods.findAll(ctx, byCode(TALLY_SHIPPING_METHOD_CODE))).items.length) {
+      if (user && !(await this.shippingMethods.findAll(ctx, byCode(TALLY_SHIPPING_METHOD_CODE))).items.length) {
         await this.shippingMethods.assignShippingMethodsToChannel(defaultCtx, { shippingMethodIds: [shippingMethodId], channelId: channel.id });
       }
       const walkIn = await this.customers.findAll(ctx, { filter: { emailAddress: { eq: WALK_IN_EMAIL } } });

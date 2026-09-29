@@ -1,8 +1,9 @@
 import {
-  Order, OrderLine, OrderService, RequestContext, RequestContextService, Sale, StockLevel,
+  ConfigService, Order, OrderLine, OrderService, RequestContext, RequestContextService, Sale, StockLevel,
   StockMovement, StockMovementService, TransactionalConnection, isGraphQlErrorResult,
 } from '@vendure/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { OrderCreateService } from '../src';
 import type { OrderCreateResult } from '../src';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -129,16 +130,27 @@ describe('proof 7: a stock shortage is topped up before addItemToOrder and taken
       .toMatchObject({ afterTopUp: before.onHand + 1, afterFulfilment: before.onHand + 1 - 3, end: -1 });
   });
 
-  it('rollback: a top-up followed by an underpaid refusal leaves stock levels and movements unchanged', async () => {
+  it('rollback: a top-up followed by an after-claim refusal (a configuration race) leaves stock levels and movements unchanged', async () => {
     const before = { level: await level(), movements: (await movements()).length };
     const observer = observe();
-    let result: OrderCreateResult;
+    const recipe = server.app.get(OrderCreateService);
+    const shippingOptions = server.app.get(ConfigService).shippingOptions;
+    const handlers = shippingOptions.fulfillmentHandlers;
+    // Ruling (A): underpaid is now refused before the claim, so the refusal after the top-up is a race:
+    // the manual fulfilment handler disappears after PaymentSettled's payment, and createFulfillment refuses.
+    recipe.testObserver = async stage => {
+      if (stage === 'payments') shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment');
+    };
+    let result: unknown;
     try {
-      result = await run(orderCommand([{ variantId: print, quantity: 3, unitPriceMinor: 4500 }], [{ method: 'cash', amountMinor: 500 }]));
+      result = await run(orderCommand([{ variantId: print, quantity: 3, unitPriceMinor: 4500 }])).catch((error: unknown) => error);
     } finally {
       observer.restore();
+      recipe.testObserver = undefined;
+      shippingOptions.fulfillmentHandlers = handlers;
     }
-    expect(result).toMatchObject({ status: 'rejected', error: { code: 'underpaid' } });
+    // Re-ruling 3: a race after the first event rolls everything back as transient.
+    expect(result).toMatchObject({ kind: 'unclassified', cause: { result: { errorCode: 'INVALID_FULFILLMENT_HANDLER_ERROR' } } });
     const topUp = `adjust:${3 - before.level.onHand}`;
     expect(observer.events.indexOf(topUp)).toBeGreaterThanOrEqual(0);
     expect(observer.events.indexOf('addItemToOrder')).toBeGreaterThan(observer.events.indexOf(topUp));

@@ -20,12 +20,16 @@ export class TallyCommand {
   @Column('varchar')
   fingerprint: string;
 
-  /** 'pending' while claimed, then 'applied' or 'rejected'. */
+  /** 'pending' while claimed, then 'applied' or 'rejected', or 'needs_admin' until an admin resolves it (VP2). */
   @Column('varchar')
   status: string;
 
   @Column('simple-json', { nullable: true })
   result: Record<string, unknown> | null;
+
+  /** The sale's stock top-ups and their exact locations, for an admin's take-back (migration TallyPosVp2a). */
+  @Column('simple-json', { nullable: true })
+  topUps: Array<{ variantId: string; stockLocationId: string; quantity: number }> | null;
 
   @CreateDateColumn()
   createdAt: Date;

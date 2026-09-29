@@ -33,6 +33,7 @@ describe('plugin harness, custom fields and GET /tally/v1/info', () => {
       Order: {
         tallyClientOrderId: 'string', tallySaleAt: 'datetime', tallyRegisterId: 'string',
         tallySessionId: 'string', tallyCashierRef: 'string', tallyPayments: 'text', tallySnapshot: 'text',
+        tallyRejectedClientOrderId: 'string', tallyRejected: 'boolean',
       },
       OrderLine: { tallyUnitPrice: 'int', tallyClientLineId: 'string', tallyPriceIncludesTax: 'boolean' },
     };

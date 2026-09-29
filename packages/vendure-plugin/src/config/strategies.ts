@@ -34,12 +34,27 @@ export class TallyPriceStrategy implements OrderItemPriceCalculationStrategy {
   }
 }
 
-// ADR 0002 "Closed to the storefront": only a plugin REST route runs with apiType 'custom'.
+// VP2 (the handler guard): the command route marks its context. RequestContext.copy() copies own
+// symbol properties, so the mark survives Vendure's transaction copies of the context.
+const TALLY_ROUTE = Symbol('vendurepos.tallyCommandRoute');
+
+/** Marks a context as the command route's own; OrderCreateService carries the mark into its contexts. */
+export function markTallyRoute(ctx: RequestContext): RequestContext {
+  (ctx as unknown as Record<symbol, boolean>)[TALLY_ROUTE] = true;
+  return ctx;
+}
+
+export function isTallyRoute(ctx: RequestContext): boolean {
+  return (ctx as unknown as Record<symbol, boolean>)[TALLY_ROUTE] === true;
+}
+
+// ADR 0002 "Closed to the storefront": only the command route, never another plugin's REST
+// controller with the same apiType 'custom'.
 export const tallyPaymentHandler = new PaymentMethodHandler({
   code: TALLY_PAYMENT_METHOD_CODE,
   description: [{ languageCode: LanguageCode.en, value: 'Tally POS tender' }],
   args: {},
-  createPayment: (ctx, order, amount, args, metadata) => ctx.apiType === 'custom'
+  createPayment: (ctx, order, amount, args, metadata) => ctx.apiType === 'custom' && isTallyRoute(ctx)
     ? { amount, state: 'Settled', metadata }
     : { amount, state: 'Declined', errorMessage: 'tally-pos is only available to the POS route', metadata },
   settlePayment: () => ({ success: true }),

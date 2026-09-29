@@ -6,8 +6,27 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/adr/0002-order-path-vendure-plugin.md`), proven by spike S1
 (`docs/spikes/s1-order-recipe.md`).
 
-Status: VP1. The plugin has the order service and `GET /tally/v1/info`. The batch route
-`POST /tally/v1/commands` arrives in VP2.
+Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
+commands, a 1 MB body) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`.
+
+**Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
+so it emits no event. A command already in the ledger always replays its recorded answer first. A
+malformed or out-of-range payload (`invalid_payload`: shape, amounts, quantities, fiscal figures, a `createdAt` more than a day ahead) is refused before any claim and not stored. The
+state-dependent facts about the sale (`unknown_variant`, `underpaid`) are stored on the command's
+ledger claim. The store's setup (`store_configuration`, including the order limits
+`orderItemsLimit` and `orderLineItemsLimit`, and `unsupported_currency`) is not stored, so the same
+command applies once the store is fixed. Once the sale has started writing (Vendure publishes its first event there), a
+failure rolls the whole transaction back as a transient 503 and Vendure drops the events it had
+emitted; the resend is checked again. A plugin bug before that point is a stored `internal_error`.
+
+**Needs an admin.** A sale whose stock take-back fails, or that a plugin bug stops part-way, is
+kept as far as it got and marked `needs_admin` in the `tally_command` ledger; it answers 409
+until an admin calls `OrderCreateService.resolveNeedsAdmin`. Either resolution takes the leftover
+top-up back at the stock location recorded when it was made. Rejecting also cancels the POS
+payments and the order with Vendure's own cancellation, releases its client id (kept in
+`tallyRejectedClientOrderId`) and flags it `tallyRejected`; if a step fails, it is refused and
+changes nothing. **An order flagged `tallyRejected` counts as never placed**: leave it out of any
+register or sales figure; the till's Retry makes the sale that counts.
 
 ## Requirements
 
@@ -21,14 +40,14 @@ Status: VP1. The plugin has the order service and `GET /tally/v1/info`. The batc
 1. Add the plugin to your Vendure config:
 
    ```ts
-   import { TallyPosPlugin, TallyPos1790648006022 } from '@vendurepos/plugin';
+   import { TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000 } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
      plugins: [TallyPosPlugin /* , … */],
      dbConnectionOptions: {
        type: 'postgres',
        synchronize: false,
-       migrations: [TallyPos1790648006022 /* , your own migrations */],
+       migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000 /* , your own migrations */],
        // …
      },
    };

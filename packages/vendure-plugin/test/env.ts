@@ -3,6 +3,7 @@ import type { VendureConfig } from '@vendure/core';
 import { createTestEnvironment, PostgresInitializer, registerInitializer, testConfig } from '@vendure/testing';
 import { parse } from 'graphql';
 import { TallyPosPlugin } from '../src';
+import { markTallyRoute } from '../src/config/strategies';
 import { OrderCreateService } from '../src/service/order-create.service';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 
@@ -117,10 +118,10 @@ export function createPluginTestEnvironment(override: Override = {}, plugins?: P
     return String(server.app.get(ConfigService).entityOptions.entityIdStrategy!.encodeId(id));
   }
 
-  // The service is called as VP2's route will call it: a custom-API context in the default channel,
+  // The service is called as the route calls it: a custom-API context marked as the route's, in the default channel,
   // or in the channel with the given token.
   async function run(command: CommandEnvelope<OrderCreatePayload>, channelToken?: string) {
-    const ctx = await server.app.get(RequestContextService).create({ apiType: 'custom', channelOrToken: channelToken });
+    const ctx = markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom', channelOrToken: channelToken }));
     return server.app.get(OrderCreateService).create(ctx, command);
   }
 
