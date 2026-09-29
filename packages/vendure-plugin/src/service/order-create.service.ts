@@ -227,6 +227,7 @@ export class OrderCreateService {
       const stored = row.result as unknown as OrderCreateResult;
       // Either resolution takes back the top-up the failed take-back left, exactly where it was made
       // (the admin's channel may have another default location), in the resolution's transaction.
+      if (row.topUps?.length) await this.lockStock(txCtx, [...new Set(row.topUps.map(topUp => topUp.variantId))]);
       for (const topUp of row.topUps ?? []) await this.adjustStock(txCtx, topUp.variantId, topUp.stockLocationId, -topUp.quantity);
       if (resolution === 'rejected') {
         // Rulings 4, N4 and re-ruling 1: a rejected row never keeps a live order. The top-up, the settled
@@ -569,8 +570,9 @@ export class OrderCreateService {
       // A copied context keeps the probe's per-request stock cache out of the real allocation after the top-up.
       const plan = await this.stockLocations.getAllocationLocations(ctx.copy(),
         new OrderLine({ productVariantId: variant.id, productVariant: variant, quantity }), quantity);
+      // Vendure creates a stock location at start and falls back to the oldest, so none at all is a bug, not a pre-check.
       const location = plan.reduce((sum, entry) => sum + entry.quantity, 0) >= quantity
-        ? plan[0].location : await this.stockLocations.defaultStockLocation(ctx);
+        ? plan[0].location : (await this.stockLocations.defaultStockLocation(ctx)) ?? pluginBug('Vendure returned no default stock location');
       await this.adjustStock(ctx, variant.id, location.id, topUp);
       const entry = { variantId: String(variant.id), stockLocationId: String(location.id), quantity: topUp };
       topUps.push(entry);

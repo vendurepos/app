@@ -103,7 +103,7 @@ marked temporary. The plugin's first PR after S1 consumes the package.
       the replay key itself, so no stored row can have a longer id and a replay can
       never be refused by this bound; the duplicate-`clientLineId` refusal, because
       the till mints a UUIDv7 per line, so no applied command carries a duplicate;
-      and the vendored discount value checks (each `discountMinor` is a non-negative
+      and the vendored discount value checks (each `discountMinor`, when present, is a positive
       safe integer, and the order's `discountMinor` equals the sum of the lines'),
       because these have not tightened since any command was applied.
       The discount value checks move to step 4 when the vendored shape is next
@@ -410,7 +410,7 @@ S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
 - ~~**A real email transport.**~~ Closed by VP2b.
   `packages/vendure-plugin/test/email-smtp.e2e.ts` sends through real SMTP
   to Mailpit. A storefront order is emailed once, and a POS order is not.
-- ~~**Concurrent sales of one variant.**~~ Closed by VP3-2. Vendure's
+- ~~**Concurrent sales of one variant.**~~ Closed for concurrent POS sales by VP3-2. Vendure's own stock writers (storefront checkout, admin fulfilment, cancellation restocks, admin stock edits) stay unlocked read-modify-writes upstream, so a storefront or admin stock write alongside a POS sale can still lose an update, and a storefront order touching the same variants in another order can deadlock with a POS sale (a retried 503 `deadlock`). Vendure's
   stock update is an unlocked read-modify-write, and VP3 measured 5 of 6
   concurrent updates lost. The recipe now locks every `stock_level` row of
   the sale's variants (`FOR UPDATE`, in variant then location order, 5 s,
