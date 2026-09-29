@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import {
-  CustomerService, Order, OrderCalculator, OrderLine, OrderService, PaymentService, ProductVariant,
-  RequestContext, ShippingLine, ShippingMethod, Surcharge, TransactionalConnection, manualFulfillmentHandler,
+  CustomerService, ID, Order, OrderCalculator, OrderLine, OrderService, PaymentService, ProductVariant,
+  ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevelService, StockLocationService,
+  StockMovementService, Surcharge, TransactionalConnection, manualFulfillmentHandler,
 } from '@vendure/core';
 import { IsNull } from 'typeorm';
-import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '../vendored/commands';
+import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { roundHalfAwayFromZero } from './rounding';
@@ -45,6 +46,10 @@ export class OrderCreateService {
     private orders: OrderService,
     private calculator: OrderCalculator,
     private payments: PaymentService,
+    private variants: ProductVariantService,
+    private stockLocations: StockLocationService,
+    private stockLevels: StockLevelService,
+    private stockMovements: StockMovementService,
   ) {}
 
   async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<CommandResult> {
@@ -71,6 +76,7 @@ export class OrderCreateService {
       tallyCashierRef: payload.cashierRef,
     };
     await this.connection.getRepository(ctx, Order).save(order);
+    const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
       const variant = await this.connection.getRepository(ctx, ProductVariant).findOne({
         where: { id: line.variantId, deletedAt: IsNull(), channels: { id: ctx.channelId } },
@@ -78,6 +84,20 @@ export class OrderCreateService {
       if (!variant || !variant.enabled) {
         throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       }
+      const entry = requested.get(line.variantId) ?? { variant, quantity: 0 };
+      requested.set(line.variantId, { variant, quantity: entry.quantity + line.quantity });
+    }
+    // ADR 0002 "Stock": top up a shortage before addItemToOrder, whose constrainQuantityToSaleable
+    // would cut the quantity, and before ArrangingPayment, which checks saleable stock again.
+    const location = await this.stockLocations.defaultStockLocation(ctx);
+    const topUps: Array<{ variantId: string; quantity: number }> = [];
+    for (const [variantId, { variant, quantity }] of requested) {
+      const shortfall = quantity - await this.variants.getSaleableStockLevel(ctx, variant);
+      if (shortfall <= 0) continue;
+      await this.adjustStock(ctx, variantId, location.id, shortfall);
+      topUps.push({ variantId, quantity: shortfall });
+    }
+    for (const line of payload.lines) {
       order = unwrap(await this.orders.addItemToOrder(ctx, order.id, line.variantId, line.quantity, {
         tallyUnitPrice: line.unitPriceMinor,
         tallyClientLineId: line.clientLineId,
@@ -172,9 +192,12 @@ export class OrderCreateService {
       },
     }));
     unwrap(await this.orders.transitionFulfillmentToState(ctx, fulfillment.id, 'Delivered'));
+    for (const topUp of topUps) await this.adjustStock(ctx, topUp.variantId, location.id, -topUp.quantity);
+    const warnings: CommandWarning[] = topUps.map(topUp => ({ code: 'insufficient_stock', ...topUp }));
     const result: CommandResult & { totalWarnings?: TotalWarning[] } = {
       id: command.id, status: 'applied',
       serverRefs: { orderId: String(order.id), displayId: order.code, totalMinor: order.totalWithTax },
+      ...(warnings.length ? { warnings } : {}),
       ...(totalWarnings.length ? { totalWarnings } : {}),
     };
     await this.connection.getRepository(ctx, TallyCommand).save({
@@ -182,5 +205,12 @@ export class OrderCreateService {
       status: 'applied', result: { ...result },
     });
     return result;
+  }
+
+  private async adjustStock(ctx: RequestContext, variantId: string, stockLocationId: ID, change: number) {
+    const level = await this.stockLevels.getStockLevel(ctx, variantId, stockLocationId);
+    await this.stockMovements.adjustProductVariantStock(ctx, variantId, [
+      { stockLocationId, stockOnHand: level.stockOnHand + change },
+    ]);
   }
 }
