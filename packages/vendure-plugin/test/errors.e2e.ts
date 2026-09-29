@@ -85,9 +85,9 @@ describe('error classes (ADR 0002 §2)', () => {
         { code: 'underpaid', message: 'Payments of 400 are below the total of 1000' }, async () => {}, async () => {}],
       ['unknown_variant', orderCommand([{ variantId: 'T_999999', quantity: 1, unitPriceMinor: 800 }]),
         { code: 'unknown_variant', message: 'Variant T_999999 is missing or disabled' }, async () => {}, async () => {}],
-      ['orderItemsLimit', orderCommand([mug(2)]), { code: 'invalid_payload' },
+      ['orderItemsLimit', orderCommand([mug(2)]), { code: 'store_configuration' },
         async () => { config.orderOptions.orderItemsLimit = 1; }, async () => { config.orderOptions.orderItemsLimit = limits.orderItemsLimit; }],
-      ['orderLineItemsLimit', orderCommand([mug(2)]), { code: 'invalid_payload' },
+      ['orderLineItemsLimit', orderCommand([mug(2)]), { code: 'store_configuration' },
         async () => { config.orderOptions.orderLineItemsLimit = 1; }, async () => { config.orderOptions.orderLineItemsLimit = limits.orderLineItemsLimit; }],
       ['no manual fulfilment handler', orderCommand([mug()]), { code: 'store_configuration' },
         async () => { config.shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment'); },
@@ -177,7 +177,7 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(await ledgerFor(input)).toBeNull();
   }
 
-  it('re-ruling 3: a limit lowered during the sale (ORDER_LIMIT_ERROR in the recipe) is a transient race; the retry\'s checks answer it', async () => {
+  it('re-ruling 3: a limit lowered during the sale is a transient race; the resend is store_configuration, not stored, and the same id applies once the limit is raised', async () => {
     const options = server.app.get(ConfigService).orderOptions;
     const limit = options.orderItemsLimit;
     const input = orderCommand([mug(2)]);
@@ -190,12 +190,19 @@ describe('error classes (ADR 0002 §2)', () => {
     });
     try {
       await expectTransientRace(input);
-      expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
+      // Front desk: the limits are store-wide setup, so the resend is store_configuration, not stored.
+      const before = await counts();
+      expect(await run(input)).toMatchObject({ status: 'rejected', error: {
+        code: 'store_configuration', message: `The sale exceeds orderOptions.orderItemsLimit 1 or orderLineItemsLimit ${options.orderLineItemsLimit}`,
+      } });
+      expect(await counts()).toEqual(before);
+      expect(await ledgerFor(input)).toBeNull();
     } finally {
       options.orderItemsLimit = limit;
       saleable.mockRestore();
     }
+    // Once the limit is raised, the same id applies.
+    expect(await run(input)).toMatchObject({ id: input.id, status: 'applied' });
   });
 
   it('re-ruling 3: InsufficientStockError that survives the top-up is a transient race; the retry tops up and applies', async () => {

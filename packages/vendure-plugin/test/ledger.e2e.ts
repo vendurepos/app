@@ -93,21 +93,21 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     }
   });
 
-  it('TallyUI #219: a quantity at or below 0, fractional or above int4 is invalid_quantity, stored on the claim; the recipe never runs', async () => {
-    const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
+  it('ADR-038 #220: a quantity at or below 0, fractional or above int4 is an unstored invalid_payload, before any claim', async () => {
+    const claim = vi.spyOn(recipe as unknown as { claim: () => Promise<unknown> }, 'claim');
     try {
       for (const quantity of [0, -1, 1.5, 2_147_483_648]) {
         const input = command();
         input.payload.lines[0].quantity = quantity;
         const result = await run(input);
         expect(result, String(quantity)).toEqual({ id: input.id, status: 'rejected', error: {
-          code: 'invalid_quantity', message: 'lines[0].quantity: expected a positive integer of at most 2147483647',
+          code: 'invalid_payload', message: quantity > 2_147_483_647 ? 'lines[0].quantity: expected at most 2147483647' : 'lines[0].quantity: expected a positive integer',
         } });
-        expect(await ledgerFor(input), String(quantity)).toMatchObject({ status: 'rejected', result });
+        expect(await ledgerFor(input)).toBeNull();
       }
-      expect(createDraft).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
     } finally {
-      createDraft.mockRestore();
+      claim.mockRestore();
     }
   });
 
@@ -138,14 +138,14 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     }
   });
 
-  it('S1: a customer email above 254 characters is invalid_payload, stored on the claim', async () => {
+  it('S1: a customer email above 254 characters is invalid_payload, unstored, before any database access', async () => {
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
       { email: `${'a'.repeat(243)}@example.com` });
     expect(input.payload.customer!.email).toHaveLength(255);
     expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
       code: 'invalid_payload', message: 'customer.email: expected at most 254 characters',
     } });
-    expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
+    expect(await ledgerFor(input)).toBeNull();
   });
 
   it('N1: a declined tally-pos payment (here, a context without the route mark) is store_configuration, not stored, never underpaid', async () => {
@@ -472,29 +472,49 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('ruling: createdAt runs from the epoch to one day from now; anything else is invalid_payload stored on the claim', async () => {
+  it('ADR-038 #220: createdAt has only an upper bound (one day ahead), unstored; a very old sale applies', async () => {
     const day = 24 * 60 * 60 * 1000;
     const at = (ms: number) => new Date(ms).toISOString();
-    const expected = (path: string) => `${path}: expected a time from 1970-01-01T00:00:00Z to one day from now`;
     const before = await counts();
     for (const [path, value] of [
-      ['createdAt', at(-1)], ['createdAt', at(Date.now() + day + 60_000)], ['createdAt', 'not a date'],
-      ['payload.createdAt', at(-1)], ['payload.createdAt', at(Date.now() + day + 60_000)], ['payload.createdAt', '2026-13-45T00:00:00Z'],
+      ['createdAt', at(Date.now() + day + 60_000)], ['createdAt', 'not a date'], ['payload.createdAt', at(Date.now() + day + 60_000)],
     ]) {
       const input = command();
       if (path === 'createdAt') input.createdAt = value;
       else input.payload.createdAt = value;
       expect(await run(input), `${path} ${value}`).toEqual({ id: input.id, status: 'rejected', error: {
-        code: 'invalid_payload', message: expected(path),
+        code: 'invalid_payload', message: `${path}: expected a time no later than one day from now`,
       } });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
+      expect(await ledgerFor(input)).toBeNull();
     }
-    expect(await counts()).toEqual({ ...before, ledger: before.ledger + 6 });
-    for (const value of ['1970-01-01T00:00:00Z', at(Date.now() + day - 60_000)]) {
+    expect(await counts()).toEqual(before);
+    // No lower bound: an offline till sends old sales.
+    for (const value of ['1969-07-20T20:17:00Z', '2001-01-01T00:00:00Z', at(Date.now() + day - 60_000)]) {
       const input = command();
       input.createdAt = value;
       input.payload.createdAt = value;
       expect(await run(input), value).toMatchObject({ status: 'applied' });
+    }
+  });
+
+  it('ADR-038 #220: a lost-response replay answers duplicate through the replay read, with no claim, even when its createdAt is now beyond the window', async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const input = command();
+    input.createdAt = input.payload.createdAt = new Date(Date.now() + day - 60_000).toISOString();
+    const first = await run(input);
+    expect(first).toMatchObject({ status: 'applied' });
+    // The server clock moves back two days: the sale's createdAt is now beyond the window.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now - 2 * day);
+    const claim = vi.spyOn(recipe as unknown as { claim: () => Promise<unknown> }, 'claim');
+    try {
+      const fresh = { ...command(), createdAt: input.createdAt };
+      expect(await run(fresh)).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
+      expect(await run(input)).toEqual({ ...first, status: 'duplicate' });
+      expect(claim).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+      claim.mockRestore();
     }
   });
 

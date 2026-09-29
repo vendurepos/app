@@ -81,8 +81,7 @@ describe('order.create recipe through OrderCreateService', () => {
       ...Array(6).fill(['rejected', 'invalid_payload']), ['rejected', 'unsupported_version'],
     ]);
     expect(results.at(-1)!.error!.data).toEqual({ orderCreate: 3 });
-    // Re-ruling 4: the fiscal-figures refusal (the display total) is stored on the claim; the others are shape refusals.
-    expect(await counts()).toEqual({ ...before, commands: before.commands + 1 });
+    expect(await counts()).toEqual(before);
   });
 
   it('happy path: Mug x1 + Beans(500) x2 is Delivered, priced, backdated and records SALE movements', async () => {
@@ -236,17 +235,13 @@ describe('order.create recipe through OrderCreateService', () => {
       ['clientPaymentId over 255', payload => { payload.payments[0].clientPaymentId = long; }],
       ['reference over 255', payload => { payload.payments[0].reference = long; }],
     ];
-    let stored = 0;
     for (const [name, mutate] of cases) {
       const command = orderCommand([mug()]);
       mutate(command.payload);
-      // Re-ruling 4: a shape refusal is answered before the claim; a value refusal is stored on it.
-      if (!payloadShapeErrors(command.payload).length) stored += 1;
       const result = await run(command);
       expect(result, name).toMatchObject({ id: command.id, status: 'rejected', error: { code: 'invalid_payload' } });
     }
-    expect(stored).toBeGreaterThan(0);
-    expect(await counts()).toEqual({ ...before, commands: before.commands + stored });
+    expect(await counts()).toEqual(before);
     // N2: tenderedMinor and changeMinor are stored only in the tallyPayments text, so any safe integer applies.
     const tendered = orderCommand([mug()], [{
       method: 'cash', amountMinor: 1000, tenderedMinor: Number.MAX_SAFE_INTEGER, changeMinor: Number.MAX_SAFE_INTEGER - 1000,

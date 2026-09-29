@@ -4,9 +4,9 @@ import type { TransientKind } from './errors';
 
 /**
  * Front desk ruling 1, TallyUI ADR-038's `platform_error` amendment, the re-rulings and TallyUI #219:
- * how every failure of the recipe is answered, as origin × outcome. Before the recipe, after the
- * claim: per-sale facts (unknown_variant, invalid_quantity, underpaid, invalid_payload values) are
- * stored on the claim; store-wide setup (store_configuration, unsupported_currency) rolls the claim
+ * how every failure of the recipe is answered, as origin × outcome. Before any database access: shape and
+ * value refusals (invalid_payload, unstored). After the claim: the state-dependent per-sale facts (unknown_variant, underpaid) are
+ * stored on the claim; store-wide setup (store_configuration incl. the order limits, unsupported_currency) rolls the claim
  * back and is not stored. A Vendure fact: the recipe publishes its first event at its first write
  * (createOrUpdate or createDraft), so no error after that write becomes a stored rejection (its
  * events would outlive it): each rolls everything back, events included, unless part of the sale

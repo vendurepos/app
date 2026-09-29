@@ -95,25 +95,46 @@ marked temporary. The plugin's first PR after S1 consumes the package.
 `@Transaction()`:
 
 1. It first validates every envelope in the batch (`validateBatch`).
-2. Each command then goes through, in this order (Front desk re-ruling 4):
-   1. shape and version validation (`invalid_payload`, `unsupported_version`),
-      including U+0000 in any string, before any database access; not stored;
-   2. in its own `withTransaction`: the ledger replay and the claim (one
-      `INSERT … ON CONFLICT`), then the `clientOrderId` collision lookup;
-   3. the deterministic checks, before the recipe writes anything, so no
-      event fires (TallyUI #219):
-      - **per-sale facts are stored on the claim**: `unknown_variant`
-        (missing, deleted or disabled variant, disabled or deleted product,
-        another channel's variant), `invalid_quantity` (a line quantity at
-        or below 0, fractional or above int4), the value bounds, `createdAt`
-        and the order limits (`invalid_payload`), and `underpaid`; the
-        till's Retry mints a new id and is checked again;
-      - **store-wide setup is not stored**: `unsupported_currency` and
-        `store_configuration` (tax zone, the POS methods and their plugin
-        checkers and handler, the manual fulfilment handler) roll the whole
-        transaction back, releasing the claim, and answer without a ledger
-        row, so the same command id applies once the store is fixed;
-   4. the recipe.
+2. Each command then goes through exactly these steps (ADR-038 #220):
+   1. **shape validation**, including U+0000 in any string, with no
+      database access: `invalid_payload` or `unsupported_version`, not
+      stored;
+   2. **the replay read**: a plain `SELECT` of the ledger by command id,
+      before any claim. A recorded id answers as recorded (`duplicate` with
+      the stored result, the stored rejection, `idempotency_mismatch` for
+      another payload or channel, 409 for `needs_admin`) without entering the
+      claim, so a committed sale whose response was lost always replays,
+      whatever its values would now fail;
+   3. **the collision lookup** on `clientOrderId`; a sale already recorded
+      goes to the collision guard after the claim;
+   4. **the value refusals**, `invalid_payload`, not stored: the amounts, the
+      pure quantity checks (at or below 0, fractional, above int4), the v3
+      fiscal figures, and the `createdAt` bound, which is future-only (at
+      most 24 h after the server clock, no lower bound: an offline till sends
+      old sales). `invalid_payload` keeps one meaning across the contract,
+      as in `@tallyui/core/server`'s `precheckCommand`;
+   5. **the claim**, in the command's own `withTransaction`: `INSERT … ON
+      CONFLICT`, whose conflict handling stays the safety net for a
+      concurrent request; then the collision guard answers a recorded sale;
+   6. **the stored and unstored checks**, before the recipe writes
+      anything, so no event fires (TallyUI #219, Front desk):
+      - stored on the claim, the state-dependent per-sale facts:
+        `unknown_variant` (missing, deleted or disabled variant, disabled or
+        deleted product, another channel's variant) and `underpaid`; the
+        till's Retry mints a new id and is checked again. `invalid_quantity`
+        is reserved for quantity refusals that depend on the catalogue; the
+        plugin has none today;
+      - not stored, with the whole transaction rolled back and the claim
+        released, so the same command id applies once the store is fixed:
+        `unsupported_currency` and `store_configuration` (tax zone, the POS
+        methods and their plugin checkers and handler, the manual
+        fulfilment handler, and the order limits `orderItemsLimit` and
+        `orderLineItemsLimit`, checked here before the first write; a limit
+        Vendure itself refuses after the draft exists is a race and rolls
+        back as transient, R1). `unsupported_tax_mode` is store-wide too:
+        the plugin does not emit it today, but found after the first write
+        it would compensate, then answer unstored with the claim released;
+   7. **the recipe**.
 3. It stops at the first 409 or 503, as medusapos's `process.ts` does.
    Earlier commands have already committed, so on the retry they replay as
    `duplicate` (ADR-039).
