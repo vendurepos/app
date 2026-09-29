@@ -53,6 +53,37 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  # The Vendure plugin is standalone npm with its own lockfile; it needs no secrets.
+  plugin:
+    name: Vendure plugin (typecheck and Postgres e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vendure
+          POSTGRES_PASSWORD: vendure
+          POSTGRES_DB: plugin
+        ports: ['5445:5432']
+        options: >-
+          --health-cmd "pg_isready -U vendure -d plugin"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    defaults:
+      run:
+        working-directory: packages/vendure-plugin
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   # No artifacts are uploaded: dist, public, apps/pos/test-results and
   # Playwright traces contain or can capture licensed rxdb-premium code.
   # Accepted risk: a build error inside rxdb-premium would print a code frame

@@ -308,10 +308,12 @@ export class OrderCreateService {
     if (order.state !== 'PaymentSettled') {
       const settled = await this.orders.transitionToState(ctx, order.id, 'PaymentSettled');
       // ADR 0002 §2: `underpaid` only when the payments really are below the bridged total.
-      const paidMinor = order.payments.filter(payment => payment.state === 'Settled')
-        .reduce((sum, payment) => sum + payment.amount, 0);
-      if (isGraphQlErrorResult(settled) && paidMinor < order.totalWithTax) {
-        throw new BusinessRejection('underpaid', `Payments of ${paidMinor} are below the total of ${order.totalWithTax}`);
+      if (isGraphQlErrorResult(settled)) {
+        const paidMinor = (await this.orders.getOrderPayments(ctx, order.id))
+          .filter(payment => payment.state === 'Settled').reduce((sum, payment) => sum + payment.amount, 0);
+        if (paidMinor < order.totalWithTax) {
+          throw new BusinessRejection('underpaid', `Payments of ${paidMinor} are below the total of ${order.totalWithTax}`);
+        }
       }
       order = unwrap(settled);
     }

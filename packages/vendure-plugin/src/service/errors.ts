@@ -34,11 +34,14 @@ const KNOWN_ERROR_RESULTS: Record<string, string> = {
 };
 
 export function rejectionFor(error: GraphQLErrorResult): BusinessRejection {
-  const known = KNOWN_ERROR_RESULTS[error.errorCode];
-  if (known) return new BusinessRejection(known, error.message);
-  return new BusinessRejection(UNKNOWN_REJECTION_CODE, error.message, {
-    vendureCode: error.errorCode, vendureMessage: error.message,
-  });
+  // Outside GraphQL an ErrorResult's message is its untranslated key (for most types, the code);
+  // its specifics are separate fields, so the readable message appends the primitive ones.
+  const { errorCode, message, __typename, ...fields } = error as GraphQLErrorResult & Record<string, unknown>;
+  const details = Object.fromEntries(Object.entries(fields).filter(([, value]) => value === null || typeof value !== 'object'));
+  const readable = Object.keys(details).length ? `${message}: ${JSON.stringify(details)}` : message;
+  const known = KNOWN_ERROR_RESULTS[errorCode];
+  if (known) return new BusinessRejection(known, readable);
+  return new BusinessRejection(UNKNOWN_REJECTION_CODE, readable, { vendureCode: errorCode, vendureMessage: message });
 }
 
 /** ADR 0002 §2 "Error results become throws": a returned ErrorResult rolls the order back. */

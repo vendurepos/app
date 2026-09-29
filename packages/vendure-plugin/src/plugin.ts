@@ -12,6 +12,11 @@ import {
 import { TallyCommand } from './entities/tally-command.entity';
 import { OrderCreateService } from './service/order-create.service';
 
+/** A new array: `list` plus each item it does not already hold. */
+function withMissing<T>(list: T[], items: T[], same: (a: T, b: T) => boolean): T[] {
+  return [...list, ...items.filter(item => !list.some(existing => same(existing, item)))];
+}
+
 /** VendurePOS: TallyUI's order.create as one Postgres transaction per command (ADR 0002). */
 @VendurePlugin({
   compatibility: '^3.6.0',
@@ -20,16 +25,19 @@ import { OrderCreateService } from './service/order-create.service';
   controllers: [TallyInfoController],
   providers: [OrderCreateService],
   exports: [OrderCreateService],
+  // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
+  // run this on arrays that setConfig shares with the caller's config.
   configuration: config => {
-    config.customFields.Order.push(...orderCustomFields);
-    config.customFields.OrderLine.push(...orderLineCustomFields);
+    const byName = (a: { name: string }, b: { name: string }) => a.name === b.name;
+    const byCode = (a: { code: string }, b: { code: string }) => a.code === b.code;
+    config.customFields.Order = withMissing(config.customFields.Order, orderCustomFields, byName);
+    config.customFields.OrderLine = withMissing(config.customFields.OrderLine, orderLineCustomFields, byName);
     config.orderOptions.orderItemPriceCalculationStrategy = tallyPriceStrategy;
-    config.paymentOptions.paymentMethodHandlers.push(tallyPaymentHandler);
-    config.paymentOptions.paymentMethodEligibilityCheckers = [
-      ...(config.paymentOptions.paymentMethodEligibilityCheckers ?? []), tallyPaymentChecker,
-    ];
-    config.shippingOptions.shippingEligibilityCheckers.push(tallyShippingChecker);
-    config.shippingOptions.shippingCalculators.push(tallyShippingCalculator);
+    const { paymentOptions: payment, shippingOptions: shipping } = config;
+    payment.paymentMethodHandlers = withMissing(payment.paymentMethodHandlers, [tallyPaymentHandler], byCode);
+    payment.paymentMethodEligibilityCheckers = withMissing(payment.paymentMethodEligibilityCheckers ?? [], [tallyPaymentChecker], byCode);
+    shipping.shippingEligibilityCheckers = withMissing(shipping.shippingEligibilityCheckers, [tallyShippingChecker], byCode);
+    shipping.shippingCalculators = withMissing(shipping.shippingCalculators, [tallyShippingCalculator], byCode);
     return config;
   },
 })
