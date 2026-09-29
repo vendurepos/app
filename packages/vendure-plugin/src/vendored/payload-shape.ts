@@ -66,8 +66,8 @@ export function payloadShapeErrors(payload: unknown): string[] {
     }
   }
   if (payload.sessionId !== undefined) {
-    check(typeof payload.sessionId === 'string' && payload.sessionId.length > 0 && payload.sessionId.length <= 36,
-      'sessionId', 'a string of at most 36 characters')
+    // Front desk (TallyUI #222 review): its length bound is a value refusal (value-ranges.ts), after the replay read.
+    check(typeof payload.sessionId === 'string' && payload.sessionId.length > 0, 'sessionId', 'a non-empty string')
   }
   for (const field of ['registerId', 'cashierRef', 'locationId']) {
     if (payload[field] !== undefined) check(typeof payload[field] === 'string', field, 'a string')

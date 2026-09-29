@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { ConfigService, LanguageCode, RequestContextService, mergeConfig } from '@vendure/core';
 import type { VendureConfig } from '@vendure/core';
 import { createTestEnvironment, PostgresInitializer, registerInitializer, testConfig } from '@vendure/testing';
@@ -10,15 +12,25 @@ import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/comman
 type Override = Parameters<typeof mergeConfig>[1];
 type Plugin = NonNullable<VendureConfig['plugins']>[number];
 
-// docker-compose.yml: project vendurepos-plugin-test on loopback :5445.
+// Explicit env wins over the worktree stack file; CI/no-file runs retain the legacy ports.
+const stackFile = resolve(__dirname, '../.test-stack.env');
+const stackValues: Record<string, string> = existsSync(stackFile)
+  ? Object.fromEntries(readFileSync(stackFile, 'utf8').trim().split('\n').map(line => line.split('=')))
+  : {};
+export const testStack = {
+  pgPort: Number(process.env.PLUGIN_TEST_PG_PORT ?? stackValues.PLUGIN_TEST_PG_PORT ?? 5445),
+  smtpPort: Number(process.env.PLUGIN_TEST_SMTP_PORT ?? stackValues.PLUGIN_TEST_SMTP_PORT ?? 1045),
+  mailpitPort: Number(process.env.PLUGIN_TEST_MAILPIT_PORT ?? stackValues.PLUGIN_TEST_MAILPIT_PORT ?? 8045),
+  serverPort: Number(process.env.PLUGIN_TEST_SERVER_PORT ?? stackValues.PLUGIN_TEST_SERVER_PORT ?? 3050),
+};
 export const dbConnectionOptions = {
-  type: 'postgres' as const, host: '127.0.0.1', port: 5445,
+  type: 'postgres' as const, host: '127.0.0.1', port: testStack.pgPort,
   username: 'vendure', password: 'vendure', database: 'plugin',
 };
 
 export function pluginTestConfig(override: Override = {}, plugins: Plugin[] = [TallyPosPlugin]) {
   registerInitializer('postgres', new PostgresInitializer());
-  return mergeConfig(mergeConfig(testConfig, { dbConnectionOptions, plugins }), override);
+  return mergeConfig(mergeConfig(testConfig, { dbConnectionOptions, plugins, apiOptions: { port: testStack.serverPort } }), override);
 }
 
 export function createPluginTestEnvironment(override: Override = {}, plugins?: Plugin[]) {

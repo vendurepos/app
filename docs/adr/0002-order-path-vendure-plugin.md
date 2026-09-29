@@ -96,7 +96,8 @@ marked temporary. The plugin's first PR after S1 consumes the package.
 
 1. It first validates every envelope in the batch (`validateBatch`).
 2. Each command then goes through exactly these steps (ADR-038 #220):
-   1. **shape validation**, including U+0000 in any string, with no
+   1. **shape validation**: types, presence, versions and U+0000 in any
+      string (which Postgres cannot hold, even for the lookup), with no
       database access: `invalid_payload` or `unsupported_version`, not
       stored;
    2. **the replay read**: a plain `SELECT` of the ledger by command id,
@@ -109,10 +110,14 @@ marked temporary. The plugin's first PR after S1 consumes the package.
       goes to the collision guard after the claim;
    4. **the value refusals**, `invalid_payload`, not stored: the amounts, the
       pure quantity checks (at or below 0, fractional, above int4), the v3
-      fiscal figures, and the `createdAt` bound, which is future-only (at
-      most 24 h after the server clock, no lower bound: an offline till sends
-      old sales). `invalid_payload` keeps one meaning across the contract,
-      as in `@tallyui/core/server`'s `precheckCommand`;
+      fiscal figures, the length bounds (`customer.email` 254; refs, ids
+      and names 255; `sessionId` 36), and the `createdAt` bound, which is
+      future-only (at most 24 h after the server clock, no lower bound: an
+      offline till sends old sales). `invalid_payload` keeps one meaning
+      across the contract, as in `@tallyui/core/server`'s `precheckCommand`.
+      The length bounds sit here, not in step 1 (Front desk, TallyUI #222
+      review), so an applied command resent with a value now over a bound
+      replays as `duplicate`;
    5. **the claim**, in the command's own `withTransaction`: `INSERT … ON
       CONFLICT`, whose conflict handling stays the safety net for a
       concurrent request; then the collision guard answers a recorded sale;

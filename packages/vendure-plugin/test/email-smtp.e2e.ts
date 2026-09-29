@@ -7,13 +7,13 @@ import { tallyOrderConfirmationHandler } from '@vendurepos/plugin/email';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyPosPlugin } from '../src';
-import { createPluginTestEnvironment } from './env';
+import { createPluginTestEnvironment, testStack } from './env';
 import { orderCommand } from './payloads';
 import { createStorefrontMethods, guestOrder } from './shop';
 
-// docker-compose.yml: Mailpit's SMTP on loopback :1045 and its HTTP API on :8045.
-const SMTP_PORT = 1045;
-const MAILPIT_API = 'http://127.0.0.1:8045/api/v1';
+// docker-compose.yml: Mailpit's SMTP and HTTP API on the worktree's loopback ports.
+const SMTP_PORT = testStack.smtpPort;
+const MAILPIT_API = `http://127.0.0.1:${testStack.mailpitPort}/api/v1`;
 // How long a storefront email may take through the job queue and SMTP, and how long a POS order gets to send none.
 const ARRIVAL_TIMEOUT_MS = 20_000;
 const SILENCE_MS = 3_000;
@@ -79,7 +79,8 @@ describe('the exported tallyOrderConfirmationHandler over a real SMTP transport 
     expect(await mailpitCount(shopEmail)).toBe(1);
     // Both orders reached PaymentSettled, the handler's event; the queue is idle, and the POS order gets a margin more.
     expect(settled).toEqual(expect.arrayContaining([body.results[0].serverRefs.displayId, paid.code]));
-    while (!await jobsIdle() && performance.now() - start < ARRIVAL_TIMEOUT_MS) await new Promise(resolve => setTimeout(resolve, 200));
+    const queueStart = performance.now();
+    while (!await jobsIdle() && performance.now() - queueStart < ARRIVAL_TIMEOUT_MS) await new Promise(resolve => setTimeout(resolve, 200));
     expect(await jobsIdle()).toBe(true);
     await new Promise(resolve => setTimeout(resolve, SILENCE_MS));
     expect(await mailpitCount(posEmail)).toBe(0);

@@ -4,8 +4,8 @@ cd "$(dirname "$0")"
 
 export VENDURE_PORT="${VENDURE_PORT:-3000}" VENDURE_DB_PORT="${VENDURE_DB_PORT:-5442}" TZ=UTC
 
-./plugin.sh
 ./stop.sh
+./plugin.sh
 docker compose down -v
 docker compose up -d --wait postgres
 npm run --silent seed
