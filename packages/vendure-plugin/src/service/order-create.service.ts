@@ -23,6 +23,7 @@ import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
 } from './errors';
+import { StoreSetupService } from './store-setup.service';
 import { roundHalfAwayFromZero } from './rounding';
 import { CUSTOMER_ID_MAX, MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
@@ -57,10 +58,11 @@ export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
 const ADMIN_REJECTED = 'TALLY_ADMIN_REJECTED';
 
-type TestHook = 'beforeStoringRejection' | 'afterCommit' | 'beforeFirstWrite';
+type TestHook = 'beforeStoringRejection' | 'afterCommit' | 'beforeFirstWrite' | 'insideRepair';
 type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensationError?: unknown };
 /** A clientOrderId collision after the recipe's first event: roll everything back and run the command again. */
 class Rerun extends Error {}
+class RepairStoreSetup extends Error {}
 /** An unstored refusal after the claim (store-wide setup, TallyUI #219): the claim rolls back, so the same id applies later. */
 class SetupRefusal extends Error {
   constructor(readonly result: OrderCreateResult) {
@@ -111,6 +113,7 @@ export class OrderCreateService {
     private stockLevels: StockLevelService,
     private stockMovements: StockMovementService,
     private config: ConfigService,
+    private storeSetup: StoreSetupService,
   ) {}
 
   /**
@@ -118,12 +121,13 @@ export class OrderCreateService {
    * result; throws TransientCommandError for every failure that may be retried (classification.ts),
    * and with kind `needs_admin` once part of a sale remains that the plugin cannot finish or undo.
    */
-  async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult> {
+  async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, options?: { repaired?: boolean }): Promise<OrderCreateResult> {
     // ADR-038 #220's step order. 1. Shape, NUL included, before any database access.
     const invalid = this.shapeRefusal(command);
     if (invalid) return invalid;
     const { payload } = command;
     let outcome: SaleOutcome;
+    let commandCtx!: RequestContext;
     try {
       // 2. The replay read: a committed id answers as recorded, never entering the claim, whatever its values now.
       const replay = await this.replayRead(ctx, command);
@@ -134,7 +138,7 @@ export class OrderCreateService {
       const invalidValue = recorded ? undefined : this.valueRefusal(command);
       if (invalidValue) return invalidValue;
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
-      const commandCtx = new RequestContext({
+      commandCtx = new RequestContext({
         req: ctx.req, apiType: ctx.apiType, channel: ctx.channel, session: ctx.session,
         languageCode: ctx.languageCode, currencyCode: payload.currency as CurrencyCode,
         isAuthorized: ctx.isAuthorized, authorizedAsOwnerOnly: ctx.authorizedAsOwnerOnly,
@@ -160,7 +164,20 @@ export class OrderCreateService {
       });
     } catch (error) {
       // A collision after the recipe's first event: everything rolled back (its events with it), so start again.
-      if (error instanceof Rerun) return this.create(ctx, command);
+      if (error instanceof Rerun) return this.create(ctx, command, options);
+      if (error instanceof RepairStoreSetup) {
+        if (options?.repaired) return storeConfiguration(command.id);
+        try {
+          await this.connection.withTransaction(commandCtx, async tx => {
+            await this.storeSetup.ensureChannelSetup(tx);
+            await this.runTestHook('insideRepair', command.id);
+          });
+        } catch (repairError) {
+          const kind = transientKind(repairError);
+          throw new TransientCommandError(command.id, kind === 'lock' ? 'timeout' : kind ?? 'unclassified', repairError);
+        }
+        return this.create(ctx, command, { repaired: true });
+      }
       if (error instanceof SetupRefusal) return error.result;
       if (error instanceof StoreConfigurationRefusal) return error.message
         ? rejected(command.id, 'store_configuration', error.message) : storeConfiguration(command.id);
@@ -323,9 +340,9 @@ export class OrderCreateService {
   }
 
   // ADR 0002 "Store configuration": the POS payment and shipping methods and a usable tax zone.
-  private async storeCanSell(ctx: RequestContext): Promise<boolean> {
+  private async setupState(ctx: RequestContext): Promise<'ok' | 'repairable' | 'refuse'> {
     const payment = await this.connection.getRepository(ctx, PaymentMethod).findOne({
-      where: { code: TALLY_PAYMENT_METHOD_CODE, enabled: true, channels: { id: ctx.channelId } },
+      where: { code: TALLY_PAYMENT_METHOD_CODE, channels: { id: ctx.channelId } },
     });
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOne({
       where: { code: TALLY_SHIPPING_METHOD_CODE, deletedAt: IsNull(), channels: { id: ctx.channelId } },
@@ -336,10 +353,11 @@ export class OrderCreateService {
     });
     // Front desk ruling (A): the permanent-list configuration errors, found before any write. The
     // plugin's own checkers and handler accept every POS order; a replaced one or a missing manual handler would not.
-    const checkers = (!payment?.checker || payment.checker.code === tallyPaymentChecker.code) && payment?.handler.code === tallyPaymentHandler.code
-      && shipping?.checker.code === tallyShippingChecker.code
+    const checkers = (!payment || (payment.enabled && (!payment.checker || payment.checker.code === tallyPaymentChecker.code)
+      && payment.handler.code === tallyPaymentHandler.code)) && (!shipping || shipping.checker.code === tallyShippingChecker.code)
       && this.config.shippingOptions.fulfillmentHandlers.some(handler => handler.code === manualFulfillmentHandler.code);
-    return !!payment && !!shipping && !!rates && checkers;
+    if (!rates || !checkers) return 'refuse';
+    return payment && shipping ? 'ok' : 'repairable';
   }
 
   /**
@@ -353,7 +371,9 @@ export class OrderCreateService {
     if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
       throw new SetupRefusal(rejected(command.id, 'unsupported_currency', `The channel does not offer ${currency}`));
     }
-    if (!await this.storeCanSell(ctx)) throw new SetupRefusal(storeConfiguration(command.id));
+    const setup = await this.setupState(ctx);
+    if (setup === 'repairable') throw new RepairStoreSetup();
+    if (setup === 'refuse') throw new SetupRefusal(storeConfiguration(command.id));
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines. The limits are store-wide
@@ -670,7 +690,7 @@ export class OrderCreateService {
           throw new BusinessRejection('underpaid', `Payments of ${paidMinor} are below the total of ${order.totalWithTax}`);
         }
         // Review 13: enough payment, so look for a configuration cause first; else an unlisted ErrorResult (transient).
-        if (!await this.storeCanSell(ctx)) throw new StoreConfigurationRefusal();
+        if (await this.setupState(ctx) !== 'ok') throw new StoreConfigurationRefusal();
       }
       order = unwrap(settled);
     }

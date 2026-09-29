@@ -1,21 +1,19 @@
 import { createRequire } from 'node:module';
 import { OnApplicationBootstrap } from '@nestjs/common';
 import {
-  Channel, ChannelService, ConfigService, CustomerService, LanguageCode, Logger, PaymentMethodService, Permission,
-  PluginCommonModule, ProcessContext, RequestContextService, ShippingMethodService, TransactionalConnection, User,
-  VendurePlugin, manualFulfillmentHandler,
+  Channel, PluginCommonModule, ProcessContext, RequestContextService, TransactionalConnection, VendurePlugin,
 } from '@vendure/core';
-import type { ID, Middleware, RequestContext } from '@vendure/core';
+import type { Middleware } from '@vendure/core';
 import { TallyCommandsController } from './api/commands.controller';
 import { TallyInfoController } from './api/info.controller';
-import { loggerCtx } from './service/errors';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import {
-  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
+  TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
 } from './config/strategies';
 import { TallyCommand } from './entities/tally-command.entity';
-import { OrderCreateService, WALK_IN_EMAIL } from './service/order-create.service';
+import { OrderCreateService } from './service/order-create.service';
+import { StoreSetupService } from './service/store-setup.service';
 
 /** A new array: `list` plus each item it does not already hold. */
 function withMissing<T>(list: T[], items: T[], same: (a: T, b: T) => boolean): T[] {
@@ -50,7 +48,7 @@ function commandsBodyParser(): Middleware['handler'] {
   imports: [PluginCommonModule],
   entities: [TallyCommand],
   controllers: [TallyInfoController, TallyCommandsController],
-  providers: [OrderCreateService],
+  providers: [OrderCreateService, StoreSetupService],
   exports: [OrderCreateService],
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
   // run this on arrays that setConfig shares with the caller's config.
@@ -90,76 +88,21 @@ function commandsBodyParser(): Middleware['handler'] {
 })
 export class TallyPosPlugin implements OnApplicationBootstrap {
   constructor(
-    private config: ConfigService,
-    private channels: ChannelService,
     private connection: TransactionalConnection,
     private contexts: RequestContextService,
-    private customers: CustomerService,
-    private paymentMethods: PaymentMethodService,
     private processContext: ProcessContext,
-    private shippingMethods: ShippingMethodService,
+    private storeSetup: StoreSetupService,
   ) {}
 
   // ADR 0002 "Store configuration" (review 9): in the server process only, every channel gets the
   // POS payment method, the in-store shipping method and the walk-in customer when it lacks them.
-  // N4 ruling: each method is created once, in the default channel, and assigned to the others, so
-  // the default channel holds one of each rather than a copy per channel.
+  // Each method is shared across channels; bootstrap and on-demand repairs use the same setup lock.
   async onApplicationBootstrap() {
     if (!this.processContext.isServer) return;
-    // The assign mutations check the active user's permissions on the target channel.
-    const identifier = this.config.authOptions.superadminCredentials?.identifier;
-    const found = identifier ? await this.connection.rawConnection.getRepository(User).findOne({
-      where: { identifier }, relations: ['roles', 'roles.channels'],
-    }) : null;
-    // Review nit 3: without a usable superadmin, skip the assignment rather than stop the server.
-    const user = found?.roles.some(role => role.permissions.includes(Permission.SuperAdmin)) ? found : undefined;
-    if (!user) {
-      Logger.error(`The superadmin "${identifier}" (authOptions.superadminCredentials.identifier) ${found ? 'lacks the SuperAdmin '
-        + 'permission' : 'was not found'}, so the POS payment and shipping methods are not assigned to the other channels`, loggerCtx);
-    }
     // Contexts come from the channel token, so the channel carries the relations Vendure loads.
-    const context = (token: string) => this.contexts.create({ apiType: 'admin', channelOrToken: token, user });
-    const defaultCtx = await context((await this.channels.getDefaultChannel()).token);
-    const paymentMethodId = await this.ensurePayment(defaultCtx);
-    const shippingMethodId = await this.ensureShipping(defaultCtx);
     for (const channel of await this.connection.rawConnection.getRepository(Channel).find({ order: { id: 'ASC' } })) {
-      const ctx = await context(channel.token);
-      const byCode = (code: string) => ({ filter: { code: { eq: code } } });
-      if (user && !(await this.paymentMethods.findAll(ctx, byCode(TALLY_PAYMENT_METHOD_CODE))).items.length) {
-        await this.paymentMethods.assignPaymentMethodsToChannel(defaultCtx, { paymentMethodIds: [paymentMethodId], channelId: channel.id });
-      }
-      if (user && !(await this.shippingMethods.findAll(ctx, byCode(TALLY_SHIPPING_METHOD_CODE))).items.length) {
-        await this.shippingMethods.assignShippingMethodsToChannel(defaultCtx, { shippingMethodIds: [shippingMethodId], channelId: channel.id });
-      }
-      const walkIn = await this.customers.findAll(ctx, { filter: { emailAddress: { eq: WALK_IN_EMAIL } } });
-      if (!walkIn.items.length) {
-        await this.customers.createOrUpdate(ctx, { emailAddress: WALK_IN_EMAIL, firstName: '', lastName: '' });
-      }
+      const ctx = await this.contexts.create({ apiType: 'admin', channelOrToken: channel.token });
+      await this.connection.withTransaction(ctx, tx => this.storeSetup.ensureChannelSetup(tx));
     }
-  }
-
-  private async ensurePayment(ctx: RequestContext): Promise<ID> {
-    const payments = await this.paymentMethods.findAll(ctx, { filter: { code: { eq: TALLY_PAYMENT_METHOD_CODE } } });
-    const checker = { code: tallyPaymentChecker.code, arguments: [] };
-    if (!payments.items.length) {
-      return (await this.paymentMethods.create(ctx, {
-        code: TALLY_PAYMENT_METHOD_CODE, enabled: true, checker,
-        translations: [{ languageCode: LanguageCode.en, name: 'Tally POS', description: '' }],
-        handler: { code: tallyPaymentHandler.code, arguments: [] },
-      })).id;
-    }
-    if (!payments.items[0].checker) await this.paymentMethods.update(ctx, { id: payments.items[0].id, checker });
-    return payments.items[0].id;
-  }
-
-  private async ensureShipping(ctx: RequestContext): Promise<ID> {
-    const shipping = await this.shippingMethods.findAll(ctx, { filter: { code: { eq: TALLY_SHIPPING_METHOD_CODE } } });
-    if (shipping.items.length) return shipping.items[0].id;
-    return (await this.shippingMethods.create(ctx, {
-      code: TALLY_SHIPPING_METHOD_CODE, fulfillmentHandler: manualFulfillmentHandler.code,
-      translations: [{ languageCode: LanguageCode.en, name: 'In-store collection', description: '' }],
-      checker: { code: tallyShippingChecker.code, arguments: [] },
-      calculator: { code: tallyShippingCalculator.code, arguments: [] },
-    })).id;
   }
 }
