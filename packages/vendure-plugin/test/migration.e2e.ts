@@ -2,6 +2,7 @@ import { RequestContextService, TransactionalConnection, runMigrations } from '@
 import { TestServer } from '@vendure/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyPos1790648006022 } from '../src';
+import { markTallyRoute } from '../src/config/strategies';
 import { createPluginTestEnvironment, dbConnectionOptions, pluginTestConfig } from './env';
 import { orderCommand } from './payloads';
 
@@ -71,7 +72,7 @@ describe('the TallyPos migration', () => {
       const pending = (await migrated.driver.createSchemaBuilder().log()).upQueries.map(item => item.query);
       expect(pending).toEqual([]);
 
-      const ctx = await server.app.get(RequestContextService).create({ apiType: 'custom' });
+      const ctx = markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom' }));
       const result = await server.app.get(OrderCreateService).create(ctx, orderCommand([
         { variantId: seeded.variantIds.mug[0], quantity: 1, unitPriceMinor: 800 },
       ]));

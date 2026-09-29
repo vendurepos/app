@@ -20,7 +20,7 @@ export class TallyCommand {
   @Column('varchar')
   fingerprint: string;
 
-  /** 'pending' while claimed, then 'applied' or 'rejected'. */
+  /** 'pending' while claimed, then 'applied' or 'rejected', or 'needs_admin' until an admin resolves it (VP2). */
   @Column('varchar')
   status: string;
 

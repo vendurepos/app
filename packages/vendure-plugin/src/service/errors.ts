@@ -5,16 +5,16 @@ import type { GraphQLErrorResult } from '@vendure/core';
 export const loggerCtx = 'TallyPosPlugin';
 
 /**
- * The contract code for an ErrorResult the plugin does not map (ADR 0002 §2 "any other
- * ErrorResult"; Front desk ruling 1): a stored rejection that carries the platform's own code and
- * message in `data` as `platformCode` and `platformMessage`.
+ * TallyUI ADR-038's `platform_error` amendment: a stored rejection for an ErrorResult on the
+ * plugin's permanent list (classification.ts), with the platform's own code and message in `data`
+ * as `platformCode` and `platformMessage`.
  */
-export const UNKNOWN_REJECTION_CODE = 'platform_error';
+export const PLATFORM_ERROR_CODE = 'platform_error';
 
-/** Front desk ruling 8: an unexpected, non-transient exception after the claim, stored like a refusal. */
+/** Front desk ruling 1: the plugin's own programming error after a complete rollback, stored like a refusal. */
 export const INTERNAL_ERROR_CODE = 'internal_error';
 
-/** A business refusal found after the claim: the order rolls back and the rejection is stored. */
+/** A business refusal found after the claim: the sale rolls back and the rejection is stored on the claim. */
 export class BusinessRejection extends Error {
   constructor(readonly code: string, message: string, readonly data?: Record<string, unknown>) {
     super(message);
@@ -27,17 +27,27 @@ export class BusinessRejection extends Error {
  */
 export class StoreConfigurationRefusal extends Error {}
 
+/** A returned ErrorResult, turned into a throw so the sale's savepoint rolls back (ADR 0002 §2). */
+export class ErrorResultThrown extends Error {
+  constructor(readonly result: GraphQLErrorResult) {
+    super(result.errorCode);
+  }
+}
+
 /**
  * `lock`: the claim's lock_timeout (55P03) on another request's uncommitted claim. `deadlock`: a
  * deadlock or serialization failure (N5). `resources`: the server is short of resources (N1).
- * A lock_timeout after the claim is a `timeout`.
+ * A lock_timeout after the claim is a `timeout`. `unclassified`: an ErrorResult off the permanent
+ * list, or an error nothing else classifies (the amendment: never `platform_error`). `needs_admin`:
+ * the ledger row awaits an admin, whose resends answer 409 like `lock`.
  */
-export type TransientKind = 'lock' | 'deadlock' | 'connection' | 'timeout' | 'resources';
+export type TransientKind = 'lock' | 'deadlock' | 'connection' | 'timeout' | 'resources' | 'unclassified' | 'needs_admin';
 
 /**
- * ADR 0002 §2: the only failures that may be retried. Nothing is stored, and the transaction,
- * claim included, has rolled back. VP2 answers `lock` as 409 `in_progress` and every other kind
- * as 503 `transient`.
+ * ADR 0002 §2: the failures that may be retried. Nothing is stored, and the transaction, claim
+ * included, has rolled back, except for `needs_admin`, whose sale is committed and whose claim
+ * stays until an admin resolves it. The route answers `lock` and `needs_admin` as 409
+ * `in_progress` and every other kind as 503 `transient`.
  */
 export class TransientCommandError extends Error {
   constructor(readonly commandId: string, readonly kind: TransientKind, readonly cause: unknown) {
@@ -45,40 +55,21 @@ export class TransientCommandError extends Error {
   }
 }
 
-// ErrorResults with a contract code of their own. `underpaid` is decided where the
-// PaymentSettled transition is refused, because it depends on the payments. A shortage that
-// createFulfillment finds is the same final answer as one addItemToOrder finds (ruling 3).
-const KNOWN_ERROR_RESULTS: Record<string, string> = {
-  INSUFFICIENT_STOCK_ERROR: 'insufficient_stock',
-  INSUFFICIENT_STOCK_ON_HAND_ERROR: 'insufficient_stock',
-};
-
-export function rejectionFor(error: GraphQLErrorResult): BusinessRejection {
-  // Outside GraphQL an ErrorResult's message is its untranslated key (for most types, the code);
-  // its specifics are separate fields, so the readable message appends the primitive ones.
-  const { errorCode, message, __typename, ...fields } = error as GraphQLErrorResult & Record<string, unknown>;
-  const details = Object.fromEntries(Object.entries(fields).filter(([, value]) => value === null || typeof value !== 'object'));
-  const readable = Object.keys(details).length ? `${message}: ${JSON.stringify(details)}` : message;
-  const known = KNOWN_ERROR_RESULTS[errorCode];
-  if (known) return new BusinessRejection(known, readable);
-  return new BusinessRejection(UNKNOWN_REJECTION_CODE, readable, { platformCode: errorCode, platformMessage: message });
-}
-
-/** ADR 0002 §2 "Error results become throws": a returned ErrorResult rolls the order back. */
+/** ADR 0002 §2 "Error results become throws": a returned ErrorResult rolls the sale back. */
 export function unwrap<T>(result: T): Exclude<T, GraphQLErrorResult> {
-  if (isGraphQlErrorResult(result)) throw rejectionFor(result as GraphQLErrorResult);
+  if (isGraphQlErrorResult(result)) throw new ErrorResultThrown(result as GraphQLErrorResult);
   return result as Exclude<T, GraphQLErrorResult>;
 }
 
 let internalErrors = 0;
 
-/** How many unexpected exceptions this process has stored as `internal_error` (ruling 8). */
+/** How many programming errors this process has stored as `internal_error` (ruling 8). */
 export function internalErrorCount(): number {
   return internalErrors;
 }
 
 /**
- * Logs an unexpected exception after the claim and turns it into the stored `internal_error`.
+ * Logs a programming error after the claim and turns it into the stored `internal_error`.
  * The raw message goes only to the log, under a random correlation id the result carries (N7): it
  * can hold internals, so it is never stored or returned.
  */
@@ -103,7 +94,7 @@ const DEADLOCK_CODES = new Set(['40P01', '40001']);
 const NODE_CONNECTION_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN']);
 const PG_CONNECTION_MESSAGES = /Connection terminated|timeout exceeded when trying to connect|Client has encountered a connection error/i;
 
-/** The transient kind of a thrown error, or undefined when it is not transient. */
+/** The named transient kind of a thrown error, or undefined when none fits (the caller then treats it as `unclassified`). */
 export function transientKind(error: unknown): TransientKind | undefined {
   const driverError = (error as { driverError?: unknown })?.driverError ?? error;
   const code = (driverError as { code?: unknown })?.code;
@@ -118,10 +109,4 @@ export function transientKind(error: unknown): TransientKind | undefined {
   const message = (driverError as { message?: unknown })?.message;
   if (typeof message === 'string' && PG_CONNECTION_MESSAGES.test(message)) return 'connection';
   return undefined;
-}
-
-/** A Postgres unique violation (23505) on the named constraint. */
-export function isUniqueViolation(error: unknown, constraint: string): boolean {
-  const driverError = (error as { driverError?: { code?: unknown; constraint?: unknown } })?.driverError;
-  return driverError?.code === '23505' && driverError.constraint === constraint;
 }

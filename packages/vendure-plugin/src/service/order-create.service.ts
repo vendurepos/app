@@ -1,13 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import {
-  ConfigService, CustomerService, ID, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
+  ConfigService, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevelService,
   StockLocationService, StockMovementService, Surcharge, TaxRate, TransactionalConnection,
   isGraphQlErrorResult, manualFulfillmentHandler,
 } from '@vendure/core';
 import type { CurrencyCode } from '@vendure/core';
-import { IsNull } from 'typeorm';
-import { TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE } from '../config/strategies';
+import { In, IsNull } from 'typeorm';
+import {
+  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute,
+} from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
@@ -15,8 +17,9 @@ import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
+import { classify } from './classification';
 import {
-  BusinessRejection, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, isUniqueViolation,
+  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx,
   transientKind, unwrap,
 } from './errors';
 import { roundHalfAwayFromZero } from './rounding';
@@ -34,6 +37,22 @@ export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSa
 export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
 // ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
 const CLAIM_LOCK_TIMEOUT = '5s';
+// Front desk ruling: a createdAt from the epoch up to now plus this skew, which absorbs a till
+// whose clock runs ahead; anything later, earlier or unparseable is invalid_payload.
+const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
+/** The environment variable that enables the test hooks; production never sets it. */
+export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
+// platformCode of an admin's `rejected` resolution of a needs_admin row.
+const ADMIN_REJECTED = 'TALLY_ADMIN_REJECTED';
+
+type TestHook = 'afterSavepointRollback' | 'afterCommit';
+type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensationError?: unknown };
+
+const createdAtError = (value: unknown, path: string) => {
+  const time = typeof value === 'string' ? Date.parse(value) : NaN;
+  return time >= 0 && time <= Date.now() + CREATED_AT_SKEW_MS ? []
+    : [`${path}: expected a time from 1970-01-01T00:00:00Z to one day from now`];
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,17 +82,19 @@ export class OrderCreateService {
 
   /**
    * Runs one order.create command in its own transaction (ADR 0002 §2). Returns the command's
-   * result; throws TransientCommandError for connection, lock and timeout failures only.
+   * result; throws TransientCommandError for every failure that may be retried (classification.ts),
+   * and with kind `needs_admin` once a sale's compensation has failed.
    */
   async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult> {
     const invalid = this.shapeRefusal(command);
     if (invalid) return invalid;
     const { payload } = command;
+    let outcome: SaleOutcome;
     try {
       // Review 1: a command the ledger already holds skips every pre-claim check and replays.
-      if (!await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id })) {
-        const requeued = await this.existingOrderResult(ctx, command);
-        if (requeued) return requeued;
+      // A sale this channel has already recorded skips them too: the collision guard answers it after the claim.
+      if (!await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id })
+        && !await this.existingOrder(ctx, payload.clientOrderId)) {
         if (!ctx.channel.availableCurrencyCodes.includes(payload.currency as CurrencyCode)) {
           return rejected(command.id, 'unsupported_currency', `The channel does not offer ${payload.currency}`);
         }
@@ -85,43 +106,85 @@ export class OrderCreateService {
         languageCode: ctx.languageCode, currencyCode: payload.currency as CurrencyCode,
         isAuthorized: ctx.isAuthorized, authorizedAsOwnerOnly: ctx.authorizedAsOwnerOnly,
       });
-      let claimed = false;
-      try {
-        return await this.connection.withTransaction(commandCtx, async txCtx => {
-          const replay = await this.claim(txCtx, command);
-          if (replay) return replay;
-          claimed = true;
-          return await this.recipe(txCtx, command);
-        });
-      } catch (error) {
-        if (error instanceof StoreConfigurationRefusal) return storeConfiguration(command.id);
-        if (error instanceof BusinessRejection) return await this.storeRejection(commandCtx, command, error);
-        // Two commands for one sale raced; the other committed first (ADR 0002 §2 "Requeue path").
-        if (isUniqueViolation(error, this.clientOrderIdIndex())) {
-          const existing = await this.existingOrderResult(commandCtx, command);
-          if (existing) return existing;
-          // Review 10: the sale is recorded in another channel, which this caller cannot answer for.
-          const elsewhere = await this.connection.getRepository(commandCtx, Order).count({
-            where: { customFields: { tallyClientOrderId: payload.clientOrderId } },
-          });
-          if (elsewhere) {
-            return await this.storeRejection(commandCtx, command, new BusinessRejection('idempotency_mismatch',
-              'The clientOrderId is already recorded in another channel', { reason: 'client_order_in_other_channel' }));
-          }
-        }
-        // N5: only the claim's lock_timeout means another request holds the id; after it, a lock timeout is a timeout.
-        if (claimed && transientKind(error) === 'lock') throw new TransientCommandError(command.id, 'timeout', error);
-        // Ruling 8: an unexpected exception after the claim is final too, or it would loop.
-        if (claimed && !transientKind(error)) {
-          return await this.storeRejection(commandCtx, command, internalErrorFor(command.id, error));
-        }
-        throw error;
-      }
+      if (isTallyRoute(ctx)) markTallyRoute(commandCtx);
+      outcome = await this.connection.withTransaction(commandCtx, async txCtx => {
+        const replay = await this.claim(txCtx, command);
+        if (replay) return { result: replay };
+        const requeued = await this.requeueResult(txCtx, command);
+        return requeued ? { result: requeued } : await this.runSale(txCtx, command);
+      });
     } catch (error) {
-      const kind = error instanceof TransientCommandError ? undefined : transientKind(error);
-      if (kind) throw new TransientCommandError(command.id, kind, error);
-      throw error;
+      if (error instanceof StoreConfigurationRefusal) return storeConfiguration(command.id);
+      if (error instanceof TransientCommandError) throw error;
+      throw new TransientCommandError(command.id, transientKind(error) ?? 'unclassified', error);
     }
+    if (outcome.needsAdmin) throw new TransientCommandError(command.id, 'needs_admin', outcome.compensationError);
+    return outcome.result;
+  }
+
+  /**
+   * TallyUI ADR-038's `platform_error` amendment: the sale's steps run in a savepoint after the
+   * claim. A stored outcome rolls back to the savepoint, keeps the claim, stores the rejection on it
+   * and commits, so a resend of the id waits on the claim and never runs the recipe a second time.
+   */
+  private async runSale(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<SaleOutcome> {
+    try {
+      // Vendure's withTransaction inside a transaction is a SAVEPOINT on the same query runner.
+      return await this.connection.withTransaction(ctx, saleCtx => this.recipe(saleCtx, command));
+    } catch (error) {
+      // The savepoint has rolled back. Had the rollback failed, `error` would be that failure: transient.
+      if (error instanceof TransientCommandError) throw error;
+      const verdict = classify(error, this.clientOrderIdIndex());
+      if (verdict.outcome === 'notStored') throw error;
+      if (verdict.outcome === 'transient') {
+        // N5: after the claim, a lock timeout is a timeout, not another request's claim.
+        throw new TransientCommandError(command.id, verdict.kind === 'lock' ? 'timeout' : verdict.kind, error);
+      }
+      let rejection: BusinessRejection;
+      if (verdict.outcome === 'collision') {
+        // Two commands for one sale raced and the other committed first (ADR 0002 §2 "Requeue path").
+        const requeued = await this.requeueResult(ctx, command);
+        if (requeued) return { result: requeued };
+        const elsewhere = await this.connection.getRepository(ctx, Order).count({
+          where: { customFields: { tallyClientOrderId: command.payload.clientOrderId } },
+        });
+        if (!elsewhere) throw new TransientCommandError(command.id, 'unclassified', error);
+        // Review 10: the sale is recorded in another channel, which this caller cannot answer for.
+        rejection = new BusinessRejection('idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
+          { reason: 'client_order_in_other_channel' });
+      } else {
+        rejection = verdict.rejection ?? internalErrorFor(command.id, error);
+      }
+      const result = rejected(command.id, rejection.code, rejection.message, rejection.data);
+      await this.runTestHook('afterSavepointRollback', command.id);
+      await this.connection.getRepository(ctx, TallyCommand).update(command.id, { status: 'rejected', result: { ...result } });
+      return { result };
+    }
+  }
+
+  /**
+   * Resolves a `needs_admin` ledger row (the amendment): `applied` replays the sale's stored refs as
+   * `duplicate`; `rejected` replays a `platform_error` carrying the admin's note. Not exposed over
+   * any API; a caller that exposes it must guard it with Permission.SuperAdmin.
+   */
+  async resolveNeedsAdmin(ctx: RequestContext, commandId: string, resolution: 'applied' | 'rejected', note: string) {
+    return this.connection.withTransaction(ctx, async txCtx => {
+      const ledger = this.connection.getRepository(txCtx, TallyCommand);
+      const row = await ledger.findOne({ where: { id: commandId }, lock: { mode: 'pessimistic_write' } });
+      if (row?.status !== 'needs_admin') throw new Error(`Command ${commandId} does not need an admin`);
+      const result = resolution === 'applied' ? row.result as unknown as OrderCreateResult
+        : rejected(commandId, PLATFORM_ERROR_CODE, `${ADMIN_REJECTED}: ${note}`, { platformCode: ADMIN_REJECTED, platformMessage: note });
+      await ledger.update(commandId, { status: resolution, result: { ...result } });
+      Logger.warn(`order.create ${commandId}: needs_admin resolved as ${resolution} (${note})`, loggerCtx);
+      return result;
+    });
+  }
+
+  /** Test seams (VP2): they run only while VENDUREPOS_PLUGIN_TEST_HOOKS is '1', which production never sets. */
+  testHooks: Partial<Record<TestHook, (commandId: string) => Promise<void>>> = {};
+
+  async runTestHook(name: TestHook, commandId: string) {
+    if (process.env[TEST_HOOKS_ENV] === '1') await this.testHooks[name]?.(commandId);
   }
 
   // ADR 0002 §2 step 2: shape and version refusals, answered before any write or claim.
@@ -134,7 +197,7 @@ export class OrderCreateService {
     if (!id.length || id.length > 64) errors.push('Invalid id');
     if (command.type !== 'order.create') errors.push('type: expected order.create');
     if (!Number.isSafeInteger(command.version) || command.version < 1) errors.push('Invalid version');
-    if (typeof command.createdAt !== 'string') errors.push('Invalid createdAt');
+    errors.push(...createdAtError(command.createdAt, 'createdAt'));
     if (typeof command.deviceId !== 'string') errors.push('Invalid deviceId');
     if (!Number.isSafeInteger(command.attempt) || command.attempt < 1) errors.push('Invalid attempt');
     if (!errors.length && !SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
@@ -143,6 +206,7 @@ export class OrderCreateService {
     }
     errors.push(...payloadShapeErrors(command.payload));
     const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
+    if (!errors.length) errors.push(...createdAtError(command.payload.createdAt, 'payload.createdAt'));
     if (!errors.length) errors.push(...valueRangeErrors(command.payload, maxMoney));
     if (!errors.length && command.version === 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
@@ -164,13 +228,35 @@ export class OrderCreateService {
   }
 
   /** The requeue answer: `applied` with the refs of the order already made for this sale. */
-  private async existingOrderResult(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
-    const order = await this.connection.getRepository(ctx, Order).findOne({
-      where: { customFields: { tallyClientOrderId: command.payload.clientOrderId }, channels: { id: ctx.channelId } },
+  private existingOrder(ctx: RequestContext, clientOrderId: string) {
+    return this.connection.getRepository(ctx, Order).findOne({
+      where: { customFields: { tallyClientOrderId: clientOrderId }, channels: { id: ctx.channelId } },
     });
-    return order ? { id: command.id, status: 'applied', serverRefs: {
-      orderId: this.encodeId(order.id), displayId: order.code, totalMinor: order.totalWithTax,
-    } } satisfies OrderCreateResult : undefined;
+  }
+
+  /**
+   * The collision guard (Front desk refinement 2), run on the claim of a new command id: a sale this
+   * channel has recorded answers `applied` only when its own command's row is `applied`, and the new
+   * id is then stored as `applied` with that result's refs and warnings, so its replay is `duplicate`.
+   * A row awaiting an admin answers 409, so a new id never gets round the mark. Without a
+   * recorded order, undefined.
+   */
+  private async requeueResult(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
+    const order = await this.existingOrder(ctx, command.payload.clientOrderId);
+    if (!order) return undefined;
+    const orderId = this.encodeId(order.id);
+    const ledger = this.connection.getRepository(ctx, TallyCommand);
+    const rows = await ledger.find({ where: {
+      clientOrderId: command.payload.clientOrderId, channelId: String(ctx.channelId), status: In(['applied', 'needs_admin']),
+    } });
+    const source = rows.find(row => (row.result as OrderCreateResult | null)?.serverRefs?.orderId === orderId);
+    if (source?.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
+    // An order whose command is neither applied nor awaiting an admin (an admin rejected it) is not answered.
+    if (!source) throw new TransientCommandError(command.id, 'unclassified', new Error(`Order ${orderId} has no applied command`));
+    const { id: _id, status: _status, ...stored } = source.result as unknown as OrderCreateResult;
+    const result: OrderCreateResult = { id: command.id, status: 'applied', ...stored };
+    await ledger.update(command.id, { status: 'applied', result: { ...result } });
+    return result;
   }
 
   // Review 2: ids cross the wire in the configured EntityIdStrategy's encoding, as the Admin API
@@ -221,19 +307,10 @@ export class OrderCreateService {
     if (existing.fingerprint !== fingerprint) {
       return rejected(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
     }
+    // The amendment: a row awaiting an admin answers 409 in_progress, never duplicate or rejected.
+    if (existing.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
     const stored = existing.result as unknown as OrderCreateResult;
     return { ...stored, status: existing.status === 'rejected' ? 'rejected' : 'duplicate' };
-  }
-
-  // The failed order transaction has rolled back, including its claim; store the final answer.
-  private async storeRejection(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, error: BusinessRejection) {
-    const result = rejected(command.id, error.code, error.message, error.data);
-    return this.connection.withTransaction(ctx, async txCtx => {
-      const replay = await this.claim(txCtx, command);
-      if (replay) return replay;
-      await this.connection.getRepository(txCtx, TallyCommand).update(command.id, { status: 'rejected', result: { ...result } });
-      return result;
-    });
   }
 
   private clientOrderIdIndex(): string {
@@ -244,7 +321,7 @@ export class OrderCreateService {
 
   // The S1 recipe (docs/spikes/s1-order-recipe.md). Its money and tax logic is unchanged; VP1 adds
   // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
-  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult> {
+  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<SaleOutcome> {
     const payload = command.payload;
     const customerId = payload.customer?.customerId ? this.decodeId(payload.customer.customerId) : undefined;
     let customer = customerId !== undefined ? await this.customers.findOne(ctx, customerId) : undefined;
@@ -266,7 +343,16 @@ export class OrderCreateService {
       tallySessionId: command.version === 3 ? payload.sessionId : undefined,
       tallyCashierRef: payload.cashierRef,
     };
-    await this.connection.getRepository(ctx, Order).save(order);
+    // The collision guard's in-progress case: another transaction still recording this sale holds
+    // the unique tallyClientOrderId key. Wait on it as long as a claim waits, then answer 409.
+    const orderRepository = this.connection.getRepository(ctx, Order);
+    await orderRepository.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
+    try {
+      await orderRepository.save(order);
+    } catch (error) {
+      throw transientKind(error) === 'lock' ? new TransientCommandError(command.id, 'lock', error) : error;
+    }
+    await orderRepository.query('SET LOCAL lock_timeout = DEFAULT');
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
       const id = this.decodeId(line.variantId);
@@ -374,7 +460,7 @@ export class OrderCreateService {
         if (paidMinor < order.totalWithTax) {
           throw new BusinessRejection('underpaid', `Payments of ${paidMinor} are below the total of ${order.totalWithTax}`);
         }
-        // Review 13: enough payment, so look for a configuration cause first; else platform_error.
+        // Review 13: enough payment, so look for a configuration cause first; else an unlisted ErrorResult (transient).
         if (!await this.storeCanSell(ctx)) throw new StoreConfigurationRefusal();
       }
       order = unwrap(settled);
@@ -394,7 +480,18 @@ export class OrderCreateService {
       },
     }));
     unwrap(await this.orders.transitionFulfillmentToState(ctx, fulfillment.id, 'Delivered'));
-    for (const topUp of topUps) await this.adjustStock(ctx, topUp.id, location.id, -topUp.quantity);
+    // The take-back is the one compensating write (the amendment). It runs in a savepoint of its own:
+    // if it fails, the sale stays committed, the claim stays as needs_admin, and an admin resolves it.
+    let compensation: { error: unknown } | undefined;
+    if (topUps.length) {
+      try {
+        await this.connection.withTransaction(ctx, async takeBackCtx => {
+          for (const topUp of topUps) await this.adjustStock(takeBackCtx, topUp.id, location.id, -topUp.quantity);
+        });
+      } catch (error) {
+        compensation = { error };
+      }
+    }
     const warnings: CommandWarning[] = topUps.map(({ variantId, quantity }) => ({ code: 'insufficient_stock', variantId, quantity }));
     const result: OrderCreateResult = {
       id: command.id, status: 'applied',
@@ -404,9 +501,15 @@ export class OrderCreateService {
     };
     await this.connection.getRepository(ctx, TallyCommand).save({
       id: command.id, channelId: String(ctx.channelId), clientOrderId: payload.clientOrderId, fingerprint: commandFingerprint(command),
-      status: 'applied', result: { ...result },
+      status: compensation ? 'needs_admin' : 'applied', result: { ...result },
     });
-    return result;
+    if (compensation) {
+      const { error } = compensation;
+      Logger.error(`order.create ${command.id} needs an admin: order ${result.serverRefs!.displayId} is recorded, but taking back `
+        + `its stock top-up failed (${error instanceof Error ? error.message : String(error)})`, loggerCtx,
+        error instanceof Error ? error.stack : undefined);
+    }
+    return { result, needsAdmin: !!compensation, compensationError: compensation?.error };
   }
 
   private async adjustStock(ctx: RequestContext, variantId: ID, stockLocationId: ID, change: number) {

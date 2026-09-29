@@ -6,8 +6,10 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/adr/0002-order-path-vendure-plugin.md`), proven by spike S1
 (`docs/spikes/s1-order-recipe.md`).
 
-Status: VP1. The plugin has the order service and `GET /tally/v1/info`. The batch route
-`POST /tally/v1/commands` arrives in VP2.
+Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
+commands, a 1 MB body) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`. A sale
+whose stock take-back fails is marked `needs_admin` in the `tally_command` ledger and answers
+409 until an admin calls `OrderCreateService.resolveNeedsAdmin`.
 
 ## Requirements
 

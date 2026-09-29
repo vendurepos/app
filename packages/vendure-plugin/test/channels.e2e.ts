@@ -1,5 +1,5 @@
 import {
-  Customer, Order, PaymentMethod, ProcessContext, ProductVariantService, RequestContextService, ShippingMethod,
+  ConfigService, Customer, Logger, Order, PaymentMethod, ProcessContext, ProductVariantService, RequestContextService, ShippingMethod,
   TransactionalConnection, User,
 } from '@vendure/core';
 import { parse } from 'graphql';
@@ -189,5 +189,40 @@ describe('store configuration in every channel, and a sale recorded in another c
     expect([await status(), await status(second.token)]).toEqual(['store_configuration', 'store_configuration']);
     await plugin.onApplicationBootstrap();
     expect([await status(), await status(second.token)]).toEqual(['applied', 'applied']);
+  });
+
+  it('review nit 3: without a usable superadmin the bootstrap logs the identifier and skips the assignment instead of failing', async () => {
+    const { zones } = await adminClient.query<{ zones: { items: Array<{ id: string; name: string }> } }>(parse('query { zones { items { id name } } }'));
+    const denmark = zones.items.find(zone => zone.name === 'Denmark')!.id;
+    const { createChannel } = await adminClient.query<{ createChannel: { id: string } }>(parse(`
+      mutation Channel($input: CreateChannelInput!) { createChannel(input: $input) { ... on Channel { id } } }`), { input: {
+      code: 'vp2-third', token: 'vp2-third-token', defaultLanguageCode: 'en', pricesIncludeTax: false,
+      defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: denmark, defaultShippingZoneId: denmark,
+    } });
+    const third = decode(createChannel.id);
+    // An administrator whose role lacks SuperAdmin.
+    const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation {
+      createRole(input: { code: "vp2-limited", description: "limited", permissions: [CreateOrder] }) { id } }`));
+    await adminClient.query(parse(`mutation Admin($roleId: ID!) { createAdministrator(input: {
+      firstName: "Limited", lastName: "Admin", emailAddress: "vp2-limited@example.com", password: "test", roleIds: [$roleId]
+    }) { id } }`), { roleId: createRole.id });
+    const credentials = server.app.get(ConfigService).authOptions.superadminCredentials!;
+    const identifier = credentials.identifier;
+    const logged = vi.spyOn(Logger, 'error');
+    try {
+      for (const [configured, reason] of [['vp2-nobody', 'was not found'], ['vp2-limited@example.com', 'lacks the SuperAdmin permission']]) {
+        credentials.identifier = configured;
+        await expect(plugin.onApplicationBootstrap()).resolves.toBeUndefined();
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining(`The superadmin "${configured}" (authOptions.superadminCredentials.identifier) ${reason}`),
+          'TallyPosPlugin');
+        // The walk-in customer needs no assignment, so it is still created.
+        expect(await storeIn(third)).toEqual({ payment: 0, shipping: 0, walkIn: 1 });
+      }
+    } finally {
+      credentials.identifier = identifier;
+      logged.mockRestore();
+    }
+    await plugin.onApplicationBootstrap();
+    expect(await storeIn(third)).toEqual({ payment: 1, shipping: 1, walkIn: 1 });
   });
 });
