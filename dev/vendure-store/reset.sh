@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 
 export VENDURE_PORT="${VENDURE_PORT:-3000}" VENDURE_DB_PORT="${VENDURE_DB_PORT:-5442}" TZ=UTC
 
+./plugin.sh
 ./stop.sh
 docker compose down -v
 docker compose up -d --wait postgres
