@@ -548,6 +548,8 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     input.payload.sessionId = 's'.repeat(40);
     expect(input.payload.customer!.email).toHaveLength(255);
     // The command was applied before today's bounds.
+    // A step-1 length bound would refuse this apply itself, so a mutation that restores one
+    // fails here, at the setup, by design.
     const values = vi.spyOn(recipe as unknown as { valueRefusal: () => unknown }, 'valueRefusal').mockReturnValue(undefined);
     try {
       const first = await run(input);
