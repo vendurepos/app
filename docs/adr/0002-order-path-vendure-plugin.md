@@ -304,11 +304,22 @@ non-unique `tallyRejectedClientOrderId` and the `tallyRejected` flag of an
 admin-rejected order, and the ledger's `topUps`.
 
 **Store configuration.** There is one shared `tally-pos` payment method and
-one shared `tally-in-store` shipping method, created once in the default
-channel and assigned to every channel, and a walk-in customer per channel.
-A bootstrap creates or assigns them when they are missing. If one is still missing when a sale arrives, or the channel
-has no tax zone, the sale is `store_configuration`, answered with the claim rolled back and nothing
-stored (TallyUI #219), so the same command id applies once the store is repaired.
+one shared `tally-in-store` shipping method, assigned to the default channel
+and every channel that uses them, and one walk-in customer, assigned to every channel.
+Bootstrap creates or assigns them in each channel without a superadmin.
+When a sale's pre-check finds a deleted or unassigned POS method and the other
+setup checks pass, it rolls back the claim and repairs the channel's setup in
+its own short transaction. Bootstrap and repair take the same two-int
+transaction-scoped advisory lock, with a 5-second lock timeout, and re-read
+live rows before creating or assigning them. Soft-deleted shipping rows stay
+deleted; repair creates a new row. The repair commits even if the sale is
+later refused, and the command runs once more, with no repair loop.
+A disabled payment method remains disabled and answers `store_configuration`.
+Replaced handlers or checkers, missing manual fulfilment or usable default-zone
+tax rates, and setup still missing after the single repair also answer
+`store_configuration`, with the claim rolled back and nothing stored
+(TallyUI #219). Repair errors are transient; a repair lock timeout is a 503,
+never a 409 (Front desk rulings 9–13, 2026-09-29).
 
 ### 4. TallyUI's contract, and the WCPOS engine it moves to
 

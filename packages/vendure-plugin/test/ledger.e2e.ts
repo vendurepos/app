@@ -254,21 +254,24 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it.each(['payment', 'shipping'] as const)('TallyUI #219: a missing channel POS %s method is store_configuration, not stored', async kind => {
+  it.each(['payment', 'shipping'] as const)('VP3-4a: a channel POS %s method removed from the channel is re-assigned on demand, and the sale applies', async kind => {
     const entity = kind === 'payment' ? PaymentMethod : ShippingMethod;
     const repo = connection.rawConnection.getRepository(entity);
     const method = await repo.findOneOrFail({
       where: { code: kind === 'payment' ? 'tally-pos' : 'tally-in-store' }, relations: ['channels'],
     });
-    const before = await counts();
     const input = command();
     try {
       await repo.createQueryBuilder().relation(entity, 'channels').of(method).remove(channel);
-      expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
-      expect(await counts()).toEqual(before);
-      expect(await ledgerFor(input)).toBeNull();
+      expect(await run(input)).toMatchObject({ status: 'applied' });
+      const repaired = await repo.findOneOrFail({ where: { id: method.id }, relations: ['channels'] });
+      expect(repaired.channels.map(assigned => String(assigned.id))).toContain(String(channel.id));
+      expect(await repo.count({ where: { code: method.code } })).toBe(1);
     } finally {
-      await repo.createQueryBuilder().relation(entity, 'channels').of(method).add(channel);
+      const current = await repo.findOneOrFail({ where: { id: method.id }, relations: ['channels'] });
+      if (!current.channels.some(assigned => String(assigned.id) === String(channel.id))) {
+        await repo.createQueryBuilder().relation(entity, 'channels').of(method).add(channel);
+      }
     }
   });
 

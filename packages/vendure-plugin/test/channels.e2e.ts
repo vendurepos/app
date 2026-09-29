@@ -174,20 +174,18 @@ describe('store configuration in every channel, and a sale recorded in another c
     // Deleted from the default channel: Vendure refuses while another channel uses it, naming that channel.
     expect(await deletePayment()).toEqual({ result: 'NOT_DELETED', message: expect.stringContaining('vp1-second') });
     expect([await status(), await status(second.token)]).toEqual(['applied', 'applied']);
-    // Deleted in the second channel: Vendure removes it from that channel only, until the next start.
+    // Deleted in the second channel: Vendure removes it from that channel only; the next sale repairs it.
     adminClient.setChannelToken(second.token);
     try {
       expect(await deletePayment()).toMatchObject({ result: 'DELETED' });
     } finally {
       adminClient.setChannelToken(ctx.channel.token);
     }
-    expect([await status(), await status(second.token)]).toEqual(['applied', 'store_configuration']);
-    await plugin.onApplicationBootstrap();
-    expect(await status(second.token)).toBe('applied');
+    expect([await status(), await status(second.token)]).toEqual(['applied', 'applied']);
     expect((await storeIn(second.id)).payment).toBe(1);
   });
 
-  it('N4: deleting the POS shipping method from any channel soft-deletes it for every channel until the next start', async () => {
+  it('N4: deleting the POS shipping method soft-deletes it for every channel and it is repaired on demand', async () => {
     await plugin.onApplicationBootstrap();
     const status = async (token?: string) => (await run(mugSale(), token)).error?.code ?? 'applied';
     const { shippingMethods } = await adminClient.query<{ shippingMethods: { items: Array<{ id: string; code: string }> } }>(
@@ -196,12 +194,15 @@ describe('store configuration in every channel, and a sale recorded in another c
     expect(await adminClient.query(parse('mutation Delete($id: ID!) { deleteShippingMethod(id: $id) { result } }'), { id: shipping.id }))
       .toEqual({ deleteShippingMethod: { result: 'DELETED' } });
     // Vendure's ShippingMethodService.softDelete sets deletedAt on the one shared method.
-    expect([await status(), await status(second.token)]).toEqual(['store_configuration', 'store_configuration']);
-    await plugin.onApplicationBootstrap();
     expect([await status(), await status(second.token)]).toEqual(['applied', 'applied']);
+    expect(await connection.rawConnection.getRepository(ShippingMethod).count({
+      where: { code: 'tally-in-store', deletedAt: IsNull() },
+    })).toBe(1);
+    expect((await connection.rawConnection.getRepository(ShippingMethod).findOneByOrFail({ id: decode(shipping.id) })).deletedAt)
+      .not.toBeNull();
   });
 
-  it('review nit 3: without a usable superadmin the bootstrap logs the identifier and skips the assignment instead of failing', async () => {
+  it('review nit 3: with a missing superadmin identifier the bootstrap assigns every channel without logging an error', async () => {
     const { zones } = await adminClient.query<{ zones: { items: Array<{ id: string; name: string }> } }>(parse('query { zones { items { id name } } }'));
     const denmark = zones.items.find(zone => zone.name === 'Denmark')!.id;
     const { createChannel } = await adminClient.query<{ createChannel: { id: string } }>(parse(`
@@ -210,30 +211,20 @@ describe('store configuration in every channel, and a sale recorded in another c
       defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: denmark, defaultShippingZoneId: denmark,
     } });
     const third = decode(createChannel.id);
-    // An administrator whose role lacks SuperAdmin.
-    const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation {
-      createRole(input: { code: "vp2-limited", description: "limited", permissions: [CreateOrder] }) { id } }`));
-    await adminClient.query(parse(`mutation Admin($roleId: ID!) { createAdministrator(input: {
-      firstName: "Limited", lastName: "Admin", emailAddress: "vp2-limited@example.com", password: "test", roleIds: [$roleId]
-    }) { id } }`), { roleId: createRole.id });
     const credentials = server.app.get(ConfigService).authOptions.superadminCredentials!;
     const identifier = credentials.identifier;
     const logged = vi.spyOn(Logger, 'error');
     try {
-      for (const [configured, reason] of [['vp2-nobody', 'was not found'], ['vp2-limited@example.com', 'lacks the SuperAdmin permission']]) {
-        credentials.identifier = configured;
-        await expect(plugin.onApplicationBootstrap()).resolves.toBeUndefined();
-        expect(logged).toHaveBeenCalledWith(expect.stringContaining(`The superadmin "${configured}" (authOptions.superadminCredentials.identifier) ${reason}`),
-          'TallyPosPlugin');
-        // The walk-in customer needs no assignment, so it is still created.
-        expect(await storeIn(third)).toEqual({ payment: 0, shipping: 0, walkIn: 1 });
+      credentials.identifier = 'vp2-nobody';
+      await expect(plugin.onApplicationBootstrap()).resolves.toBeUndefined();
+      for (const id of [defaultChannelId, second.id, third]) {
+        expect(await storeIn(id)).toEqual({ payment: 1, shipping: 1, walkIn: 1 });
       }
+      expect(logged).not.toHaveBeenCalled();
     } finally {
       credentials.identifier = identifier;
       logged.mockRestore();
     }
-    await plugin.onApplicationBootstrap();
-    expect(await storeIn(third)).toEqual({ payment: 1, shipping: 1, walkIn: 1 });
   });
 
   const mismatch = (id: string) => ({ id, status: 'rejected', error: {
