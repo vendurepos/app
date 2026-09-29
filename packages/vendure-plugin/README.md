@@ -9,11 +9,13 @@ command, with an idempotency ledger. The design is ADR 0002
 Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
 commands, a 1 MB body) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`.
 
-**Rejections and events.** Every deterministic refusal (an unknown variant, an underpayment, the
-order limits, the store's configuration, the currency) is stored on the command's ledger claim
-before the sale writes anything, so it emits no event. Once the sale has started writing, a
-failure rolls the whole transaction back as a transient 503, and Vendure drops the events it had
-emitted; the resend is checked again.
+**Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
+so it emits no event. Facts about the sale (`unknown_variant`, `invalid_quantity`, `underpaid`,
+out-of-range values) are stored on the command's ledger claim; the store's setup
+(`store_configuration`, `unsupported_currency`) is not stored, so the same command applies once the
+store is fixed. Once the sale has started writing (Vendure publishes its first event there), a
+failure rolls the whole transaction back as a transient 503 and Vendure drops the events it had
+emitted; the resend is checked again. A plugin bug before that point is a stored `internal_error`.
 
 **Needs an admin.** A sale whose stock take-back fails, or that a plugin bug stops part-way, is
 kept as far as it got and marked `needs_admin` in the `tally_command` ledger; it answers 409

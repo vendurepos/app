@@ -100,14 +100,19 @@ marked temporary. The plugin's first PR after S1 consumes the package.
       including U+0000 in any string, before any database access; not stored;
    2. in its own `withTransaction`: the ledger replay and the claim (one
       `INSERT … ON CONFLICT`), then the `clientOrderId` collision lookup;
-   3. the deterministic checks: variant, product and channel
-      (`unknown_variant`), the order limits, value bounds and `createdAt`
-      (`invalid_payload`), `underpaid`, `unsupported_currency` and the
-      store's configuration (`store_configuration`: tax zone, the POS
-      methods and their plugin checkers and handler, the manual fulfilment
-      handler). Their rejection is **stored on the claim**, before the
-      recipe writes anything, so no event fires; the till's Retry mints a new
-      id and is checked again;
+   3. the deterministic checks, before the recipe writes anything, so no
+      event fires (TallyUI #219):
+      - **per-sale facts are stored on the claim**: `unknown_variant`
+        (missing, deleted or disabled variant, disabled or deleted product,
+        another channel's variant), `invalid_quantity` (a line quantity at
+        or below 0, fractional or above int4), the value bounds, `createdAt`
+        and the order limits (`invalid_payload`), and `underpaid`; the
+        till's Retry mints a new id and is checked again;
+      - **store-wide setup is not stored**: `unsupported_currency` and
+        `store_configuration` (tax zone, the POS methods and their plugin
+        checkers and handler, the manual fulfilment handler) roll the whole
+        transaction back, releasing the claim, and answer without a ledger
+        row, so the same command id applies once the store is fixed;
    4. the recipe.
 3. It stops at the first 409 or 503, as medusapos's `process.ts` does.
    Earlier commands have already committed, so on the retry they replay as
@@ -152,9 +157,9 @@ ADR-038's `platform_error` amendment). The table is
 `src/service/classification.ts`, with a test per row.
 
 - **Stored rejections are decided before the recipe's first event.** The
-  deterministic checks above run after the claim and before any write, and
-  their rejections are stored on the claim. The recipe publishes its first
-  event at its first write: `CustomerService.createOrUpdate` for a new
+  deterministic checks above run after the claim and before any write. **A
+  Vendure fact** (accepted by the Front desk, TallyUI #219): the recipe
+  publishes its first event at its first write, `CustomerService.createOrUpdate` for a new
   buyer (a `CustomerEvent`), otherwise `OrderService.createDraft` (an
   `OrderEvent` and the transition to `Draft`), both before the transition
   to `ArrangingPayment`. Vendure's EventBus delivers an event when the outer
@@ -162,7 +167,8 @@ ADR-038's `platform_error` amendment). The table is
   error from the recipe is ever turned into a stored rejection:
   - **a race** (a variant disabled, stock taken, a limit or the
     configuration changed during the sale: `unknown_variant`,
-    `insufficient_stock`, a permanent-list `ErrorResult`), and any other
+    `insufficient_stock`, a permanent-list `ErrorResult`, which TallyUI #219
+    R1 keeps transient after the first write), and any other
     `ErrorResult` or database, driver, network or unknown-SQLSTATE error,
     is **transient**: the whole transaction rolls back, its events are
     dropped, the claim is released, and the resend's checks answer it. Only
@@ -174,10 +180,12 @@ ADR-038's `platform_error` amendment). The table is
   - a `clientOrderId` collision met in the recipe rolls back and runs the
     command again, so the collision guard answers it before any write;
   - a `PluginBugError` (an invariant of the plugin's own code, raised
-    explicitly; nothing parses stacks) after the first write keeps the
-    partial sale for an admin (`needs_admin`). A native error, the plugin's
-    own `TypeError` included, is transient. `internal_error` stays in the
-    contract but no step before the first event raises it today.
+    explicitly; nothing parses stacks) **before** the recipe's first write
+    is a stored `internal_error`, with a generic message and a correlation
+    id, the raw error only logged (TallyUI #219 R2); **after** the first
+    write it keeps the partial sale for an admin (`needs_admin`). A native
+    error, the plugin's own `TypeError` included, is transient.
+    `internal_error` stays in the contract for other plugins too.
 - **`platform_error`** comes only from an admin's rejection of a
   `needs_admin` row, with `platformCode: 'TALLY_ADMIN_REJECTED'` and the
   admin's reason as `platformMessage`. `TALLY_` is the reserved prefix of
@@ -234,7 +242,7 @@ lock and `resume.ts`.
 | POS concept | Vendure mechanism (adopted) | Replaces (not carried over) |
 |---|---|---|
 | The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on the last transition; the plugin overwrites it with `tallySaleAt` (the payload's sale time) in the same transaction, so Vendure's reports match the till | Status workarounds such as WCPOS's `pos-open`/`pos-partial`; a sale that reaches the server is always paid |
-| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is `unsupported_currency`, stored on the claim before the recipe writes anything (re-ruling 4); once the channel is fixed, the Retry's new id applies. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
+| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is `unsupported_currency`, answered after the claim and before any write with the claim rolled back and nothing stored (TallyUI #219), so the same command id applies once the channel is fixed. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
 | Lines | One `OrderLine` per POS line. Vendure merges equal lines, so a read-only line custom field `tallyClientLineId` keeps them 1:1 | — |
 | Stock | A manual fulfilment records `SALE` stock movements at the location that Vendure's `StockLocationStrategy` allocates from. `payload.locationId` is not used in the MVP (TallyUI does not send it yet). A shortage is topped up **before** `addItemToOrder`, because otherwise `addItemToOrder` saves the line at the saleable quantity and returns `InsufficientStockError` (and `addItemsToOrder` cuts it silently; S1), and before `ArrangingPayment`. The top-up is taken back after fulfilment, inside the transaction, and the result carries an `insufficient_stock` warning (ADR-039) | Stock-reduction hooks and reservation tables |
 | As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice`, with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`), which it reads from a second read-only line field, `tallyPriceIncludesTax`, because the strategy sees only the order and the line's custom fields. Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no other workaround (proved in S1) | Rewriting line totals through post meta |
@@ -262,8 +270,8 @@ admin-rejected order, and the ledger's `topUps`.
 one shared `tally-in-store` shipping method, created once in the default
 channel and assigned to every channel, and a walk-in customer per channel.
 A bootstrap creates or assigns them when they are missing. If one is still missing when a sale arrives, or the channel
-has no tax zone, the sale is `store_configuration`, stored on the claim before the
-recipe writes anything, and the till's Retry (a new id) applies once the store is repaired.
+has no tax zone, the sale is `store_configuration`, answered with the claim rolled back and nothing
+stored (TallyUI #219), so the same command id applies once the store is repaired.
 
 ### 4. TallyUI's contract, and the WCPOS engine it moves to
 

@@ -218,16 +218,12 @@ describe('order.create recipe through OrderCreateService', () => {
       ['negative amountMinor', payload => { payload.payments[0].amountMinor = -1; }],
       ['negative tenderedMinor', payload => { payload.payments[0].tenderedMinor = -1; }],
       ['fractional changeMinor', payload => { payload.payments[0].changeMinor = 0.5; }],
-      ['zero quantity', payload => { payload.lines[0].quantity = 0; }],
-      ['negative quantity', payload => { payload.lines[0].quantity = -1; }],
-      ['fractional quantity', payload => { payload.lines[0].quantity = 1.5; }],
       ['unitPriceMinor above int4', payload => { payload.lines[0].unitPriceMinor = 2_147_483_648; }],
       // N2: the default MoneyStrategy's columns are int4.
       ['totalMinor above int4', payload => { payload.totalMinor = 2_147_483_648; }],
       ['amountMinor above int4', payload => { payload.payments[0].amountMinor = 2_147_483_648; }],
       ['unsafe tenderedMinor', payload => { payload.payments[0].tenderedMinor = Number.MAX_SAFE_INTEGER + 1; }],
       // N3: OrderLine.quantity is int4, and createdAt becomes tallySaleAt and orderPlacedAt.
-      ['quantity above int4', payload => { payload.lines[0].quantity = 2_147_483_648; }],
       ['unparseable createdAt', payload => { payload.createdAt = 'yesterday-ish'; }],
       ['empty createdAt', payload => { payload.createdAt = ''; }],
       // The v3 fiscal figures carry the shared contract's safe-integer bound.

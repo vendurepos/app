@@ -1,16 +1,13 @@
-import { isGraphQlErrorResult } from '@vendure/core';
+import { randomUUID } from 'node:crypto';
+import { Logger, isGraphQlErrorResult } from '@vendure/core';
 import type { GraphQLErrorResult } from '@vendure/core';
 
 export const loggerCtx = 'TallyPosPlugin';
 
-/**
- * TallyUI ADR-038's `platform_error` amendment: a stored rejection for an ErrorResult on the
- * plugin's permanent list (classification.ts), with the platform's own code and message in `data`
- * as `platformCode` and `platformMessage`.
- */
+/** TallyUI ADR-038's `platform_error`; here only an admin's rejection of a needs_admin row (TALLY_ADMIN_REJECTED). */
 export const PLATFORM_ERROR_CODE = 'platform_error';
-/** Front desk ruling 1: a contract code for a plugin bug before the recipe's first event; nothing raises it there today (re-ruling 3). */
-/** Front desk ruling 1: the plugin's own programming error after a complete rollback, stored like a refusal. */
+
+/** TallyUI #219 R2: a PluginBugError before the recipe's first write, stored with a correlation id. */
 export const INTERNAL_ERROR_CODE = 'internal_error';
 
 /** A business refusal found after the claim: the sale rolls back and the rejection is stored on the claim. */
@@ -68,6 +65,19 @@ export class TransientCommandError extends Error {
 export function unwrap<T>(result: T): Exclude<T, GraphQLErrorResult> {
   if (isGraphQlErrorResult(result)) throw new ErrorResultThrown(result as GraphQLErrorResult);
   return result as Exclude<T, GraphQLErrorResult>;
+}
+
+/**
+ * The stored `internal_error` for a plugin bug before the recipe's first write (TallyUI #219 R2). The raw
+ * message goes only to the log, under a random correlation id the result carries (N7): it can hold internals.
+ */
+export function internalErrorFor(commandId: string, error: unknown) {
+  const correlationId = randomUUID();
+  Logger.error(`order.create ${commandId} failed on a plugin bug (correlationId ${correlationId}): `
+    + `${error instanceof Error ? error.message : String(error)}`, loggerCtx, error instanceof Error ? error.stack : undefined);
+  return { id: commandId, status: 'rejected' as const, error: {
+    code: INTERNAL_ERROR_CODE, message: 'The server could not record the order', data: { message: 'Internal error', correlationId },
+  } };
 }
 
 // Postgres SQLSTATEs: 55P03 lock_not_available (the claim's lock_timeout); 40P01 deadlock_detected

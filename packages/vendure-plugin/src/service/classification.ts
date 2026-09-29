@@ -3,19 +3,21 @@ import { BusinessRejection, ErrorResultThrown, PluginBugError, StoreConfiguratio
 import type { TransientKind } from './errors';
 
 /**
- * Front desk ruling 1, TallyUI ADR-038's `platform_error` amendment and the re-rulings: how every
- * failure of the recipe is answered, as origin × outcome. The deterministic refusals (variant,
- * limits, underpaid, configuration, values, currency) are checked after the claim and before the
- * recipe's first write, and stored on the claim. The recipe publishes its first event at its first
- * write, so none of its errors becomes a stored rejection (its events would outlive it): each
- * rolls everything back, events included, unless part of the sale must stay for an admin.
+ * Front desk ruling 1, TallyUI ADR-038's `platform_error` amendment, the re-rulings and TallyUI #219:
+ * how every failure of the recipe is answered, as origin × outcome. Before the recipe, after the
+ * claim: per-sale facts (unknown_variant, invalid_quantity, underpaid, invalid_payload values) are
+ * stored on the claim; store-wide setup (store_configuration, unsupported_currency) rolls the claim
+ * back and is not stored. A Vendure fact: the recipe publishes its first event at its first write
+ * (createOrUpdate or createDraft), so no error after that write becomes a stored rejection (its
+ * events would outlive it): each rolls everything back, events included, unless part of the sale
+ * must stay for an admin.
  */
 export const CLASSIFICATION = {
   rejection: 'transient', // a race on the plugin's own checks (unknown_variant, underpaid): the retry's checks answer it
   mapped: 'transient', // a stock race (insufficient_stock despite the top-up): the retry tops up again
-  permanent: 'transient', // a configuration race on PERMANENT_ERROR_RESULTS: the retry's checks answer it
+  permanent: 'transient', // R1: a permanent platform error after the first write rolls back fully: 503
   unlisted: 'transient', // any other ErrorResult: 503
-  programming: 'needsAdmin', // a PluginBugError with part of the sale written (before any write: 503)
+  programming: 'needsAdmin', // R2: a PluginBugError; before the first write a stored internal_error, after it needs_admin
   storeConfiguration: 'notStored', // a declined payment or a refused PaymentSettled with a configuration cause
   // The unique tallyClientOrderId, met after the first event: roll back and run the command again, so that the
   // collision guard answers it before any write (applied, 409, or another channel's idempotency_mismatch).

@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { OrderCreateService, TallyCommand, TransientCommandError } from '../src';
 import { markTallyRoute, tallyPaymentHandler } from '../src/config/strategies';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
+import { PluginBugError } from '../src/service/errors';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -92,6 +93,51 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     }
   });
 
+  it('TallyUI #219: a quantity at or below 0, fractional or above int4 is invalid_quantity, stored on the claim; the recipe never runs', async () => {
+    const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
+    try {
+      for (const quantity of [0, -1, 1.5, 2_147_483_648]) {
+        const input = command();
+        input.payload.lines[0].quantity = quantity;
+        const result = await run(input);
+        expect(result, String(quantity)).toEqual({ id: input.id, status: 'rejected', error: {
+          code: 'invalid_quantity', message: 'lines[0].quantity: expected a positive integer of at most 2147483647',
+        } });
+        expect(await ledgerFor(input), String(quantity)).toMatchObject({ status: 'rejected', result });
+      }
+      expect(createDraft).not.toHaveBeenCalled();
+    } finally {
+      createDraft.mockRestore();
+    }
+  });
+
+  it('TallyUI #219 R2: a PluginBugError before the recipe\'s first write is a stored internal_error; nothing is written; the replay returns it', async () => {
+    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: 'vp2-r2@example.com' });
+    const before = await counts();
+    const logged = vi.spyOn(Logger, 'error');
+    recipe.testHooks.beforeFirstWrite = async id => {
+      if (id === input.id) throw new PluginBugError('injected invariant before the first write');
+    };
+    process.env[TEST_HOOKS_ENV] = '1';
+    try {
+      const result = await run(input);
+      expect(result).toEqual({ id: input.id, status: 'rejected', error: {
+        code: 'internal_error', message: 'The server could not record the order',
+        data: { message: 'Internal error', correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/) },
+      } });
+      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+      expect(JSON.stringify(await ledgerFor(input))).not.toContain('injected');
+      const { correlationId } = result.error!.data as { correlationId: string };
+      expect(logged).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${correlationId}.*injected invariant`)), 'TallyPosPlugin', expect.any(String));
+      recipe.testHooks = {};
+      expect(await run(input)).toEqual(result);
+    } finally {
+      delete process.env[TEST_HOOKS_ENV];
+      recipe.testHooks = {};
+      logged.mockRestore();
+    }
+  });
+
   it('S1: a customer email above 254 characters is invalid_payload, stored on the claim', async () => {
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
       { email: `${'a'.repeat(243)}@example.com` });
@@ -132,11 +178,11 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     await methods.update(method.id, { handler: { code: 'dummy-payment-handler', args: [] } });
     try {
       expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
-      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+      expect(await counts()).toEqual(before);
     } finally {
       await methods.update(method.id, { handler: method.handler });
     }
-    expect(await run({ ...input, id: command().id })).toMatchObject({ status: 'applied' });
+    expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
   it('review 4: U+0000 in any string is invalid_payload during shape validation, before any database access', async () => {
@@ -168,7 +214,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     }
   });
 
-  it('proof 10, re-ruling 4: a default tax zone with all its rates disabled is store_configuration stored on the claim', async () => {
+  it('proof 10, TallyUI #219: a default tax zone with all its rates disabled is store_configuration, not stored; the same id applies once repaired', async () => {
     const repo = connection.rawConnection.getRepository(TaxRate);
     const rates = await repo.find({ where: { zoneId: channel.defaultTaxZone.id, enabled: true } });
     expect(rates.length).toBeGreaterThan(0);
@@ -177,16 +223,16 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     try {
       for (const rate of rates) await repo.update(rate.id, { enabled: false });
       expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
-      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
+      expect(await counts()).toEqual(before);
+      expect(await ledgerFor(input)).toBeNull();
     } finally {
       for (const rate of rates) await repo.update(rate.id, { enabled: true });
     }
-    // Stored: the till's Retry mints a new id, which applies once the store is repaired.
-    expect(await run({ ...input, id: command().id })).toMatchObject({ status: 'applied' });
+    // Not stored, the claim released: the same id applies once the store is repaired.
+    expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it.each(['payment', 'shipping'] as const)('re-ruling 4: a missing channel POS %s method is store_configuration stored on the claim', async kind => {
+  it.each(['payment', 'shipping'] as const)('TallyUI #219: a missing channel POS %s method is store_configuration, not stored', async kind => {
     const entity = kind === 'payment' ? PaymentMethod : ShippingMethod;
     const repo = connection.rawConnection.getRepository(entity);
     const method = await repo.findOneOrFail({
@@ -197,8 +243,8 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     try {
       await repo.createQueryBuilder().relation(entity, 'channels').of(method).remove(channel);
       expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
-      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
+      expect(await counts()).toEqual(before);
+      expect(await ledgerFor(input)).toBeNull();
     } finally {
       await repo.createQueryBuilder().relation(entity, 'channels').of(method).add(channel);
     }

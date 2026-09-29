@@ -34,17 +34,17 @@ describe('a store with BigIntMoneyStrategy', () => {
     expect(payments.map(payment => [payment.amount, payment.state])).toEqual([[21_250_000_000, 'Settled']]);
   });
 
-  it('still refuses unitPriceMinor and quantity above int4, and money above the safe range, before the claim', async () => {
+  it('still refuses unitPriceMinor and quantity above int4 (invalid_payload, invalid_quantity), and money above the safe range', async () => {
     const mug = { variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 };
-    const cases: Array<(command: ReturnType<typeof orderCommand>) => void> = [
-      command => { command.payload.lines[0].unitPriceMinor = 2_147_483_648; },
-      command => { command.payload.lines[0].quantity = 2_147_483_648; },
-      command => { command.payload.totalMinor = Number.MAX_SAFE_INTEGER + 1; },
+    const cases: Array<[string, (command: ReturnType<typeof orderCommand>) => void]> = [
+      ['invalid_payload', command => { command.payload.lines[0].unitPriceMinor = 2_147_483_648; }],
+      ['invalid_quantity', command => { command.payload.lines[0].quantity = 2_147_483_648; }],
+      ['invalid_payload', command => { command.payload.totalMinor = Number.MAX_SAFE_INTEGER + 1; }],
     ];
-    for (const mutate of cases) {
+    for (const [code, mutate] of cases) {
       const command = orderCommand([mug]);
       mutate(command);
-      expect(await run(command)).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
+      expect(await run(command)).toMatchObject({ status: 'rejected', error: { code } });
     }
   });
 });

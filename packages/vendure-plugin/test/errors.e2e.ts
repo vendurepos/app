@@ -70,7 +70,7 @@ describe('error classes (ADR 0002 §2)', () => {
     }
   }
 
-  it('re-ruling 4: every deterministic refusal is stored on the claim before the recipe writes anything: no sale write, no event at all', async () => {
+  it('TallyUI #219: every deterministic refusal is answered before the recipe writes anything, per-sale facts stored and setup not: no event at all', async () => {
     const config = server.app.get(ConfigService);
     const delivered: string[] = [];
     const subscription = server.app.get(EventBus).filter(() => true).subscribe(event => delivered.push(event.constructor.name));
@@ -107,8 +107,11 @@ describe('error classes (ADR 0002 §2)', () => {
         } finally {
           await repair();
         }
-        expect(await counts(), name).toEqual({ ...before, ledger: before.ledger + 1 });
-        expect(await ledgerFor(input), name).toMatchObject({ status: 'rejected', result: { error } });
+        // TallyUI #219: per-sale facts are stored on the claim; store-wide setup rolls the claim back.
+        const stored = (error as { code: string }).code !== 'store_configuration';
+        expect(await counts(), name).toEqual({ ...before, ledger: before.ledger + (stored ? 1 : 0) });
+        if (stored) expect(await ledgerFor(input), name).toMatchObject({ status: 'rejected', result: { error } });
+        else expect(await ledgerFor(input), name).toBeNull();
       }
       await new Promise(resolve => setTimeout(resolve, 300));
       expect(createDraft).not.toHaveBeenCalled();
@@ -315,7 +318,7 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(after.orders).toBe(before.orders + 1);
   });
 
-  it('re-ruling 4: unsupported_currency is stored on the claim; once the channel offers it, the Retry\'s new id applies', async () => {
+  it('TallyUI #219: unsupported_currency is not stored and releases the claim; the same id applies once the channel offers it', async () => {
     const input = orderCommand([mug()]);
     input.payload.currency = 'USD';
     input.payload.display!.currency = 'USD';
@@ -323,13 +326,13 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
       code: 'unsupported_currency', message: 'The channel does not offer USD',
     } });
-    expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-    expect(await ledgerFor(input)).toMatchObject({ status: 'rejected' });
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
     await adminClient.query(parse(`mutation Currencies($id: ID!) {
       updateChannel(input: { id: $id, availableCurrencyCodes: [EUR, USD] }) { ... on Channel { id } }
     }`), { id: activeChannel.id });
-    const retry = { ...input, id: orderCommand([mug()]).id };
+    const retry = input;
     const result = await run(retry);
     expect(result, JSON.stringify(result)).toMatchObject({ id: retry.id, status: 'applied' });
     const order = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: decode(result.serverRefs!.orderId) });

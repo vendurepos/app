@@ -20,7 +20,7 @@ import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
 import { classify } from './classification';
 import {
-  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, loggerCtx, pluginBug,
+  BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
 } from './errors';
 import { roundHalfAwayFromZero } from './rounding';
@@ -53,12 +53,18 @@ export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
 const ADMIN_REJECTED = 'TALLY_ADMIN_REJECTED';
 
-type TestHook = 'beforeStoringRejection' | 'afterCommit';
+type TestHook = 'beforeStoringRejection' | 'afterCommit' | 'beforeFirstWrite';
 type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensationError?: unknown };
 /** A clientOrderId collision after the recipe's first event: roll everything back and run the command again. */
 class Rerun extends Error {}
+/** Store-wide setup (TallyUI #219): answered after rolling the claim back, so the same id applies once the store is fixed. */
+class SetupRefusal extends Error {
+  constructor(readonly result: OrderCreateResult) {
+    super(result.error!.code);
+  }
+}
 /** What the recipe has written so far, for an admin when it cannot finish. */
-type SaleProgress = { order?: Order; topUps: TopUp[] };
+type SaleProgress = { written?: boolean; order?: Order; topUps: TopUp[] };
 
 /** The path of the first string holding U+0000 in an envelope, or undefined. */
 function nulPath(value: unknown, path: string): string | undefined {
@@ -141,6 +147,7 @@ export class OrderCreateService {
     } catch (error) {
       // A collision after the recipe's first event: everything rolled back (its events with it), so start again.
       if (error instanceof Rerun) return this.create(ctx, command);
+      if (error instanceof SetupRefusal) return error.result;
       if (error instanceof StoreConfigurationRefusal) return storeConfiguration(command.id);
       if (error instanceof TransientCommandError) throw error;
       throw new TransientCommandError(command.id, transientKind(error) ?? 'unclassified', error);
@@ -166,6 +173,12 @@ export class OrderCreateService {
       const verdict = classify(error, this.clientOrderIdIndex());
       if (verdict.outcome === 'notStored') throw error;
       if (verdict.outcome === 'collision') throw new Rerun();
+      if (verdict.outcome === 'needsAdmin' && !progress.written) {
+        // TallyUI #219 R2: a plugin bug before the first write stores internal_error; nothing was written or emitted.
+        const result = internalErrorFor(command.id, error);
+        await this.connection.getRepository(ctx, TallyCommand).update(command.id, { status: 'rejected', result: { ...result } });
+        return { result };
+      }
       if (verdict.outcome === 'needsAdmin' && progress.order) return this.markNeedsAdmin(ctx, command, progress, error);
       // N5: after the claim, a lock timeout is a timeout, not another request's claim.
       const kind = verdict.outcome === 'transient' ? verdict.kind : 'unclassified';
@@ -304,13 +317,19 @@ export class OrderCreateService {
    * recipe keeps the same checks for races, which roll back as transient.
    */
   private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
+    const { lines, payments, totalMinor, currency } = command.payload;
+    // TallyUI #219: a per-line quantity that OrderLine.quantity (int4) cannot hold is the stored invalid_quantity.
+    const badLine = lines.findIndex(line => !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > MAX_INT4);
+    if (badLine >= 0) {
+      return rejected(command.id, 'invalid_quantity', `lines[${badLine}].quantity: expected a positive integer of at most ${MAX_INT4}`);
+    }
     const invalidValue = this.valueRefusal(command);
     if (invalidValue) return invalidValue;
-    const { lines, payments, totalMinor, currency } = command.payload;
+    // TallyUI #219: store-wide setup is never stored; the caller rolls the claim back (SetupRefusal).
     if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
-      return rejected(command.id, 'unsupported_currency', `The channel does not offer ${currency}`);
+      throw new SetupRefusal(rejected(command.id, 'unsupported_currency', `The channel does not offer ${currency}`));
     }
-    if (!await this.storeCanSell(ctx)) return storeConfiguration(command.id);
+    if (!await this.storeCanSell(ctx)) throw new SetupRefusal(storeConfiguration(command.id));
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines.
@@ -453,18 +472,21 @@ export class OrderCreateService {
     let customer = customerId !== undefined ? await this.customers.findOne(ctx, customerId) : undefined;
     const ignored: CustomerIgnored[] = given && !customer
       ? [{ code: 'customer_ignored', customerId: given.slice(0, CUSTOMER_ID_MAX), reason: tooLong ? 'too_long' : 'unknown' }] : [];
+    await this.runTestHook('beforeFirstWrite', command.id);
     if (!customer) {
       // Review: createOrUpdate matches a customer of any channel and overwrites its names, so find it the
       // same way first (and add this channel, as createOrUpdate did); create only a missing one.
       const emailAddress = normalizeEmailAddress(payload.customer?.email || WALK_IN_EMAIL);
       const customers = this.connection.getRepository(ctx, Customer);
       customer = await customers.findOne({ where: { emailAddress, deletedAt: IsNull() }, relations: ['channels'] }) ?? undefined;
+      progress.written = true; // The recipe's first write follows: nothing it raises from here is stored.
       if (!customer) {
         customer = unwrap(await this.customers.createOrUpdate(ctx, { emailAddress, firstName: '', lastName: '' }));
       } else if (!customer.channels.some(channel => idsAreEqual(channel.id, ctx.channelId))) {
         await customers.createQueryBuilder().relation('channels').of(customer).add(ctx.channelId);
       }
     }
+    progress.written = true;
     // The recipe's first event is published here (a new customer's CustomerEvent comes just before it).
     let order = await this.orders.createDraft(ctx);
     progress.order = order;

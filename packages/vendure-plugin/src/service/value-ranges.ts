@@ -41,8 +41,7 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   text(payload.customer?.email, 'customer.email', 254);
   payload.lines.forEach((line, index) => {
     const path = `lines[${index}]`;
-    if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) errors.push(`${path}.quantity: expected a positive integer`);
-    else if (line.quantity > MAX_INT4) errors.push(`${path}.quantity: expected at most ${MAX_INT4}`);
+    // The quantity (≤0, fractional, above int4) is the stored invalid_quantity (TallyUI #219), checked by the service.
     minor(line.unitPriceMinor, `${path}.unitPriceMinor`, MAX_INT4);
     minor(line.discountMinor, `${path}.discountMinor`, maxMoney);
     text(line.clientLineId, `${path}.clientLineId`);
