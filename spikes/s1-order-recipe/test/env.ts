@@ -3,15 +3,16 @@ import { createTestEnvironment, PostgresInitializer, registerInitializer, testCo
 import { parse } from 'graphql';
 import { TallySpikePlugin } from '../src/plugin/tally-spike.plugin';
 
-export function createS1TestEnvironment() {
+export function createS1TestEnvironment(override: Parameters<typeof mergeConfig>[1] = {}) {
   registerInitializer('postgres', new PostgresInitializer());
-  const environment = createTestEnvironment(mergeConfig(testConfig, {
+  const config = mergeConfig(testConfig, {
     dbConnectionOptions: {
       type: 'postgres', host: '127.0.0.1', port: 5444,
       username: 'vendure', password: 'vendure', database: 's1',
     },
     plugins: [TallySpikePlugin],
-  }));
+  });
+  const environment = createTestEnvironment(mergeConfig(config, override));
   const { server, adminClient } = environment;
   const variantIds: Record<'mug' | 'beans' | 'print', string[]> = { mug: [], beans: [], print: [] };
 

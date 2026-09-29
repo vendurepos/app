@@ -1,12 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import {
   CustomerService, Order, OrderCalculator, OrderLine, OrderService, PaymentService,
-  RequestContext, ShippingLine, ShippingMethod, TransactionalConnection, manualFulfillmentHandler,
+  RequestContext, ShippingLine, ShippingMethod, Surcharge, TransactionalConnection, manualFulfillmentHandler,
 } from '@vendure/core';
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
+import { ratePpmFromPercent } from '../vendored/tax-exact';
+import { roundHalfAwayFromZero } from './rounding';
 import { TallyCommand } from './tally-command.entity';
 import { unwrap } from './unwrap';
+
+export type TotalWarning =
+  | { code: 'total_mismatch'; expectedMinor: number; serverMinor: number; bridgeMinor: number }
+  | { code: 'tax_rate_mismatch'; ratePpm: number; expectedMinor: number; serverMinor: number };
+
+type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSave' | 'finalPass' | 'payments';
 
 declare module '@vendure/core/dist/entity/custom-entity-fields' {
   interface CustomOrderFields {
@@ -27,6 +35,9 @@ declare module '@vendure/core/dist/entity/custom-entity-fields' {
 
 @Injectable()
 export class OrderCreateService {
+  // TEMPORARY spike observation only; tests reload through this transaction's repository.
+  testObserver?: (stage: PricingStage, ctx: RequestContext, order: Order) => Promise<void>;
+
   constructor(
     private connection: TransactionalConnection,
     private customers: CustomerService,
@@ -65,15 +76,66 @@ export class OrderCreateService {
         tallyClientLineId: line.clientLineId,
         tallyPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
       }));
+      await this.testObserver?.('addItemToOrder', ctx, order);
     }
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOneOrFail({
       where: { code: 'tally-in-store', channels: { id: ctx.channelId } },
     });
     order = unwrap(await this.orders.setShippingMethod(ctx, order.id, [shipping.id]));
+    await this.testObserver?.('setShippingMethod', ctx, order);
+    for (const line of payload.lines) {
+      if (!(line.discountMinor! > 0)) continue;
+      const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId)!;
+      const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
+        order, description: 'POS discount', sku: 'TALLY-DISCOUNT', listPrice: -line.discountMinor!,
+        listPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
+        taxLines: orderLine.taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
+      }));
+      order.surcharges.push(surcharge);
+      await this.testObserver?.('surchargeSave', ctx, order);
+    }
+    // calculateOrderTotals reads surcharge.price/priceWithTax; these getters compute tax
+    // from taxLines. applyTaxes only visits product lines, so attach surcharges above.
     order = await this.calculator.applyPriceAdjustments(ctx, order, []);
+    const totalWarnings: TotalWarning[] = [];
+    const serverMinor = order.totalWithTax;
+    const bridgeMinor = payload.totalMinor - serverMinor;
+    if (bridgeMinor !== 0) {
+      const bridge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
+        order, description: 'POS rounding', sku: 'TALLY-ROUNDING', listPrice: bridgeMinor,
+        listPriceIncludesTax: true, taxLines: [],
+      }));
+      order.surcharges.push(bridge);
+      this.calculator.calculateOrderTotals(order);
+      totalWarnings.push({ code: 'total_mismatch', expectedMinor: payload.totalMinor, serverMinor, bridgeMinor });
+    }
+    if (command.version === 3) {
+      // For an integer count, half-away rounding of count/2 equals ceil(count/2).
+      const T = Number(roundHalfAwayFromZero(BigInt(order.lines.length + order.surcharges.length), 2n));
+      const pos = new Map<number, number>();
+      const vendure = new Map<number, number>();
+      for (const rate of payload.taxByRate!) {
+        pos.set(rate.ratePpm, (pos.get(rate.ratePpm) ?? 0) + rate.taxMinor);
+      }
+      for (const rate of order.taxSummary) {
+        const ratePpm = ratePpmFromPercent(rate.taxRate);
+        vendure.set(ratePpm, (vendure.get(ratePpm) ?? 0) + rate.taxTotal);
+      }
+      const perRate = [...new Set([...pos.keys(), ...vendure.keys()])].map(ratePpm => ({
+        ratePpm, pos: pos.get(ratePpm) ?? 0, vendure: vendure.get(ratePpm) ?? 0,
+        diff: (vendure.get(ratePpm) ?? 0) - (pos.get(ratePpm) ?? 0),
+      }));
+      for (const rate of perRate) {
+        if (Math.abs(rate.diff) > T) totalWarnings.push({
+          code: 'tax_rate_mismatch', ratePpm: rate.ratePpm, expectedMinor: rate.pos, serverMinor: rate.vendure,
+        });
+      }
+      console.log('S1-NUM', JSON.stringify({ proof: 1, stage: 'recipe', T, perRate, bridge: bridgeMinor }));
+    }
     await this.connection.getRepository(ctx, Order).save(order);
     await this.connection.getRepository(ctx, OrderLine).save(order.lines);
     await this.connection.getRepository(ctx, ShippingLine).save(order.shippingLines);
+    await this.testObserver?.('finalPass', ctx, order);
     order = unwrap(await this.orders.transitionToState(ctx, order.id, 'ArrangingPayment'));
 
     let remaining = payload.totalMinor;
@@ -84,6 +146,7 @@ export class OrderCreateService {
       remaining -= amount;
     }
     order = (await this.orders.findOne(ctx, order.id))!;
+    await this.testObserver?.('payments', ctx, order);
     if (order.state !== 'PaymentSettled') {
       order = unwrap(await this.orders.transitionToState(ctx, order.id, 'PaymentSettled'));
     }
@@ -102,9 +165,10 @@ export class OrderCreateService {
       },
     }));
     unwrap(await this.orders.transitionFulfillmentToState(ctx, fulfillment.id, 'Delivered'));
-    const result: CommandResult = {
+    const result: CommandResult & { totalWarnings?: TotalWarning[] } = {
       id: command.id, status: 'applied',
       serverRefs: { orderId: String(order.id), displayId: order.code, totalMinor: order.totalWithTax },
+      ...(totalWarnings.length ? { totalWarnings } : {}),
     };
     await this.connection.getRepository(ctx, TallyCommand).save({
       id: command.id, clientOrderId: payload.clientOrderId, fingerprint: commandFingerprint(command),
