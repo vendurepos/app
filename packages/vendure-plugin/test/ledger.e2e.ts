@@ -68,7 +68,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   }
   afterEach(() => { recipe.testObserver = undefined; });
 
-  it.each(['disabled', 'missing'] as const)('proof 10: a %s variant stores unknown_variant and a replay never runs the recipe', async kind => {
+  it.each(['disabled', 'missing'] as const)('proof 10, ruling (A): a %s variant is unknown_variant before the claim; nothing is stored and the recipe never runs', async kind => {
     const input = command(kind === 'disabled' ? variantIds.print[0] : encode(999999));
     const before = await counts();
     const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
@@ -77,9 +77,9 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       const replay = await run(input);
       expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'unknown_variant' } });
       expect(replay).toEqual(result);
-      expect(createDraft).toHaveBeenCalledTimes(1);
-      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected', result });
+      expect(createDraft).not.toHaveBeenCalled();
+      expect(await counts()).toEqual(before);
+      expect(await ledgerFor(input)).toBeNull();
     } finally {
       createDraft.mockRestore();
     }

@@ -9,7 +9,17 @@ command, with an idempotency ledger. The design is ADR 0002
 Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
 commands, a 1 MB body) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`. A sale
 whose stock take-back fails is marked `needs_admin` in the `tally_command` ledger and answers
-409 until an admin calls `OrderCreateService.resolveNeedsAdmin`.
+409 until an admin calls `OrderCreateService.resolveNeedsAdmin`. Rejecting it cancels the order
+with Vendure's own cancellation, or is refused if the order cannot be cancelled.
+
+**Events of a rejected sale.** Every deterministic refusal (an unknown variant, an underpayment,
+the order limits, the store's configuration) is answered before anything is written, so it emits
+no event. A sale refused after that point (a race, such as stock that changed meanwhile, or a
+plugin `internal_error`) is rolled back to a savepoint inside the command's transaction, but
+Vendure's EventBus still delivers the events it emitted (`OrderStateTransitionEvent`,
+`OrderPlacedEvent`, …) when the rejection commits, **for an order that does not exist**. The
+plugin's `tallyOrderConfirmationHandler` ignores them, as it ignores every POS order; your own
+subscribers should check that the order still exists.
 
 ## Requirements
 

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Controller, Post } from '@nestjs/common';
 import {
-  Allow, Ctx, Logger, Order, OrderService, Payment, PaymentService, Permission, PluginCommonModule, RequestContext,
-  RequestContextService, StockMovementService, TransactionalConnection, VendurePlugin,
+  Allow, Ctx, Logger, Order, OrderService, Payment, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
+  RequestContextService, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
+  defaultOrderProcess,
 } from '@vendure/core';
+import type { OrderProcess, OrderState } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TallyPosPlugin } from '../src';
@@ -41,8 +43,13 @@ class DummyRestPlugin {}
 })
 class MerchantCorsPlugin {}
 
+let refuseCancel = false;
+
 describe('POST /tally/v1/commands', () => {
-  const environment = createPluginTestEnvironment({}, [MerchantCorsPlugin, TallyPosPlugin, DummyRestPlugin]);
+  // An order process that refuses Cancelled while `refuseCancel` is set, as a merchant's own process could (ruling 4).
+  const environment = createPluginTestEnvironment({ orderOptions: { process: [defaultOrderProcess, {
+    onTransitionStart: (_from, to) => (refuseCancel && to === 'Cancelled' ? 'Test process refuses Cancelled' : undefined),
+  } satisfies OrderProcess<OrderState>] } }, [MerchantCorsPlugin, TallyPosPlugin, DummyRestPlugin]);
   const { server, adminClient, variantIds, encode } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
@@ -209,7 +216,10 @@ describe('POST /tally/v1/commands', () => {
   });
 
   it('item 4: while a rejection is being recorded, a resend of the same id gets 409, never a second recipe run', async () => {
-    const input = orderCommand([{ variantId: encode(999999), quantity: 1, unitPriceMinor: 800 }]);
+    // An after-claim race: the recipe's saleable check sees plenty, so it skips the top-up for Print
+    // (2 on hand), and Vendure's own check inside addItemToOrder refuses 3.
+    const input = orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]);
+    const saleable = vi.spyOn(server.app.get(ProductVariantService), 'getSaleableStockLevel').mockResolvedValueOnce(1000);
     const barrier = gate();
     recipe.testHooks.afterSavepointRollback = async id => {
       if (id === input.id) await barrier.hold();
@@ -222,12 +232,13 @@ describe('POST /tally/v1/commands', () => {
       expect(await post({ commands: [input] })).toEqual({ status: 409, body: { code: 'in_progress', id: input.id } });
       barrier.release();
       const result = (await first).body.results[0];
-      expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'unknown_variant' } });
+      expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'insufficient_stock' } });
       expect((await post({ commands: [input] })).body.results[0]).toEqual(result);
       expect(createDraft).toHaveBeenCalledTimes(1);
       expect(await ordersFor(input)).toHaveLength(0);
     } finally {
       createDraft.mockRestore();
+      saleable.mockRestore();
     }
   });
 
@@ -301,13 +312,42 @@ describe('POST /tally/v1/commands', () => {
       expect(replay.body.results[0]).toEqual({ ...row!.result, status: 'duplicate' });
       expect(replay.body.results[0].serverRefs.orderId).toBe(encode(orders[0].id));
 
+      // Ruling 4: rejecting cancels the order; while it cannot be cancelled, the rejection is refused.
       const rejectedInput = await needsAdmin();
+      const [live] = await ordersFor(rejectedInput);
+      const orderRepository = connection.rawConnection.getRepository(Order);
+      const cancellations = () => connection.rawConnection.getRepository(StockMovement).count({ where: { type: 'CANCELLATION' as never } });
+      const cancellationsBefore = await cancellations();
+      refuseCancel = true;
+      try {
+        await expect(recipe.resolveNeedsAdmin(ctx, rejectedInput.id, 'rejected', 'order cancelled by the admin')).rejects
+          .toThrow(`Command ${rejectedInput.id} is not rejected: order ${live.code} cannot be cancelled (ORDER_STATE_TRANSITION_ERROR`);
+      } finally {
+        refuseCancel = false;
+      }
+      expect(await ledgerFor(rejectedInput)).toMatchObject({ status: 'needs_admin' });
+      expect(await orderRepository.findOneByOrFail({ id: live.id })).toMatchObject({
+        state: 'Delivered', customFields: { tallyClientOrderId: rejectedInput.payload.clientOrderId },
+      });
+      expect(await cancellations()).toBe(cancellationsBefore);
+
       await recipe.resolveNeedsAdmin(ctx, rejectedInput.id, 'rejected', 'order cancelled by the admin');
+      expect(await orderRepository.findOneByOrFail({ id: live.id })).toMatchObject({
+        state: 'Cancelled', customFields: { tallyClientOrderId: `${rejectedInput.payload.clientOrderId}#rejected:${rejectedInput.id}` },
+      });
+      expect(await cancellations()).toBe(cancellationsBefore + 1);
       expect((await post({ commands: [rejectedInput] })).body.results[0]).toEqual({ id: rejectedInput.id, status: 'rejected', error: {
         code: 'platform_error', message: 'TALLY_ADMIN_REJECTED: order cancelled by the admin',
         data: { platformCode: 'TALLY_ADMIN_REJECTED', platformMessage: 'order cancelled by the admin' },
       } });
       await expect(recipe.resolveNeedsAdmin(ctx, rejectedInput.id, 'applied', 'again')).rejects.toThrow('does not need an admin');
+      // The till's Retry under a new id is a new sale, recorded once.
+      const retry = { ...rejectedInput, id: mug().id };
+      const sold = (await post({ commands: [retry] })).body.results[0];
+      expect(sold).toMatchObject({ id: retry.id, status: 'applied' });
+      expect(sold.serverRefs.orderId).not.toBe(encode(live.id));
+      expect((await ordersFor(rejectedInput)).map(order => [encode(order.id), order.state])).toEqual([[sold.serverRefs.orderId, 'Delivered']]);
+      expect((await post({ commands: [retry] })).body.results[0]).toEqual({ ...sold, status: 'duplicate' });
     } finally {
       logged.mockRestore();
     }

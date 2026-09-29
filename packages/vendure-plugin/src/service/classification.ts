@@ -6,34 +6,23 @@ import type { TransientKind } from './errors';
 /**
  * Front desk ruling 1 and TallyUI ADR-038's `platform_error` amendment: how every failure after
  * the claim is answered, as origin × outcome. The sale's steps run in a savepoint, so every
- * outcome below starts from a sale that has been rolled back completely, claim kept.
- *
- * | Origin                                                        | Outcome                                          |
- * |---------------------------------------------------------------|--------------------------------------------------|
- * | `rejection`: the plugin's own business refusal                | stored, its contract code (`unknown_variant`, `underpaid`, `idempotency_mismatch`) |
- * | `mapped`: an ErrorResult with a contract code                 | stored, that code (`insufficient_stock`)          |
- * | `permanent`: an ErrorResult on PERMANENT_ERROR_RESULTS        | stored `platform_error`                           |
- * | `unlisted`: any other ErrorResult                             | transient 503, nothing stored                     |
- * | `programming`: a TypeError, RangeError or ReferenceError raised by plugin code after the claim (before it: transient) | stored `internal_error`, generic message and a correlation id |
- * | `storeConfiguration`: a refused PaymentSettled with a configuration cause | `store_configuration`, nothing stored   |
- * | `clientOrderCollision`: the unique `tallyClientOrderId`        | this channel: the new id stored `applied` with the refs and warnings when the order's own command is `applied`; 409 when that command awaits an admin or is still in progress (the unique key's wait, bounded like the claim's). Another channel: stored `idempotency_mismatch` |
- * | `database`: a driver, network or database error, known SQLSTATE or not, and anything else | transient (503; 409 only for the claim's own lock) |
+ * outcome below starts from a sale that has been rolled back completely, claim kept. Ruling (A):
+ * every deterministic refusal (unknown_variant, underpaid, the order limits as invalid_payload, the
+ * permanent-list configuration as store_configuration) is answered before the claim and not stored,
+ * so after the claim these rows are the safety net for races; their events leak (README).
  */
-export type Origin = 'rejection' | 'mapped' | 'permanent' | 'unlisted' | 'programming' | 'storeConfiguration'
-  | 'clientOrderCollision' | 'database';
-
-export type Outcome = 'stored' | 'transient' | 'notStored' | 'collision';
-
-export const CLASSIFICATION: Record<Origin, Outcome> = {
-  rejection: 'stored',
-  mapped: 'stored',
-  permanent: 'stored',
-  unlisted: 'transient',
-  programming: 'stored',
-  storeConfiguration: 'notStored',
+export const CLASSIFICATION = {
+  rejection: 'stored', // the plugin's own refusal: unknown_variant, underpaid, idempotency_mismatch
+  mapped: 'stored', // an ErrorResult with a contract code: insufficient_stock
+  permanent: 'stored', // an ErrorResult on PERMANENT_ERROR_RESULTS: platform_error
+  unlisted: 'transient', // any other ErrorResult: 503
+  programming: 'stored', // the plugin's own TypeError, RangeError or ReferenceError: internal_error (before the claim: 503)
+  storeConfiguration: 'notStored', // a refused PaymentSettled with a configuration cause: store_configuration
+  // The unique tallyClientOrderId. This channel: the new id stored applied with the result of the order's
+  // applied command; 409 while that command awaits an admin or is in progress. Another channel: idempotency_mismatch.
   clientOrderCollision: 'collision',
-  database: 'transient',
-};
+  database: 'transient', // driver, network, any SQLSTATE and anything else: 503 (409 only for the claim's lock)
+} as const;
 
 /** ErrorResults with a contract code of their own. A shortage createFulfillment finds is the same answer as one addItemToOrder finds (ruling 3). */
 export const MAPPED_ERROR_RESULTS: Record<string, string> = {

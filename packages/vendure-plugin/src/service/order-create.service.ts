@@ -8,7 +8,7 @@ import {
 import type { CurrencyCode } from '@vendure/core';
 import { In, IsNull } from 'typeorm';
 import {
-  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute,
+  TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute, tallyPaymentChecker, tallyShippingChecker,
 } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
@@ -59,7 +59,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const rejected = (id: string, code: string, message: string, data?: Record<string, unknown>): OrderCreateResult =>
   ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
 const storeConfiguration = (id: string) => rejected(id, 'store_configuration',
-  'Missing POS payment, shipping, or usable default-zone tax rates');
+  'Missing or reconfigured POS payment or shipping method, manual fulfilment handler, or usable default-zone tax rates');
 
 @Injectable()
 export class OrderCreateService {
@@ -99,6 +99,8 @@ export class OrderCreateService {
           return rejected(command.id, 'unsupported_currency', `The channel does not offer ${payload.currency}`);
         }
         if (!await this.storeCanSell(ctx)) return storeConfiguration(command.id);
+        const refusal = await this.deterministicRefusal(ctx, command);
+        if (refusal) return refusal;
       }
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       const commandCtx = new RequestContext({
@@ -172,7 +174,21 @@ export class OrderCreateService {
       const ledger = this.connection.getRepository(txCtx, TallyCommand);
       const row = await ledger.findOne({ where: { id: commandId }, lock: { mode: 'pessimistic_write' } });
       if (row?.status !== 'needs_admin') throw new Error(`Command ${commandId} does not need an admin`);
-      const result = resolution === 'applied' ? row.result as unknown as OrderCreateResult
+      const stored = row.result as unknown as OrderCreateResult;
+      if (resolution === 'rejected') {
+        // Front desk ruling 4: a rejected row never keeps a live order. Vendure's cancellation (stock
+        // restored as it restores it) and freeing the clientOrderId commit with the rejection, or not at all.
+        const orderId = this.decodeId(stored.serverRefs!.orderId)!;
+        const cancelled = await this.orders.cancelOrder(txCtx, { orderId, reason: note, cancelShipping: true });
+        if (isGraphQlErrorResult(cancelled)) {
+          throw new Error(`Command ${commandId} is not rejected: order ${stored.serverRefs!.displayId} cannot be cancelled `
+            + `(${cancelled.errorCode}: ${cancelled.message})`);
+        }
+        await this.connection.getRepository(txCtx, Order).update(orderId, {
+          customFields: { tallyClientOrderId: `${row.clientOrderId}#rejected:${commandId}` },
+        });
+      }
+      const result = resolution === 'applied' ? stored
         : rejected(commandId, PLATFORM_ERROR_CODE, `${ADMIN_REJECTED}: ${note}`, { platformCode: ADMIN_REJECTED, platformMessage: note });
       await ledger.update(commandId, { status: resolution, result: { ...result } });
       Logger.warn(`order.create ${commandId}: needs_admin resolved as ${resolution} (${note})`, loggerCtx);
@@ -224,10 +240,47 @@ export class OrderCreateService {
     const rates = zone && await this.connection.getRepository(ctx, TaxRate).count({
       where: { zoneId: zone.id, enabled: true, customerGroup: IsNull() },
     });
-    return !!payment && !!shipping && !!rates;
+    // Front desk ruling (A): the permanent-list configuration errors, found before any write. The
+    // plugin's own checkers accept every POS order; a replaced checker or a missing manual handler would not.
+    const checkers = (!payment?.checker || payment.checker.code === tallyPaymentChecker.code)
+      && shipping?.checker.code === tallyShippingChecker.code
+      && this.config.shippingOptions.fulfillmentHandlers.some(handler => handler.code === manualFulfillmentHandler.code);
+    return !!payment && !!shipping && !!rates && checkers;
   }
 
-  /** The requeue answer: `applied` with the refs of the order already made for this sale. */
+  /**
+   * Front desk ruling (A): the sale's deterministic refusals, answered before the claim so that
+   * nothing is written and no event fires. Not stored, like `invalid_payload`. The recipe keeps
+   * the same checks after the claim for races.
+   */
+  private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
+    const { lines, payments, totalMinor } = command.payload;
+    const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
+    const items = lines.reduce((sum, line) => sum + line.quantity, 0);
+    // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines.
+    if (items > orderItemsLimit || lines.some(line => line.quantity > orderLineItemsLimit)) {
+      return rejected(command.id, 'invalid_payload',
+        `lines: exceed orderOptions.orderItemsLimit ${orderItemsLimit} or orderLineItemsLimit ${orderLineItemsLimit}`);
+    }
+    // The bridge makes Vendure's total equal totalMinor, so the payload alone decides underpaid.
+    const paidMinor = payments.reduce((sum, payment) => sum + payment.amountMinor, 0);
+    if (paidMinor < totalMinor) return rejected(command.id, 'underpaid', `Payments of ${paidMinor} are below the total of ${totalMinor}`);
+    for (const line of lines) {
+      if (!await this.findVariant(ctx, line.variantId)) {
+        return rejected(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
+      }
+    }
+    return undefined;
+  }
+
+  private async findVariant(ctx: RequestContext, variantId: string) {
+    const id = this.decodeId(variantId);
+    const variant = id === undefined ? null : await this.connection.getRepository(ctx, ProductVariant).findOne({
+      where: { id, deletedAt: IsNull(), channels: { id: ctx.channelId } },
+    });
+    return variant?.enabled ? variant : undefined;
+  }
+
   private existingOrder(ctx: RequestContext, clientOrderId: string) {
     return this.connection.getRepository(ctx, Order).findOne({
       where: { customFields: { tallyClientOrderId: clientOrderId }, channels: { id: ctx.channelId } },
@@ -251,7 +304,7 @@ export class OrderCreateService {
     } });
     const source = rows.find(row => (row.result as OrderCreateResult | null)?.serverRefs?.orderId === orderId);
     if (source?.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
-    // An order whose command is neither applied nor awaiting an admin (an admin rejected it) is not answered.
+    // Unreachable by construction (an admin's rejection cancels the order and frees its clientOrderId): transient.
     if (!source) throw new TransientCommandError(command.id, 'unclassified', new Error(`Order ${orderId} has no applied command`));
     const { id: _id, status: _status, ...stored } = source.result as unknown as OrderCreateResult;
     const result: OrderCreateResult = { id: command.id, status: 'applied', ...stored };
@@ -355,13 +408,9 @@ export class OrderCreateService {
     await orderRepository.query('SET LOCAL lock_timeout = DEFAULT');
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
-      const id = this.decodeId(line.variantId);
-      const variant = id === undefined ? null : await this.connection.getRepository(ctx, ProductVariant).findOne({
-        where: { id, deletedAt: IsNull(), channels: { id: ctx.channelId } },
-      });
-      if (!variant || !variant.enabled) {
-        throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
-      }
+      // A race after the pre-claim check: the variant was disabled or removed meanwhile.
+      const variant = await this.findVariant(ctx, line.variantId);
+      if (!variant) throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       const entry = requested.get(line.variantId) ?? { variant, quantity: 0 };
       requested.set(line.variantId, { variant, quantity: entry.quantity + line.quantity });
     }

@@ -143,6 +143,19 @@ never commits.
 `platform_error` amendment). The table is `src/service/classification.ts`,
 with a test per row.
 
+- **Deterministic refusals come before the claim** (Front desk ruling A).
+  An unknown or disabled variant (`unknown_variant`), payments below
+  `totalMinor` (`underpaid`), the configured order limits
+  (`invalid_payload`) and the permanent-list configuration errors (a missing
+  manual fulfilment handler, a replaced checker on the POS payment or
+  shipping method: `store_configuration`) are answered before any write, so
+  they emit no event, and they are not stored. After the claim only races
+  and `internal_error` reach the savepoint path below. Their events leak:
+  Vendure's EventBus waits only for the outer transaction, so the events a
+  rolled-back savepoint emitted are delivered when the rejection commits,
+  for an order that does not exist. `tallyOrderConfirmationHandler`
+  ignores them (it ignores every POS order), and the README warns
+  merchants' own subscribers.
 - **The savepoint keeps the claim.** After the claim, the sale's steps run
   in a savepoint inside the command's transaction (Vendure's
   `withTransaction` inside a transaction). A stored outcome rolls back to
@@ -151,9 +164,9 @@ with a test per row.
   never written in a separate transaction after a full rollback, so a resend
   of the same id waits on the claim (409) and never runs the recipe twice.
 - **Stored rejections**, replayed without re-running the recipe:
-  - `unknown_variant` for a missing or disabled variant;
+  - `unknown_variant` for a variant disabled or removed during the sale;
   - `underpaid` when the `PaymentSettled` transition is refused and the
-    payments really are below the bridged total;
+    payments really are below the bridged total (a safety net);
   - `insufficient_stock` if a shortage survives the top-up;
   - `platform_error` only for an `ErrorResult` on the plugin's explicit
     permanent list (one that depends only on the payload and the store's
@@ -187,6 +200,11 @@ with a test per row.
   command id, and every resend answers 409 `in_progress`. An admin resolves
   the row as `applied` or `rejected` with
   `OrderCreateService.resolveNeedsAdmin`, and replays then answer that.
+  `rejected` (`platform_error`, `platformCode: 'TALLY_ADMIN_REJECTED'`)
+  cancels the order with Vendure's `cancelOrder`, which restores its stock,
+  and frees its `clientOrderId`, all in the rejection's transaction; if the
+  order cannot be cancelled, the rejection is refused. A rejected row never
+  keeps a live order, so the till's Retry under a new id is a new sale.
 
 **What this retires, measured.** medusapos's lease, fencing token, advisory
 lock and resume are 310 physical lines on its `main` (5c23a74):

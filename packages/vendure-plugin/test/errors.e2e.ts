@@ -1,6 +1,6 @@
 import {
-  Channel, ConfigService, Customer, EventBus, InsufficientStockOnHandError, Order, OrderLine, OrderPlacedEvent, OrderService,
-  OrderStateTransitionEvent, Payment,
+  Channel, ConfigService, Customer, CustomerService, EventBus, InsufficientStockOnHandError, Order, OrderLine, OrderService,
+  Payment, PaymentMethod, ShippingMethod,
   ProductVariantService, ShippingLine, StockMovement, Surcharge, TaxRate, TransactionalConnection, defaultOrderProcess,
 } from '@vendure/core';
 import type { OrderProcess, OrderState } from '@vendure/core';
@@ -70,9 +70,57 @@ describe('error classes (ADR 0002 §2)', () => {
     }
   }
 
-  it('a real underpayment: the refused PaymentSettled transition with payments below the total is `underpaid`', async () => {
-    const input = orderCommand([mug()], [{ method: 'cash', amountMinor: 400 }]);
-    await expectStored(input, { code: 'underpaid', message: 'Payments of 400 are below the total of 1000' });
+  it('ruling (A): every deterministic refusal is answered before the claim: nothing stored, nothing written, no event at all', async () => {
+    const config = server.app.get(ConfigService);
+    const delivered: string[] = [];
+    const subscription = server.app.get(EventBus).filter(() => true).subscribe(event => delivered.push(event.constructor.name));
+    const methods = { payment: connection.rawConnection.getRepository(PaymentMethod), shipping: connection.rawConnection.getRepository(ShippingMethod) };
+    const payment = await methods.payment.findOneByOrFail({ code: 'tally-pos' });
+    const shipping = await methods.shipping.findOneByOrFail({ code: 'tally-in-store' });
+    const foreign = { code: 'default-shipping-eligibility-checker', args: [{ name: 'orderMinimum', value: '0' }] };
+    const handlers = config.shippingOptions.fulfillmentHandlers;
+    const limits = { ...config.orderOptions };
+    const cases: Array<[string, ReturnType<typeof orderCommand>, object, () => Promise<unknown>, () => Promise<unknown>]> = [
+      ['underpaid', orderCommand([mug()], [{ method: 'cash', amountMinor: 400 }]),
+        { code: 'underpaid', message: 'Payments of 400 are below the total of 1000' }, async () => {}, async () => {}],
+      ['unknown_variant', orderCommand([{ variantId: 'T_999999', quantity: 1, unitPriceMinor: 800 }]),
+        { code: 'unknown_variant', message: 'Variant T_999999 is missing or disabled' }, async () => {}, async () => {}],
+      ['orderItemsLimit', orderCommand([mug(2)]), { code: 'invalid_payload' },
+        async () => { config.orderOptions.orderItemsLimit = 1; }, async () => { config.orderOptions.orderItemsLimit = limits.orderItemsLimit; }],
+      ['orderLineItemsLimit', orderCommand([mug(2)]), { code: 'invalid_payload' },
+        async () => { config.orderOptions.orderLineItemsLimit = 1; }, async () => { config.orderOptions.orderLineItemsLimit = limits.orderLineItemsLimit; }],
+      ['no manual fulfilment handler', orderCommand([mug()]), { code: 'store_configuration' },
+        async () => { config.shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment'); },
+        async () => { config.shippingOptions.fulfillmentHandlers = handlers; }],
+      ['a replaced payment checker', orderCommand([mug()]), { code: 'store_configuration' },
+        () => methods.payment.update(payment.id, { checker: foreign }), () => methods.payment.update(payment.id, { checker: payment.checker })],
+      ['a replaced shipping checker', orderCommand([mug()]), { code: 'store_configuration' },
+        () => methods.shipping.update(shipping.id, { checker: foreign }), () => methods.shipping.update(shipping.id, { checker: shipping.checker })],
+    ];
+    const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
+    try {
+      for (const [name, input, error, breakStore, repair] of cases) {
+        const before = await counts();
+        await breakStore();
+        try {
+          expect(await run(input), name).toMatchObject({ id: input.id, status: 'rejected', error });
+        } finally {
+          await repair();
+        }
+        expect(await counts(), name).toEqual(before);
+        expect(await ledgerFor(input), name).toBeNull();
+      }
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(createDraft).not.toHaveBeenCalled();
+      expect(delivered).toEqual([]);
+      // Not vacuous: an applied sale's events arrive through the same subscription.
+      expect(await run(orderCommand([mug()]))).toMatchObject({ status: 'applied' });
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(delivered).toContain('OrderPlacedEvent');
+    } finally {
+      createDraft.mockRestore();
+      subscription.unsubscribe();
+    }
   });
 
   it('ruling 1: a refused PaymentSettled with sufficient payments (a state transition, off the permanent list) is transient; nothing is stored', async () => {
@@ -126,18 +174,26 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(PLATFORM_ERROR_CODE).toBe('platform_error');
   });
 
-  it('ruling 1: a permanent ErrorResult (ORDER_LIMIT_ERROR from addItemToOrder) is a stored platform_error in the amendment\'s shape, and replays', async () => {
+  it('ruling 1, safety net: a limit lowered during the sale (ORDER_LIMIT_ERROR after the claim) is a stored platform_error in the amendment\'s shape', async () => {
     const options = server.app.get(ConfigService).orderOptions;
     const limit = options.orderItemsLimit;
-    options.orderItemsLimit = 1;
+    const input = orderCommand([mug(2)]);
+    // The pre-claim check passed; the store changes before addItemToOrder (the recipe's first stage runs after it).
+    const customers = vi.spyOn(server.app.get(CustomerService), 'createOrUpdate');
+    customers.mockImplementationOnce(async (...args) => {
+      options.orderItemsLimit = 1;
+      customers.mockRestore();
+      return server.app.get(CustomerService).createOrUpdate(...args);
+    });
     try {
       const platformMessage = 'ORDER_LIMIT_ERROR: {"maxItems":1}';
-      await expectStored(orderCommand([mug(2)]), {
+      await expectStored(input, {
         code: 'platform_error', message: `ORDER_LIMIT_ERROR: ${platformMessage}`,
         data: { platformCode: 'ORDER_LIMIT_ERROR', platformMessage },
       });
     } finally {
       options.orderItemsLimit = limit;
+      customers.mockRestore();
     }
   });
 
@@ -156,11 +212,10 @@ describe('error classes (ADR 0002 §2)', () => {
 
   it('platform_error leaves no durable change; a Retry under a new id with the same clientOrderId makes exactly one order', async () => {
     // The till requeues a platform_error under a NEW command id, so the rejection must leave nothing.
-    // The trigger is permanent and late: without the manual fulfilment handler, createFulfillment
-    // refuses after the order is PaymentSettled.
+    // The trigger is a late configuration race (the safety net): the manual fulfilment handler is
+    // removed after the pre-claim check, so createFulfillment refuses after the order is PaymentSettled.
     const shippingOptions = server.app.get(ConfigService).shippingOptions;
     const handlers = shippingOptions.fulfillmentHandlers;
-    shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment');
     const emailAddress = 'vp1-platform-error@example.com';
     // Before the refusal the recipe writes a new customer, a stock top-up (Print: 2 on hand), lines,
     // a discount surcharge, a shipping line and a payment, so every count below is non-vacuous.
@@ -170,6 +225,7 @@ describe('error classes (ADR 0002 §2)', () => {
     const baseline = await counts();
     recipe.testObserver = async (stage, ctx, order) => {
       if (stage !== 'payments' || order.customFields.tallyClientOrderId !== input.payload.clientOrderId) return;
+      shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment');
       const ofOrder = { where: { order: { id: order.id } } };
       written = {
         lines: await connection.getRepository(ctx, OrderLine).count(ofOrder),
@@ -214,37 +270,6 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(await ordersFor()).toBe(1);
     // The rejected command id itself still replays its stored answer.
     expect(await run(input)).toEqual(result);
-  });
-
-  // KNOWN GAP, reported to the Front desk: Vendure's EventBus waits only for the outer transaction,
-  // so events published inside the rolled-back savepoint are still delivered when the stored
-  // rejection commits. `it.fails` passes while the gap exists and fails once it is closed.
-  it.fails('the amendment: no event of a rolled-back sale reaches a subscriber after its platform_error commits', async () => {
-    const input = orderCommand([mug()]);
-    const control = orderCommand([mug()]);
-    const delivered: Record<string, string[]> = { [input.id]: [], [control.id]: [] };
-    const subscription = server.app.get(EventBus).filter(event => event instanceof OrderPlacedEvent
-      || event instanceof OrderStateTransitionEvent).subscribe(event => {
-      const { order } = event as OrderPlacedEvent | OrderStateTransitionEvent;
-      for (const command of [input, control]) {
-        if (order.customFields.tallyClientOrderId === command.payload.clientOrderId) delivered[command.id].push(event.constructor.name);
-      }
-    });
-    // The subscription is not vacuous: an applied sale's events arrive.
-    expect(await run(control)).toMatchObject({ status: 'applied' });
-    await new Promise(resolve => setTimeout(resolve, 500));
-    expect(delivered[control.id]).toContain('OrderPlacedEvent');
-    const shippingOptions = server.app.get(ConfigService).shippingOptions;
-    const handlers = shippingOptions.fulfillmentHandlers;
-    shippingOptions.fulfillmentHandlers = handlers.filter(handler => handler.code !== 'manual-fulfillment');
-    try {
-      expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } });
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } finally {
-      shippingOptions.fulfillmentHandlers = handlers;
-      subscription.unsubscribe();
-    }
-    expect(delivered[input.id]).toEqual([]);
   });
 
   it('refinement 2: a unique-violation race on tallyClientOrderId takes the collision guard: the new id stored applied with the first result, one order', async () => {

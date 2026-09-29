@@ -1,6 +1,6 @@
 import {
   Customer, Order, OrderLine, OrderService, Payment, PaymentService,
-  Sale, ShippingLine, StockLevel, StockMovement, Surcharge, TransactionalConnection, isGraphQlErrorResult,
+  Sale, ShippingLine, StockLevel, StockMovement, Surcharge, TransactionalConnection,
 } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -277,31 +277,24 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(order.totalWithTax).toBe(0);
   });
 
-  it('proof 5: an underpaid sale is a stored `underpaid`; order, lines, payments, stock movements, surcharges, shipping lines, history and customers roll back', async () => {
+  it('proof 5, ruling (A): an underpaid sale is refused before the claim: no order, line, payment, stock movement, surcharge, shipping line, history, customer or ledger row', async () => {
     const before = await rollbackCounts();
     const stockBefore = await stock(serviceIds.mug[0]);
     // These spies call Vendure unchanged: no mock implementation or synthetic ErrorResult.
     const transition = vi.spyOn(server.app.get(OrderService), 'transitionToState');
     const payment = vi.spyOn(server.app.get(PaymentService), 'createPayment');
     try {
-      // The discount makes the recipe save a surcharge row before the failing transition, so the
-      // surcharge count below cannot pass vacuously; a new buyer email does the same for customers.
+      // A discounted sale by a new buyer, which after the claim would write a surcharge and a customer.
       const command = orderCommand([{ ...mug(), discountMinor: 100 }], [{ method: 'cash', amountMinor: 500 }],
         { email: 'vp1-proof5-rollback@example.com' });
       const result = await submit(command);
       expect(result).toEqual({ id: command.id, status: 'rejected', error: {
         code: 'underpaid', message: 'Payments of 500 are below the total of 875',
       } });
-      expect(transition.mock.calls.at(-1)?.[2]).toBe('PaymentSettled');
-      const returned = await transition.mock.results.at(-1)!.value;
-      expect(Boolean(isGraphQlErrorResult(returned))).toBe(true);
-      expect(returned.__typename).toBe('OrderStateTransitionError');
-      expect(payment).toHaveBeenCalledTimes(1);
-      expect(await payment.mock.results[0].value).toMatchObject({ amount: 500, state: 'Settled' });
-      expect(await rollbackCounts()).toEqual({ ...before, commands: before.commands + 1 });
-      const ledger = await connection.rawConnection.getRepository(TallyCommand).find({ where: { id: command.id } });
-      expect(ledger).toHaveLength(1);
-      expect(ledger[0]).toMatchObject({ status: 'rejected', result });
+      expect(transition).not.toHaveBeenCalled();
+      expect(payment).not.toHaveBeenCalled();
+      expect(await rollbackCounts()).toEqual(before);
+      expect(await connection.rawConnection.getRepository(TallyCommand).count({ where: { id: command.id } })).toBe(0);
       expect(await stock(serviceIds.mug[0])).toBe(stockBefore);
     } finally {
       transition.mockRestore();
