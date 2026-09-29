@@ -1,6 +1,6 @@
 # Spike S1: the Vendure order recipe (ADR 0002)
 
-Status: in progress (proofs 3, 4 and 7 pending)
+Status: complete. All 12 proofs pass (61 tests); ADR 0002 stays Proposed until the Front desk rules
 Date: 2026-09-29
 Branch: `spike-s1`. Code: `spikes/s1-order-recipe/` (TEMPORARY, evidence only)
 
@@ -19,8 +19,9 @@ TallyUI's exact tax maths and v3 types) is vendored, marked TEMPORARY,
 from medusapos 5c23a74 and TallyUI `origin/main` until
 `@tallyui/core/server` exists.
 
-Codex wrote the code from one spec per proof group. Group E fell to an
-Opus subagent under the exit-5 rule. Every number below comes from the
+Codex wrote groups A–D, one spec per proof group. Codex's quota ran out
+before group E, so under the exit-5 rule an Opus subagent implemented it
+from the same, unchanged spec. Every number below comes from the
 worker's own run of the full suite, not from the implementer's.
 
 ## Results
@@ -29,11 +30,11 @@ worker's own run of the full suite, not from the implementer's.
 |---|---|---|---|---|
 | 1 | Tax parity: discount surcharges plus one rounding bridge match the till | **PASS** | 12 cases (default and `OrderLevelTaxCalculationStrategy` × tax-exclusive and tax-inclusive × discounted, mixed-mode and negative-tie orders). Every order total = `totalMinor`. The largest per-rate difference is **1** minor unit (default strategy, inclusive, mixed, 7 %, where T = 2). The largest bridge is **1** (order-level strategy, inclusive, mixed). A deliberately misallocated `taxByRate` gives two `tax_rate_mismatch` warnings (19 %: 24 vs 19; 7 %: 2 vs 7), and the sale is still applied | `test/tax-default.e2e.ts`, `test/tax-order-level.e2e.ts`, `test/tax-cases.ts` |
 | 2 | No server promotions on POS orders | **PASS** | An automatic order-percentage promotion and a line fixed-discount promotion were both active. Each was applied after every `addItemToOrder`, after `setShippingMethod` and after the surcharge save. `order.promotions`, `order.discounts` and every line's adjustments are empty after the final `applyPriceAdjustments(ctx, order, [])`, after the payments, and after the order is reloaded post-fulfilment. The recipe never calls `addPaymentToOrder`; it uses `PaymentService.createPayment` | `test/promotions.e2e.ts` |
-| 3 | No customer email for POS orders | pending | | |
-| 4 | Storefront cannot use `tally-pos` or the in-store method | pending | | |
+| 3 | No customer email for POS orders | **PASS** | `EmailPlugin`'s `orderConfirmationHandler` is filtered on `tallyClientOrderId`. The POS order sends **0** emails, and the control Shop API order sends **1** ("Order confirmation for #…"). The handler fires on `OrderStateTransitionEvent` (to `PaymentSettled`), not `OrderPlacedEvent` | `test/email.e2e.ts` |
+| 4 | Storefront cannot use `tally-pos` or the in-store method | **PASS** | On a Shop API guest order, `tally-pos` is listed with `isEligible: false`, and `addPaymentToOrder` gives `INELIGIBLE_PAYMENT_METHOD_ERROR` (the order stays in `ArrangingPayment` with no payment). `tally-in-store` is missing from the eligible shipping methods, and `setOrderShippingMethod` gives `INELIGIBLE_SHIPPING_METHOD_ERROR`. **The handler guard also holds on its own:** with a forged `tallyClientOrderId` that makes the checker pass, the payment is `Declined` ("only available to the POS route") because `ctx.apiType` is not `custom` | `test/storefront.e2e.ts` |
 | 5 | A returned `ErrorResult` rolls the whole order back | **PASS** | An underpaid sale makes the recipe's `transitionToState('PaymentSettled')` return `OrderStateTransitionError`. Afterwards, orders 6→6, order lines 10→10, payments 6→6 and stock movements 24→24 are unchanged, and ledger rows go 6→7: one stored `rejected` row, per §2 | `test/recipe.e2e.ts` |
 | 6 | One transaction per command in a batch | **PASS** | A batch of 3 whose 2nd command uses a disabled variant gives applied / stored `unknown_variant` / applied. A batch whose 2nd command meets a held lock answers 409 after **5.6 s**: the 1st command is committed and the 3rd is not processed. The retry answers `duplicate`, `duplicate`, `applied` | `test/ledger.e2e.ts` |
-| 7 | Stock top-up before `addItem`, never cut, taken back | pending | | |
+| 7 | Stock top-up before `addItem`, never cut, taken back | **PASS** | Selling 3 × `Print` with 2 on hand: stock goes 2 → **3** after the top-up (before any item is added), then 0 after fulfilment, then **−1** after the take-back. The order line keeps quantity **3**, and there is an `insufficient_stock` warning with `quantity: 1`. Movements: ADJUSTMENT +1, ALLOCATION 3, SALE −3, ADJUSTMENT −1. **Control without the top-up:** `addItemToOrder` saves the line at 2 and returns `InsufficientStockError`, which the recipe would turn into a rejection; `addItemsToOrder` silently cuts the line to 2. **Rollback:** a sale that tops up and then fails leaves stock and movements unchanged | `test/stock.e2e.ts` |
 | 8 | POS lines stay 1:1 | **PASS** | Two POS lines of the same variant become 2 order lines, each with its own `tallyClientLineId` | `test/recipe.e2e.ts` |
 | 9 | Split tender, overpayment, zero total | **PASS** | Split tender: payments 500 + 500 = 1000. Overpayment: a cash tender of 2000 on a 1000 total gives one payment row of 1000, and `tallyPayments` keeps tendered 2000 and change 1000. Zero total: `Draft → ArrangingPayment → PaymentSettled → Delivered` with no payment row | `test/recipe.e2e.ts` |
 | 10 | Stored rejections, no retry loops | **PASS** | A disabled variant and a missing variant each give a stored `unknown_variant` with no new order; replays return it in 13–25 ms without running the recipe. A channel whose default-zone tax rates are all disabled (the nearest Vendure 3.7.3 equivalent of "no tax zone") gives `store_configuration` with no ledger row and no order. There are no 503s | `test/ledger.e2e.ts` |
@@ -79,7 +80,26 @@ field, `tallyPriceIncludesTax`.
    The spike emits both today. TallyUI adds them to its core types and
    server package for 2.2.0, and the exact shapes have been sent to the
    TallyUI worker.
-6. **`codex-job.sh` reports exit 1, not 5, on a Codex usage limit.** The
+6. **The confirmation email's event.** In 3.7.3, `orderConfirmationHandler`
+   listens to `OrderStateTransitionEvent` (to `PaymentSettled`), not
+   `OrderPlacedEvent`. The filter on `tallyClientOrderId` works on that
+   event. ADR 0002's wording is corrected.
+7. **`addItemToOrder` rejects rather than cuts.** On a shortage it saves
+   the line at the saleable quantity and returns `InsufficientStockError`.
+   Only the plural `addItemsToOrder` cuts silently. Either way the top-up
+   must come first. ADR 0002's wording is corrected.
+8. **Negative stock is allowed.** Vendure accepts on-hand stock of −1
+   after a take-back. That is the honest record of an oversold, paid
+   sale.
+9. **The top-up uses the default stock location.** With one location that
+   is the same one `StockLocationStrategy` allocates from. With several,
+   VP3 must ask the strategy, and no order line exists yet at top-up time.
+   Left open.
+10. **The email job queue was not exercised.** With the `testing`
+    transport, `EmailPlugin` sends in-process and skips the `send-email`
+    queue. The filter decides before anything would be queued, so a real
+    transport should behave the same, but that path was not run.
+11. **`codex-job.sh` reports exit 1, not 5, on a Codex usage limit.** The
    quota message appears only in `events.jsonl`. Reported to the Front
    desk.
 
