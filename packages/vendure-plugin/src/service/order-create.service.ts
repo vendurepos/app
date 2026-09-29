@@ -229,7 +229,14 @@ export class OrderCreateService {
         // clientOrderId commit with the rejection, or none of them does.
         const refuse = (reason: string) => new Error(`Command ${commandId} is not rejected: ${reason}`);
         const orderId = this.decodeId(stored.serverRefs!.orderId)!;
-        const order = await this.orders.findOne(txCtx, orderId) ?? pluginBug(`Order ${orderId} of ${commandId} is missing`);
+        const order = await this.orders.findOne(txCtx, orderId);
+        if (!order) {
+          // The order exists but this context's channel does not see it: refuse, and the transaction changes nothing.
+          if (await this.connection.getRepository(txCtx, Order).existsBy({ id: orderId })) {
+            throw refuse(`the order is in channel ${row.channelId}; resolve from that channel`);
+          }
+          pluginBug(`Order ${orderId} of ${commandId} is missing`);
+        }
         for (const payment of await this.orders.getOrderPayments(txCtx, orderId)) {
           if (payment.method !== TALLY_PAYMENT_METHOD_CODE || payment.state !== 'Settled') continue;
           const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
@@ -267,7 +274,7 @@ export class OrderCreateService {
     if (process.env[TEST_HOOKS_ENV] === '1') await this.testHooks[name]?.(commandId);
   }
 
-  // ADR 0002 §2 step 2: shape and version refusals, answered before any write or claim.
+  // ADR-038 #220 step 1: shape and version refusals (U+0000, duplicate clientLineIds included), before any database access.
   private shapeRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
     const id = typeof command?.id === 'string' ? command.id : '';
     if (!command || typeof command !== 'object' || Array.isArray(command)) {
@@ -288,10 +295,18 @@ export class OrderCreateService {
         { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
+    // #12 review: a repeated clientLineId could merge order lines and meet ORDER_LIMIT_ERROR after the draft.
+    const seen = new Set<string>();
+    (Array.isArray(command.payload?.lines) ? command.payload.lines : []).forEach((line, index) => {
+      const lineId = (line as { clientLineId?: unknown } | null)?.clientLineId;
+      if (typeof lineId !== 'string') return;
+      if (seen.has(lineId)) errors.push(`lines[${index}].clientLineId: expected no duplicate clientLineId`);
+      seen.add(lineId);
+    });
     return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
   }
-  // ADR-038 #220 step 4: the payload's values, after the replay and collision lookups: an unstored invalid_payload.
-  // The payload's values: an unstored invalid_payload before any database access (Front desk, matching precheckCommand).
+  // ADR-038 #220 step 4: the payload's values, after the replay read and the collision lookup and before the claim:
+  // an unstored invalid_payload (Front desk, matching precheckCommand).
   private valueRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
     const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
     const errors = valueRangeErrors(command.payload, maxMoney);

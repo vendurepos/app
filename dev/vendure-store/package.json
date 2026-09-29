@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@vendure/core": "3.7.3",
+    "@vendurepos/plugin": "file:../../packages/vendure-plugin",
     "pg": "8.23.0"
   },
   "devDependencies": {

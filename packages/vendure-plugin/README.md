@@ -117,9 +117,13 @@ The package is standalone npm, not part of the pnpm workspace.
 
 ```sh
 npm ci
-npm run db:up       # Postgres 16 on 127.0.0.1:5445, compose project vendurepos-plugin-test
+npm run db:up       # Postgres 16 on 127.0.0.1:5445 and Mailpit (SMTP :1045, API :8045), project vendurepos-plugin-test
 npm run typecheck
 npm run build       # dist/, with the main and ./email entries
 npm test            # vitest, one worker
-npm run db:down     # removes the container and its volume
+npm run db:down     # removes the containers and the volume
 ```
+
+Build before `npm test`: `test/email-smtp.e2e.ts` imports `@vendurepos/plugin/email` from `dist/`, as a
+store does, and sends through Mailpit. The dev store (`dev/vendure-store`) installs this package from
+`dist/` too, so build it before that store's `npm ci`; the store's scripts do so when `dist/` is stale.

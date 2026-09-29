@@ -374,8 +374,9 @@ S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
   `total_mismatch`, arrive in TallyUI's `CommandWarning` (2.2.0).
 - **Several stock locations.** VP3 takes the top-up location from
   `StockLocationStrategy`; S1 used the default location.
-- **A real email transport.** The first plugin e2e exercises the wrapped
-  email handler with one.
+- ~~**A real email transport.**~~ Closed by VP2b.
+  `packages/vendure-plugin/test/email-smtp.e2e.ts` sends through real SMTP
+  to Mailpit. A storefront order is emailed once, and a POS order is not.
 - **Concurrent sales of one variant.** Vendure's stock update is an
   unlocked read-modify-write, and the top-up and take-back double that
   exposure. VP3 measures it under concurrency.

@@ -7,6 +7,7 @@ import {
   VendureConfig,
   dummyPaymentHandler,
 } from '@vendure/core';
+import { TallyPosPlugin } from '@vendurepos/plugin';
 import {
   COOKIE_SECRET,
   CORS_ORIGINS,
@@ -68,5 +69,8 @@ export const config: VendureConfig = {
     DefaultSchedulerPlugin.init(),
     DefaultJobQueuePlugin.init({ useDatabaseForBuffer: true }),
     DefaultSearchPlugin.init({ bufferUpdates: false, indexStockStatus: true }),
+    // POST /tally/v1/commands. Its tables and columns come from the seed's synchronize (no migrations
+    // here); on start it gives every channel the POS payment and shipping methods and the walk-in customer.
+    TallyPosPlugin,
   ],
 };

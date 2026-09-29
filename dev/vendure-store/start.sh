@@ -17,6 +17,7 @@ if (exec 3<>/dev/tcp/127.0.0.1/$VENDURE_PORT) 2>/dev/null; then
   exit 1
 fi
 
+./plugin.sh
 docker compose up -d --wait postgres
 if [ -z "$(docker compose exec -T postgres psql -U vendure -d vendure -tAc "select to_regclass('public.channel')")" ]; then
   echo "vendure-store: database is empty; run ./reset.sh first" >&2

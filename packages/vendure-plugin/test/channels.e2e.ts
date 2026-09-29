@@ -319,4 +319,41 @@ describe('store configuration in every channel, and a sale recorded in another c
     // Per location: the second location ends at 1 - 3 (the sale without its top-up); the default location is untouched.
     expect(await levels()).toEqual({ ...before, [decode(secondLocation)]: -2 });
   });
+
+  it('#12 nit 6: rejecting from a channel that does not see the order is refused clearly and changes nothing', async () => {
+    const user = await connection.rawConnection.getRepository(User).findOneOrFail({
+      where: { identifier: 'superadmin' }, relations: ['roles', 'roles.channels'],
+    });
+    const contexts = server.app.get(RequestContextService);
+    const stock = server.app.get(StockMovementService);
+    const adjust = stock.adjustProductVariantStock.bind(stock);
+    const spy = vi.spyOn(stock, 'adjustProductVariantStock').mockImplementationOnce(adjust)
+      .mockImplementationOnce(() => Promise.reject(new Error('injected take-back failure')));
+    // A default-channel sale beyond the stock on hand: it tops up, and the take-back fails.
+    const input = orderCommand([{ variantId: variantIds.print[0], quantity: 50, unitPriceMinor: 4500 }]);
+    try {
+      await expect(run(input)).rejects.toMatchObject({ kind: 'needs_admin' });
+    } finally {
+      spy.mockRestore();
+    }
+    const ledger = connection.rawConnection.getRepository(TallyCommand);
+    const { result } = await ledger.findOneByOrFail({ id: input.id });
+    const orderId = decode((result as { serverRefs: { orderId: string } }).serverRefs.orderId);
+    const state = async () => ({
+      row: (await ledger.findOneByOrFail({ id: input.id })).status,
+      order: (await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: orderId })).state,
+      stock: (await connection.rawConnection.getRepository(StockLevel).find({ where: { productVariantId: serviceIds.print[0] } }))
+        .map(level => [level.stockLocationId, level.stockOnHand]),
+    });
+    const before = await state();
+    expect(before).toMatchObject({ row: 'needs_admin', order: 'Delivered' });
+    const secondCtx = await contexts.create({ apiType: 'admin', user, channelOrToken: second.token });
+    await expect(server.app.get(OrderCreateService).resolveNeedsAdmin(secondCtx, input.id, 'rejected', 'wrong channel')).rejects
+      .toThrow(`Command ${input.id} is not rejected: the order is in channel ${defaultChannelId}; resolve from that channel`);
+    expect(await state()).toEqual(before);
+    // Control: from the order's channel, the same rejection goes through.
+    const defaultCtx = await contexts.create({ apiType: 'admin', user });
+    await server.app.get(OrderCreateService).resolveNeedsAdmin(defaultCtx, input.id, 'rejected', 'right channel');
+    expect(await state()).toMatchObject({ row: 'rejected', order: 'Cancelled' });
+  });
 });
