@@ -1,0 +1,17 @@
+# Test database for @vendurepos/plugin. Project name vendurepos-plugin-test (package.json scripts),
+# loopback :5445, so it never collides with the dev store (:5442), the smoke store (:5443) or S1 (:5444).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vendure
+      POSTGRES_PASSWORD: vendure
+      POSTGRES_DB: plugin
+      TZ: UTC
+      PGTZ: UTC
+    ports: ["127.0.0.1:5445:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vendure", "-d", "plugin"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
