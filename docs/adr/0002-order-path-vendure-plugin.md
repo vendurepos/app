@@ -138,12 +138,26 @@ an `ErrorResult` (a state transition refused, stock, a payment declined) is
 turned into a throw, so the transaction rolls back. A half-built order never
 commits.
 
-**Stored rejections, never retry loops.** A business refusal found after
-the claim is a final answer: `unknown_variant` (a variant missing or
-disabled), `underpaid`, and so on. The order transaction rolls back. The
-`rejected` result is then written to the ledger in its own short
-transaction, so a replay returns the same rejection without re-running the
-recipe. Only genuinely transient failures answer 503.
+**Error classes. No deterministic condition ever loops** (Front desk
+ruling, after S1):
+
+- **Stored rejections.** A business refusal found after the claim is a
+  final answer. The order transaction rolls back, and the `rejected`
+  result is then written to the ledger in its own short transaction, so a
+  replay returns the same rejection without re-running the recipe:
+  - `unknown_variant` for a missing or disabled variant;
+  - `underpaid` when the `PaymentSettled` transition is refused and the
+    payments really are below the bridged total;
+  - `insufficient_stock` if a shortage survives the top-up;
+  - **any other `ErrorResult`**: `rejected`, with Vendure's error code and
+    message in `data`. A refused `PaymentSettled` transition whose payments
+    do cover the total counts as `store_configuration` when a
+    configuration cause is found, and otherwise as this unknown class.
+- **Requeue path.** A unique violation on `tallyClientOrderId` (two
+  commands for the same sale racing) answers `ok` with the existing
+  order's refs, and writes nothing.
+- **503 only for transient failures.** That means connection, lock and
+  timeout failures. Nothing deterministic ever answers 503.
 
 **What this retires, measured.** medusapos's lease, fencing token, advisory
 lock and resume are 310 physical lines on its `main` (5c23a74):
@@ -158,18 +172,18 @@ lock and `resume.ts`.
 | POS concept | Vendure mechanism (adopted) | Replaces (not carried over) |
 |---|---|---|
 | The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on the last transition; the plugin overwrites it with `tallySaleAt` (the payload's sale time) in the same transaction, so Vendure's reports match the till | Status workarounds such as WCPOS's `pos-open`/`pos-partial`; a sale that reaches the server is always paid |
-| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is refused as `unsupported_currency` before the claim | Repricing lines in the channel's default currency |
+| Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is refused as `unsupported_currency` before the claim. Like `store_configuration`, that refusal is not stored, so the same command id applies once the channel is fixed. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
 | Lines | One `OrderLine` per POS line. Vendure merges equal lines, so a read-only line custom field `tallyClientLineId` keeps them 1:1 | — |
 | Stock | A manual fulfilment records `SALE` stock movements at the location that Vendure's `StockLocationStrategy` allocates from. `payload.locationId` is not used in the MVP (TallyUI does not send it yet). A shortage is topped up **before** `addItemToOrder`, because otherwise `addItemToOrder` saves the line at the saleable quantity and returns `InsufficientStockError` (and `addItemsToOrder` cuts it silently; S1), and before `ArrangingPayment`. The top-up is taken back after fulfilment, inside the transaction, and the result carries an `insufficient_stock` warning (ADR-039) | Stock-reduction hooks and reservation tables |
 | As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice`, with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`), which it reads from a second read-only line field, `tallyPriceIncludesTax`, because the strategy sees only the order and the line's custom fields. Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no other workaround (proved in S1) | Rewriting line totals through post meta |
 | Discounts (v2/v3) | One negative, **taxable** `Surcharge` per discounted line (`POS discount`, SKU `TALLY-DISCOUNT`) of `-discountMinor`, in that line's tax mode. Its tax lines copy the line's rate and description, so the order-level tax group for that rate shrinks by the discount. A net unit price was rejected: `(unit × qty − discount) / qty` is not an integer in general | Coupon emulation |
 | Server promotions | **None on POS orders.** The POS has already applied its own discounts. Four calls re-apply the channel's active promotions while the order is built: `addItemsToOrder`, `addSurchargeToOrder`, `setShippingMethod`, and the coupon revalidation inside `addPaymentToOrder`. So the recipe ends with one final pricing pass, `orderCalculator.applyPriceAdjustments(ctx, order, [])`, followed by explicit saves of the order, its lines and its shipping lines. `order.promotions` and every line's promotion adjustments are saved empty. A later edit in the Dashboard would re-apply the channel's promotions; POS orders are not meant to be edited there | Settling promotion differences in a surcharge |
-| Tax and money authority | The configured `TaxZoneStrategy` and the merchant's tax strategy, unchanged. **The till's totals are the fiscal record** (as in medusapos ADR 0012). One untaxed `TALLY-ROUNDING` surcharge bridges **any** difference between Vendure's total and `totalMinor` (ADR-048). The order is always recorded, and is never refused as `total_mismatch`. The size of the bridge comes back as a `totalWarnings` entry. The surcharge is added through the repository followed by `calculateOrderTotals`, so it causes no promotion pass. A negative tie rounds half away from zero, using the plugin's own rounding rather than `Math.round`. ADR-048's bound widens to ⌈(lines + surcharges) / 2⌉ minor units. Per-rate figures are compared with that tolerance against the v3 `taxByRate`, and any difference is reported as a warning, never refused | WooCommerce's single "prices include tax" option, and changing store settings to match the POS |
+| Tax and money authority | The configured `TaxZoneStrategy` and the merchant's tax strategy, unchanged. **The till's totals are the fiscal record** (as in medusapos ADR 0012). One untaxed `TALLY-ROUNDING` surcharge bridges **any** difference between Vendure's total and `totalMinor` (ADR-048). The order is always recorded, and is never refused as `total_mismatch`. The size of the bridge comes back as a `totalWarnings` entry. The surcharge is added through the repository followed by `calculateOrderTotals`, so it causes no promotion pass. The plugin rounds half away from zero wherever it computes a figure itself (the bridge, the tolerance). Vendure's own tax rounding is accepted as it is: it uses `Math.round`, so −59.5 on a negative surcharge becomes −59. The bridge and the tolerance absorb the difference (Front desk ruling, after S1). ADR-048's bound widens to ⌈(lines + surcharges) / 2⌉ minor units, and S1 asserts that the bridge never exceeds it in any parity case. Per-rate figures are compared with that tolerance against the v3 `taxByRate`, and any difference is reported as a warning, never refused | WooCommerce's single "prices include tax" option, and changing store settings to match the POS |
 | Payment | A `tally-pos` `PaymentMethod` per channel. Its handler returns `Settled` payments created with `PaymentService.createPayment`, one per tender (`cash` or `external`) as given. A sum of tenders above the total is allowed (ADR-039): the covering tender's Vendure payment is capped, so Vendure accepts the payments as covering the order exactly. The **full tender list, including change, is stored on the order** in a read-only `tallyPayments` field, as medusapos's `tally_payments` is. That list is the fiscal record, and a register's expected cash derives from it, never from Vendure's payment rows. A zero-total sale has no payment, so the plugin makes the `PaymentSettled` transition itself | Payment-gateway emulation |
 | Collection | An in-store `ShippingMethod` with a zero calculator | Hiding shipping lines |
 | Closed to the storefront | The `tally-pos` payment method and the in-store shipping method each have an eligibility checker that accepts only orders carrying `tallyClientOrderId` created through the plugin's authenticated route. The payment handler also refuses unless `ctx.apiType === 'custom'`. A Shop API customer can never settle an order with `tally-pos` or pick the in-store method | — |
 | Customer | In order: the customer from `customer.customerId` (v3) when it exists in this channel; else the customer found or created by email with `CustomerService.createOrUpdate` (ADR-047); else one walk-in placeholder customer per channel. An unknown or foreign `customerId` falls back; it never rejects the sale | Guest-order meta |
-| No customer email | POS orders send no order-confirmation email, matching Medusa's `no_notification`. The email handlers filter on `tallyClientOrderId`; in 3.7.3 the order confirmation fires on `OrderStateTransitionEvent` to `PaymentSettled` (proved in S1) | — |
+| No customer email | POS orders send no order-confirmation email, matching Medusa's `no_notification`. The plugin exports a wrapped `orderConfirmationHandler` that skips orders with `tallyClientOrderId`, and the quick-start tells merchants to install it in their `EmailPlugin` handlers. In 3.7.3 the order confirmation fires on `OrderStateTransitionEvent` to `PaymentSettled`. S1 proved the filter with a testing transport; the first plugin e2e proves it with a real transport | — |
 | Till, drawer and cashier | Order custom fields: `tallyRegisterId` is the till's **device** id (medusapos ADR 0017/0019); `tallySessionId` (v3) identifies the drawer session (ADR-068); `tallyCashierRef`; `tallySaleAt`. Register sessions, movements and closures are their own commands and entities later (ADR-068); the order only references them. TallyUI records the device meaning in ADR-038/068 | `_wcpos_register`, `_wcpos_session` and `_pos_user` post meta; the WooCommerce sale counter, which TallyUI's payload does not carry and this plugin does not add |
 | Receipt snapshot (v3) | `display` and `taxByRate` are stored unchanged in a read-only `Order.tallySnapshot` text field, so the order carries the receipt exactly as the cashier printed it | Rebuilding a receipt from server totals |
 | Order number | Vendure's own order `code`, returned as `serverRefs.displayId` | — |
@@ -230,15 +244,17 @@ it proves each of these with a test:
    order totals and per-rate tax within tolerance of the POS figures. This
    covers all four combinations of pricing mode and tax strategy, mixed
    per-line `taxInclusive` orders, and negative ties.
-2. **No promotions.** After each of the four re-pricing calls, the final
-   pass saves `order.promotions` and every line's adjustments empty.
+2. **No promotions.** After the re-pricing calls the recipe makes
+   (`addItemToOrder`, `setShippingMethod`), the final pass saves
+   `order.promotions` and every line's adjustments empty. The recipe avoids
+   `addSurchargeToOrder` and `addPaymentToOrder` altogether.
 3. **No customer email** for a POS order.
 4. **Storefront.** The `tally-pos` payment method and the in-store shipping
    method are unusable from the Shop API.
 5. **Error results.** Every returned `ErrorResult` rolls the order back.
 6. **Batches.** Each command in a batch gets its own transaction, and a
    batch stops at a 409.
-7. **Stock.** The top-up happens before `addItemsToOrder`, and the sold
+7. **Stock.** The top-up happens before `addItemToOrder`, and the sold
    quantity is never cut.
 8. **Lines.** POS lines stay 1:1 with order lines, including two lines of
    the same variant.
@@ -248,10 +264,21 @@ it proves each of these with a test:
     and a channel without a tax zone gives `store_configuration`; neither
     leads to a 503 retry loop.
 11. **Idempotency.** A concurrent duplicate id gives 409 and then
-    `duplicate`, and a new id for an existing `clientOrderId` returns `ok`
-    and writes nothing.
+    `duplicate`, and a new id for an existing `clientOrderId` returns the
+    existing refs (as `applied` in the spike, following medusapos) and
+    writes nothing.
 12. **Crash safety.** A crash after commit leaves no duplicate order on
     retry.
+
+S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
+
+**Follow-ups (Front desk):**
+- **The warning contract.** `tax_rate_mismatch`, and `bridgeMinor` on
+  `total_mismatch`, arrive in TallyUI's `CommandWarning` (2.2.0).
+- **Several stock locations.** VP3 takes the top-up location from
+  `StockLocationStrategy`; S1 used the default location.
+- **A real email transport.** The first plugin e2e exercises the wrapped
+  email handler with one.
 
 Other consequences:
 
