@@ -61,6 +61,15 @@ export function taxCases(strategy: string, override: Parameters<typeof createS1T
       return { order, result };
     }
 
+    // Proof 1 bound on the rounding bridge: B = ceil((lines + surcharges) / 2) from the saved order;
+    // a missing total_mismatch warning means bridgeMinor = 0.
+    function bridgeBound(order: Order, result: { totalWarnings?: TotalWarning[] }) {
+      const B = Math.ceil((order.lines.length + order.surcharges.length) / 2);
+      const warning = result.totalWarnings?.find(item => item.code === 'total_mismatch');
+      const bridge = warning?.code === 'total_mismatch' ? warning.bridgeMinor : 0;
+      return { B, bridge };
+    }
+
     for (const pricesIncludeTax of [false, true]) {
       const mode = pricesIncludeTax ? 'inclusive' : 'exclusive';
       for (const caseName of ['a-discount', 'b-mixed', 'c-negative-tie']) {
@@ -101,6 +110,9 @@ export function taxCases(strategy: string, override: Parameters<typeof createS1T
           const bridges = order.surcharges.filter(row => row.sku === 'TALLY-ROUNDING');
           const bridge = bridges.reduce((sum, row) => sum + row.listPrice, 0);
           console.log('S1-NUM', JSON.stringify({ proof: 1, strategy, mode, case: caseName, T, perRate, bridge }));
+          const bound = bridgeBound(order, result);
+          console.log('S1-NUM', JSON.stringify({ proof: 1, strategy, case: `${mode}: ${caseName}`, ...bound }));
+          expect(Math.abs(bound.bridge), JSON.stringify(bound)).toBeLessThanOrEqual(bound.B);
           expect(order.totalWithTax).toBe(command.payload.totalMinor);
           expect(result.serverRefs!.totalMinor).toBe(command.payload.totalMinor);
           expect(order.state).toBe('Delivered');
@@ -132,11 +144,41 @@ export function taxCases(strategy: string, override: Parameters<typeof createS1T
       const command = orderCommand([
         { variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 101, discountMinor: 50, ratePpm: 190000 },
       ], undefined, undefined, { version: 2 });
-      const { order } = await submit(command);
+      const { order, result } = await submit(command);
+      const bound = bridgeBound(order, result);
+      console.log('S1-NUM', JSON.stringify({ proof: 1, strategy, case: 'v2-discount', ...bound }));
+      expect(Math.abs(bound.bridge), JSON.stringify(bound)).toBeLessThanOrEqual(bound.B);
       expect(order.state).toBe('Delivered');
       expect(order.totalWithTax).toBe(command.payload.totalMinor);
       expect(order.surcharges.find(row => row.sku === 'TALLY-DISCOUNT')?.listPrice).toBe(-50);
       expect(order.customFields.tallySnapshot).toBeNull();
+    });
+
+    it('negative control: a POS total off by B + 5 is applied, bridged in full, and exceeds the bound', async () => {
+      await setMode(false);
+      // 100 net at 19% is 119 in both POS and Vendure, so the only bridge is the offset.
+      // One line plus the bridge surcharge gives B = ceil(2 / 2) = 1.
+      const expectedB = 1;
+      const offset = expectedB + 5;
+      const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 100, ratePpm: 190000 }]);
+      expect(command.payload.totalMinor).toBe(119);
+      command.payload.totalMinor += offset;
+      command.payload.subtotalMinor += offset;
+      command.payload.display!.totalMinor += offset;
+      command.payload.display!.subtotalMinor += offset;
+      command.payload.display!.lines[0].amountMinor += offset;
+      command.payload.payments[0].amountMinor += offset;
+      const { order, result } = await submit(command);
+      const bound = bridgeBound(order, result);
+      console.log('S1-NUM', JSON.stringify({ proof: 1, strategy, case: 'negative-control-offset', offset, ...bound }));
+      expect(order.state).toBe('Delivered');
+      expect(order.totalWithTax).toBe(command.payload.totalMinor);
+      expect(bound.B).toBe(expectedB);
+      expect(bound.bridge).toBe(offset);
+      expect(result.totalWarnings).toEqual([{ code: 'total_mismatch', expectedMinor: 119 + offset, serverMinor: 119, bridgeMinor: offset }]);
+      // The parity cases' bound assertion would catch this bridge.
+      expect(Math.abs(bound.bridge)).toBeGreaterThan(bound.B);
+      expect(() => expect(Math.abs(bound.bridge)).toBeLessThanOrEqual(bound.B)).toThrow();
     });
 
     it('reports an above-bound v3 per-rate discrepancy without refusing the sale', async () => {

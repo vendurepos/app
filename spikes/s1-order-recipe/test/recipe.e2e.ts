@@ -1,6 +1,6 @@
 import {
   ConfigService, Customer, Order, OrderLine, OrderService, Payment, PaymentService,
-  Sale, StockLevel, StockMovement, TransactionalConnection, isGraphQlErrorResult,
+  Sale, ShippingLine, StockLevel, StockMovement, Surcharge, TransactionalConnection, isGraphQlErrorResult,
 } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -70,6 +70,16 @@ describe('S1 order.create recipe through HTTP', () => {
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),
       payments: await connection.rawConnection.getRepository(Payment).count(),
       stockMovements: await connection.rawConnection.getRepository(StockMovement).count(),
+    };
+  }
+  // Proof 5 also counts the other tables the recipe writes before the failing transition.
+  async function rollbackCounts() {
+    return {
+      ...await counts(),
+      surcharges: await connection.rawConnection.getRepository(Surcharge).count(),
+      shippingLines: await connection.rawConnection.getRepository(ShippingLine).count(),
+      orderHistory: await connection.rawConnection.getRepository(OrderHistoryEntry).count(),
+      customers: await connection.rawConnection.getRepository(Customer).count(),
     };
   }
   async function stock(variantId: string) {
@@ -203,14 +213,17 @@ describe('S1 order.create recipe through HTTP', () => {
     console.log('S1-NUM', JSON.stringify({ proof: '9-zero', totalMinor: order.totalWithTax, payments: order.payments.length, transitions }));
   });
 
-  it('proof 5: returned OrderStateTransitionError for underpayment rolls back order, lines, payments and stock movements; rejection is stored', async () => {
-    const before = await counts();
+  it('proof 5: returned OrderStateTransitionError for underpayment rolls back order, lines, payments, stock movements, surcharges, shipping lines, history and customers; rejection is stored', async () => {
+    const before = await rollbackCounts();
     const stockBefore = await stock(variantIds.mug[0]);
     // These spies call Vendure unchanged: no mock implementation or synthetic ErrorResult.
     const transition = vi.spyOn(server.app.get(OrderService), 'transitionToState');
     const payment = vi.spyOn(server.app.get(PaymentService), 'createPayment');
     try {
-      const command = orderCommand([mug()], [{ method: 'cash', amountMinor: 500 }]);
+      // The discount makes the recipe save a surcharge row before the failing transition, so the
+      // surcharge count below cannot pass vacuously; a new buyer email does the same for customers.
+      const command = orderCommand([{ ...mug(), discountMinor: 100 }], [{ method: 'cash', amountMinor: 500 }],
+        { email: 's1-proof5-rollback@example.com' });
       const result = await submit(command);
       expect(result).toMatchObject({ status: 'rejected', error: { code: 'ORDER_STATE_TRANSITION_ERROR' } });
       expect(transition.mock.calls.at(-1)?.[2]).toBe('PaymentSettled');
@@ -219,7 +232,7 @@ describe('S1 order.create recipe through HTTP', () => {
       expect(returned.__typename).toBe('OrderStateTransitionError');
       expect(payment).toHaveBeenCalledTimes(1);
       expect(await payment.mock.results[0].value).toMatchObject({ amount: 500, state: 'Settled' });
-      const after = await counts();
+      const after = await rollbackCounts();
       expect(after).toEqual({ ...before, commands: before.commands + 1 });
       const ledger = await connection.rawConnection.getRepository(TallyCommand).find({ where: { id: command.id } });
       expect(ledger).toHaveLength(1);
