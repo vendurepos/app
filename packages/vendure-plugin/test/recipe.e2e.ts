@@ -230,7 +230,7 @@ describe('order.create recipe through OrderCreateService', () => {
       ['unsafe taxByRate netMinor', payload => { payload.taxByRate![0].netMinor = Number.MAX_SAFE_INTEGER + 1; }],
       ...(['clientOrderId', 'registerId', 'cashierRef'] as const).map(field =>
         [`${field} over 255`, (payload: OrderCreatePayload) => { payload[field] = long; }] as [string, (payload: OrderCreatePayload) => void]),
-      ['sessionId over 255', payload => { payload.sessionId = long; }],
+      ['sessionId over 36', payload => { payload.sessionId = 'x'.repeat(37); }],
       ['clientLineId over 255', payload => { payload.lines[0].clientLineId = long; }],
       ['clientPaymentId over 255', payload => { payload.payments[0].clientPaymentId = long; }],
       ['reference over 255', payload => { payload.payments[0].reference = long; }],

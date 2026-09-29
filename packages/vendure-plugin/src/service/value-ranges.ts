@@ -8,6 +8,7 @@ export const MAX_INT4 = 2_147_483_647;
 export const MAX_STRING = 255;
 // The customerId bound both plugins share; a longer one is ignored, never refused.
 export const CUSTOMER_ID_MAX = 64;
+export const SESSION_ID_MAX = 36; // a UUID's length, the contract's sessionId bound
 
 /**
  * The largest amount the store's money columns hold (N2): int4 for the default MoneyStrategy, and
@@ -20,7 +21,8 @@ export function maxMoneyMinor(moneyColumnType: unknown): number {
 /**
  * Range errors of a payload whose shape is already valid (payloadShapeErrors), answered as
  * `invalid_payload` before the claim; [] when every value fits. `maxMoney` bounds the amounts that
- * land in the store's money columns (maxMoneyMinor).
+ * land in the store's money columns (maxMoneyMinor). Every length bound lives here, after the
+ * replay read and the collision lookup (ADR-038 #220 step 4).
  */
 export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number): string[] {
   const errors: string[] = [];
@@ -35,7 +37,8 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   // N3: tallySaleAt and orderPlacedAt are written from it after the claim.
   if (!Number.isFinite(Date.parse(payload.createdAt))) errors.push('createdAt: expected a date');
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor', 'discountMinor'] as const) minor(payload[field], field, maxMoney);
-  for (const field of ['clientOrderId', 'registerId', 'cashierRef', 'sessionId'] as const) text(payload[field], field);
+  for (const field of ['clientOrderId', 'registerId', 'cashierRef'] as const) text(payload[field], field);
+  text(payload.sessionId, 'sessionId', SESSION_ID_MAX);
   // customerId over CUSTOMER_ID_MAX is never refused: the recipe treats it as absent (customer_ignored).
   // The bound both plugins share (RFC 5321's 254), inside Vendure's varchar(255) emailAddress.
   text(payload.customer?.email, 'customer.email', 254);
