@@ -1,5 +1,5 @@
 import {
-  Allocation, ChannelService, GlobalSettingsService, Order, OrderService, ProductVariantService,
+  Allocation, Channel, ChannelService, GlobalSettingsService, Order, OrderService, ProductVariantService,
   RequestContext, RequestContextService, StockLevel, StockLocation, StockLocationService, TransactionalConnection, User,
 } from '@vendure/core';
 import { parse } from 'graphql';
@@ -90,7 +90,7 @@ describe('VP3-3: MultiChannel stock locations', () => {
 
   it('4: storefront over-allocation is measured; POS caps it without leftover allocated stock', async () => {
     await setLevels(2, 3);
-    expect(String((await server.app.get(StockLocationService).getAllStockLocations(ctx.copy()))[0].id)).toBe(String(x.id));
+    expect(String((await connection.rawConnection.getRepository(StockLocation).find())[0].id)).toBe(String(x.id));
     const methods = await createStorefrontMethods(adminClient);
     const shop = await guestOrder(shopClient, variantIds.mug[0], 'stock-locations@example.com');
     expect(shop.added.state).toBe('AddingItems');
@@ -143,10 +143,13 @@ describe('VP3-3: MultiChannel stock locations', () => {
 
   it('6: a tracked variant in a channel without stock locations is refused, unstored', async () => {
     await setLevels(0, 0);
+    const defaultChannel = await connection.rawConnection.getRepository(Channel).findOneOrFail({
+      where: { id: ctx.channelId }, relations: ['defaultTaxZone', 'defaultShippingZone'],
+    });
     const channel = unwrap(await server.app.get(ChannelService).create(ctx, {
       code: 'no-stock-location', token: 'no-stock-location', defaultLanguageCode: ctx.channel.defaultLanguageCode,
       defaultCurrencyCode: ctx.channel.defaultCurrencyCode, pricesIncludeTax: false,
-      defaultTaxZoneId: ctx.channel.defaultTaxZoneId, defaultShippingZoneId: ctx.channel.defaultShippingZoneId,
+      defaultTaxZoneId: defaultChannel.defaultTaxZone.id, defaultShippingZoneId: defaultChannel.defaultShippingZone.id,
     }));
     await server.app.get(ProductVariantService).assignProductVariantsToChannel(ctx, { productVariantIds: [variantId], channelId: channel.id });
     await server.app.get(TallyPosPlugin).onApplicationBootstrap();

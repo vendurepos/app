@@ -1,5 +1,5 @@
 import {
-  Allocation, DefaultStockLocationStrategy, RequestContextService, StockLevel, StockLocationService, TransactionalConnection,
+  Allocation, DefaultStockLocationStrategy, RequestContextService, StockLevel, StockLocation, StockLocationService, TransactionalConnection,
 } from '@vendure/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
@@ -19,7 +19,7 @@ describe('VP3-3: Default stock location strategy', () => {
     const d = await locations.defaultStockLocation(ctx);
     const x = await locations.create(ctx, { name: 'X' });
     await locations.update(ctx, { id: d.id, name: 'D renamed' });
-    expect(String((await locations.getAllStockLocations(ctx.copy()))[0].id)).toBe(String(x.id));
+    expect(String((await connection.rawConnection.getRepository(StockLocation).find())[0].id)).toBe(String(x.id));
     const variantId = serviceIds.mug[0];
     const levels = connection.rawConnection.getRepository(StockLevel);
     for (const location of [d, x]) {
