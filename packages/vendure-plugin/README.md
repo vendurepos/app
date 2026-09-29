@@ -128,6 +128,7 @@ npm run db:down     # removes the containers and the volume
 records the chosen stack in the ignored `.test-stack.env`, which the tests read. `db:down` uses
 that recorded stack and removes the file after stopping it, so overrides do not need to be kept
 for `db:down`. `scripts/test-stack.sh env` prints the values without starting it.
+`db:up` with a different `PLUGIN_TEST_PROJECT` refuses while the recorded stack is running; run `npm run db:down` first.
 The key is the path's `cksum`; the offset is `key % 100`.
 
 | Environment variable | Stack default |
