@@ -24,9 +24,7 @@ export class BusinessRejection extends Error {
  * A store-configuration fault found after the claim (a refused PaymentSettled with enough payment,
  * review 13): the order and the claim roll back and, as before the claim, nothing is stored.
  */
-export class StoreConfigurationRefusal extends Error {
-  constructor(message?: string) { super(message); }
-}
+export class StoreConfigurationRefusal extends Error {}
 
 /**
  * N5: one of the plugin's own invariants broke (a bug in the plugin), raised explicitly where the
