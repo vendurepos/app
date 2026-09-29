@@ -152,9 +152,12 @@ inside the command's transaction:
 
 - `SET LOCAL lock_timeout = '5s'`, then `INSERT … ON CONFLICT DO NOTHING`.
   A second request for the same id waits on the uncommitted row. After 5 s
-  it answers 409 `in_progress`, which the outbox retries. The timeout is
-  reset right after the claim, so it does not also govern the stock and
-  order locks that follow.
+  it answers 409 `in_progress`, which the outbox retries. Right after the
+  claim the timeout becomes `10s` for the rest of the recipe (VP3, Front
+  desk ruling 7): no wait anywhere is unbounded, and a lock timeout after
+  the claim answers 503 `timeout`, which the till retries. The order save
+  keeps the claim's 5 s and its 409. The sale's `stock_level` rows are
+  locked with a 5 s timeout (ruling 6; see "Concurrent sales" below).
 - Once the first request commits, a replay reads the stored result
   (`duplicate`, same `serverRefs`). A different fingerprint gives
   `idempotency_mismatch`. A command id already claimed in another channel
@@ -377,9 +380,13 @@ S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
 - ~~**A real email transport.**~~ Closed by VP2b.
   `packages/vendure-plugin/test/email-smtp.e2e.ts` sends through real SMTP
   to Mailpit. A storefront order is emailed once, and a POS order is not.
-- **Concurrent sales of one variant.** Vendure's stock update is an
-  unlocked read-modify-write, and the top-up and take-back double that
-  exposure. VP3 measures it under concurrency.
+- ~~**Concurrent sales of one variant.**~~ Closed by VP3-2. Vendure's
+  stock update is an unlocked read-modify-write, and VP3 measured 5 of 6
+  concurrent updates lost. The recipe now locks every `stock_level` row of
+  the sale's variants (`FOR UPDATE`, in variant then location order, 5 s,
+  a timeout is a 503) before its first stock read, and `adjustStock` locks
+  its own row, which covers an admin's take-back.
+  `packages/vendure-plugin/test/concurrency.e2e.ts` proves it.
 - **Split tender with change on a non-final tender.** VP1 adds this test.
 - **The handler guard.** `ctx.apiType === 'custom'` holds for any plugin's
   REST controller; VP1 narrows the guard to this route.

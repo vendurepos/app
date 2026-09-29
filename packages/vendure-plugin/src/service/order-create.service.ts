@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
-  ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevelService,
+  ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevel, StockLevelService,
   StockLocationService, StockMovementService, Surcharge, TaxRate, TransactionalConnection,
   idsAreEqual, isGraphQlErrorResult, manualFulfillmentHandler, normalizeEmailAddress,
 } from '@vendure/core';
@@ -45,6 +45,10 @@ export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSa
 export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
 // ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
 const CLAIM_LOCK_TIMEOUT = '5s';
+// Front desk ruling 7: every wait after the claim is bounded; a timeout is a 503 and the till retries.
+const RECIPE_LOCK_TIMEOUT = '10s';
+// Front desk ruling 6: the wait for the sale's stock rows; a timeout is a 503 (transient timeout).
+const STOCK_LOCK_TIMEOUT = '5s';
 // ADR-038 #220: a createdAt no later than now plus this skew, which absorbs a till whose clock runs
 // ahead; there is no lower bound, since an offline till sends old sales. Later or unparseable: invalid_payload.
 const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
@@ -457,7 +461,8 @@ export class OrderCreateService {
        ON CONFLICT (id) DO NOTHING RETURNING id`,
       [command.id, String(ctx.channelId), command.payload.clientOrderId, fingerprint, 'pending'],
     );
-    await runner.query('SET LOCAL lock_timeout = DEFAULT');
+    // Only the claim waits 5 s for a 409; every later wait is bounded too (ruling 7), and its timeout is a 503.
+    await runner.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
     if (rows.length) return undefined;
     // The safety net for a concurrent request: the other one committed while this one waited.
     return this.replayAnswer(ctx, command, await repository.findOneByOrFail({ id: command.id }));
@@ -538,7 +543,7 @@ export class OrderCreateService {
     } catch (error) {
       throw transientKind(error) === 'lock' ? new TransientCommandError(command.id, 'lock', error) : error;
     }
-    await orderRepository.query('SET LOCAL lock_timeout = DEFAULT');
+    await orderRepository.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
       // A race after the pre-claim check: the variant was disabled or removed meanwhile.
@@ -547,6 +552,9 @@ export class OrderCreateService {
       const entry = requested.get(line.variantId) ?? { variant, quantity: 0 };
       requested.set(line.variantId, { variant, quantity: entry.quantity + line.quantity });
     }
+    // Ruling 5: Vendure's stock writes are absolute values from unlocked reads, so a concurrent sale of the variant
+    // lost its update (VP3 investigation Q2). Outside the order-save try, so a lock timeout here is a 503.
+    await this.lockStock(ctx, [...requested.values()].map(({ variant }) => variant.id));
     // ADR 0002 "Stock": top up a shortage before addItemToOrder, which would otherwise save the
     // line at the saleable quantity, and before ArrangingPayment, which checks saleable stock again.
     // Vendure creates a stock location at start and falls back to the oldest, so none at all is a bug, not a pre-check.
@@ -703,7 +711,19 @@ export class OrderCreateService {
     return { result, needsAdmin: !!compensation, compensationError: compensation?.error };
   }
 
+  // Locks every stock_level row of the sale's variants, in one order, so overlapping sales cannot deadlock on them.
+  private async lockStock(ctx: RequestContext, ids: ID[]) {
+    const levels = this.connection.getRepository(ctx, StockLevel);
+    await levels.query(`SET LOCAL lock_timeout = '${STOCK_LOCK_TIMEOUT}'`);
+    await levels.createQueryBuilder('level').select('level.id').where('level.productVariantId IN (:...ids)', { ids })
+      .orderBy('level.productVariantId').addOrderBy('level.stockLocationId').setLock('pessimistic_write').getMany();
+    await levels.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
+  }
+
   private async adjustStock(ctx: RequestContext, variantId: ID, stockLocationId: ID, change: number) {
+    // Read under the row lock: a no-op inside the recipe, the protection for resolveNeedsAdmin's take-back.
+    await this.connection.getRepository(ctx, StockLevel).createQueryBuilder('level').select('level.id')
+      .where({ productVariantId: variantId, stockLocationId }).setLock('pessimistic_write').getMany();
     const level = await this.stockLevels.getStockLevel(ctx, variantId, stockLocationId);
     await this.stockMovements.adjustProductVariantStock(ctx, variantId, [
       { stockLocationId, stockOnHand: level.stockOnHand + change },
