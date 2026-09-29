@@ -1,5 +1,5 @@
 import {
-  Customer, PaymentMethod, ProductVariantService, RequestContextService, ShippingMethod, TransactionalConnection, User,
+  ConfigService, Customer, PaymentMethod, ProductVariantService, RequestContextService, ShippingMethod, TransactionalConnection, User,
 } from '@vendure/core';
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
@@ -162,6 +162,30 @@ describe('VP3-4a: repair the channel POS setup on demand', () => {
     expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id }))
       .toMatchObject({ status: 'rejected', result });
     expect(await shippingRows()).toHaveLength(1);
+  });
+
+  it('4b: repair survives an unstored refusal (the claim rolls back)', async () => {
+    // The setup check runs before the order limits: the first pass repairs in its own transaction,
+    // the rerun passes the setup check and is refused on the limit, which rolls its claim back.
+    const deleted = await deleteShipping();
+    const options = server.app.get(ConfigService).orderOptions;
+    const limit = options.orderItemsLimit;
+    options.orderItemsLimit = 1;
+    try {
+      const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 }]);
+      expect(await run(input, second.token)).toMatchObject({ status: 'rejected', error: {
+        code: 'store_configuration',
+        message: `The sale exceeds orderOptions.orderItemsLimit 1 or orderLineItemsLimit ${options.orderLineItemsLimit}`,
+      } });
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id })).toBeNull();
+      const live = await shippingRows();
+      expect(live).toHaveLength(1);
+      expect(live[0].channels.map(channel => String(channel.id))).toContain(second.id);
+      expect((await connection.rawConnection.getRepository(ShippingMethod).findOneByOrFail({ id: deleted.id })).deletedAt)
+        .toEqual(deleted.deletedAt);
+    } finally {
+      options.orderItemsLimit = limit;
+    }
   });
 
   it('5: a disabled payment method stays disabled and is refused unstored without repair', async () => {
