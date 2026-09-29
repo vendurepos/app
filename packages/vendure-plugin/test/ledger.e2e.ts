@@ -140,7 +140,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     }
   });
 
-  it('S1: a customer email above 254 characters is invalid_payload, unstored, before any database access', async () => {
+  it('S1: a customer email above 254 characters is invalid_payload, unstored, after the replay read and before the claim', async () => {
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
       { email: `${'a'.repeat(243)}@example.com` });
     expect(input.payload.customer!.email).toHaveLength(255);
@@ -538,6 +538,52 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       clock.mockRestore();
       claim.mockRestore();
     }
+  });
+
+  // Front desk (TallyUI #222 review): the length bounds run after the replay read and the collision lookup,
+  // so an applied command whose values are now over a bound still replays. Both values fit varchar(255).
+  async function appliedOverBounds(tag: string) {
+    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
+      { email: `${tag}${'a'.repeat(243 - tag.length)}@example.com` });
+    input.payload.sessionId = 's'.repeat(40);
+    expect(input.payload.customer!.email).toHaveLength(255);
+    // The command was applied before today's bounds.
+    const values = vi.spyOn(recipe as unknown as { valueRefusal: () => unknown }, 'valueRefusal').mockReturnValue(undefined);
+    try {
+      const first = await run(input);
+      expect(first).toMatchObject({ status: 'applied' });
+      return { input, first };
+    } finally {
+      values.mockRestore();
+    }
+  }
+
+  it('TallyUI #222 review: an applied command with a sessionId and email now over their bounds replays as duplicate, with no claim', async () => {
+    const { input, first } = await appliedOverBounds('r');
+    const claim = vi.spyOn(recipe as unknown as { claim: () => Promise<unknown> }, 'claim');
+    try {
+      const fresh = { ...input, id: command().id, payload: { ...input.payload, clientOrderId: command().payload.clientOrderId } };
+      expect(await run(fresh)).toEqual({ id: fresh.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'sessionId: expected at most 36 characters; customer.email: expected at most 254 characters',
+      } });
+      expect(await ledgerFor(fresh)).toBeNull();
+      expect(await run(input)).toEqual({ ...first, status: 'duplicate' });
+      expect(claim).not.toHaveBeenCalled();
+    } finally {
+      claim.mockRestore();
+    }
+  });
+
+  it('TallyUI #222 review: a new id for an applied sale whose values are now over their bounds is answered by the collision guard, never invalid_payload', async () => {
+    const { input, first } = await appliedOverBounds('c');
+    const before = await counts();
+    const requeued = { ...input, id: command().id };
+    const result = await run(requeued);
+    expect(result).toEqual({ ...first, id: requeued.id });
+    expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+    expect(await ledgerFor(requeued)).toMatchObject({ status: 'applied', result, clientOrderId: input.payload.clientOrderId });
+    expect(await run(requeued)).toEqual({ ...result, status: 'duplicate' });
+    expect(await ordersFor(input)).toBe(1);
   });
 
   it('ruling 1: an exception from outside the plugin\'s code, even a TypeError, is transient; nothing is stored; the retry applies', async () => {
