@@ -15,6 +15,15 @@ describe('merchantTextError', () => {
     expect(merchantTextError('Barcode field', value)).toBe(HAS_NUL);
   });
 
+  it('names the supplied field in each error message', () => {
+    expect(merchantTextError('Cashier reference', 'a'.repeat(256))).toBe(
+      'Cashier reference is too long: use at most 255 characters.',
+    );
+    expect(merchantTextError('Register id', 'x\u0000')).toBe(
+      'Register id contains a NUL character; remove it.',
+    );
+  });
+
   it('gives the length message when the text is both too long and has a NUL', () => {
     expect(merchantTextError('Barcode field', `\u0000${'a'.repeat(255)}`)).toBe(TOO_LONG);
   });
