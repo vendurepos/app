@@ -110,7 +110,8 @@ describe('error classes (ADR 0002 §2)', () => {
   });
 
   it('a unique-violation race on tallyClientOrderId takes the requeue path: applied with the first order\'s refs, one order, nothing written', async () => {
-    const first = orderCommand([mug()]);
+    // A new buyer, so neither command waits on the other's customer row, only on the unique key.
+    const first = orderCommand([mug()], undefined, { email: 'vp1-race@example.com' });
     const second = { ...first, id: orderCommand([mug()]).id };
     let entered!: () => void;
     let release!: () => void;
@@ -129,14 +130,15 @@ describe('error classes (ADR 0002 §2)', () => {
     const b = run(second);
     // Wait until the second command's order update blocks on the first's uncommitted unique key.
     const start = performance.now();
-    let blocked = false;
-    while (!blocked && performance.now() - start < 10_000) {
-      const rows = await connection.rawConnection.query(`SELECT pid FROM pg_stat_activity
+    let blocked: string[] = [];
+    while (!blocked.length && performance.now() - start < 10_000) {
+      const rows = await connection.rawConnection.query(`SELECT query FROM pg_stat_activity
         WHERE datname = current_database() AND wait_event_type = 'Lock' AND state = 'active'`);
-      blocked = rows.length > 0;
-      if (!blocked) await new Promise(resolve => setTimeout(resolve, 25));
+      blocked = rows.map((row: { query: string }) => row.query);
+      if (!blocked.length) await new Promise(resolve => setTimeout(resolve, 25));
     }
-    expect(blocked).toBe(true);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toMatch(/^UPDATE "order" SET .*"customFieldsTallyclientorderid"/);
     const before = await counts();
     release();
     const [resultA, resultB] = await Promise.all([a, b]);
