@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 
 plugin=../../packages/vendure-plugin
 if [ ! -f "$plugin/dist/index.js" ] || [ -n "$(find "$plugin/src" "$plugin/package.json" "$plugin/tsconfig.json" \
-    "$plugin/tsconfig.build.json" -newer "$plugin/dist/index.js" -print -quit)" ]; then
+    "$plugin/tsconfig.build.json" "$plugin/package-lock.json" -newer "$plugin/dist/index.js" -print -quit)" ]; then
   echo "vendure-store: building @vendurepos/plugin"
   (cd "$plugin" && npm ci && npm run build)
 fi

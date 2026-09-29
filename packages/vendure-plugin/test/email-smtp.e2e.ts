@@ -79,7 +79,8 @@ describe('the exported tallyOrderConfirmationHandler over a real SMTP transport 
     expect(await mailpitCount(shopEmail)).toBe(1);
     // Both orders reached PaymentSettled, the handler's event; the queue is idle, and the POS order gets a margin more.
     expect(settled).toEqual(expect.arrayContaining([body.results[0].serverRefs.displayId, paid.code]));
-    while (!await jobsIdle() && performance.now() - start < ARRIVAL_TIMEOUT_MS) await new Promise(resolve => setTimeout(resolve, 200));
+    const queueStart = performance.now();
+    while (!await jobsIdle() && performance.now() - queueStart < ARRIVAL_TIMEOUT_MS) await new Promise(resolve => setTimeout(resolve, 200));
     expect(await jobsIdle()).toBe(true);
     await new Promise(resolve => setTimeout(resolve, SILENCE_MS));
     expect(await mailpitCount(posEmail)).toBe(0);

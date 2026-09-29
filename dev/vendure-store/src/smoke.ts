@@ -72,11 +72,12 @@ async function commandSmoke(token: string) {
   expectEqual(sold.status, 200, `the sale's HTTP status (${JSON.stringify(sold.body)})`);
   const result = sold.body.results?.[0];
   expectEqual([result?.id, result?.status, result?.serverRefs?.totalMinor], [command.id, 'applied', 1000], 'the sale\'s result');
+  expectEqual([result?.warnings, result?.totalWarnings], [undefined, undefined], 'the sale\'s warnings');
   const { order } = (await gql('/admin-api', 'query Order($id: ID!) { order(id: $id) { state totalWithTax } }',
     { id: result.serverRefs.orderId }, admin)).body.data;
   expectEqual(order, { state: 'Delivered', totalWithTax: 1000 }, `order ${result.serverRefs.orderId} in the Admin API`);
   expectEqual(shopFloor(await mug()), shopFloor(before)! - 1, 'the Shop floor stock of TALLY-MUG');
-  console.log(`ok - POST /tally/v1/commands applied order ${result.serverRefs.displayId}: Delivered, 1000, Shop floor stock -1`);
+  console.log(`ok - POST /tally/v1/commands applied order ${result.serverRefs.displayId}: Delivered, 1000, no warnings, Shop floor stock -1`);
   const replay = await post({ commands: [command] });
   expectEqual([replay.status, replay.body.results?.[0]?.status, replay.body.results?.[0]?.serverRefs?.orderId],
     [200, 'duplicate', result.serverRefs.orderId], 'the replay');
