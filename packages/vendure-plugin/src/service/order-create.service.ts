@@ -19,6 +19,7 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
 import { classify } from './classification';
+import { WALK_IN_EMAIL } from './constants';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
@@ -43,7 +44,7 @@ export type TopUp = { variantId: string; stockLocationId: string; quantity: numb
 
 export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSave' | 'finalPass' | 'payments';
 
-export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
+export { WALK_IN_EMAIL };
 // ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
 const CLAIM_LOCK_TIMEOUT = '5s';
 // Front desk ruling 7: every wait after the claim is bounded; a timeout is a 503 and the till retries.

@@ -347,9 +347,9 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   });
 
   it('refinement 2: a new id for a sale still in progress waits on the unique key as long as a claim, then 409; afterwards it is stored applied', async () => {
-    // A new buyer, so the second command waits only on the unique key, not on the first's customer row.
-    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
-      { email: 'vp2-in-progress@example.com' });
+    // The walk-in, an existing buyer, so the second command waits only on the unique key: a new email would wait on
+    // the per-email customer lock instead and answer 503 (ruling 15, customer-concurrency.e2e.ts).
+    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);
     const gate = hold(input);
     const first = timed(run(input));
     await gate.reached;

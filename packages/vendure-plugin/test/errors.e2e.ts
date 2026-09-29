@@ -279,8 +279,9 @@ describe('error classes (ADR 0002 §2)', () => {
   });
 
   it('refinement 2: a unique-violation race on tallyClientOrderId takes the collision guard: the new id stored applied with the first result, one order', async () => {
-    // A new buyer, so neither command waits on the other's customer row, only on the unique key.
-    const first = orderCommand([mug()], undefined, { email: 'vp1-race@example.com' });
+    // The walk-in, an existing buyer, so the second command waits only on the unique key, never on the per-email
+    // customer lock a new email takes (ruling 15).
+    const first = orderCommand([mug()]);
     const second = { ...first, id: orderCommand([mug()]).id };
     let entered!: () => void;
     let release!: () => void;

@@ -8,9 +8,11 @@ import {
   TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
 } from '../config/strategies';
-import { WALK_IN_EMAIL } from './order-create.service';
+import { WALK_IN_EMAIL } from './constants';
+import { unwrap } from './errors';
 
-// Two-int advisory keys occupy a separate namespace from other plugins' single-bigint keys.
+// Two-int advisory keys occupy a separate namespace from other plugins' single-bigint keys. The key (this, 0) is
+// deliberately global, not per channel: the POS methods and the walk-in are rows shared by every channel.
 const SETUP_LOCK_NAMESPACE = 0x7a11;
 
 @Injectable()
@@ -60,7 +62,7 @@ export class StoreSetupService {
       where: { emailAddress: WALK_IN_EMAIL, deletedAt: IsNull() }, relations: ['channels'],
     });
     if (!walkIn) {
-      await this.customers.createOrUpdate(ctx, { emailAddress: WALK_IN_EMAIL, firstName: '', lastName: '' });
+      unwrap(await this.customers.createOrUpdate(ctx, { emailAddress: WALK_IN_EMAIL, firstName: '', lastName: '' }));
     } else if (!walkIn.channels.some(channel => idsAreEqual(channel.id, ctx.channelId))) {
       await this.channels.assignToChannels(ctx, Customer, walkIn.id, [ctx.channelId]);
     }

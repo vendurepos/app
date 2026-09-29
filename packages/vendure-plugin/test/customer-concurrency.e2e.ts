@@ -2,7 +2,7 @@ import { Customer, Order, ProductVariantService, RequestContextService, Transact
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { OrderCreateService, TallyPosPlugin } from '../src';
+import { OrderCreateService, TallyCommand, TallyPosPlugin, TransientCommandError } from '../src';
 import type { OrderCreateResult } from '../src';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -144,5 +144,35 @@ describe('VP3-4b: concurrent customer lookups', () => {
       .toEqual({ blocked: true, results: ['applied', 'applied'], customers: 1 });
     const id = String(customers[0].id);
     expect(await Promise.all(results.map(result => orderCustomer(result.value)))).toEqual([id, id]);
+  });
+
+  it('ruling 15: a new-id resend of an in-progress first sale for a new email answers 503 timeout; after commit the retry returns the recorded result', async () => {
+    const email = `vp3-4b-resend-${Date.now()}@example.com`;
+    const a = mug(email);
+    const requeued = { ...a, id: mug().id };
+    const held = hold(a);
+    const first = timed(run(a));
+    await held.reached;
+    let second: { value?: OrderCreateResult; error?: unknown; ms: number };
+    try {
+      second = await timed(run(requeued));
+    } finally {
+      held.release();
+    }
+    // The per-email lock cannot tell a resend from another sale by the same new buyer: the generic transient (503).
+    expect(second.error).toBeInstanceOf(TransientCommandError);
+    expect(second.error).toMatchObject({ commandId: requeued.id, kind: 'timeout' });
+    expect(second.ms).toBeGreaterThanOrEqual(9_000);
+    expect(second.ms).toBeLessThanOrEqual(13_000);
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: requeued.id })).toBeNull();
+    const applied = (await first).value!;
+    expect(applied).toMatchObject({ status: 'applied' });
+    expect(await run(requeued)).toMatchObject({ id: requeued.id, status: 'applied', serverRefs: applied.serverRefs });
+    expect({
+      customers: await connection.rawConnection.getRepository(Customer).count({ where: { emailAddress: email, deletedAt: IsNull() } }),
+      orders: await connection.rawConnection.getRepository(Order).count({
+        where: { customFields: { tallyClientOrderId: a.payload.clientOrderId } },
+      }),
+    }).toEqual({ customers: 1, orders: 1 });
   });
 });
