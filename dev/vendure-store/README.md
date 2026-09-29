@@ -13,12 +13,20 @@ Run from `dev/vendure-store/`. Needs Node `^20.19 || >=22.12`, npm, and a
 running Docker (Colima on the Mac mini).
 
 ```bash
-npm ci                 # once, and after the lockfile changes
+./plugin.sh            # build @vendurepos/plugin, then npm ci here, each only when needed
 ./reset.sh             # wipe the database volume and seed it
 ./start.sh             # start Vendure detached; waits until the Shop API answers
 ./stop.sh              # stop Vendure and the Postgres container (data kept)
 ./smoke.sh             # reset + start + checks, then stop (KEEP_RUNNING=1 keeps it up)
 ```
+
+The store runs `@vendurepos/plugin` from `packages/vendure-plugin`, installed as
+`file:../../packages/vendure-plugin`. `.npmrc` sets `install-links`, so npm copies the package's
+`dist/` into `node_modules` instead of linking it, and the plugin resolves this store's
+`@vendure/core`. **Build the plugin before this store's `npm ci`**
+(`cd ../../packages/vendure-plugin && npm ci && npm run build`). `plugin.sh` does both when the
+plugin's `dist/` is missing or older than its sources, or this store's copy differs, and `reset.sh`,
+`start.sh` and `smoke.sh` run it first.
 
 `start.sh` refuses to start on an empty database; run `./reset.sh` first.
 The server log is `.run/vendure.log`, the pid `.run/vendure.pid`.
@@ -51,6 +59,15 @@ Pass the same variables to every script in a session.
 | Token methods | `bearer`, `cookie`, `api-key` |
 | CORS origins | `localhost` and `127.0.0.1` on :8081 (Expo) and :8099 (web export) |
 | Tax strategy | `OrderLevelTaxCalculationStrategy` |
+| POS commands | `POST /tally/v1/commands` (`TallyPosPlugin`; bearer token, `vendure-token`, `X-Tally-Protocol: 1`) |
+
+On start the plugin gives every channel the `tally-pos` payment method, the `tally-in-store`
+shipping method and the walk-in customer; the seed creates none of them.
+
+`./smoke.sh` checks the catalogue, the login and the POS channel, then sells 1 × `TALLY-MUG`
+through the command route (a v3 `order.create`, 1000 cash): `applied`, the order `Delivered` at
+1000, Shop floor stock down by 1; the replay is `duplicate` with the same order; a batch
+without `X-Tally-Protocol` answers 400.
 
 Channels (both EUR, prices tax-exclusive, default tax zone Denmark):
 
@@ -93,5 +110,6 @@ curl -s http://127.0.0.1:3000/shop-api \
 ## Changing the schema
 
 The server runs with `synchronize: false` and no migrations. The seed builds
-the schema with `synchronize: true` on an empty database, so after changing
+the schema with `synchronize: true` on an empty database, the plugin's
+`tally_command` ledger and order custom fields included, so after changing
 custom fields or adding a plugin with entities, run `./reset.sh`.
