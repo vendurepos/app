@@ -91,10 +91,12 @@ export class OrderCreateService {
     const { payload } = command;
     let outcome: SaleOutcome;
     try {
-      // Review 1: a command the ledger already holds skips every pre-claim check and replays.
-      // A sale this channel has already recorded skips them too: the collision guard answers it after the claim.
+      // Front desk ordering ruling: 1. a command the ledger already holds replays (review 1); 2. a sale
+      // recorded in any channel goes to the collision guard after the claim; 3. only then the checks below.
       if (!await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id })
-        && !await this.existingOrder(ctx, payload.clientOrderId)) {
+        && !await this.recordedAnywhere(ctx, payload.clientOrderId)) {
+        const invalidValue = this.valueRefusal(command);
+        if (invalidValue) return invalidValue;
         if (!ctx.channel.availableCurrencyCodes.includes(payload.currency as CurrencyCode)) {
           return rejected(command.id, 'unsupported_currency', `The channel does not offer ${payload.currency}`);
         }
@@ -142,21 +144,13 @@ export class OrderCreateService {
         // N5: after the claim, a lock timeout is a timeout, not another request's claim.
         throw new TransientCommandError(command.id, verdict.kind === 'lock' ? 'timeout' : verdict.kind, error);
       }
-      let rejection: BusinessRejection;
       if (verdict.outcome === 'collision') {
         // Two commands for one sale raced and the other committed first (ADR 0002 §2 "Requeue path").
         const requeued = await this.requeueResult(ctx, command);
         if (requeued) return { result: requeued };
-        const elsewhere = await this.connection.getRepository(ctx, Order).count({
-          where: { customFields: { tallyClientOrderId: command.payload.clientOrderId } },
-        });
-        if (!elsewhere) throw new TransientCommandError(command.id, 'unclassified', error);
-        // Review 10: the sale is recorded in another channel, which this caller cannot answer for.
-        rejection = new BusinessRejection('idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
-          { reason: 'client_order_in_other_channel' });
-      } else {
-        rejection = verdict.rejection ?? internalErrorFor(command.id, error);
+        throw new TransientCommandError(command.id, 'unclassified', error);
       }
+      const rejection = verdict.rejection ?? internalErrorFor(command.id, error);
       const result = rejected(command.id, rejection.code, rejection.message, rejection.data);
       await this.runTestHook('afterSavepointRollback', command.id);
       await this.connection.getRepository(ctx, TallyCommand).update(command.id, { status: 'rejected', result: { ...result } });
@@ -213,7 +207,7 @@ export class OrderCreateService {
     if (!id.length || id.length > 64) errors.push('Invalid id');
     if (command.type !== 'order.create') errors.push('type: expected order.create');
     if (!Number.isSafeInteger(command.version) || command.version < 1) errors.push('Invalid version');
-    errors.push(...createdAtError(command.createdAt, 'createdAt'));
+    if (typeof command.createdAt !== 'string') errors.push('Invalid createdAt');
     if (typeof command.deviceId !== 'string') errors.push('Invalid deviceId');
     if (!Number.isSafeInteger(command.attempt) || command.attempt < 1) errors.push('Invalid attempt');
     if (!errors.length && !SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
@@ -221,11 +215,17 @@ export class OrderCreateService {
         { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
+    return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
+  }
+
+  // Front desk ordering ruling, step 3: the payload's values, checked after the collision lookup.
+  private valueRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
+    const errors = createdAtError(command.createdAt, 'createdAt');
     const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
     if (!errors.length) errors.push(...createdAtError(command.payload.createdAt, 'payload.createdAt'));
     if (!errors.length) errors.push(...valueRangeErrors(command.payload, maxMoney));
     if (!errors.length && command.version === 3) errors.push(...fiscalFiguresErrors(command.payload));
-    return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
+    return errors.length ? rejected(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
 
   // ADR 0002 "Store configuration": the POS payment and shipping methods and a usable tax zone.
@@ -281,6 +281,10 @@ export class OrderCreateService {
     return variant?.enabled ? variant : undefined;
   }
 
+  private async recordedAnywhere(ctx: RequestContext, clientOrderId: string) {
+    return !!await this.connection.getRepository(ctx, Order).count({ where: { customFields: { tallyClientOrderId: clientOrderId } } });
+  }
+
   private existingOrder(ctx: RequestContext, clientOrderId: string) {
     return this.connection.getRepository(ctx, Order).findOne({
       where: { customFields: { tallyClientOrderId: clientOrderId }, channels: { id: ctx.channelId } },
@@ -291,14 +295,20 @@ export class OrderCreateService {
    * The collision guard (Front desk refinement 2), run on the claim of a new command id: a sale this
    * channel has recorded answers `applied` only when its own command's row is `applied`, and the new
    * id is then stored as `applied` with that result's refs and warnings, so its replay is `duplicate`.
-   * A row awaiting an admin answers 409, so a new id never gets round the mark. Without a
-   * recorded order, undefined.
+   * A row awaiting an admin answers 409, so a new id never gets round the mark. A sale recorded in
+   * another channel is a stored idempotency_mismatch (review 10). Without a recorded order, undefined.
    */
   private async requeueResult(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
     const order = await this.existingOrder(ctx, command.payload.clientOrderId);
-    if (!order) return undefined;
-    const orderId = this.encodeId(order.id);
     const ledger = this.connection.getRepository(ctx, TallyCommand);
+    if (!order) {
+      if (!await this.recordedAnywhere(ctx, command.payload.clientOrderId)) return undefined;
+      const mismatch = rejected(command.id, 'idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
+        { reason: 'client_order_in_other_channel' });
+      await ledger.update(command.id, { status: 'rejected', result: { ...mismatch } });
+      return mismatch;
+    }
+    const orderId = this.encodeId(order.id);
     const rows = await ledger.find({ where: {
       clientOrderId: command.payload.clientOrderId, channelId: String(ctx.channelId), status: In(['applied', 'needs_admin']),
     } });

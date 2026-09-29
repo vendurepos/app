@@ -156,6 +156,27 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await ordersFor(input)).toBe(1);
   });
 
+  it('ordering ruling: a same-channel collision is answered before a pre-claim check that would now refuse (the variant disabled since)', async () => {
+    const input = command(variantIds.beans[1]);
+    const first = await run(input);
+    expect(first).toMatchObject({ status: 'applied' });
+    const setEnabled = (enabled: boolean) => adminClient.query(parse(`mutation Enable($input: [UpdateProductVariantInput!]!) {
+      updateProductVariants(input: $input) { id }
+    }`), { input: [{ id: variantIds.beans[1], enabled }] });
+    await setEnabled(false);
+    try {
+      // Not vacuous: a new sale of the variant is refused before the claim.
+      expect(await run(command(variantIds.beans[1]))).toMatchObject({ status: 'rejected', error: { code: 'unknown_variant' } });
+      const requeued = { ...input, id: command().id };
+      expect(await run(requeued)).toEqual({ ...first, id: requeued.id });
+      expect(await ledgerFor(requeued)).toMatchObject({ status: 'applied' });
+      expect(await run(requeued)).toEqual({ ...first, id: requeued.id, status: 'duplicate' });
+      expect(await ordersFor(input)).toBe(1);
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
   it('proof 11(c), refinement 2: a requeue with a new id of an applied sale is stored applied with its refs and warnings; its replay is duplicate', async () => {
     // Beans: 11 sold of 10 on hand, so the first result carries an insufficient_stock warning.
     const input = orderCommand([{ variantId: variantIds.beans[0], quantity: 11, unitPriceMinor: 800 }]);

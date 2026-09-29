@@ -83,14 +83,8 @@ describe('store configuration in every channel, and a sale recorded in another c
     const first = orderCommand(mug);
     expect(await run(first)).toMatchObject({ status: 'applied' });
     const other = { ...first, id: orderCommand(mug).id };
-    // The second channel sells the Mug too, so the pre-claim variant check (ruling A) passes and the collision decides.
-    const user = await connection.rawConnection.getRepository(User).findOneOrFail({
-      where: { identifier: 'superadmin' }, relations: ['roles', 'roles.channels'],
-    });
-    const adminCtx = await server.app.get(RequestContextService).create({ apiType: 'admin', user });
-    await server.app.get(ProductVariantService).assignProductVariantsToChannel(adminCtx, {
-      productVariantIds: [serviceIds.mug[0]], channelId: second.id,
-    });
+    // The second channel does not sell the Mug: the collision lookup comes before the pre-claim variant
+    // check (ordering ruling), so the till hears that the sale exists elsewhere, never unknown_variant.
     const orders = await connection.rawConnection.getRepository(Order).count();
     const result = await run(other, second.token);
     expect(result).toEqual({ id: other.id, status: 'rejected', error: {
