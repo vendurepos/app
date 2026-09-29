@@ -117,11 +117,35 @@ The package is standalone npm, not part of the pnpm workspace.
 
 ```sh
 npm ci
-npm run db:up       # Postgres 16 on 127.0.0.1:5445 and Mailpit (SMTP :1045, API :8045), project vendurepos-plugin-test
+npm run db:up       # Postgres 16 and Mailpit in a stack derived from this worktree's path
 npm run typecheck
 npm run build       # dist/, with the main and ./email entries
 npm test            # vitest, one worker
 npm run db:down     # removes the containers and the volume
+```
+
+`npm run db:up` derives a Compose project and ports from the absolute package directory, and
+records the chosen stack in the ignored `.test-stack.env`, which the tests read. `db:down` uses
+that recorded stack and removes the file after stopping it, so overrides do not need to be kept
+for `db:down`. `scripts/test-stack.sh env` prints the values without starting it.
+The key is the path's `cksum`; the offset is `key % 100`.
+
+| Environment variable | Stack default |
+| --- | --- |
+| `PLUGIN_TEST_PROJECT` | `vendurepos-plugin-${key}` |
+| `PLUGIN_TEST_PG_PORT` | `5400 + offset`; advance past 5432 and 5442–5445, and past any port already listening on the host, wrapping 5499 to 5400 |
+| `PLUGIN_TEST_SMTP_PORT` | `11000 + offset` |
+| `PLUGIN_TEST_MAILPIT_PORT` | `18000 + offset` |
+| `PLUGIN_TEST_SERVER_PORT` | `13000 + offset` |
+
+Tests resolve each port from the environment, then `.test-stack.env`, then the CI/no-file defaults:
+Postgres 5445, SMTP 1045, Mailpit API 8045 and Vendure server 3050. CI keeps its fixed services.
+If paths hash to colliding ports, all four ports advance together to the first free offset.
+To override the chosen stack, export values before `npm run db:up`, for example:
+
+```sh
+export PLUGIN_TEST_PROJECT=plugin-review PLUGIN_TEST_PG_PORT=5499
+export PLUGIN_TEST_SMTP_PORT=11099 PLUGIN_TEST_MAILPIT_PORT=18099 PLUGIN_TEST_SERVER_PORT=13099
 ```
 
 Build before `npm test`: `test/email-smtp.e2e.ts` imports `@vendurepos/plugin/email` from `dist/`, as a

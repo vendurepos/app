@@ -23,8 +23,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "db:up": "docker compose -p vendurepos-plugin-test up -d --wait",
-    "db:down": "docker compose -p vendurepos-plugin-test down -v",
+    "db:up": "scripts/test-stack.sh up",
+    "db:down": "scripts/test-stack.sh down",
     "test": "vitest run --maxWorkers=1",
     "typecheck": "tsc --noEmit"
   },
