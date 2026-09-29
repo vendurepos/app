@@ -265,17 +265,21 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(order.totalWithTax).toBe(1000);
   });
 
-  it('classifies only connection, lock and timeout failures as transient', () => {
+  it('classifies only connection, lock, deadlock, timeout and resource failures as transient', () => {
     const driver = (code: string) => ({ driverError: { code } });
-    // Ruling 4: a deadlock or a serialization failure is a lock failure too, and succeeds on retry.
-    for (const code of ['55P03', '40P01', '40001']) expect(transientKind(driver(code)), code).toBe('lock');
+    // N5: only lock_not_available is `lock` (409 on the claim); a deadlock or a serialization failure is `deadlock` (503).
+    expect(transientKind(driver('55P03'))).toBe('lock');
+    for (const code of ['40P01', '40001']) expect(transientKind(driver(code)), code).toBe('deadlock');
     expect(transientKind(driver('57014'))).toBe('timeout');
     expect(transientKind(driver('25P03'))).toBe('timeout');
-    for (const code of ['08006', '08001', '57P01', '57P03']) expect(transientKind(driver(code))).toBe('connection');
+    // N1: 57P05 idle_session_timeout and 40003 statement_completion_unknown are connection failures.
+    for (const code of ['08006', '08001', '57P01', '57P03', '57P05', '40003']) expect(transientKind(driver(code)), code).toBe('connection');
+    // N1: class 53 insufficient resources, except 53400 configuration_limit_exceeded.
+    for (const code of ['53000', '53100', '53200', '53300']) expect(transientKind(driver(code)), code).toBe('resources');
     expect(transientKind(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }))).toBe('connection');
     expect(transientKind(new Error('Connection terminated unexpectedly'))).toBe('connection');
     // Review 11: 08P01 protocol_violation is deterministic, so it is not a connection failure.
-    for (const code of ['23505', '23503', '22P02', '42P01', '08P01']) expect(transientKind(driver(code)), code).toBeUndefined();
+    for (const code of ['23505', '23503', '22P02', '42P01', '08P01', '53400', '57P04']) expect(transientKind(driver(code)), code).toBeUndefined();
     expect(transientKind(new Error('injected'))).toBeUndefined();
     expect(new TransientCommandError('id', 'lock', undefined)).toMatchObject({ commandId: 'id', kind: 'lock' });
   });

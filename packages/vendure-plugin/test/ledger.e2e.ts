@@ -222,6 +222,67 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
+  it('N5: a real deadlock inside the recipe is TransientCommandError(deadlock), not lock; nothing is written; the retry applies', async () => {
+    const input = command();
+    const before = await counts();
+    // Another session holds advisory lock 2 and then waits for 1, which the recipe holds.
+    const other = connection.rawConnection.createQueryRunner();
+    await other.connect();
+    await other.startTransaction();
+    await other.query('SELECT pg_advisory_xact_lock(9002)');
+    let theirs: Promise<unknown> | undefined;
+    recipe.testObserver = async (stage, ctx, order) => {
+      if (stage !== 'finalPass' || order.customFields.tallyClientOrderId !== input.payload.clientOrderId) return;
+      const repository = connection.getRepository(ctx, Order);
+      await repository.query('SELECT pg_advisory_xact_lock(9001)');
+      // The recipe waits first, so its deadlock check (after deadlock_timeout) finds the cycle and aborts it.
+      const mine = repository.query('SELECT pg_advisory_xact_lock(9002)');
+      await new Promise(resolve => setTimeout(resolve, 200));
+      theirs = other.query('SELECT pg_advisory_xact_lock(9001)');
+      await mine;
+    };
+    try {
+      const failed = await timed(run(input));
+      expect(failed.error).toBeInstanceOf(TransientCommandError);
+      expect((failed.error as TransientCommandError).cause).toMatchObject({ driverError: { code: '40P01' } });
+      expect(failed.error).toMatchObject({ commandId: input.id, kind: 'deadlock' });
+    } finally {
+      recipe.testObserver = undefined;
+      await theirs;
+      await other.commitTransaction();
+      await other.release();
+    }
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
+    expect(await run(input)).toMatchObject({ status: 'applied' });
+  });
+
+  it('N5: a lock timeout inside the recipe, after the claim, is TransientCommandError(timeout), not lock', async () => {
+    const input = command();
+    const before = await counts();
+    const other = connection.rawConnection.createQueryRunner();
+    await other.connect();
+    await other.startTransaction();
+    await other.query('SELECT pg_advisory_xact_lock(9003)');
+    recipe.testObserver = async (stage, ctx, order) => {
+      if (stage !== 'finalPass' || order.customFields.tallyClientOrderId !== input.payload.clientOrderId) return;
+      const repository = connection.getRepository(ctx, Order);
+      await repository.query("SET LOCAL lock_timeout = '50ms'");
+      await repository.query('SELECT pg_advisory_xact_lock(9003)');
+    };
+    try {
+      const failed = await timed(run(input));
+      expect((failed.error as TransientCommandError).cause).toMatchObject({ driverError: { code: '55P03' } });
+      expect(failed.error).toMatchObject({ commandId: input.id, kind: 'timeout' });
+    } finally {
+      recipe.testObserver = undefined;
+      await other.commitTransaction();
+      await other.release();
+    }
+    expect(await counts()).toEqual(before);
+    expect(await run(input)).toMatchObject({ status: 'applied' });
+  });
+
   it('ruling 8: any other exception after the claim is a stored internal_error, logged and counted; a replay returns it', async () => {
     const input = command();
     const before = await counts();
@@ -234,15 +295,29 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       const result = await run(input);
       expect(result).toEqual({ id: input.id, status: 'rejected', error: {
         code: 'internal_error', message: 'The server could not record the order',
-        data: { message: 'injected recipe exception' },
+        data: { message: 'Internal error', correlationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) },
       } });
       expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected', result });
+      const row = await ledgerFor(input);
+      expect(row).toMatchObject({ status: 'rejected', result });
+      // N7: no part of the raw message is returned or stored; the log has it under the correlation id.
+      for (const part of ['injected', 'recipe exception']) {
+        expect(JSON.stringify(result)).not.toContain(part);
+        expect(JSON.stringify(row)).not.toContain(part);
+      }
       expect(internalErrorCount()).toBe(count + 1);
-      expect(logged).toHaveBeenCalledWith(expect.stringContaining('injected recipe exception'), 'TallyPosPlugin', expect.any(String));
+      const { correlationId } = result.error!.data as { correlationId: string };
+      expect(logged).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${correlationId}.*injected recipe exception`)),
+        'TallyPosPlugin', expect.any(String));
       // The replay does not reach the recipe, so the observer would throw again if it did.
       expect(await run(input)).toEqual(result);
       expect(internalErrorCount()).toBe(count + 1);
+      // A second failure gets its own id.
+      const other = command();
+      recipe.testObserver = async (_stage, _ctx, order) => {
+        if (order.customFields.tallyClientOrderId === other.payload.clientOrderId) throw new Error('injected recipe exception');
+      };
+      expect((await run(other)).error!.data!.correlationId).not.toBe(correlationId);
     } finally {
       recipe.testObserver = undefined;
       logged.mockRestore();

@@ -61,6 +61,33 @@ On start, in the server process, the plugin gives every channel that lacks them 
 Both methods are closed to the Shop API. A channel created later is configured at the next
 start.
 
+### The POS methods across channels
+
+Each method is created **once**, in the default channel, and assigned to every other channel.
+The default channel's Admin UI therefore lists one `tally-pos` and one `tally-in-store`, shared
+by all channels, not a copy per channel. Deleting them follows Vendure's own rules:
+
+- **`tally-pos`, deleted in the default channel:** Vendure refuses (`NOT_DELETED`, naming the
+  other channels that use it) unless the deletion is forced. A forced deletion removes the method
+  from every channel.
+- **`tally-pos`, deleted in another channel:** Vendure removes it from that channel only.
+- **`tally-in-store`, deleted in any channel:** Vendure soft-deletes a shipping method as a whole,
+  so it is gone from **every** channel, the default channel included.
+
+A channel without either method answers every new sale with `store_configuration`, before the
+claim and without storing anything. The next server start creates or assigns the missing method
+again, and the same commands then apply.
+
+### Merchant code inside the recipe
+
+Each command runs in one database transaction. A refusal found inside it (`underpaid`,
+`insufficient_stock`, `platform_error`, `internal_error`) rolls the transaction back and is
+stored as final; the till may then retry the sale under a new command id. Merchant code that runs
+inside that transaction — custom order-process hooks, blocking event handlers, custom
+strategies — must therefore not write outside the transaction or call outside systems (email,
+payment providers, webhooks, other databases). Otherwise such a side effect survives the
+rollback, and a `platform_error` or a retry can follow a side effect that has already happened.
+
 POS lines keep the till's price; every other order line is priced by your configured
 `orderItemPriceCalculationStrategy`, which the plugin wraps and whose `init` and `destroy` it
 forwards.

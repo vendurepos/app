@@ -30,7 +30,8 @@
   },
   "peerDependencies": {
     "@vendure/core": "^3.6.0",
-    "@vendure/email-plugin": "^3.6.0"
+    "@vendure/email-plugin": "^3.6.0",
+    "typeorm": "^0.3.21"
   },
   "peerDependenciesMeta": {
     "@vendure/email-plugin": {
@@ -44,6 +45,7 @@
     "@vendure/email-plugin": "3.7.3",
     "@vendure/testing": "3.7.3",
     "pg": "8.23.0",
+    "typeorm": "0.3.31",
     "typescript": "~5.8.3",
     "unplugin-swc": "2.0.0",
     "vitest": "4.0.18"

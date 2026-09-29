@@ -20,7 +20,7 @@ import {
   transientKind, unwrap,
 } from './errors';
 import { roundHalfAwayFromZero } from './rounding';
-import { MAX_MINOR, valueRangeErrors } from './value-ranges';
+import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
 export type TotalWarning =
@@ -109,6 +109,8 @@ export class OrderCreateService {
               'The clientOrderId is already recorded in another channel', { reason: 'client_order_in_other_channel' }));
           }
         }
+        // N5: only the claim's lock_timeout means another request holds the id; after it, a lock timeout is a timeout.
+        if (claimed && transientKind(error) === 'lock') throw new TransientCommandError(command.id, 'timeout', error);
         // Ruling 8: an unexpected exception after the claim is final too, or it would loop.
         if (claimed && !transientKind(error)) {
           return await this.storeRejection(commandCtx, command, internalErrorFor(command.id, error));
@@ -140,7 +142,8 @@ export class OrderCreateService {
         { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
-    if (!errors.length) errors.push(...valueRangeErrors(command.payload));
+    const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
+    if (!errors.length) errors.push(...valueRangeErrors(command.payload, maxMoney));
     if (!errors.length && command.version === 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
   }
@@ -182,7 +185,7 @@ export class OrderCreateService {
     }
     const valid = strategy.primaryKeyType === 'uuid'
       ? typeof decoded === 'string' && UUID.test(decoded)
-      : Number.isSafeInteger(decoded) && (decoded as number) > 0 && (decoded as number) <= MAX_MINOR;
+      : Number.isSafeInteger(decoded) && (decoded as number) > 0 && (decoded as number) <= MAX_INT4;
     return valid && String(strategy.encodeId(decoded as never)) === id ? decoded as ID : undefined;
   }
 
@@ -203,13 +206,18 @@ export class OrderCreateService {
     const fingerprint = commandFingerprint(command);
     await runner.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
     const rows = await runner.query(
-      `INSERT INTO ${table} ("id", "clientOrderId", "fingerprint", "status") VALUES ($1, $2, $3, $4)
+      `INSERT INTO ${table} ("id", "channelId", "clientOrderId", "fingerprint", "status") VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (id) DO NOTHING RETURNING id`,
-      [command.id, command.payload.clientOrderId, fingerprint, 'pending'],
+      [command.id, String(ctx.channelId), command.payload.clientOrderId, fingerprint, 'pending'],
     );
     await runner.query('SET LOCAL lock_timeout = DEFAULT');
     if (rows.length) return undefined;
     const existing = await repository.findOneByOrFail({ id: command.id });
+    // N6: another channel's command id never replays that channel's answer.
+    if (existing.channelId !== String(ctx.channelId)) {
+      return rejected(command.id, 'idempotency_mismatch', 'Command id was already used in another channel',
+        { reason: 'command_in_other_channel' });
+    }
     if (existing.fingerprint !== fingerprint) {
       return rejected(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
     }
@@ -395,7 +403,7 @@ export class OrderCreateService {
       ...(totalWarnings.length ? { totalWarnings } : {}),
     };
     await this.connection.getRepository(ctx, TallyCommand).save({
-      id: command.id, clientOrderId: payload.clientOrderId, fingerprint: commandFingerprint(command),
+      id: command.id, channelId: String(ctx.channelId), clientOrderId: payload.clientOrderId, fingerprint: commandFingerprint(command),
       status: 'applied', result: { ...result },
     });
     return result;

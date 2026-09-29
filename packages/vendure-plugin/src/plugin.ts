@@ -1,9 +1,10 @@
 import { OnApplicationBootstrap } from '@nestjs/common';
 import {
-  Channel, CustomerService, LanguageCode, PaymentMethodService, PluginCommonModule, ProcessContext,
-  RequestContextService, ShippingMethodService, TransactionalConnection, VendurePlugin, manualFulfillmentHandler,
+  Channel, ChannelService, ConfigService, CustomerService, LanguageCode, PaymentMethodService, PluginCommonModule,
+  ProcessContext, RequestContextService, ShippingMethodService, TransactionalConnection, User, VendurePlugin,
+  manualFulfillmentHandler,
 } from '@vendure/core';
-import type { RequestContext } from '@vendure/core';
+import type { ID, RequestContext } from '@vendure/core';
 import { TallyInfoController } from './api/info.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import {
@@ -48,6 +49,8 @@ function withMissing<T>(list: T[], items: T[], same: (a: T, b: T) => boolean): T
 })
 export class TallyPosPlugin implements OnApplicationBootstrap {
   constructor(
+    private config: ConfigService,
+    private channels: ChannelService,
     private connection: TransactionalConnection,
     private contexts: RequestContextService,
     private customers: CustomerService,
@@ -58,13 +61,29 @@ export class TallyPosPlugin implements OnApplicationBootstrap {
 
   // ADR 0002 "Store configuration" (review 9): in the server process only, every channel gets the
   // POS payment method, the in-store shipping method and the walk-in customer when it lacks them.
-  // Default channel first: Vendure also assigns what it creates in any channel to the default one.
+  // N4 ruling: each method is created once, in the default channel, and assigned to the others, so
+  // the default channel holds one of each rather than a copy per channel.
   async onApplicationBootstrap() {
     if (!this.processContext.isServer) return;
+    // The assign mutations check the active user's permissions on the target channel.
+    const identifier = this.config.authOptions.superadminCredentials?.identifier;
+    const user = identifier ? await this.connection.rawConnection.getRepository(User).findOne({
+      where: { identifier }, relations: ['roles', 'roles.channels'],
+    }) : null;
+    // Contexts come from the channel token, so the channel carries the relations Vendure loads.
+    const context = (token: string) => this.contexts.create({ apiType: 'admin', channelOrToken: token, user: user ?? undefined });
+    const defaultCtx = await context((await this.channels.getDefaultChannel()).token);
+    const paymentMethodId = await this.ensurePayment(defaultCtx);
+    const shippingMethodId = await this.ensureShipping(defaultCtx);
     for (const channel of await this.connection.rawConnection.getRepository(Channel).find({ order: { id: 'ASC' } })) {
-      const ctx = await this.contexts.create({ apiType: 'admin', channelOrToken: channel });
-      await this.ensurePayment(ctx);
-      await this.ensureShipping(ctx);
+      const ctx = await context(channel.token);
+      const byCode = (code: string) => ({ filter: { code: { eq: code } } });
+      if (!(await this.paymentMethods.findAll(ctx, byCode(TALLY_PAYMENT_METHOD_CODE))).items.length) {
+        await this.paymentMethods.assignPaymentMethodsToChannel(defaultCtx, { paymentMethodIds: [paymentMethodId], channelId: channel.id });
+      }
+      if (!(await this.shippingMethods.findAll(ctx, byCode(TALLY_SHIPPING_METHOD_CODE))).items.length) {
+        await this.shippingMethods.assignShippingMethodsToChannel(defaultCtx, { shippingMethodIds: [shippingMethodId], channelId: channel.id });
+      }
       const walkIn = await this.customers.findAll(ctx, { filter: { emailAddress: { eq: WALK_IN_EMAIL } } });
       if (!walkIn.items.length) {
         await this.customers.createOrUpdate(ctx, { emailAddress: WALK_IN_EMAIL, firstName: '', lastName: '' });
@@ -72,29 +91,28 @@ export class TallyPosPlugin implements OnApplicationBootstrap {
     }
   }
 
-  private async ensurePayment(ctx: RequestContext) {
+  private async ensurePayment(ctx: RequestContext): Promise<ID> {
     const payments = await this.paymentMethods.findAll(ctx, { filter: { code: { eq: TALLY_PAYMENT_METHOD_CODE } } });
     const checker = { code: tallyPaymentChecker.code, arguments: [] };
     if (!payments.items.length) {
-      await this.paymentMethods.create(ctx, {
+      return (await this.paymentMethods.create(ctx, {
         code: TALLY_PAYMENT_METHOD_CODE, enabled: true, checker,
         translations: [{ languageCode: LanguageCode.en, name: 'Tally POS', description: '' }],
         handler: { code: tallyPaymentHandler.code, arguments: [] },
-      });
-    } else if (!payments.items[0].checker) {
-      await this.paymentMethods.update(ctx, { id: payments.items[0].id, checker });
+      })).id;
     }
+    if (!payments.items[0].checker) await this.paymentMethods.update(ctx, { id: payments.items[0].id, checker });
+    return payments.items[0].id;
   }
 
-  private async ensureShipping(ctx: RequestContext) {
+  private async ensureShipping(ctx: RequestContext): Promise<ID> {
     const shipping = await this.shippingMethods.findAll(ctx, { filter: { code: { eq: TALLY_SHIPPING_METHOD_CODE } } });
-    if (!shipping.items.length) {
-      await this.shippingMethods.create(ctx, {
-        code: TALLY_SHIPPING_METHOD_CODE, fulfillmentHandler: manualFulfillmentHandler.code,
-        translations: [{ languageCode: LanguageCode.en, name: 'In-store collection', description: '' }],
-        checker: { code: tallyShippingChecker.code, arguments: [] },
-        calculator: { code: tallyShippingCalculator.code, arguments: [] },
-      });
-    }
+    if (shipping.items.length) return shipping.items[0].id;
+    return (await this.shippingMethods.create(ctx, {
+      code: TALLY_SHIPPING_METHOD_CODE, fulfillmentHandler: manualFulfillmentHandler.code,
+      translations: [{ languageCode: LanguageCode.en, name: 'In-store collection', description: '' }],
+      checker: { code: tallyShippingChecker.code, arguments: [] },
+      calculator: { code: tallyShippingCalculator.code, arguments: [] },
+    })).id;
   }
 }

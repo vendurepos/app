@@ -9,6 +9,10 @@ export class TallyCommand {
   @PrimaryColumn('varchar')
   id: string;
 
+  /** The channel the command was claimed in (N6), as a string of the channel's id. */
+  @Column('varchar')
+  channelId: string;
+
   @Index()
   @Column('varchar')
   clientOrderId: string;

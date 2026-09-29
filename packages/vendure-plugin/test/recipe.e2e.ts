@@ -162,7 +162,14 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(command.payload.payments);
   });
 
-  it('proof 9: overpayment caps the covering payment at 1000 and preserves tendered 2000/change 1000', async () => {
+  it('proof 9: cash tendered 2000 with change 1000 applies 1000, and tallyPayments keeps tendered and change', async () => {
+    const command = orderCommand([mug()], [{ method: 'cash', amountMinor: 1000, tenderedMinor: 2000, changeMinor: 1000 }]);
+    const { order } = await applied(command);
+    expect(order.payments.map(payment => payment.amount)).toEqual([1000]);
+    expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(command.payload.payments);
+  });
+
+  it('ADR-039 overpayment: with Σ amountMinor 2000 above the total 1000, the covering payment is capped at 1000', async () => {
     const command = orderCommand([mug()], [{ method: 'cash', amountMinor: 2000, tenderedMinor: 2000, changeMinor: 1000 }]);
     const { order } = await applied(command);
     expect(order.payments.map(payment => payment.amount)).toEqual([1000]);
@@ -186,22 +193,6 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(stored).toEqual(command.payload.payments);
     expect(stored[0]).toMatchObject({ amountMinor: 500, tenderedMinor: 600, changeMinor: 100 });
     expect(order.state).toBe('Delivered');
-  });
-
-  it('the drawer derives from tallyPayments: net cash is tendered minus change over cash tenders, +500 here', async () => {
-    const tenders = [
-      { method: 'cash' as const, amountMinor: 500, tenderedMinor: 600, changeMinor: 100 },
-      { method: 'external' as const, amountMinor: 500, reference: 'card-1' },
-    ];
-    const { order } = await applied(orderCommand([mug()], tenders));
-    // ADR 0002 "Payment": the register's expected cash comes from the stored tenders, never from payment rows.
-    const netCash = (list: Array<{ method: string; amountMinor: number; tenderedMinor?: number; changeMinor?: number }>) =>
-      list.filter(tender => tender.method === 'cash')
-        .reduce((sum, tender) => sum + (tender.tenderedMinor !== undefined
-          ? tender.tenderedMinor - (tender.changeMinor ?? 0) : tender.amountMinor), 0);
-    expect(netCash(JSON.parse(order.customFields.tallyPayments!))).toBe(500);
-    // A cash tender without tendered and change falls back to amountMinor.
-    expect(netCash([{ method: 'cash', amountMinor: 300 }, ...tenders])).toBe(800);
   });
 
   it('review 2: variant ids arrive as the Admin API gives them; a non-numeric or garbage id is a stored unknown_variant', async () => {
@@ -230,8 +221,17 @@ describe('order.create recipe through OrderCreateService', () => {
       ['negative quantity', payload => { payload.lines[0].quantity = -1; }],
       ['fractional quantity', payload => { payload.lines[0].quantity = 1.5; }],
       ['unitPriceMinor above int4', payload => { payload.lines[0].unitPriceMinor = 2_147_483_648; }],
+      // N2: the default MoneyStrategy's columns are int4.
       ['totalMinor above int4', payload => { payload.totalMinor = 2_147_483_648; }],
-      ['tenderedMinor above int4', payload => { payload.payments[0].tenderedMinor = 2_147_483_648; }],
+      ['amountMinor above int4', payload => { payload.payments[0].amountMinor = 2_147_483_648; }],
+      ['unsafe tenderedMinor', payload => { payload.payments[0].tenderedMinor = Number.MAX_SAFE_INTEGER + 1; }],
+      // N3: OrderLine.quantity is int4, and createdAt becomes tallySaleAt and orderPlacedAt.
+      ['quantity above int4', payload => { payload.lines[0].quantity = 2_147_483_648; }],
+      ['unparseable createdAt', payload => { payload.createdAt = 'yesterday-ish'; }],
+      ['empty createdAt', payload => { payload.createdAt = ''; }],
+      // The v3 fiscal figures carry the shared contract's safe-integer bound.
+      ['unsafe display line amount', payload => { payload.display!.lines[0].amountMinor = Number.MAX_SAFE_INTEGER + 1; }],
+      ['unsafe taxByRate netMinor', payload => { payload.taxByRate![0].netMinor = Number.MAX_SAFE_INTEGER + 1; }],
       ...(['clientOrderId', 'registerId', 'cashierRef'] as const).map(field =>
         [`${field} over 255`, (payload: OrderCreatePayload) => { payload[field] = long; }] as [string, (payload: OrderCreatePayload) => void]),
       ['sessionId over 255', payload => { payload.sessionId = long; }],
@@ -246,11 +246,24 @@ describe('order.create recipe through OrderCreateService', () => {
       const result = await run(command);
       expect(result, name).toMatchObject({ id: command.id, status: 'rejected', error: { code: 'invalid_payload' } });
     }
-    // The boundary itself is accepted: 2 147 483 647 fits int4 (the rounding bridge absorbs the total).
-    const edge = orderCommand([mug()]);
-    edge.payload.payments[0].tenderedMinor = 2_147_483_647;
-    expect(await run(edge)).toMatchObject({ status: 'applied' });
-    expect(await counts()).toMatchObject({ orders: before.orders + 1, commands: before.commands + 1 });
+    expect(await counts()).toEqual(before);
+    // N2: tenderedMinor and changeMinor are stored only in the tallyPayments text, so any safe integer applies.
+    const tendered = orderCommand([mug()], [{
+      method: 'cash', amountMinor: 1000, tenderedMinor: Number.MAX_SAFE_INTEGER, changeMinor: Number.MAX_SAFE_INTEGER - 1000,
+    }]);
+    const { order } = await applied(tendered);
+    expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(tendered.payload.payments);
+    // The v3 display and taxByRate figures are stored as text: above int4, they apply unchanged.
+    const figures = orderCommand([mug()]);
+    figures.payload.display!.subtotalMinor = 2_147_483_648;
+    figures.payload.taxByRate![0].netMinor += 2_147_483_648;
+    figures.payload.taxByRate![0].grossMinor += 2_147_483_648;
+    const snapshot = (await applied(figures)).order.customFields.tallySnapshot!;
+    expect(JSON.parse(snapshot)).toEqual({ display: figures.payload.display, taxByRate: figures.payload.taxByRate });
+    // A valid ISO date with an offset is a createdAt like any other.
+    const offset = orderCommand([mug()]);
+    offset.payload.createdAt = '2026-09-28T12:00:00+02:00';
+    expect((await applied(offset)).order.customFields.tallySaleAt).toEqual(new Date('2026-09-28T10:00:00.000Z'));
   });
 
   it('proof 9: zero-total sale reaches PaymentSettled without a payment, then is Delivered', async () => {
