@@ -12,7 +12,7 @@ import { orderCommand } from './payloads';
 export function taxCases(strategy: string, override: Parameters<typeof createPluginTestEnvironment>[0] = {}) {
   describe(`proof 1 tax parity: ${strategy}`, () => {
     const environment = createPluginTestEnvironment(override);
-    const { server, adminClient, serviceIds, run } = environment;
+    const { server, adminClient, variantIds, decode, run } = environment;
     let connection: TransactionalConnection;
     let channelId: string;
     let germanyId: string;
@@ -43,7 +43,7 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       const result = await run(command);
       expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied' });
       const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
-        where: { id: result.serverRefs!.orderId }, relations: ['lines', 'surcharges', 'shippingLines', 'fulfillments'],
+        where: { id: decode(result.serverRefs!.orderId) }, relations: ['lines', 'surcharges', 'shippingLines', 'fulfillments'],
       });
       return { order, result };
     }
@@ -64,13 +64,13 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
           await setMode(pricesIncludeTax);
           const lines = caseName === 'c-negative-tie' ? [
             // An exclusive discount of -50 at 19% owes -9.5 minor tax, also in an inclusive channel.
-            { variantId: serviceIds.mug[0], unitPriceMinor: 101, quantity: 1, discountMinor: 50,
+            { variantId: variantIds.mug[0], unitPriceMinor: 101, quantity: 1, discountMinor: 50,
               taxInclusive: false, ratePpm: 190000 },
           ] : [
-            { variantId: serviceIds.mug[0], unitPriceMinor: 101, quantity: 1, ratePpm: 190000,
+            { variantId: variantIds.mug[0], unitPriceMinor: 101, quantity: 1, ratePpm: 190000,
               ...(caseName === 'b-mixed' ? { taxInclusive: !pricesIncludeTax } : {}) },
-            { variantId: serviceIds.beans[0], unitPriceMinor: 102, quantity: 1, ratePpm: 70000 },
-            { variantId: serviceIds.beans[1], unitPriceMinor: 103,
+            { variantId: variantIds.beans[0], unitPriceMinor: 102, quantity: 1, ratePpm: 70000 },
+            { variantId: variantIds.beans[1], unitPriceMinor: 103,
               quantity: caseName === 'a-discount' ? 3 : 1, discountMinor: 17, ratePpm: 70000 },
           ];
           const command = orderCommand(lines, undefined, undefined, { pricesIncludeTax });
@@ -127,7 +127,7 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
     it('v2 applies the same own-mode discount without a v3 snapshot, bridge within bound', async () => {
       await setMode(false);
       const command = orderCommand([
-        { variantId: serviceIds.mug[0], quantity: 1, unitPriceMinor: 101, discountMinor: 50, ratePpm: 190000 },
+        { variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 101, discountMinor: 50, ratePpm: 190000 },
       ], undefined, undefined, { version: 2 });
       const { order, result } = await submit(command);
       const bound = bridgeBound(order, result);
@@ -144,7 +144,7 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       // One line plus the bridge surcharge gives B = ceil(2 / 2) = 1.
       const expectedB = 1;
       const offset = expectedB + 5;
-      const command = orderCommand([{ variantId: serviceIds.mug[0], quantity: 1, unitPriceMinor: 100, ratePpm: 190000 }]);
+      const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 100, ratePpm: 190000 }]);
       expect(command.payload.totalMinor).toBe(119);
       command.payload.totalMinor += offset;
       command.payload.subtotalMinor += offset;
@@ -167,8 +167,8 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
     it('reports an above-bound v3 per-rate discrepancy without refusing the sale', async () => {
       await setMode(false);
       const command = orderCommand([
-        { variantId: serviceIds.mug[0], quantity: 1, unitPriceMinor: 100, ratePpm: 190000 },
-        { variantId: serviceIds.beans[0], quantity: 1, unitPriceMinor: 100, ratePpm: 70000 },
+        { variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 100, ratePpm: 190000 },
+        { variantId: variantIds.beans[0], quantity: 1, unitPriceMinor: 100, ratePpm: 70000 },
       ]);
       // Deliberately wrong rate allocation, but unchanged total tax and settlement.
       command.payload.taxByRate![0].taxMinor += 5;

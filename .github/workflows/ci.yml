@@ -82,6 +82,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run build
       - run: npm test
 
   # No artifacts are uploaded: dist, public, apps/pos/test-results and

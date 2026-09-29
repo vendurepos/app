@@ -23,7 +23,7 @@ export function pluginTestConfig(override: Override = {}, plugins: Plugin[] = [T
 export function createPluginTestEnvironment(override: Override = {}, plugins?: Plugin[]) {
   const environment = createTestEnvironment(pluginTestConfig(override, plugins));
   const { server, adminClient } = environment;
-  // GraphQL ids for the Admin and Shop APIs, and the decoded ids the service and repositories use.
+  // Ids as the Admin and Shop APIs give them, which commands carry (review 2), and the decoded ids repositories use.
   const variantIds: Record<'mug' | 'beans' | 'print', string[]> = { mug: [], beans: [], print: [] };
   const serviceIds: Record<'mug' | 'beans' | 'print', string[]> = { mug: [], beans: [], print: [] };
 
@@ -112,11 +112,17 @@ export function createPluginTestEnvironment(override: Override = {}, plugins?: P
     return String(server.app.get(ConfigService).entityOptions.entityIdStrategy!.decodeId(id));
   }
 
-  // The service is called as VP2's route will call it: a custom-API context in the default channel.
-  async function run(command: CommandEnvelope<OrderCreatePayload>) {
-    const ctx = await server.app.get(RequestContextService).create({ apiType: 'custom' });
+  // An entity id as the Admin API gives it, and as commands carry it (TestingEntityIdStrategy: T_1).
+  function encode(id: string | number) {
+    return String(server.app.get(ConfigService).entityOptions.entityIdStrategy!.encodeId(id));
+  }
+
+  // The service is called as VP2's route will call it: a custom-API context in the default channel,
+  // or in the channel with the given token.
+  async function run(command: CommandEnvelope<OrderCreatePayload>, channelToken?: string) {
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'custom', channelOrToken: channelToken });
     return server.app.get(OrderCreateService).create(ctx, command);
   }
 
-  return { ...environment, init, variantIds, serviceIds, decode, run };
+  return { ...environment, init, variantIds, serviceIds, decode, encode, run };
 }

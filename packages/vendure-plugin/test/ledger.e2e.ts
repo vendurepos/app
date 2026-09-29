@@ -1,17 +1,17 @@
 import {
-  Channel, Order, OrderLine, OrderService, Payment, PaymentMethod, ShippingMethod,
+  Channel, Logger, Order, OrderLine, OrderService, Payment, PaymentMethod, ShippingMethod,
   StockMovement, TaxRate, TransactionalConnection,
 } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, TallyCommand, TransientCommandError } from '../src';
+import { OrderCreateService, TallyCommand, TransientCommandError, internalErrorCount } from '../src';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
 describe('ledger: stored rejections, idempotency and transient failures', () => {
   const environment = createPluginTestEnvironment();
-  const { server, adminClient, variantIds, serviceIds, run } = environment;
+  const { server, adminClient, variantIds, encode, run } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
   let channel: Channel;
@@ -31,7 +31,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   });
   afterAll(() => server.destroy());
 
-  const command = (variantId = serviceIds.mug[0]) => orderCommand([{ variantId, quantity: 1, unitPriceMinor: 800 }]);
+  const command = (variantId = variantIds.mug[0]) => orderCommand([{ variantId, quantity: 1, unitPriceMinor: 800 }]);
   async function counts() {
     return {
       orders: await connection.rawConnection.getRepository(Order).count(),
@@ -67,7 +67,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   afterEach(() => { recipe.testObserver = undefined; });
 
   it.each(['disabled', 'missing'] as const)('proof 10: a %s variant stores unknown_variant and a replay never runs the recipe', async kind => {
-    const input = command(kind === 'disabled' ? serviceIds.print[0] : '999999');
+    const input = command(kind === 'disabled' ? variantIds.print[0] : encode(999999));
     const before = await counts();
     const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
     try {
@@ -176,16 +176,33 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect((await ledgerFor(input))?.result).toEqual(first);
   });
 
-  it('proof 12: after a commit whose answer was lost, the retry returns duplicate with the committed orderId', async () => {
+  // The crash-after-commit proof (12) needs the route and arrives in VP2; this is the replay it relies on.
+  it('sequential replay: the same id after a commit returns duplicate with the committed orderId', async () => {
     const input = command();
-    const lost = await run(input);
+    const first = await run(input);
     const committed = await connection.rawConnection.getRepository(Order).findOneOrFail({
       where: { customFields: { tallyClientOrderId: input.payload.clientOrderId } },
     });
     expect(committed.state).toBe('Delivered');
-    expect(await run(input)).toMatchObject({ status: 'duplicate', serverRefs: { orderId: String(committed.id) } });
-    expect(lost.serverRefs!.orderId).toBe(String(committed.id));
+    expect(await run(input)).toMatchObject({ status: 'duplicate', serverRefs: { orderId: encode(committed.id) } });
+    expect(first.serverRefs!.orderId).toBe(encode(committed.id));
     expect(await ordersFor(input)).toBe(1);
+  });
+
+  it('review 1: a committed command replays as duplicate even after the store stops passing the pre-claim checks', async () => {
+    const input = command();
+    const first = await run(input);
+    expect(first.status).toBe('applied');
+    const repo = connection.rawConnection.getRepository(TaxRate);
+    const rates = await repo.find({ where: { zoneId: channel.defaultTaxZone.id, enabled: true } });
+    try {
+      for (const rate of rates) await repo.update(rate.id, { enabled: false });
+      // A new command is refused before the claim, so the store really fails the check.
+      expect(await run(command())).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
+      expect(await run(input)).toEqual({ ...first, status: 'duplicate' });
+    } finally {
+      for (const rate of rates) await repo.update(rate.id, { enabled: true });
+    }
   });
 
   it('a statement timeout inside the recipe is a TransientCommandError(timeout); nothing is written; the retry applies', async () => {
@@ -205,19 +222,30 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('any other exception is neither transient nor stored: it propagates, the claim rolls back, and the retry applies', async () => {
+  it('ruling 8: any other exception after the claim is a stored internal_error, logged and counted; a replay returns it', async () => {
     const input = command();
     const before = await counts();
+    const count = internalErrorCount();
+    const logged = vi.spyOn(Logger, 'error');
     recipe.testObserver = async (_stage, _ctx, order) => {
       if (order.customFields.tallyClientOrderId === input.payload.clientOrderId) throw new Error('injected recipe exception');
     };
-    const failed = await timed(run(input));
-    recipe.testObserver = undefined;
-    expect(failed.error).toBeInstanceOf(Error);
-    expect(failed.error).not.toBeInstanceOf(TransientCommandError);
-    expect((failed.error as Error).message).toBe('injected recipe exception');
-    expect(await counts()).toEqual(before);
-    expect(await ledgerFor(input)).toBeNull();
-    expect(await run(input)).toMatchObject({ status: 'applied' });
+    try {
+      const result = await run(input);
+      expect(result).toEqual({ id: input.id, status: 'rejected', error: {
+        code: 'internal_error', message: 'The server could not record the order',
+        data: { message: 'injected recipe exception' },
+      } });
+      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
+      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected', result });
+      expect(internalErrorCount()).toBe(count + 1);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('injected recipe exception'), 'TallyPosPlugin', expect.any(String));
+      // The replay does not reach the recipe, so the observer would throw again if it did.
+      expect(await run(input)).toEqual(result);
+      expect(internalErrorCount()).toBe(count + 1);
+    } finally {
+      recipe.testObserver = undefined;
+      logged.mockRestore();
+    }
   });
 });

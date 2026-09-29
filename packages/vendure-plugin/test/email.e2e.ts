@@ -4,7 +4,8 @@ import { EmailPlugin, FileBasedTemplateLoader } from '@vendure/email-plugin';
 import type { EmailDetails } from '@vendure/email-plugin';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TallyPosPlugin, tallyOrderConfirmationHandler } from '../src';
+import { TallyPosPlugin } from '../src';
+import { tallyOrderConfirmationHandler } from '../src/email';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 import { createStorefrontMethods, guestOrder } from './shop';
@@ -23,7 +24,7 @@ describe('proof 3: the exported tallyOrderConfirmationHandler skips POS orders a
       globalTemplateVars: { fromAddress: '"VP1" <vp1@vendurepos.invalid>' },
     })],
   });
-  const { server, adminClient, shopClient, variantIds, serviceIds, run } = environment;
+  const { server, adminClient, shopClient, variantIds, run } = environment;
   // The confirmation handler's event (S1 finding 6), so the POS count of 0 cannot pass vacuously.
   const settled: string[] = [];
   beforeAll(async () => {
@@ -50,7 +51,7 @@ describe('proof 3: the exported tallyOrderConfirmationHandler skips POS orders a
     const posEmail = 'vp1-pos-buyer@example.com';
     const controlEmail = 'vp1-shop-buyer@example.com';
     const pos = await run(orderCommand(
-      [{ variantId: serviceIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: posEmail },
+      [{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: posEmail },
     ));
     expect(pos, JSON.stringify(pos)).toMatchObject({ status: 'applied' });
 

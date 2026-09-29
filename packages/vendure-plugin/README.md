@@ -38,12 +38,14 @@ Status: VP1. The plugin has the order service and `GET /tally/v1/info`. The batc
    custom-field columns, the unique index on `tallyClientOrderId`, and plain indexes on
    `tallyRegisterId` and `tallySessionId`. Run it with `runMigrations(config)` as usual.
 
-2. POS orders send no order-confirmation email. In `EmailPlugin`'s handlers, use
-   `tallyOrderConfirmationHandler` **in place of** `orderConfirmationHandler`:
+2. POS orders send no order-confirmation email. If you use `@vendure/email-plugin` (an
+   optional peer dependency), install `tallyOrderConfirmationHandler` from the
+   `@vendurepos/plugin/email` entry **in place of** `orderConfirmationHandler`. It is a handler
+   of its own with the default's configuration, and it leaves the default handler unchanged:
 
    ```ts
    import { EmailPlugin, defaultEmailHandlers, orderConfirmationHandler } from '@vendure/email-plugin';
-   import { tallyOrderConfirmationHandler } from '@vendurepos/plugin';
+   import { tallyOrderConfirmationHandler } from '@vendurepos/plugin/email';
 
    EmailPlugin.init({
      handlers: defaultEmailHandlers.map(handler =>
@@ -52,13 +54,16 @@ Status: VP1. The plugin has the order service and `GET /tally/v1/info`. The batc
    });
    ```
 
-On start, the plugin creates the `tally-pos` payment method and the `tally-in-store` shipping
-method in the default channel when they are missing. Both are closed to the Shop API.
+   The main entry, `@vendurepos/plugin`, never loads `@vendure/email-plugin`.
 
-**Known issue.** TypeORM does not know the two plain indexes, because Vendure custom fields
-have no index option. So Vendure warns at start-up that the schema does not match, and a
-later `generateMigration` proposes dropping them. Leave those two `DROP INDEX` statements out
-of your own migrations.
+On start, in the server process, the plugin gives every channel that lacks them the
+`tally-pos` payment method, the `tally-in-store` shipping method and the walk-in customer.
+Both methods are closed to the Shop API. A channel created later is configured at the next
+start.
+
+POS lines keep the till's price; every other order line is priced by your configured
+`orderItemPriceCalculationStrategy`, which the plugin wraps and whose `init` and `destroy` it
+forwards.
 
 ## Development
 
@@ -68,6 +73,7 @@ The package is standalone npm, not part of the pnpm workspace.
 npm ci
 npm run db:up       # Postgres 16 on 127.0.0.1:5445, compose project vendurepos-plugin-test
 npm run typecheck
+npm run build       # dist/, with the main and ./email entries
 npm test            # vitest, one worker
 npm run db:down     # removes the container and its volume
 ```

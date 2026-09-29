@@ -1,6 +1,6 @@
 import { RequestContextService, TransactionalConnection, runMigrations } from '@vendure/core';
 import { TestServer } from '@vendure/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyPos1790648006022 } from '../src';
 import { createPluginTestEnvironment, dbConnectionOptions, pluginTestConfig } from './env';
 import { orderCommand } from './payloads';
@@ -37,7 +37,16 @@ describe('the TallyPos migration', () => {
     const config = pluginTestConfig({ dbConnectionOptions: {
       ...dbConnectionOptions, database, synchronize: false, migrations: [TallyPos1790648006022],
     } });
-    expect(await runMigrations(config)).toEqual(['TallyPos1790648006022']);
+    // runMigrations prints "Your database schema does not match…" when the schema diff is not empty.
+    const printed = vi.spyOn(console, 'log');
+    try {
+      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022']);
+      const output = printed.mock.calls.flat().join('\n');
+      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022/);
+      expect(output).not.toMatch(/does not match/);
+    } finally {
+      printed.mockRestore();
+    }
 
     const server = new TestServer(config);
     await server.bootstrap();
@@ -57,17 +66,14 @@ describe('the TallyPos migration', () => {
         'CREATE UNIQUE INDEX "PK_cb557f149dd2aba503ab051d4fa" ON public.tally_command USING btree (id)',
         'CREATE UNIQUE INDEX "UQ_ff88d64a4e987b9203e7d767f46" ON public."order" USING btree ("customFieldsTallyclientorderid")',
       ]);
-      // The generated part matches the entity metadata exactly. TypeORM does not know the two
-      // hand-added indexes (custom fields have no index option), so it would drop them: a schema
-      // sync or a later generateMigration removes them, and Vendure warns about it at every start.
+      // Ruling 2: the register and session indexes are TypeORM metadata on CustomOrderFields, so the
+      // migrated schema matches the entities exactly and generateMigration would propose nothing.
       const pending = (await migrated.driver.createSchemaBuilder().log()).upQueries.map(item => item.query);
-      expect(pending).toEqual([
-        'DROP INDEX "public"."IDX_tally_order_register_id"', 'DROP INDEX "public"."IDX_tally_order_session_id"',
-      ]);
+      expect(pending).toEqual([]);
 
       const ctx = await server.app.get(RequestContextService).create({ apiType: 'custom' });
       const result = await server.app.get(OrderCreateService).create(ctx, orderCommand([
-        { variantId: seeded.serviceIds.mug[0], quantity: 1, unitPriceMinor: 800 },
+        { variantId: seeded.variantIds.mug[0], quantity: 1, unitPriceMinor: 800 },
       ]));
       expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied', serverRefs: { totalMinor: 1000 } });
     } finally {

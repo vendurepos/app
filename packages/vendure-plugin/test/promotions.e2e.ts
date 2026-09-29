@@ -7,7 +7,7 @@ import { orderCommand } from './payloads';
 
 describe('proof 2: automatic promotions are removed from POS orders', () => {
   const environment = createPluginTestEnvironment();
-  const { server, adminClient, serviceIds, decode, run } = environment;
+  const { server, adminClient, variantIds, decode, run } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
   const relations = ['promotions', 'lines', 'shippingLines', 'surcharges', 'payments', 'fulfillments'];
@@ -60,8 +60,8 @@ describe('proof 2: automatic promotions are removed from POS orders', () => {
       const addSurcharge = vi.spyOn(server.app.get(OrderService), 'addSurchargeToOrder');
       try {
         const lines = [
-          { variantId: serviceIds.mug[0], quantity: 1, unitPriceMinor: 1000, discountMinor: 50 },
-          { variantId: serviceIds.beans[0], quantity: 1, unitPriceMinor: 500 },
+          { variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 1000, discountMinor: 50 },
+          { variantId: variantIds.beans[0], quantity: 1, unitPriceMinor: 500 },
         ];
         const total = orderCommand(lines).payload.totalMinor;
         const command = orderCommand(lines, [
@@ -70,7 +70,7 @@ describe('proof 2: automatic promotions are removed from POS orders', () => {
         const result = await run(command);
         expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied' });
         const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
-          where: { id: result.serverRefs!.orderId }, relations,
+          where: { id: decode(result.serverRefs!.orderId) }, relations,
         });
         observations.push(snapshot('afterFulfilmentReload', order));
         expect(observations.map(row => row.call)).toEqual([

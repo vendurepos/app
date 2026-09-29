@@ -1,12 +1,12 @@
 import {
-  ConfigService, Order, OrderLine, OrderService, Payment, ProductVariantService, StockMovement,
-  TransactionalConnection, defaultOrderProcess,
+  Channel, ConfigService, InsufficientStockOnHandError, Order, OrderLine, OrderService, Payment,
+  ProductVariantService, StockMovement, TaxRate, TransactionalConnection, defaultOrderProcess,
 } from '@vendure/core';
 import type { OrderProcess, OrderState } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TransientCommandError, UNKNOWN_REJECTION_CODE } from '../src';
-import { transientKind } from '../src/service/errors';
+import { rejectionFor, transientKind } from '../src/service/errors';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -20,7 +20,7 @@ const refusingProcess: OrderProcess<OrderState> = {
 
 describe('error classes (ADR 0002 §2)', () => {
   const environment = createPluginTestEnvironment({ orderOptions: { process: [defaultOrderProcess, refusingProcess] } });
-  const { server, adminClient, variantIds, serviceIds, run } = environment;
+  const { server, adminClient, variantIds, decode, run } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
   beforeAll(async () => {
@@ -37,7 +37,7 @@ describe('error classes (ADR 0002 §2)', () => {
     recipe.testObserver = undefined;
   });
 
-  const mug = (quantity = 1) => ({ variantId: serviceIds.mug[0], quantity, unitPriceMinor: 800 });
+  const mug = (quantity = 1) => ({ variantId: variantIds.mug[0], quantity, unitPriceMinor: 800 });
   async function counts() {
     return {
       orders: await connection.rawConnection.getRepository(Order).count(),
@@ -70,26 +70,62 @@ describe('error classes (ADR 0002 §2)', () => {
     await expectStored(input, { code: 'underpaid', message: 'Payments of 400 are below the total of 1000' });
   });
 
-  it('a refused PaymentSettled transition with sufficient payments is the unknown class, with Vendure\'s code and message in data', async () => {
+  it('a refused PaymentSettled transition with sufficient payments is platform_error, with the platform code and message in data', async () => {
     refuseTo = 'PaymentSettled';
     const input = orderCommand([mug()], [{ method: 'cash', amountMinor: 1000 }]);
     const result = await expectStored(input, {
-      code: UNKNOWN_REJECTION_CODE, message: expect.any(String),
-      data: { vendureCode: 'ORDER_STATE_TRANSITION_ERROR', vendureMessage: 'ORDER_STATE_TRANSITION_ERROR' },
+      code: 'platform_error', message: expect.any(String),
+      data: { platformCode: 'ORDER_STATE_TRANSITION_ERROR', platformMessage: 'ORDER_STATE_TRANSITION_ERROR' },
     });
     expect(JSON.parse(result.error!.message.replace(/^ORDER_STATE_TRANSITION_ERROR: /, ''))).toEqual({
       transitionError: 'Test process refuses PaymentSettled', fromState: 'ArrangingPayment', toState: 'PaymentSettled',
     });
   });
 
-  it('an unknown ErrorResult (OrderLimitError from addItemToOrder) is stored with its Vendure code and replays', async () => {
+  it('review 13: a refused PaymentSettled with enough payment and a store fault is store_configuration, not stored', async () => {
+    refuseTo = 'PaymentSettled';
+    const input = orderCommand([mug()], [{ method: 'cash', amountMinor: 1000 }]);
+    const channel = await connection.rawConnection.getRepository(Channel).findOneOrFail({
+      where: { code: '__default_channel__' }, relations: ['defaultTaxZone'],
+    });
+    const rates = connection.rawConnection.getRepository(TaxRate);
+    const enabled = await rates.find({ where: { zoneId: channel.defaultTaxZone.id, enabled: true } });
+    // The store breaks while the sale is being recorded, after the pre-claim check passed.
+    recipe.testObserver = async (stage, _ctx, order) => {
+      if (stage !== 'payments' || order.customFields.tallyClientOrderId !== input.payload.clientOrderId) return;
+      for (const rate of enabled) await rates.update(rate.id, { enabled: false });
+    };
+    const before = await counts();
+    try {
+      expect(await run(input)).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'store_configuration' } });
+      expect(await counts()).toEqual(before);
+      expect(await ledgerFor(input)).toBeNull();
+    } finally {
+      for (const rate of enabled) await rates.update(rate.id, { enabled: true });
+    }
+    // Not stored: once the store is repaired and the process accepts, the same id applies.
+    recipe.testObserver = undefined;
+    refuseTo = undefined;
+    expect(await run(input)).toMatchObject({ id: input.id, status: 'applied' });
+  });
+
+  it('ruling 3: a shortage createFulfillment finds (INSUFFICIENT_STOCK_ON_HAND_ERROR) maps to insufficient_stock', () => {
+    const rejection = rejectionFor(new InsufficientStockOnHandError({
+      productVariantId: 'T_3', productVariantName: 'Print', stockOnHand: 2,
+    }));
+    expect(rejection).toMatchObject({ code: 'insufficient_stock', data: undefined });
+    expect(rejection.message).toBe('INSUFFICIENT_STOCK_ON_HAND_ERROR: {"productVariantId":"T_3","productVariantName":"Print","stockOnHand":2}');
+    expect(UNKNOWN_REJECTION_CODE).toBe('platform_error');
+  });
+
+  it('an unknown ErrorResult (OrderLimitError from addItemToOrder) is a stored platform_error with its code and replays', async () => {
     const options = server.app.get(ConfigService).orderOptions;
     const limit = options.orderItemsLimit;
     options.orderItemsLimit = 1;
     try {
       await expectStored(orderCommand([mug(2)]), {
-        code: UNKNOWN_REJECTION_CODE, message: expect.any(String),
-        data: { vendureCode: 'ORDER_LIMIT_ERROR', vendureMessage: expect.any(String) },
+        code: 'platform_error', message: expect.any(String),
+        data: { platformCode: 'ORDER_LIMIT_ERROR', platformMessage: expect.any(String) },
       });
     } finally {
       options.orderItemsLimit = limit;
@@ -101,7 +137,7 @@ describe('error classes (ADR 0002 §2)', () => {
     // for Print (2 on hand); Vendure's own check inside addItemToOrder then sees the real 2.
     const saleable = vi.spyOn(server.app.get(ProductVariantService), 'getSaleableStockLevel').mockResolvedValueOnce(1000);
     try {
-      await expectStored(orderCommand([{ variantId: serviceIds.print[0], quantity: 3, unitPriceMinor: 4500 }]), {
+      await expectStored(orderCommand([{ variantId: variantIds.print[0], quantity: 3, unitPriceMinor: 4500 }]), {
         code: 'insufficient_stock', message: 'INSUFFICIENT_STOCK_ERROR: {"quantityAvailable":2}',
       });
     } finally {
@@ -170,20 +206,22 @@ describe('error classes (ADR 0002 §2)', () => {
     }`), { id: activeChannel.id });
     const result = await run(input);
     expect(result, JSON.stringify(result)).toMatchObject({ id: input.id, status: 'applied' });
-    const order = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: result.serverRefs!.orderId });
+    const order = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: decode(result.serverRefs!.orderId) });
     expect(order.currencyCode).toBe('USD');
     expect(order.totalWithTax).toBe(1000);
   });
 
   it('classifies only connection, lock and timeout failures as transient', () => {
     const driver = (code: string) => ({ driverError: { code } });
-    expect(transientKind(driver('55P03'))).toBe('lock');
+    // Ruling 4: a deadlock or a serialization failure is a lock failure too, and succeeds on retry.
+    for (const code of ['55P03', '40P01', '40001']) expect(transientKind(driver(code)), code).toBe('lock');
     expect(transientKind(driver('57014'))).toBe('timeout');
     expect(transientKind(driver('25P03'))).toBe('timeout');
     for (const code of ['08006', '08001', '57P01', '57P03']) expect(transientKind(driver(code))).toBe('connection');
     expect(transientKind(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }))).toBe('connection');
     expect(transientKind(new Error('Connection terminated unexpectedly'))).toBe('connection');
-    for (const code of ['23505', '23503', '22P02', '42P01', '40001', '40P01']) expect(transientKind(driver(code))).toBeUndefined();
+    // Review 11: 08P01 protocol_violation is deterministic, so it is not a connection failure.
+    for (const code of ['23505', '23503', '22P02', '42P01', '08P01']) expect(transientKind(driver(code)), code).toBeUndefined();
     expect(transientKind(new Error('injected'))).toBeUndefined();
     expect(new TransientCommandError('id', 'lock', undefined)).toMatchObject({ commandId: 'id', kind: 'lock' });
   });

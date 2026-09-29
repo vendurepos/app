@@ -6,6 +6,17 @@
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./email": {
+      "types": "./dist/email.d.ts",
+      "default": "./dist/email.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": ["dist", "README.md"],
   "engines": {
     "node": "^20.19 || >=22.12"
@@ -20,6 +31,11 @@
   "peerDependencies": {
     "@vendure/core": "^3.6.0",
     "@vendure/email-plugin": "^3.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@vendure/email-plugin": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@swc/core": "1.16.2",

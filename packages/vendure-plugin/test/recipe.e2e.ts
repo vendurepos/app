@@ -14,7 +14,7 @@ import { orderCommand } from './payloads';
 
 describe('order.create recipe through OrderCreateService', () => {
   const environment = createPluginTestEnvironment();
-  const { server, serviceIds, run } = environment;
+  const { server, variantIds, serviceIds, decode, encode, run } = environment;
   let connection: TransactionalConnection;
   beforeAll(async () => {
     await environment.init();
@@ -22,7 +22,7 @@ describe('order.create recipe through OrderCreateService', () => {
   });
   afterAll(() => server.destroy());
 
-  const mug = () => ({ variantId: serviceIds.mug[0], quantity: 1, unitPriceMinor: 800 });
+  const mug = () => ({ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 });
   async function submit(command: ReturnType<typeof orderCommand>) {
     expect(payloadShapeErrors(command.payload)).toEqual([]);
     expect(fiscalFiguresErrors(command.payload)).toEqual([]);
@@ -32,11 +32,11 @@ describe('order.create recipe through OrderCreateService', () => {
     const result = await submit(command);
     expect(result, JSON.stringify(result)).toMatchObject({ id: command.id, status: 'applied' });
     const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
-      where: { id: result.serverRefs!.orderId },
+      where: { id: decode(result.serverRefs!.orderId) },
       relations: ['lines', 'payments', 'customer', 'shippingLines', 'shippingLines.shippingMethod', 'fulfillments'],
     });
     expect(result.serverRefs).toEqual({
-      orderId: String(order.id), displayId: order.code, totalMinor: command.payload.totalMinor,
+      orderId: encode(order.id), displayId: order.code, totalMinor: command.payload.totalMinor,
     });
     expect(order.totalWithTax).toBe(command.payload.totalMinor);
     return { order, result };
@@ -86,7 +86,7 @@ describe('order.create recipe through OrderCreateService', () => {
 
   it('happy path: Mug x1 + Beans(500) x2 is Delivered, priced, backdated and records SALE movements', async () => {
     const before = [await stock(serviceIds.mug[0]), await stock(serviceIds.beans[0])];
-    const command = orderCommand([mug(), { variantId: serviceIds.beans[0], quantity: 2, unitPriceMinor: 500 }]);
+    const command = orderCommand([mug(), { variantId: variantIds.beans[0], quantity: 2, unitPriceMinor: 500 }]);
     const { order, result } = await applied(command);
     expect(order.state).toBe('Delivered');
     expect(order.currencyCode).toBe('EUR');
@@ -127,8 +127,8 @@ describe('order.create recipe through OrderCreateService', () => {
   it('uses each line tax mode: inclusive Mug beside exclusive Beans lines', async () => {
     const command = orderCommand([
       { ...mug(), unitPriceMinor: 1000, taxInclusive: true },
-      { variantId: serviceIds.beans[0], quantity: 1, unitPriceMinor: 500 },
-      { variantId: serviceIds.beans[1], quantity: 1, unitPriceMinor: 900 },
+      { variantId: variantIds.beans[0], quantity: 1, unitPriceMinor: 500 },
+      { variantId: variantIds.beans[1], quantity: 1, unitPriceMinor: 900 },
     ]);
     const { order } = await applied(command);
     const prices = command.payload.lines.map(posLine => {
@@ -170,21 +170,87 @@ describe('order.create recipe through OrderCreateService', () => {
   });
 
   it('split tender with change on a non-final tender: payments cover the order exactly; tallyPayments as given', async () => {
-    // Total 1000: cash 600 tendered with 100 change, then 500 external. The tenders sum to 1100.
+    // Ruling 7 (TallyUI ADR-038): amountMinor is what the tender applies to the order, net of change.
+    // Total 1000: cash 600 handed over with 100 change applies 500, then 500 by card.
     const tenders = [
-      { method: 'cash' as const, amountMinor: 600, tenderedMinor: 600, changeMinor: 100 },
+      { method: 'cash' as const, amountMinor: 500, tenderedMinor: 600, changeMinor: 100 },
       { method: 'external' as const, amountMinor: 500, reference: 'card-1' },
     ];
     const command = orderCommand([mug()], tenders);
     const { order } = await applied(command);
     const payments = [...order.payments].sort((a, b) => Number(a.id) - Number(b.id));
-    expect(payments.reduce((sum, payment) => sum + payment.amount, 0)).toBe(order.totalWithTax);
     expect(order.totalWithTax).toBe(1000);
-    // The recipe caps only the covering tender: cash keeps its 600, the external tender covers the other 400.
     expect(payments.map(payment => [payment.metadata.tender.method, payment.amount, payment.state]))
-      .toEqual([['cash', 600, 'Settled'], ['external', 400, 'Settled']]);
-    expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(command.payload.payments);
+      .toEqual([['cash', 500, 'Settled'], ['external', 500, 'Settled']]);
+    const stored = JSON.parse(order.customFields.tallyPayments!);
+    expect(stored).toEqual(command.payload.payments);
+    expect(stored[0]).toMatchObject({ amountMinor: 500, tenderedMinor: 600, changeMinor: 100 });
     expect(order.state).toBe('Delivered');
+  });
+
+  it('the drawer derives from tallyPayments: net cash is tendered minus change over cash tenders, +500 here', async () => {
+    const tenders = [
+      { method: 'cash' as const, amountMinor: 500, tenderedMinor: 600, changeMinor: 100 },
+      { method: 'external' as const, amountMinor: 500, reference: 'card-1' },
+    ];
+    const { order } = await applied(orderCommand([mug()], tenders));
+    // ADR 0002 "Payment": the register's expected cash comes from the stored tenders, never from payment rows.
+    const netCash = (list: Array<{ method: string; amountMinor: number; tenderedMinor?: number; changeMinor?: number }>) =>
+      list.filter(tender => tender.method === 'cash')
+        .reduce((sum, tender) => sum + (tender.tenderedMinor !== undefined
+          ? tender.tenderedMinor - (tender.changeMinor ?? 0) : tender.amountMinor), 0);
+    expect(netCash(JSON.parse(order.customFields.tallyPayments!))).toBe(500);
+    // A cash tender without tendered and change falls back to amountMinor.
+    expect(netCash([{ method: 'cash', amountMinor: 300 }, ...tenders])).toBe(800);
+  });
+
+  it('review 2: variant ids arrive as the Admin API gives them; a non-numeric or garbage id is a stored unknown_variant', async () => {
+    expect(variantIds.mug[0]).toMatch(/^T_\d+$/);
+    for (const variantId of ['T_abc', 'garbage', `T_${serviceIds.mug[0]}x`, serviceIds.mug[0], 'T_99999999999']) {
+      const command = orderCommand([{ ...mug(), variantId }]);
+      const result = await submit(command);
+      expect(result, variantId).toMatchObject({ status: 'rejected', error: { code: 'unknown_variant' } });
+    }
+  });
+
+  it('review 3: out-of-range values are invalid_payload before the claim, writing nothing', async () => {
+    const before = await counts();
+    const long = 'x'.repeat(256);
+    const cases: Array<[string, (payload: OrderCreatePayload) => void]> = [
+      ['negative unitPriceMinor', payload => { payload.lines[0].unitPriceMinor = -1; }],
+      ['fractional unitPriceMinor', payload => { payload.lines[0].unitPriceMinor = 1.5; }],
+      ['unsafe totalMinor', payload => { payload.totalMinor = Number.MAX_SAFE_INTEGER + 1; }],
+      ['negative subtotalMinor', payload => { payload.subtotalMinor = -1; }],
+      ['negative taxMinor', payload => { payload.taxMinor = -1; }],
+      ['negative discountMinor', payload => { payload.lines[0].discountMinor = -5; }],
+      ['negative amountMinor', payload => { payload.payments[0].amountMinor = -1; }],
+      ['negative tenderedMinor', payload => { payload.payments[0].tenderedMinor = -1; }],
+      ['fractional changeMinor', payload => { payload.payments[0].changeMinor = 0.5; }],
+      ['zero quantity', payload => { payload.lines[0].quantity = 0; }],
+      ['negative quantity', payload => { payload.lines[0].quantity = -1; }],
+      ['fractional quantity', payload => { payload.lines[0].quantity = 1.5; }],
+      ['unitPriceMinor above int4', payload => { payload.lines[0].unitPriceMinor = 2_147_483_648; }],
+      ['totalMinor above int4', payload => { payload.totalMinor = 2_147_483_648; }],
+      ['tenderedMinor above int4', payload => { payload.payments[0].tenderedMinor = 2_147_483_648; }],
+      ...(['clientOrderId', 'registerId', 'cashierRef'] as const).map(field =>
+        [`${field} over 255`, (payload: OrderCreatePayload) => { payload[field] = long; }] as [string, (payload: OrderCreatePayload) => void]),
+      ['sessionId over 255', payload => { payload.sessionId = long; }],
+      ['clientLineId over 255', payload => { payload.lines[0].clientLineId = long; }],
+      ['clientPaymentId over 255', payload => { payload.payments[0].clientPaymentId = long; }],
+      ['reference over 255', payload => { payload.payments[0].reference = long; }],
+      ['customerId over 64', payload => { payload.customer = { customerId: 'x'.repeat(65) }; }],
+    ];
+    for (const [name, mutate] of cases) {
+      const command = orderCommand([mug()]);
+      mutate(command.payload);
+      const result = await run(command);
+      expect(result, name).toMatchObject({ id: command.id, status: 'rejected', error: { code: 'invalid_payload' } });
+    }
+    // The boundary itself is accepted: 2 147 483 647 fits int4 (the rounding bridge absorbs the total).
+    const edge = orderCommand([mug()]);
+    edge.payload.payments[0].tenderedMinor = 2_147_483_647;
+    expect(await run(edge)).toMatchObject({ status: 'applied' });
+    expect(await counts()).toMatchObject({ orders: before.orders + 1, commands: before.commands + 1 });
   });
 
   it('proof 9: zero-total sale reaches PaymentSettled without a payment, then is Delivered', async () => {
@@ -232,13 +298,16 @@ describe('order.create recipe through OrderCreateService', () => {
 
   it('reuses the walk-in customer and resolves a customer id before email, with unknown-id email fallback', async () => {
     expect(await connection.rawConnection.getRepository(Customer).count({ where: { emailAddress: 'walk-in@vendurepos.invalid' } })).toBe(1);
-    const line = { variantId: serviceIds.beans[1], quantity: 1, unitPriceMinor: 900 };
+    const line = { variantId: variantIds.beans[1], quantity: 1, unitPriceMinor: 900 };
     const first = await applied(orderCommand([line], undefined, { customerId: '999999', email: 'vp1-buyer@example.com' }));
-    const second = await applied(orderCommand([line], undefined, { customerId: String(first.order.customer!.id), email: 'unused@example.com' }));
+    const second = await applied(orderCommand([line], undefined, { customerId: encode(first.order.customer!.id), email: 'unused@example.com' }));
     const third = await applied(orderCommand([line], undefined, { email: 'vp1-buyer@example.com' }));
+    // Review 2: a garbage customer id falls back to the email, like an unknown one.
+    const fourth = await applied(orderCommand([line], undefined, { customerId: 'T_not-an-id', email: 'vp1-buyer@example.com' }));
     expect(first.order.customer!.emailAddress).toBe('vp1-buyer@example.com');
     expect(second.order.customer!.id).toBe(first.order.customer!.id);
     expect(third.order.customer!.id).toBe(first.order.customer!.id);
+    expect(fourth.order.customer!.id).toBe(first.order.customer!.id);
     expect(await connection.rawConnection.getRepository(Customer).count({ where: { emailAddress: 'unused@example.com' } })).toBe(0);
   });
 });

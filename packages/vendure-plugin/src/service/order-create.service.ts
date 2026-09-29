@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  CustomerService, ID, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
+  ConfigService, CustomerService, ID, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevelService,
   StockLocationService, StockMovementService, Surcharge, TaxRate, TransactionalConnection,
   isGraphQlErrorResult, manualFulfillmentHandler,
@@ -15,8 +15,12 @@ import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
-import { BusinessRejection, TransientCommandError, isUniqueViolation, transientKind, unwrap } from './errors';
+import {
+  BusinessRejection, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, isUniqueViolation,
+  transientKind, unwrap,
+} from './errors';
 import { roundHalfAwayFromZero } from './rounding';
+import { MAX_MINOR, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
 export type TotalWarning =
@@ -27,12 +31,16 @@ export type OrderCreateResult = CommandResult & { totalWarnings?: TotalWarning[]
 
 export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSave' | 'finalPass' | 'payments';
 
-const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
+export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
 // ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
 const CLAIM_LOCK_TIMEOUT = '5s';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const rejected = (id: string, code: string, message: string, data?: Record<string, unknown>): OrderCreateResult =>
   ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
+const storeConfiguration = (id: string) => rejected(id, 'store_configuration',
+  'Missing POS payment, shipping, or usable default-zone tax rates');
 
 @Injectable()
 export class OrderCreateService {
@@ -50,6 +58,7 @@ export class OrderCreateService {
     private stockLocations: StockLocationService,
     private stockLevels: StockLevelService,
     private stockMovements: StockMovementService,
+    private config: ConfigService,
   ) {}
 
   /**
@@ -61,16 +70,14 @@ export class OrderCreateService {
     if (invalid) return invalid;
     const { payload } = command;
     try {
+      // Review 1: a command the ledger already holds skips every pre-claim check and replays.
       if (!await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id })) {
         const requeued = await this.existingOrderResult(ctx, command);
         if (requeued) return requeued;
-      }
-      if (!ctx.channel.availableCurrencyCodes.includes(payload.currency as CurrencyCode)) {
-        return rejected(command.id, 'unsupported_currency', `The channel does not offer ${payload.currency}`);
-      }
-      if (!await this.storeCanSell(ctx)) {
-        return rejected(command.id, 'store_configuration',
-          'Missing POS payment, shipping, or usable default-zone tax rates');
+        if (!ctx.channel.availableCurrencyCodes.includes(payload.currency as CurrencyCode)) {
+          return rejected(command.id, 'unsupported_currency', `The channel does not offer ${payload.currency}`);
+        }
+        if (!await this.storeCanSell(ctx)) return storeConfiguration(command.id);
       }
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       const commandCtx = new RequestContext({
@@ -78,16 +85,33 @@ export class OrderCreateService {
         languageCode: ctx.languageCode, currencyCode: payload.currency as CurrencyCode,
         isAuthorized: ctx.isAuthorized, authorizedAsOwnerOnly: ctx.authorizedAsOwnerOnly,
       });
+      let claimed = false;
       try {
         return await this.connection.withTransaction(commandCtx, async txCtx => {
-          return await this.claim(txCtx, command) ?? await this.recipe(txCtx, command);
+          const replay = await this.claim(txCtx, command);
+          if (replay) return replay;
+          claimed = true;
+          return await this.recipe(txCtx, command);
         });
       } catch (error) {
+        if (error instanceof StoreConfigurationRefusal) return storeConfiguration(command.id);
         if (error instanceof BusinessRejection) return await this.storeRejection(commandCtx, command, error);
         // Two commands for one sale raced; the other committed first (ADR 0002 §2 "Requeue path").
         if (isUniqueViolation(error, this.clientOrderIdIndex())) {
           const existing = await this.existingOrderResult(commandCtx, command);
           if (existing) return existing;
+          // Review 10: the sale is recorded in another channel, which this caller cannot answer for.
+          const elsewhere = await this.connection.getRepository(commandCtx, Order).count({
+            where: { customFields: { tallyClientOrderId: payload.clientOrderId } },
+          });
+          if (elsewhere) {
+            return await this.storeRejection(commandCtx, command, new BusinessRejection('idempotency_mismatch',
+              'The clientOrderId is already recorded in another channel', { reason: 'client_order_in_other_channel' }));
+          }
+        }
+        // Ruling 8: an unexpected exception after the claim is final too, or it would loop.
+        if (claimed && !transientKind(error)) {
+          return await this.storeRejection(commandCtx, command, internalErrorFor(command.id, error));
         }
         throw error;
       }
@@ -116,6 +140,7 @@ export class OrderCreateService {
         { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
+    if (!errors.length) errors.push(...valueRangeErrors(command.payload));
     if (!errors.length && command.version === 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
   }
@@ -141,8 +166,33 @@ export class OrderCreateService {
       where: { customFields: { tallyClientOrderId: command.payload.clientOrderId }, channels: { id: ctx.channelId } },
     });
     return order ? { id: command.id, status: 'applied', serverRefs: {
-      orderId: String(order.id), displayId: order.code, totalMinor: order.totalWithTax,
+      orderId: this.encodeId(order.id), displayId: order.code, totalMinor: order.totalWithTax,
     } } satisfies OrderCreateResult : undefined;
+  }
+
+  // Review 2: ids cross the wire in the configured EntityIdStrategy's encoding, as the Admin API
+  // gives them. An id the strategy would not have issued decodes to undefined.
+  private decodeId(id: string): ID | undefined {
+    const strategy = this.idStrategy();
+    let decoded: unknown;
+    try {
+      decoded = strategy.decodeId(id);
+    } catch {
+      return undefined;
+    }
+    const valid = strategy.primaryKeyType === 'uuid'
+      ? typeof decoded === 'string' && UUID.test(decoded)
+      : Number.isSafeInteger(decoded) && (decoded as number) > 0 && (decoded as number) <= MAX_MINOR;
+    return valid && String(strategy.encodeId(decoded as never)) === id ? decoded as ID : undefined;
+  }
+
+  private encodeId(id: ID): string {
+    return String(this.idStrategy().encodeId(id as never));
+  }
+
+  // As Vendure's own IdCodecService picks it: entityOptions first, then the deprecated top level.
+  private idStrategy() {
+    return this.config.entityOptions.entityIdStrategy ?? this.config.entityIdStrategy;
   }
 
   // ADR 0002 §2 "The claim": Postgres-only. A second claim for the id waits on the uncommitted row.
@@ -184,12 +234,12 @@ export class OrderCreateService {
     return this.clientOrderIdConstraint;
   }
 
-  // The S1 recipe (docs/spikes/s1-order-recipe.md), unchanged apart from the `underpaid` mapping.
+  // The S1 recipe (docs/spikes/s1-order-recipe.md). Its money and tax logic is unchanged; VP1 adds
+  // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
   private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult> {
     const payload = command.payload;
-    let customer = payload.customer?.customerId
-      ? await this.customers.findOne(ctx, payload.customer.customerId)
-      : undefined;
+    const customerId = payload.customer?.customerId ? this.decodeId(payload.customer.customerId) : undefined;
+    let customer = customerId !== undefined ? await this.customers.findOne(ctx, customerId) : undefined;
     if (!customer) {
       const emailAddress = payload.customer?.email || WALK_IN_EMAIL;
       const existing = await this.customers.findAll(ctx, { filter: { emailAddress: { eq: emailAddress } } });
@@ -211,8 +261,9 @@ export class OrderCreateService {
     await this.connection.getRepository(ctx, Order).save(order);
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
-      const variant = await this.connection.getRepository(ctx, ProductVariant).findOne({
-        where: { id: line.variantId, deletedAt: IsNull(), channels: { id: ctx.channelId } },
+      const id = this.decodeId(line.variantId);
+      const variant = id === undefined ? null : await this.connection.getRepository(ctx, ProductVariant).findOne({
+        where: { id, deletedAt: IsNull(), channels: { id: ctx.channelId } },
       });
       if (!variant || !variant.enabled) {
         throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
@@ -223,15 +274,16 @@ export class OrderCreateService {
     // ADR 0002 "Stock": top up a shortage before addItemToOrder, which would otherwise save the
     // line at the saleable quantity, and before ArrangingPayment, which checks saleable stock again.
     const location = await this.stockLocations.defaultStockLocation(ctx);
-    const topUps: Array<{ variantId: string; quantity: number }> = [];
+    const topUps: Array<{ variantId: string; id: ID; quantity: number }> = [];
     for (const [variantId, { variant, quantity }] of requested) {
       const shortfall = quantity - await this.variants.getSaleableStockLevel(ctx, variant);
       if (shortfall <= 0) continue;
-      await this.adjustStock(ctx, variantId, location.id, shortfall);
-      topUps.push({ variantId, quantity: shortfall });
+      await this.adjustStock(ctx, variant.id, location.id, shortfall);
+      topUps.push({ variantId, id: variant.id, quantity: shortfall });
     }
     for (const line of payload.lines) {
-      order = unwrap(await this.orders.addItemToOrder(ctx, order.id, line.variantId, line.quantity, {
+      const variantId = requested.get(line.variantId)!.variant.id;
+      order = unwrap(await this.orders.addItemToOrder(ctx, order.id, variantId, line.quantity, {
         tallyUnitPrice: line.unitPriceMinor,
         tallyClientLineId: line.clientLineId,
         tallyPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
@@ -239,7 +291,7 @@ export class OrderCreateService {
       await this.testObserver?.('addItemToOrder', ctx, order);
     }
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOneOrFail({
-      where: { code: TALLY_SHIPPING_METHOD_CODE, channels: { id: ctx.channelId } },
+      where: { code: TALLY_SHIPPING_METHOD_CODE, deletedAt: IsNull(), channels: { id: ctx.channelId } },
     });
     order = unwrap(await this.orders.setShippingMethod(ctx, order.id, [shipping.id]));
     await this.testObserver?.('setShippingMethod', ctx, order);
@@ -314,6 +366,8 @@ export class OrderCreateService {
         if (paidMinor < order.totalWithTax) {
           throw new BusinessRejection('underpaid', `Payments of ${paidMinor} are below the total of ${order.totalWithTax}`);
         }
+        // Review 13: enough payment, so look for a configuration cause first; else platform_error.
+        if (!await this.storeCanSell(ctx)) throw new StoreConfigurationRefusal();
       }
       order = unwrap(settled);
     }
@@ -332,11 +386,11 @@ export class OrderCreateService {
       },
     }));
     unwrap(await this.orders.transitionFulfillmentToState(ctx, fulfillment.id, 'Delivered'));
-    for (const topUp of topUps) await this.adjustStock(ctx, topUp.variantId, location.id, -topUp.quantity);
-    const warnings: CommandWarning[] = topUps.map(topUp => ({ code: 'insufficient_stock', ...topUp }));
+    for (const topUp of topUps) await this.adjustStock(ctx, topUp.id, location.id, -topUp.quantity);
+    const warnings: CommandWarning[] = topUps.map(({ variantId, quantity }) => ({ code: 'insufficient_stock', variantId, quantity }));
     const result: OrderCreateResult = {
       id: command.id, status: 'applied',
-      serverRefs: { orderId: String(order.id), displayId: order.code, totalMinor: order.totalWithTax },
+      serverRefs: { orderId: this.encodeId(order.id), displayId: order.code, totalMinor: order.totalWithTax },
       ...(warnings.length ? { warnings } : {}),
       ...(totalWarnings.length ? { totalWarnings } : {}),
     };
@@ -347,7 +401,7 @@ export class OrderCreateService {
     return result;
   }
 
-  private async adjustStock(ctx: RequestContext, variantId: string, stockLocationId: ID, change: number) {
+  private async adjustStock(ctx: RequestContext, variantId: ID, stockLocationId: ID, change: number) {
     const level = await this.stockLevels.getStockLevel(ctx, variantId, stockLocationId);
     await this.stockMovements.adjustProductVariantStock(ctx, variantId, [
       { stockLocationId, stockOnHand: level.stockOnHand + change },

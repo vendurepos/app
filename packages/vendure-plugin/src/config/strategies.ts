@@ -2,27 +2,37 @@ import {
   LanguageCode, PaymentMethodEligibilityChecker, PaymentMethodHandler,
   ShippingCalculator, ShippingEligibilityChecker,
 } from '@vendure/core';
-import type { OrderItemPriceCalculationStrategy } from '@vendure/core';
-// Not exported from @vendure/core's index in 3.7.3 (S1 finding 3).
-import { DefaultOrderItemPriceCalculationStrategy } from '@vendure/core/dist/config/order/default-order-item-price-calculation-strategy';
+import type { Injector, Order, OrderItemPriceCalculationStrategy, ProductVariant, RequestContext } from '@vendure/core';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
 export const TALLY_SHIPPING_METHOD_CODE = 'tally-in-store';
 
-const defaultPriceStrategy = new DefaultOrderItemPriceCalculationStrategy();
+/**
+ * ADR 0002 "As-sold price and tax mode": POS orders keep the till's unit price in the line's own
+ * mode. Every other line, and the strategy's lifecycle, goes to the merchant's configured strategy
+ * (review 7).
+ */
+export class TallyPriceStrategy implements OrderItemPriceCalculationStrategy {
+  constructor(readonly inner: OrderItemPriceCalculationStrategy) {}
 
-// ADR 0002 "As-sold price and tax mode": POS orders keep the till's unit price in the line's own mode.
-export const tallyPriceStrategy: OrderItemPriceCalculationStrategy = {
-  calculateUnitPrice(ctx, variant, customFields, order) {
+  init(injector: Injector) {
+    return this.inner.init?.(injector);
+  }
+
+  destroy() {
+    return this.inner.destroy?.();
+  }
+
+  calculateUnitPrice(ctx: RequestContext, variant: ProductVariant, customFields: Record<string, any>, order: Order, quantity: number) {
     if (order.customFields.tallyClientOrderId && customFields.tallyUnitPrice != null) {
       return {
         price: customFields.tallyUnitPrice,
         priceIncludesTax: customFields.tallyPriceIncludesTax,
       };
     }
-    return defaultPriceStrategy.calculateUnitPrice(ctx, variant);
-  },
-};
+    return this.inner.calculateUnitPrice(ctx, variant, customFields, order, quantity);
+  }
+}
 
 // ADR 0002 "Closed to the storefront": only a plugin REST route runs with apiType 'custom'.
 export const tallyPaymentHandler = new PaymentMethodHandler({

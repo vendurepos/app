@@ -9,24 +9,26 @@ import { orderCommand } from './payloads';
 
 describe('proof 7: a stock shortage is topped up before addItemToOrder and taken back after fulfilment', () => {
   const environment = createPluginTestEnvironment();
-  const { server, serviceIds, run } = environment;
+  const { server, variantIds, serviceIds, decode, run } = environment;
   let connection: TransactionalConnection;
-  let print: string;
+  let print: string; // as commands carry it
+  let printId: string; // decoded, for repositories
   beforeAll(async () => {
     await environment.init();
-    print = serviceIds.print[0];
+    print = variantIds.print[0];
+    printId = serviceIds.print[0];
     connection = server.app.get(TransactionalConnection);
   });
   afterAll(() => server.destroy());
 
   async function level(ctx?: RequestContext) {
     const levels = await (ctx ? connection.getRepository(ctx, StockLevel) : connection.rawConnection.getRepository(StockLevel))
-      .find({ where: { productVariantId: print } });
+      .find({ where: { productVariantId: printId } });
     return { onHand: levels.reduce((sum, item) => sum + item.stockOnHand, 0),
       allocated: levels.reduce((sum, item) => sum + item.stockAllocated, 0) };
   }
   const movements = () => connection.rawConnection.getRepository(StockMovement)
-    .find({ where: { productVariant: { id: print } }, order: { id: 'ASC' } });
+    .find({ where: { productVariant: { id: printId } }, order: { id: 'ASC' } });
   // Records the recipe's call order and on-hand stock inside its transaction; every spy calls Vendure unchanged.
   function observe() {
     const events: string[] = [];
@@ -72,10 +74,10 @@ describe('proof 7: a stock shortage is topped up before addItemToOrder and taken
     // A direct OrderService call without the recipe's top-up, rolled back afterwards.
     await expect(connection.withTransaction(ctx, async tx => {
       const draft = await orders.createDraft(tx);
-      const single = await orders.addItemToOrder(tx, draft.id, print, 3);
+      const single = await orders.addItemToOrder(tx, draft.id, printId, 3);
       const lines = await connection.getRepository(tx, OrderLine).find({ where: { order: { id: draft.id } } });
       const other = await orders.createDraft(tx);
-      const batch = await orders.addItemsToOrder(tx, other.id, [{ productVariantId: print, quantity: 3 }]);
+      const batch = await orders.addItemsToOrder(tx, other.id, [{ productVariantId: printId, quantity: 3 }]);
       observed = {
         addItemToOrder: { error: isGraphQlErrorResult(single) ? single.__typename : null,
           quantityAvailable: (single as { quantityAvailable?: number }).quantityAvailable,
@@ -106,7 +108,7 @@ describe('proof 7: a stock shortage is topped up before addItemToOrder and taken
       status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: print, quantity: 1 }],
     });
     const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
-      where: { id: result.serverRefs!.orderId }, relations: ['lines'],
+      where: { id: decode(result.serverRefs!.orderId) }, relations: ['lines'],
     });
     expect(order.state).toBe('Delivered');
     expect(order.lines.map(line => line.quantity)).toEqual([3]);
