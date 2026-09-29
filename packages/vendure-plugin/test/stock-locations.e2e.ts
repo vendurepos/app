@@ -1,5 +1,5 @@
 import {
-  Allocation, Channel, ChannelService, GlobalSettingsService, Order, OrderService, ProductVariantService,
+  Allocation, Channel, ChannelService, GlobalSettingsService, Order, OrderService, ProductVariantService, dummyPaymentHandler,
   RequestContext, RequestContextService, StockLevel, StockLocation, StockLocationService, TransactionalConnection, User,
 } from '@vendure/core';
 import { parse } from 'graphql';
@@ -11,7 +11,7 @@ import { orderCommand } from './payloads';
 import { createStorefrontMethods, guestOrder } from './shop';
 
 describe('VP3-3: MultiChannel stock locations', () => {
-  const environment = createPluginTestEnvironment();
+  const environment = createPluginTestEnvironment({ paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler] } });
   const { server, adminClient, shopClient, variantIds, serviceIds, decode, run } = environment;
   let connection: TransactionalConnection;
   let ctx: RequestContext;
