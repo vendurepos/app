@@ -1,8 +1,8 @@
 import {
   LanguageCode, PaymentMethodEligibilityChecker, PaymentMethodHandler,
-  ShippingCalculator, ShippingEligibilityChecker,
+  ShippingCalculator, ShippingEligibilityChecker, StockLocationService, idsAreEqual,
 } from '@vendure/core';
-import type { Injector, Order, OrderItemPriceCalculationStrategy, ProductVariant, RequestContext } from '@vendure/core';
+import type { Injector, Order, OrderItemPriceCalculationStrategy, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
 export const TALLY_SHIPPING_METHOD_CODE = 'tally-in-store';
@@ -31,6 +31,42 @@ export class TallyPriceStrategy implements OrderItemPriceCalculationStrategy {
       };
     }
     return this.inner.calculateUnitPrice(ctx, variant, customFields, order, quantity);
+  }
+}
+
+/**
+ * POS lines only (Front desk, 2026-09-29): cap Vendure 3.7.3's MultiChannel over-allocation
+ * and fill its threshold under-allocation. Storefront plans and other methods stay unchanged.
+ */
+export class TallyStockLocationStrategy implements StockLocationStrategy {
+  private injector: Injector;
+  constructor(readonly inner: StockLocationStrategy) {}
+  init(injector: Injector) {
+    this.injector = injector;
+    return this.inner.init?.(injector);
+  }
+  destroy() { return this.inner.destroy?.(); }
+  getAvailableStock(...args: Parameters<StockLocationStrategy['getAvailableStock']>) { return this.inner.getAvailableStock(...args); }
+  forRelease(...args: Parameters<StockLocationStrategy['forRelease']>) { return this.inner.forRelease(...args); }
+  forSale(...args: Parameters<StockLocationStrategy['forSale']>) { return this.inner.forSale(...args); }
+  forCancellation(...args: Parameters<StockLocationStrategy['forCancellation']>) { return this.inner.forCancellation(...args); }
+  async forAllocation(...args: Parameters<StockLocationStrategy['forAllocation']>) {
+    const plan = await this.inner.forAllocation(...args);
+    const [ctx, , orderLine, quantity] = args;
+    if (!orderLine.customFields?.tallyClientLineId) return plan;
+    let sum = 0;
+    const capped = plan.flatMap(entry => {
+      const kept = Math.min(entry.quantity, quantity - sum);
+      sum += kept;
+      return kept > 0 ? [{ location: entry.location, quantity: kept }] : [];
+    });
+    if (sum < quantity) {
+      const location = await this.injector.get(StockLocationService).defaultStockLocation(ctx);
+      const entry = capped.find(item => idsAreEqual(item.location.id, location.id));
+      if (entry) entry.quantity += quantity - sum;
+      else capped.push({ location, quantity: quantity - sum });
+    }
+    return capped;
   }
 }
 

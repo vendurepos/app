@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
+  Allocation, ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevel, StockLevelService,
   StockLocationService, StockMovementService, Surcharge, TaxRate, TransactionalConnection,
   idsAreEqual, isGraphQlErrorResult, manualFulfillmentHandler, normalizeEmailAddress,
@@ -162,7 +162,8 @@ export class OrderCreateService {
       // A collision after the recipe's first event: everything rolled back (its events with it), so start again.
       if (error instanceof Rerun) return this.create(ctx, command);
       if (error instanceof SetupRefusal) return error.result;
-      if (error instanceof StoreConfigurationRefusal) return storeConfiguration(command.id);
+      if (error instanceof StoreConfigurationRefusal) return error.message
+        ? rejected(command.id, 'store_configuration', error.message) : storeConfiguration(command.id);
       if (error instanceof TransientCommandError) throw error;
       throw new TransientCommandError(command.id, transientKind(error) ?? 'unclassified', error);
     }
@@ -557,16 +558,25 @@ export class OrderCreateService {
     await this.lockStock(ctx, [...requested.values()].map(({ variant }) => variant.id));
     // ADR 0002 "Stock": top up a shortage before addItemToOrder, which would otherwise save the
     // line at the saleable quantity, and before ArrangingPayment, which checks saleable stock again.
-    // Vendure creates a stock location at start and falls back to the oldest, so none at all is a bug, not a pre-check.
-    const location = await this.stockLocations.defaultStockLocation(ctx) ?? pluginBug('Vendure returned no default stock location');
-    const topUps: Array<{ variantId: string; id: ID; quantity: number }> = [];
+    const topUps: TopUp[] = [];
+    const stockWarnings: CommandWarning[] = [];
     for (const [variantId, { variant, quantity }] of requested) {
-      const shortfall = quantity - await this.variants.getSaleableStockLevel(ctx, variant);
-      if (shortfall <= 0) continue;
-      await this.adjustStock(ctx, variant.id, location.id, shortfall);
-      topUps.push({ variantId, id: variant.id, quantity: shortfall });
-      // The exact location of each top-up, for an admin's take-back from any channel's context.
-      progress.topUps.push({ variantId: String(variant.id), stockLocationId: String(location.id), quantity: shortfall });
+      const available = await this.stockLevels.getAvailableStock(ctx, variant.id);
+      const physicalShort = Math.max(0, quantity - Math.max(0, available.stockOnHand - available.stockAllocated));
+      if (physicalShort > 0) stockWarnings.push({ code: 'insufficient_stock', variantId, quantity: physicalShort });
+      const topUp = Math.max(0, quantity - await this.variants.getSaleableStockLevel(ctx, variant));
+      if (topUp === 0) continue;
+      // A copied context keeps the probe's per-request stock cache out of the real allocation after the top-up.
+      const plan = await this.stockLocations.getAllocationLocations(ctx.copy(),
+        new OrderLine({ productVariantId: variant.id, productVariant: variant, quantity }), quantity);
+      const location = plan.reduce((sum, entry) => sum + entry.quantity, 0) >= quantity
+        ? plan[0].location : await this.stockLocations.defaultStockLocation(ctx);
+      await this.adjustStock(ctx, variant.id, location.id, topUp);
+      const entry = { variantId: String(variant.id), stockLocationId: String(location.id), quantity: topUp };
+      topUps.push(entry);
+      progress.topUps.push(entry);
+      if (await this.variants.getSaleableStockLevel(ctx, variant) < quantity) throw new StoreConfigurationRefusal(
+        `Variant ${variantId} cannot be made saleable in this channel (no stock location the StockLocationStrategy sells from)`);
     }
     for (const line of payload.lines) {
       const variantId = requested.get(line.variantId)!.variant.id;
@@ -662,6 +672,12 @@ export class OrderCreateService {
       }
       order = unwrap(settled);
     }
+    // Backstop for custom strategies: every POS line must be allocated in full, exactly once.
+    for (const line of order.lines.filter(line => line.customFields.tallyClientLineId)) {
+      const allocations = await this.connection.getRepository(ctx, Allocation).find({ where: { orderLine: { id: line.id } } });
+      if (allocations.reduce((sum, entry) => sum + entry.quantity, 0) !== line.quantity) throw new StoreConfigurationRefusal(
+        `Stock allocation for order line ${line.id} did not match its quantity`);
+    }
     order.customFields.tallyPayments = JSON.stringify(payload.payments);
     order.orderPlacedAt = new Date(payload.createdAt);
     if (command.version === 3) {
@@ -683,14 +699,14 @@ export class OrderCreateService {
     if (topUps.length) {
       try {
         await this.connection.withTransaction(ctx, async takeBackCtx => {
-          for (const topUp of topUps) await this.adjustStock(takeBackCtx, topUp.id, location.id, -topUp.quantity);
+          for (const topUp of topUps) await this.adjustStock(takeBackCtx, topUp.variantId, topUp.stockLocationId, -topUp.quantity);
         });
       } catch (error) {
         compensation = { error };
       }
     }
     const warnings: Array<CommandWarning | CustomerIgnored> = [
-      ...topUps.map(({ variantId, quantity }) => ({ code: 'insufficient_stock' as const, variantId, quantity })), ...ignored,
+      ...stockWarnings, ...ignored,
     ];
     const result: OrderCreateResult = {
       id: command.id, status: 'applied',

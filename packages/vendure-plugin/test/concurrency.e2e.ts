@@ -86,12 +86,12 @@ describe('VP3-2: concurrent sales of one variant', () => {
     held.release();
     const results = await Promise.all([first, second]);
     const after = await level();
-    // A tops up 1 from on-hand 0 and leaves -1. B reads that under the lock, so it tops up 2: today's warning is the
-    // top-up size (VP3-3 rules on the warning quantity). A lost update showed B topping up 1 and on-hand falling by 1.
+    // A tops up 1 from on-hand 0 and leaves -1. B sells 1 against on-hand -1, so it tops up 2 but warns for 1:
+    // the warning covers only this sale's units, not the pre-existing negative on-hand (VP3-3).
     expect({ blocked, onHand: after.onHand - before.onHand, allocated: after.allocated - before.allocated,
       results: results.map(outcome) }).toEqual({ blocked: true, onHand: -2, allocated: 0, results: [
       { status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: mug, quantity: 1 }] },
-      { status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: mug, quantity: 2 }] },
+      { status: 'applied', warnings: [{ code: 'insufficient_stock', variantId: mug, quantity: 1 }] },
     ] });
   });
 
