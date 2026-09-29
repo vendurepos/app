@@ -34,7 +34,7 @@ describe('S1 harness', () => {
         tallyClientOrderId: 'string', tallySaleAt: 'datetime', tallyRegisterId: 'string',
         tallySessionId: 'string', tallyCashierRef: 'string', tallyPayments: 'text', tallySnapshot: 'text',
       },
-      OrderLine: { tallyUnitPrice: 'int', tallyClientLineId: 'string' },
+      OrderLine: { tallyUnitPrice: 'int', tallyClientLineId: 'string', tallyPriceIncludesTax: 'boolean' },
     };
     for (const [entityName, fields] of Object.entries(expected)) {
       const entity = globalSettings.serverConfig.entityCustomFields.find(item => item.entityName === entityName);
