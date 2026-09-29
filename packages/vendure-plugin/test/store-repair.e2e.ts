@@ -4,7 +4,7 @@ import {
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, TallyCommand, TallyPosPlugin } from '../src';
+import { OrderCreateService, TallyCommand, TallyPosPlugin, TransientCommandError } from '../src';
 import { tallyPaymentChecker, tallyPaymentHandler } from '../src/config/strategies';
 import { TEST_HOOKS_ENV, WALK_IN_EMAIL } from '../src/service/order-create.service';
 import { StoreSetupService } from '../src/service/store-setup.service';
@@ -243,6 +243,17 @@ describe('VP3-4a: repair the channel POS setup on demand', () => {
     const result = await run(input, second.token).catch(error => error);
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ status: 'rejected', error: { code: 'store_configuration' } });
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id })).toBeNull();
+  });
+
+  it('9: a repair lock timeout is TransientCommandError(timeout), never lock (409), and stores nothing', async () => {
+    await deleteShipping();
+    vi.spyOn(setup, 'ensureChannelSetup').mockRejectedValueOnce(
+      Object.assign(new Error('canceling statement due to lock timeout'), { driverError: { code: '55P03' } }));
+    const input = sale();
+    const error = await run(input, second.token).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TransientCommandError);
+    expect(error).toMatchObject({ commandId: input.id, kind: 'timeout' });
     expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id })).toBeNull();
   });
 });

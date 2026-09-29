@@ -19,6 +19,7 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
 import { classify } from './classification';
+import { WALK_IN_EMAIL } from './constants';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
@@ -43,13 +44,16 @@ export type TopUp = { variantId: string; stockLocationId: string; quantity: numb
 
 export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSave' | 'finalPass' | 'payments';
 
-export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
+export { WALK_IN_EMAIL };
 // ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
 const CLAIM_LOCK_TIMEOUT = '5s';
 // Front desk ruling 7: every wait after the claim is bounded; a timeout is a 503 and the till retries.
 const RECIPE_LOCK_TIMEOUT = '10s';
 // Front desk ruling 6: the wait for the sale's stock rows; a timeout is a 503 (transient timeout).
 const STOCK_LOCK_TIMEOUT = '5s';
+// Ruling 14: the two-int advisory key (this, hashtext(email)) serialises creating a customer per email.
+// Distinct from StoreSetupService's 0x7a11; two-int keys are apart from other plugins' single-bigint keys.
+const CUSTOMER_LOCK_NAMESPACE = 0x7a12;
 // ADR-038 #220: a createdAt no later than now plus this skew, which absorbs a till whose clock runs
 // ahead; there is no lower bound, since an offline till sends old sales. Later or unparseable: invalid_payload.
 const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
@@ -535,12 +539,23 @@ export class OrderCreateService {
       // same way first (and add this channel, as createOrUpdate did); create only a missing one.
       const emailAddress = normalizeEmailAddress(payload.customer?.email || WALK_IN_EMAIL);
       const customers = this.connection.getRepository(ctx, Customer);
-      customer = await customers.findOne({ where: { emailAddress, deletedAt: IsNull() }, relations: ['channels'] }) ?? undefined;
+      const lookup = async () => await customers.findOne({ where: { emailAddress, deletedAt: IsNull() }, relations: ['channels'] }) ?? undefined;
+      customer = await lookup();
+      if (!customer) {
+        // Ruling 14: emailAddress has no unique index, so a miss is checked again under a per-email lock held to
+        // commit (bounded by the recipe's lock timeout). An existing customer, the walk-in included, never takes it.
+        await customers.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [CUSTOMER_LOCK_NAMESPACE, emailAddress]);
+        customer = await lookup();
+      }
       progress.written = true; // The recipe's first write follows: nothing it raises from here is stored.
       if (!customer) {
         customer = unwrap(await this.customers.createOrUpdate(ctx, { emailAddress, firstName: '', lastName: '' }));
       } else if (!customer.channels.some(channel => idsAreEqual(channel.id, ctx.channelId))) {
-        await customers.createQueryBuilder().relation('channels').of(customer).add(ctx.channelId);
+        // Ruling 8: idempotent, so a concurrent sale linking the same customer waits for that commit and succeeds (no 23505).
+        const junction = customers.metadata.findRelationWithPropertyPath('channels')!.junctionEntityMetadata!;
+        const quote = (name: string) => customers.manager.connection.driver.escape(name);
+        await customers.query(`INSERT INTO ${junction.tablePath.split('.').map(quote).join('.')} (${quote(junction.ownerColumns[0].databaseName)},
+          ${quote(junction.inverseColumns[0].databaseName)}) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [customer.id, ctx.channelId]);
       }
     }
     progress.written = true;
