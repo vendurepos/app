@@ -20,6 +20,7 @@ this repo.
 - `docs/adr/` — this repo's decisions, numbered `NNNN-short-title.md`, in the
   same format as medusapos (`Status`, `Date`, Context / Decision /
   Consequences).
+- `docs/scan-policy.md` — what a barcode scan does on each surface (Front desk rulings).
 - Job ids in the plan: **VA** jobs belong to this repo, **VP** jobs to the
   Vendure plugin that will live here, **TV** jobs to TallyUI (another repo,
   dispatched separately).
