@@ -9,8 +9,8 @@
 ## The contract (Front desk ruling on TallyUI/tallyui#287, 2026-09-30)
 
 - **Shape:** core's server capabilities gain an optional
-  `taxRounding?: { granularity: 'per_order' | 'per_line' | 'per_rate_group'; mode: 'half_away_from_zero' | 'half_up' }` (`half_up` added by the Front desk, 2026-09-30: Vendure's money strategy is `Math.round`).
-- **An absent `taxRounding`** means `per_order` / `half_away_from_zero`, which is the till's behaviour today.
+  `taxRounding?: { granularity: 'per_order' | 'per_line' | 'per_rate_group'; mode: 'half_away_from_zero' | 'half_up' } | { granularity: 'custom' }` (`half_up` and `custom` added by the Front desk, 2026-09-30: Vendure's money strategy is `Math.round`, and a store the server cannot describe must say so).
+- **An absent `taxRounding`** means an older server: the till assumes `per_order` / `half_away_from_zero`, its behaviour today. **`{ granularity: 'custom' }`** (no `mode`) means a store whose rounding the server cannot describe: the till uses its default figures, and that server never emits `figures_mismatch` for subtotal or tax.
 - **No flags.** Each granularity's algorithm is written out in TallyUI's contract docs from Vendure's and Medusa's real code. A variant that needs a different algorithm gets its own granularity **name**. The two `mode` values differ only on exact negative halves.
 - **A capability, not an order.create version.** The till reads it at sale time and records the strategy on the sale's own record, not in the payload. The figures are frozen at finalize.
 - **Where it goes on the `/info` wire:** follow core's `/info` parser on the day. This plugin's `/info` today is `{ contracts: { 'order.create': [...] } }`, and core's `ServerCapabilities` is the connector's parsed view of it.
@@ -24,7 +24,7 @@ The plugin's `GET /tally/v1/info` advertises **how this Vendure store rounds tax
 
 ## Stakes
 
-Every sale's receipt against the store's books. A wrongly advertised strategy makes the till compute the wrong figures on every multi-line sale. It is worse than advertising nothing, which leaves the till at its default rule.
+Every sale's receipt against the store's books. A wrongly advertised strategy makes the till compute the wrong figures on every multi-line sale. It is worse than advertising `{ granularity: 'custom' }`, which leaves the till at its default figures.
 
 ## What to advertise
 
@@ -32,7 +32,7 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 |---|---|
 | `DefaultOrderTaxCalculationStrategy` (Vendure's default, or no `orderTaxCalculationStrategy` set) | `{ granularity: 'per_line', mode: 'half_up' }` |
 | `OrderLevelTaxCalculationStrategy` | `{ granularity: 'per_rate_group', mode: 'half_up' }` |
-| Anything else (a custom strategy, including a subclass of either), or a money strategy other than `DefaultMoneyStrategy` | **omitted** |
+| Anything else (a custom tax strategy, including a subclass of either), or a money strategy other than `DefaultMoneyStrategy` | `{ granularity: 'custom' }` (no `mode`). **Never omit the field:** absence means an older server, which is the wrong assumption for exactly this store. |
 
 **Why these two names suffice** (measured, #38, told to the TallyUI queue on 2026-09-30):
 - **`per_line`:** each line's tax is rounded on its own.
@@ -43,9 +43,9 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 
 **Rounding mode:** Vendure advertises `half_up`.
 - Vendure's `DefaultMoneyStrategy` is `Math.round`, which rounds **half up**. It differs from `half_away_from_zero` only on exact negative halves, e.g. a −59.5 discount surcharge becomes −59, not −60 (already noted in ADR 0002). The contract gained `half_up` for exactly this (Front desk, 2026-09-30).
-- `DefaultMoneyStrategy` is Vendure's default, and `moneyStrategy` is configurable. If a store configures a different money strategy, its rounding is unknown, so **omit `taxRounding`**, as for a custom tax strategy. Detect the exact class, as below.
+- `DefaultMoneyStrategy` is Vendure's default, and `moneyStrategy` is configurable. A store with a different money strategy has unknown rounding, so it advertises `{ granularity: 'custom' }`, as a custom tax strategy does. Detect the exact class, as below.
 
-**Detect by exact class, never by name string.** Compare `config.taxOptions.orderTaxCalculationStrategy.constructor` with Vendure's `DefaultOrderTaxCalculationStrategy` and `OrderLevelTaxCalculationStrategy`. Do not use `instanceof`: a subclass may round differently, so it counts as custom and is omitted. The dev store sets `OrderLevelTaxCalculationStrategy` (`dev/vendure-store/src/vendure-config.ts:58`).
+**Detect by exact class, never by name string.** Compare `config.taxOptions.orderTaxCalculationStrategy.constructor` with Vendure's `DefaultOrderTaxCalculationStrategy` and `OrderLevelTaxCalculationStrategy`. Do not use `instanceof`: a subclass may round differently, so it counts as custom and advertises `{ granularity: 'custom' }`. The dev store sets `OrderLevelTaxCalculationStrategy` (`dev/vendure-store/src/vendure-config.ts:58`).
 
 ## In scope
 
@@ -54,7 +54,7 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 - **`packages/vendure-plugin/test/info-tax-rounding.e2e.ts`** (new): the three rows, each with its own `createPluginTestEnvironment` option. `test/tax-order-level.e2e.ts` shows how an environment gets the order-level strategy.
 - **`docs/adr/0002-order-path-vendure-plugin.md`:**
   - §5 "Versions" / `/info`: what is advertised and why, plus the half-up caveat;
-  - the subtotal/tax warning bullet: `figures_mismatch` may ship once tills that follow the strategy are released. That is its own PR, comparing exactly, and not part of this one.
+  - the subtotal/tax warning bullet: `figures_mismatch` may ship once tills that follow the strategy are released. That is its own PR, comparing exactly, and not part of this one. A store advertising `custom` never gets a subtotal or tax `figures_mismatch` from this server.
 
 ## Out of scope
 
@@ -66,13 +66,14 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 
 1. **Default strategy:** `/info` advertises `{ granularity: 'per_line', mode: 'half_up' }`.
 2. **Order-level strategy:** `{ granularity: 'per_rate_group', mode: 'half_up' }`.
-3. **A subclass of `OrderLevelTaxCalculationStrategy`, an unrelated custom tax strategy, and a custom money strategy:** `taxRounding` is **absent**, and the rest of `/info` is unchanged.
+3. **A subclass of `OrderLevelTaxCalculationStrategy`, an unrelated custom tax strategy, and a custom money strategy:** each advertises exactly `{ granularity: 'custom' }` with **no `mode`**, the field is present (never absent), and the rest of `/info` is unchanged.
 4. **`/info`'s existing `contracts`** are unchanged in all three.
 
 ## Mutation checks (the dispatching session reruns each)
 
 - The mapping returns `per_line` for the order-level strategy: test 2 fails.
 - Detection uses `instanceof`, so the subclass is advertised as `per_rate_group`: test 3 fails.
+- A custom strategy omits `taxRounding` instead of advertising `{ granularity: 'custom' }`: test 3 fails.
 
 ## Acceptance
 
