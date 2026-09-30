@@ -9,7 +9,7 @@ import { logout } from '../lib/logout';
 import { SaleCart } from '../lib/sale-cart';
 import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
-import { useCatalogue } from '../lib/use-catalogue';
+import { SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { useSaleSettings } from '../lib/use-sale-settings';
 
 // The till's register id, minted once per device (medusapos uses 'medusapos.register_id').
@@ -51,12 +51,18 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </Button>
       </HStack>
       <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
-        {saleSettings ? (
+        {saleSettings.status === 'ready' ? (
           <CurrencyProvider currencyCode={saleSettings.settings.currency}>
             <TaxProvider {...taxProviderProps(saleSettings.settings)} rateCodes={saleSettings.rateCodes}>
               <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} />
             </TaxProvider>
           </CurrencyProvider>
+        ) : catalogue.error === SESSION_ENDED_TEXT ? (
+          // A refused session fails the settings reads too, and no retry fixes that: the catalogue's notice says why.
+          <Text className="p-4 text-sm text-muted-foreground">{SESSION_ENDED_TEXT}</Text>
+        ) : saleSettings.status === 'retrying' ? (
+          // No sale on guessed settings: the cart waits until both reads succeed.
+          <Text testID="sale-settings-retrying" className="p-4 text-sm text-muted-foreground">{"Can't reach the store's settings yet. Retrying…"}</Text>
         ) : <Text className="p-4 text-sm text-muted-foreground">Loading store settings…</Text>}
       </ConnectorProvider>
     </VStack>
