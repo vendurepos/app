@@ -16,7 +16,7 @@ import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
-import { readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
+import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 
 // The till's register id, minted once per device (medusapos uses 'medusapos.register_id').
 const REGISTER_ID_KEY = 'vendurepos.register_id';
@@ -48,7 +48,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     refreshCapabilities: async () => {
       // Timed out like the sale's own read, so a hung /info can't hold the outbox's send.
       const read = connector.capabilities && await readCapabilities(session, connector);
-      if (read) capabilities.current = read;
+      // Never below MIN_ORDER_CREATE: the outbox would re-send a refused order lower, without the net-discount rule;
+      // kept at 4, such an order stays rejected and needs attention instead.
+      if (read && read.orderCreate >= MIN_ORDER_CREATE) capabilities.current = read;
     },
   });
   const notice = outboxNotice(outbox.state);
