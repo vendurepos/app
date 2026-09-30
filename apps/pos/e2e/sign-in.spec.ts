@@ -78,6 +78,8 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-email').fill(USERNAME);
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  // Same barcode field, so the same catalogue database name: only the removal at sign-out keeps the mug away.
+  await page.getByTestId('sign-in-barcode_field').fill('barcode');
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByText(/Failed to fetch/).first()).toBeVisible();
   await expect(page.getByText('Tally Fixture Mug', { exact: true })).toHaveCount(0);
