@@ -1,10 +1,10 @@
 import type { SyncNotice } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, OrderContentMismatchError, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { Subject } from 'rxjs';
 import { expect, it, vi } from 'vitest';
 import { catalogueConnector, databaseName, removeCatalogueDatabaseWithin, startCatalogueSync } from './catalogue';
-import { isOrderStored, openOrders, ordersDatabaseName, recordOrder, watchPendingOrders, type OrderStore } from './orders-db';
+import { openOrderStore, ordersDatabaseName, outboxStoreKey, type OrderStore } from './orders-db';
 import type { Session } from './session';
 
 // Memory storage stands in for SQLite: like the web engine, one storage serves both databases, each under its own name.
@@ -38,14 +38,6 @@ function cashSale(): PosOrder {
   return finalizeOrder(builder.getSnapshot(), { registerId: 'register-1', cashierRef: session.email });
 }
 
-/** The first count usePendingOrderCount would show for the store. */
-async function pendingCount(store: OrderStore): Promise<number> {
-  let stop = () => {};
-  const count = await new Promise<number>((resolve) => { stop = watchPendingOrders(store, resolve); });
-  stop();
-  return count;
-}
-
 it('names one database per store and channel, apart from every catalogue database name, never holding the token', () => {
   expect(ordersDatabaseName(session)).not.toBe(databaseName(session));
   expect(ordersDatabaseName(session)).not.toMatch(/^vendurepos_[0-9a-f]{8}$/);
@@ -54,58 +46,63 @@ it('names one database per store and channel, apart from every catalogue databas
   expect(ordersDatabaseName({ ...otherStore })).toBe(ordersDatabaseName(otherStore));
 });
 
-it('stores a completed sale and confirms it with isStored', async () => {
-  const order = cashSale();
-  expect(await isOrderStored(session, order)).toBe(false);
-  await recordOrder(session, order);
-  expect(await isOrderStored(session, order)).toBe(true);
-  const stored = await (await openOrders(session)).findOne(order.id).exec();
-  expect(stored?.toJSON()).toMatchObject({ id: order.id, syncStatus: 'pending', totalMinor: 952 });
-  expect(stored?.payments).toEqual([expect.objectContaining({ method: 'cash', amountMinor: 952, tenderedMinor: 1000, changeMinor: 48 })]);
+it("opens the outbox only once the store's settings, and so its order.create version, are read", () => {
+  // Opened earlier, a pending order's first send would go at order.create 3 and keep that version for good.
+  expect(outboxStoreKey(session, { status: 'resolving', attempt: 1 })).toBeNull();
+  expect(outboxStoreKey(session, { status: 'retrying', attempt: 2, lastError: new Error('offline') })).toBeNull();
+  expect(outboxStoreKey(session, { status: 'ready', settings: session.settings, rateCodes: {}, capabilities: { orderCreate: 4 } }))
+    .toBe(ordersDatabaseName(session));
 });
 
-it("counts a retried complete()'s same order as stored, and refuses other content under its id", async () => {
+it("keeps each store's orders apart, and a closed store's orders are there when it opens again", async () => {
   const order = cashSale();
-  await recordOrder(session, order);
-  await expect(recordOrder(session, order)).resolves.toBeUndefined();
-  const other = { ...order, totalMinor: order.totalMinor + 1 };
-  await expect(recordOrder(session, other)).rejects.toBeInstanceOf(OrderContentMismatchError);
-  expect(await isOrderStored(session, other)).toBe(false);
-  expect(await isOrderStored(session, order)).toBe(true);
+  const here = await openOrderStore(ordersDatabaseName(session));
+  await here.orders.insert(order);
+  const other = await openOrderStore(ordersDatabaseName(otherStore));
+  expect(await other.orders.findOne(order.id).exec()).toBeNull();
+  await other.close();
+  await here.close();
+  expect(here.orders.closed).toBe(true);
+  const again = await openOrderStore(ordersDatabaseName(session));
+  expect((await again.orders.findOne(order.id).exec())?.toJSON()).toMatchObject({ id: order.id, syncStatus: 'pending', totalMinor: 952 });
+  await again.close();
 });
 
-it("keeps each store's orders apart: another store neither holds nor counts them, and switching back finds them", async () => {
+it('opens a name again straight after a close() that is still running, and finds its orders', async () => {
+  const name = ordersDatabaseName(session);
   const order = cashSale();
-  await recordOrder(session, order);
-  const pendingHere = await pendingCount(session);
-  expect(pendingHere).toBeGreaterThan(0);
-  const ordersHere = await openOrders(session);
-  expect(await isOrderStored(otherStore, order)).toBe(false);
-  expect(await pendingCount(otherStore)).toBe(0);
-  // The switch closed the first store's handle; it removed nothing.
-  expect(ordersHere.closed).toBe(true);
-  expect(await isOrderStored(session, order)).toBe(true);
-  expect(await pendingCount(session)).toBe(pendingHere);
+  const first = await openOrderStore(name);
+  await first.orders.insert(order);
+  const settled: string[] = [];
+  const closing = first.close().then(() => { settled.push('closed'); });
+  const second = await openOrderStore(name).finally(() => { settled.push('opened'); });
+  await closing;
+  // The reopen waited for the close (dev mode's ignoreDuplicate would let a production build's DB8 through here):
+  // the first handle is closed, the second one open, and it holds the order.
+  expect(settled).toEqual(['closed', 'opened']);
+  expect(first.orders.closed).toBe(true);
+  expect(second.orders.closed).toBe(false);
+  expect((await second.orders.findOne(order.id).exec())?.id).toBe(order.id);
+  await second.close();
 });
 
-it('still holds a stored order after sign-out removes the catalogue database', async () => {
+it('still holds a stored order after sign-out removes the catalogue database, and after a reload', async () => {
+  const name = ordersDatabaseName(session);
   await startCatalogueSync(session, catalogueConnector(session));
   const order = cashSale();
-  await recordOrder(session, order);
+  const store = await openOrderStore(name);
+  await store.orders.insert(order);
   expect(await removeCatalogueDatabaseWithin()).toBe('removed');
-  expect(await isOrderStored(session, order)).toBe(true);
-  const orders = await openOrders(session);
-  expect(orders.closed).toBe(false);
-  expect((await orders.findOne(order.id).exec())?.id).toBe(order.id);
+  expect(store.orders.closed).toBe(false);
+  expect((await store.orders.findOne(order.id).exec())?.id).toBe(order.id);
   // Signing in again reopens the catalogue under the same name; the order is still there.
   await startCatalogueSync(session, catalogueConnector(session));
-  expect(await isOrderStored(session, order)).toBe(true);
   expect(await removeCatalogueDatabaseWithin()).toBe('removed');
   // The open handle keeps a removed memory store's documents, so read the order back as a reload would: the
   // database closed (memory storage keeps its data on close, never on remove), the module fresh, the store reopened.
-  await orders.database.close();
+  await store.close();
   vi.resetModules();
-  const reloaded = await import('./orders-db');
-  expect(await reloaded.isOrderStored(session, order)).toBe(true);
-  expect((await (await reloaded.openOrders(session)).findOne(order.id).exec())?.syncStatus).toBe('pending');
+  const reloaded = await (await import('./orders-db')).openOrderStore(name);
+  expect((await reloaded.orders.findOne(order.id).exec())?.syncStatus).toBe('pending');
+  await reloaded.close();
 });
