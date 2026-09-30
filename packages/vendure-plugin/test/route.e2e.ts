@@ -121,6 +121,28 @@ describe('POST /tally/v1/commands', () => {
     expect(replay.body.results).toEqual(response.body.results.map((result: object) => ({ ...result, status: 'duplicate' })));
   });
 
+  it('a per-command rejection does not stop the batch; the replay repeats each answer (medusapos parity)', async () => {
+    // quantity 0 is an unstored invalid_payload; a tender below the total is a stored underpaid rejection.
+    const invalid = orderCommand([{ variantId: variantIds.mug[0], quantity: 0, unitPriceMinor: 800 }]);
+    const underpaid = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], [{ method: 'cash', amountMinor: 400 }]);
+    const [valid, valid2] = [mug(), mug()];
+    const commands = [valid, invalid, underpaid, valid2];
+    const response = await post({ commands });
+    expect(response.status).toBe(200);
+    const results = response.body.results;
+    expect(results.map((result: { id: string; status: string; error?: { code: string } }) => [result.id, result.status, result.error?.code]))
+      .toEqual([[valid.id, 'applied', undefined], [invalid.id, 'rejected', 'invalid_payload'], [underpaid.id, 'rejected', 'underpaid'],
+        [valid2.id, 'applied', undefined]]);
+    expect(await ledgerFor(invalid)).toBeNull();
+    expect(await ledgerFor(underpaid)).toMatchObject({ status: 'rejected' });
+    const replay = await post({ commands });
+    expect(replay.status).toBe(200);
+    expect(replay.body.results).toEqual([
+      { ...results[0], status: 'duplicate' }, results[1], results[2], { ...results[3], status: 'duplicate' },
+    ]);
+    expect(await ordersFor(underpaid)).toHaveLength(0);
+  });
+
   it('requires X-Tally-Protocol: 1, else 400 unsupported_protocol, before any write', async () => {
     const before = await ledgerCount();
     for (const protocol of [undefined, '2']) {
