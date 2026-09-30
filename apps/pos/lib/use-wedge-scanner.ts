@@ -44,6 +44,9 @@ export function useWedgeScanner(onScan: (code: string) => void) {
     let field: HTMLInputElement | null = null;
     let held = '';
     let release: ReturnType<typeof setTimeout> | undefined;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    // Whether this burst's held keys have gone into the field already.
+    let flushed = false;
     // A run that turns out not to be a scan (a slow key follows, or a named key, or nothing) is typing: its held keys go
     // in at the caret, replacing a selection, through the native setter and an input event as a key would.
     function flush() {
@@ -53,6 +56,13 @@ export function useWedgeScanner(onScan: (code: string) => void) {
       setValue(field, field.value.slice(0, start) + held + field.value.slice(field.selectionEnd ?? start));
       field.setSelectionRange(start + held.length, start + held.length);
       held = '';
+      flushed = true;
+    }
+    // The release timer runs on the wall clock: a main thread stalled mid-scan fires it before the scan's queued keys
+    // are handled (#88). So it yields once, letting queued input in first, and flushes only if no key came meanwhile.
+    // event.timeStamp and performance.now() share the document's time origin (DOM spec, in every current engine).
+    function settleRun() {
+      settle = setTimeout(() => { if (performance.now() - lastKeyAt >= WEDGE_KEY_GAP_MS) flush(); }, 0);
     }
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -65,7 +75,9 @@ export function useWedgeScanner(onScan: (code: string) => void) {
       if (event.key === 'Enter') {
         const code = burst;
         burst = '';
-        if (!fast || code.length < WEDGE_MIN_LENGTH) {
+        // A burst part flushed into the field anyway is typing to its end, Enter included: a scan can't restore the
+        // amount, as a restore never undoes the onChangeText the flush reached, so the field shows what happened.
+        if (!fast || code.length < WEDGE_MIN_LENGTH || flushed) {
           flush();
           return;
         }
@@ -79,6 +91,7 @@ export function useWedgeScanner(onScan: (code: string) => void) {
         if (!fast) {
           flush();
           field = money;
+          flushed = false;
         }
         burst = fast ? burst + event.key : event.key;
         lastKeyAt = event.timeStamp;
@@ -88,7 +101,7 @@ export function useWedgeScanner(onScan: (code: string) => void) {
           event.preventDefault();
           held += event.key;
           clearTimeout(release);
-          release = setTimeout(flush, WEDGE_KEY_GAP_MS);
+          release = setTimeout(settleRun, WEDGE_KEY_GAP_MS);
         }
       } else if (event.key !== 'Shift') {
         // The named keys and shortcuts (Backspace, Delete, the arrows, Cmd+A) neither extend nor end a burst, but act on
@@ -100,6 +113,7 @@ export function useWedgeScanner(onScan: (code: string) => void) {
     document.addEventListener('keydown', onKeyDown, true);
     return () => {
       clearTimeout(release);
+      clearTimeout(settle);
       document.removeEventListener('keydown', onKeyDown, true);
     };
   }, []);

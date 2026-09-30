@@ -165,3 +165,47 @@ it('leaves a scanner-fast burst into a text field such as the search to the fiel
   expect(search.value).toBe('400638133393');
   expect(enters).toHaveBeenCalledTimes(1);
 });
+
+/**
+ * Delivers `keys` to `target` stamped `from` on, 2 ms apart, without moving the clock: keys a wedge sent while the main
+ * thread was stalled, queued, and handled only now with the timeStamps they were pressed at.
+ */
+function queued(keys: string[], from: number, target: HTMLInputElement) {
+  keys.forEach((key, i) => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'timeStamp', { value: from + i * 2 });
+    target.dispatchEvent(event);
+  });
+}
+
+// The stall (#88): the scan's first 4 keys are handled, then the thread stalls until the release timer is due, so its
+// tick runs first; the rest of the scan, pressed during the stall, is handled next, before the timer's yield completes.
+it('flushes nothing when the release timer fires on a stall with a scan still queued', () => {
+  const counted = moneyInput('100.00');
+  const inputs = vi.fn();
+  counted.addEventListener('input', inputs);
+  type(CODE.slice(0, 4), WEDGE_GAP_MS, counted, false);
+  const last = performance.now();
+  vi.advanceTimersToNextTimer();
+  expect(performance.now() - last).toBe(WEDGE_KEY_GAP_MS);
+  queued([...CODE.slice(4), 'Enter'], last + 1, counted);
+  vi.advanceTimersByTime(100);
+  expect(inputs).not.toHaveBeenCalled();
+  expect(onScan.mock.calls).toEqual([[CODE]]);
+  expect(counted.value).toBe('100.00');
+});
+
+// A pause the yield sees whole: the timer ticks and its yield completes with no key handled, so the held keys go in;
+// the rest of the burst, handled after, can no longer be a scan, since the field's onChangeText has had its first keys.
+it('types the rest of a burst whose first keys a pause put in a money field, Enter included', () => {
+  const counted = moneyInput('');
+  type(CODE.slice(0, 4), WEDGE_GAP_MS, counted, false);
+  const last = performance.now();
+  vi.advanceTimersByTime(WEDGE_KEY_GAP_MS);
+  vi.runOnlyPendingTimers();
+  expect(counted.value).toBe(CODE.slice(0, 4));
+  queued([...CODE.slice(4), 'Enter'], last + 1, counted);
+  expect(onScan).not.toHaveBeenCalled();
+  expect(counted.value).toBe(CODE);
+  expect(enters).toHaveBeenCalledTimes(1);
+});
