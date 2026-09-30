@@ -8,7 +8,7 @@ import {
 } from '@tallyui/components';
 import { ConnectorProvider, type ServerCapabilities } from '@tallyui/core';
 import {
-  createRegisterOutbox, CurrencyProvider, registerCommandsLogger, RegisterSessionRequiredError, TaxProvider, taxProviderProps,
+  createRegisterOutbox, CurrencyProvider, registerCommandsLogger, TaxProvider, taxProviderProps,
   useCurrencyFormatter, useOrderOutbox, useRegisterSession, useSale, type OutboxState, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { cartTabLabel } from '../lib/cart-totals';
@@ -16,6 +16,7 @@ import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { logout } from '../lib/logout';
 import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
+import { startTenderInSession } from '../lib/pay-gate';
 import { printLines } from '../lib/print-lines';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleReceipt } from '../lib/sale-receipt';
@@ -31,8 +32,6 @@ import { zReportLines } from '../lib/z-report';
 const APP_VERSION = Constants.expoConfig?.version ?? 'unknown';
 // The business day a session opens on is the device's.
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
-// The cashier-facing refusal for a Pay with no open session (RegisterSessionRequiredError carries only a code).
-const OPEN_REGISTER_TEXT = 'Open the register to take payment.';
 // From this window width the cart sits beside the catalogue; below it, Products and Cart are tabs.
 const WIDE_MIN_WIDTH = 768;
 // How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70).
@@ -246,16 +245,7 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, 
   const [payError, setPayError] = useState<string>();
   async function pay(method: 'cash' | 'external') {
     setPayError(undefined);
-    try {
-      // Read from storage, not the rendered session, and pinned to the tender (INTEGRATION.md). Null means sessions
-      // are off, which this till never sells under: the settings gate needs MIN_REGISTER, and a database still opening
-      // is refused the same way.
-      const confirmed = await register.requireSaleSession();
-      if (!confirmed) throw new RegisterSessionRequiredError();
-      sale.startTender(method, { session: confirmed });
-    } catch (refusal) {
-      setPayError(refusal instanceof RegisterSessionRequiredError ? OPEN_REGISTER_TEXT : String(refusal));
-    }
+    setPayError(await startTenderInSession(register, sale, method));
   }
   const cart = (payGate?: ReactNode) => <SaleCart sale={sale} onPay={(method) => void pay(method)} payGate={payGate} payError={payError} />;
   const format = useCurrencyFormatter();
