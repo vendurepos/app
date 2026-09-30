@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { withStockOverlay, type SyncNotice, type TallyConnector } from '@tallyui/core';
+import { withStockOverlay, type TallyConnector } from '@tallyui/core';
 import { getStorageHealth } from '@tallyui/database';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import { isStorageWorkerStartError } from '@tallyui/storage-sqlite/web';
@@ -17,7 +17,6 @@ export function useCatalogue(session: Session): {
   error: string | null;
   stockOverlay: ReadonlyMap<string, unknown> | undefined;
   stockOverlayAsOf: string | undefined;
-  pullNotice: SyncNotice | undefined;
 } {
   // One connector per store session (TallyUI #307): a shared instance would share its reconcile feeds across stores.
   const connector = useMemo(() => catalogueConnector(session), [session]);
@@ -26,7 +25,6 @@ export function useCatalogue(session: Session): {
   const [error, setError] = useState<string | null>(null);
   const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [stockOverlayAsOf, setStockOverlayAsOf] = useState<string>();
-  const [pullNotice, setPullNotice] = useState<SyncNotice>();
   const overlaidProducts = useMemo(() => products.map(doc => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay)), [products, connector, stockOverlay]);
 
   useEffect(() => {
@@ -51,7 +49,6 @@ export function useCatalogue(session: Session): {
       }));
       subscriptions.push(replication.notice$.subscribe((notice) => {
         if (cancelled) return;
-        setPullNotice(notice);
         if (dead) return;
         tillStopped = notice?.fixedBy === 'till';
         if (!tillStopped) return;
@@ -103,5 +100,5 @@ export function useCatalogue(session: Session): {
     };
   }, [session, connector]);
 
-  return { connector, products: overlaidProducts, lastSyncedAt, error, stockOverlay, stockOverlayAsOf, pullNotice };
+  return { connector, products: overlaidProducts, lastSyncedAt, error, stockOverlay, stockOverlayAsOf };
 }

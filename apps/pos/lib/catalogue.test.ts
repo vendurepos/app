@@ -274,8 +274,7 @@ describe('catalogue sync lifecycle', () => {
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
       .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, setError])
-      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
-      .mockReturnValueOnce([undefined, vi.fn()]);
+      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
     let cleanup: (() => void) | void = undefined;
     vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
     const health = new Subject<{ status: 'ok' | 'stalled' | 'dead'; stalledWrites: number }>();
@@ -304,12 +303,10 @@ describe('catalogue sync lifecycle', () => {
     const { stopCatalogueSync } = await import('./catalogue');
     const setLastSyncedAt = vi.fn();
     const setError = vi.fn();
-    const setPullNotice = vi.fn();
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
       .mockReturnValueOnce([null, setLastSyncedAt]).mockReturnValueOnce([null, setError])
-      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
-      .mockReturnValueOnce([undefined, setPullNotice]);
+      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
     let cleanup: (() => void) | void = undefined;
     vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
     catalogueHook(session);
@@ -320,7 +317,6 @@ describe('catalogue sync lifecycle', () => {
     replication.active$.next(true);
     replication.notice$.next(notice);
     replication.active$.next(false);
-    expect(setPullNotice).toHaveBeenLastCalledWith(notice);
     expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
     // A later reSync run returns the paused empty page: the catalogue must not report itself synced.
     replication.active$.next(true);
@@ -382,8 +378,7 @@ describe('catalogue sync lifecycle', () => {
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[raw], vi.fn()])
       .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
-      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
-      .mockReturnValueOnce([undefined, vi.fn()]);
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
     const { products, connector, stockOverlay } = catalogueHook(session);
     expect(connector.traits.product.getVariants!(products[0])[0].stock?.quantity).toBe(7);
     expect(connector.traits.product.getVariants!(raw)[0].stock?.quantity).toBe(1);
@@ -400,8 +395,7 @@ describe('catalogue sync lifecycle', () => {
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
       .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
-      .mockReturnValueOnce([undefined, setOverlay]).mockReturnValueOnce([undefined, setAsOf])
-      .mockReturnValueOnce([undefined, vi.fn()]);
+      .mockReturnValueOnce([undefined, setOverlay]).mockReturnValueOnce([undefined, setAsOf]);
     let cleanup: (() => void) | void = undefined;
     vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
     catalogueHook(session);

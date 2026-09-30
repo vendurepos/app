@@ -31,19 +31,16 @@ it('shows the session-ended notice when the store answers a product pull with 40
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const setLastSyncedAt = vi.fn();
   const setError = vi.fn();
-  const setPullNotice = vi.fn();
   vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
     .mockReturnValueOnce([null, setLastSyncedAt]).mockReturnValueOnce([null, setError])
-    .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
-    .mockReturnValueOnce([undefined, setPullNotice]);
+    .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
   vi.mocked(useMemo).mockImplementation((create) => create());
   let cleanup: (() => void) | void = undefined;
   vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
   useCatalogue(session);
   await vi.waitFor(() => expect(setError).toHaveBeenCalledWith(SESSION_ENDED_TEXT));
   expect(fetch.mock.calls.some(([url]) => String(url).startsWith(`${session.url}/`))).toBe(true);
-  expect(setPullNotice).toHaveBeenCalledWith(expect.objectContaining({ code: 'unauthorized', fixedBy: 'till' }));
-  // Let the paused run end: it must not clear the notice or report the catalogue synced.
+  // Let the paused run end: it must not clear the error or report the catalogue synced.
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
   expect(setLastSyncedAt).not.toHaveBeenCalled();

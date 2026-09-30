@@ -5,19 +5,15 @@ declare global {
 }
 
 let cspConsole: string[] = [];
-let sharedConnectorConsole: string[] = [];
+// TallyUI #315's one-connector-two-databases warning is dev-only and this is a production build, so the per-session guard is the unit test in lib/catalogue.test.ts.
 
 // public/index.html's CSP meta must hold for the whole flow. A reload starts a new array, so read it before each one.
 test.beforeEach(async ({ page }) => {
   // An invalid CSP source is a build mistake and a refusal is a violation, so either console message fails the smoke.
   const messages: string[] = [];
   cspConsole = messages;
-  const shared: string[] = [];
-  sharedConnectorConsole = shared;
   page.on('console', (message) => {
     if (/Content Security Policy/i.test(message.text())) messages.push(message.text());
-    // TallyUI #315's warning: one connector instance replicating into two databases.
-    if (/one connector instance is replicating into two databases/i.test(message.text())) shared.push(message.text());
   });
   await page.addInitScript(() => {
     window.cspViolations = [];
@@ -136,7 +132,6 @@ test('signs in to the dev store', async ({ page }) => {
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
-  expect(sharedConnectorConsole).toEqual([]);
 });
 
 test('a session revoked on the store stops the catalogue with a notice', async ({ page }) => {
@@ -177,5 +172,4 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
-  expect(sharedConnectorConsole).toEqual([]);
 });
