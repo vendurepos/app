@@ -9,7 +9,10 @@ A POS sale is recorded offline first and reaches the server later as a
 TallyUI command. The client side is already built and platform-neutral:
 
 - **The contract.** `order.create` is sent to `POST /tally/v1/commands`
-  (`X-Tally-Protocol: 1`, 1–50 commands per batch). The command `id` is a
+  (`X-Tally-Protocol: 1`, 1–50 commands per batch). A batch of more than 50
+  answers 413 `{ code: 'batch_too_large', maxCommands: 50, message }`, as
+  medusapos does, while an empty or malformed batch stays 400
+  `invalid_payload` (Front desk ruling 18, 2026-09-30). The command `id` is a
   UUIDv7 and is the idempotency key. The server fingerprints the canonical
   `{type, version, payload}` with SHA-256 (TallyUI ADR-038, ADR-039).
 - **The results.** Each command comes back `applied`, `duplicate` or

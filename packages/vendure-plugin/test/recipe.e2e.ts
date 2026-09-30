@@ -176,6 +176,16 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(command.payload.payments);
   });
 
+  it('ADR-039: a tender after the covering one creates no Vendure payment; tallyPayments keeps both', async () => {
+    const command = orderCommand([mug()], [{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 500 }]);
+    const { order } = await applied(command);
+    expect(order.totalWithTax).toBe(1000);
+    expect(order.payments.map(payment => [payment.state, payment.amount])).toEqual([['Settled', 1000]]);
+    expect(order.payments[0].metadata.tender).toEqual(command.payload.payments[0]);
+    expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(command.payload.payments);
+    expect(order.state).toBe('Delivered');
+  });
+
   it('split tender with change on a non-final tender: payments cover the order exactly; tallyPayments as given', async () => {
     // Ruling 7 (TallyUI ADR-038): amountMinor is what the tender applies to the order, net of change.
     // Total 1000: cash 600 handed over with 100 change applies 500, then 500 by card.
