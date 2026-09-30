@@ -606,8 +606,21 @@ test.describe('on a narrow screen', () => {
     await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
   }
 
-  /** A keyboard-wedge scan: the code's keys a few ms apart, then Enter, into whatever has the focus. */
+  /**
+   * A keyboard-wedge scan at scanner speed: the code's keydowns, then Enter's, dispatched to the focus in one synchronous
+   * loop, so every gap is well under WEDGE_KEY_GAP_MS however loaded the machine (Playwright's per-key round trips can
+   * exceed it on a CI runner). Synthetic keys type nothing, so this is for a scan meant never to reach a field: none
+   * focused, or a money field, whose keys the listener holds.
+   */
   async function wedgeScan(page: Page, code: string) {
+    await page.evaluate((keys) => {
+      const target = document.activeElement ?? document.body;
+      for (const key of keys) target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    }, [...code, 'Enter']);
+  }
+
+  /** A scan typed key by key, for a text field whose own handling of the keys is under test: the listener leaves it be. */
+  async function typedScan(page: Page, code: string) {
     await page.keyboard.type(code, { delay: 5 });
     await page.keyboard.press('Enter');
   }
@@ -647,7 +660,7 @@ test.describe('on a narrow screen', () => {
     const search = page.getByPlaceholder('Search or scan barcode / SKU');
     // Into the focused search field the field's own Enter looks the code up; the listener leaves it be, so one add.
     await expect(search).toBeFocused();
-    await wedgeScan(page, MUG_BARCODE);
+    await typedScan(page, MUG_BARCODE);
     await expect(highlight).toBeVisible();
     await expect(cartTab).toHaveText('Cart (1) · €9.52');
     await expect(search).toHaveValue('');
@@ -737,7 +750,7 @@ test.describe('on a narrow screen', () => {
     await expect(sheet).toBeVisible();
     // Into the reason field the keys are the field's: nothing is added.
     await sheet.getByTestId('movement-reason').click();
-    await wedgeScan(page, MUG_BARCODE);
+    await typedScan(page, MUG_BARCODE);
     await expect(sheet.getByTestId('movement-reason')).toHaveValue(MUG_BARCODE);
     await expect(sheet).toBeVisible();
     await expect(cartTab).toHaveText('Cart (0) · €0.00');
