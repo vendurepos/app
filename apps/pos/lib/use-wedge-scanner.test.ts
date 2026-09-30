@@ -39,12 +39,30 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Types `keys` then Enter at `target`, `gapMs` apart, as a keyboard or a wedge would. */
-function type(keys: string, gapMs: number, target: Element = document.body) {
-  for (const key of [...keys, 'Enter']) {
+/** Types `keys` then Enter (unless `enter` is false) at `target`, `gapMs` apart, as a keyboard or a wedge would. */
+function type(keys: string, gapMs: number, target: Element = document.body, enter = true) {
+  for (const key of enter ? [...keys, 'Enter'] : keys) {
     vi.advanceTimersByTime(gapMs);
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    // happy-dom has no default action: a key not prevented types into an input, at its end, as the browser would.
+    if (target.dispatchEvent(event) && key.length === 1 && target instanceof HTMLInputElement) target.value += key;
   }
+}
+
+/** Presses one key at `target`; a Backspace not prevented deletes before the caret, as the browser would. */
+function press(key: string, target: HTMLInputElement, gapMs = WEDGE_GAP_MS) {
+  vi.advanceTimersByTime(gapMs);
+  if (!target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) || key !== 'Backspace') return;
+  const caret = target.selectionStart ?? target.value.length;
+  target.value = target.value.slice(0, caret - 1) + target.value.slice(caret);
+}
+
+/** A money field as react-native-web renders TallyUI's amount inputs (keyboardType="decimal-pad"). */
+function moneyInput(value: string) {
+  const input = document.body.appendChild(document.createElement('input'));
+  input.setAttribute('inputmode', 'decimal');
+  input.value = value;
+  return input;
 }
 
 it('takes a scanner-fast burst ended by Enter as a scan, and its Enter goes no further', () => {
@@ -76,5 +94,74 @@ it('stops listening once unmounted', () => {
   unmount();
   type(CODE, WEDGE_GAP_MS);
   expect(onScan).not.toHaveBeenCalled();
+  expect(enters).toHaveBeenCalledTimes(1);
+});
+
+it('takes a scanner-fast burst into a money field as a scan, and not one of its keys reaches the field', () => {
+  const counted = moneyInput('100.00');
+  const inputs = vi.fn();
+  counted.addEventListener('input', () => inputs(counted.value));
+  type('400638133393', WEDGE_GAP_MS, counted);
+  vi.advanceTimersByTime(100);
+  expect(onScan.mock.calls).toEqual([['400638133393']]);
+  expect(counted.value).toBe('100.00');
+  // Not even the first key: the field's onChangeText would have acted on it (a cash payment, the tile counts).
+  expect(inputs).not.toHaveBeenCalled();
+  expect(enters).not.toHaveBeenCalled();
+});
+
+it('keeps the Shift a scanner sends for a capital out of a money field too', () => {
+  const counted = moneyInput('');
+  const inputs = vi.fn();
+  counted.addEventListener('input', inputs);
+  for (const key of 'ABC12345') {
+    press('Shift', counted);
+    press(key, counted);
+  }
+  press('Enter', counted);
+  expect(onScan.mock.calls).toEqual([['ABC12345']]);
+  expect(inputs).not.toHaveBeenCalled();
+});
+
+it('types over a selected amount in a money field at human speed', () => {
+  const counted = moneyInput('100.00');
+  counted.setSelectionRange(0, counted.value.length);
+  type('50', 150, counted, false);
+  vi.advanceTimersByTime(100);
+  expect(counted.value).toBe('50');
+});
+
+it('puts held keys in before a Backspace acts: 1, 2 then a quick Backspace is 1', () => {
+  const counted = moneyInput('');
+  type('12', 150, counted, false);
+  press('Backspace', counted);
+  vi.advanceTimersByTime(100);
+  expect(counted.value).toBe('1');
+  expect(onScan).not.toHaveBeenCalled();
+});
+
+it('leaves typing at human speed in a money field alone: 1, 2, 0 then Enter is 120', () => {
+  const counted = moneyInput('');
+  type('120', 150, counted);
+  expect(onScan).not.toHaveBeenCalled();
+  expect(counted.value).toBe('120');
+  expect(enters).toHaveBeenCalledTimes(1);
+});
+
+it('puts two keys rolled together into a money field back in the field once the run ends', () => {
+  const counted = moneyInput('');
+  type('12', WEDGE_GAP_MS, counted, false);
+  vi.advanceTimersByTime(WEDGE_KEY_GAP_MS);
+  type('0', 150, counted);
+  expect(counted.value).toBe('120');
+  expect(onScan).not.toHaveBeenCalled();
+});
+
+it('leaves a scanner-fast burst into a text field such as the search to the field', () => {
+  const search = document.body.appendChild(document.createElement('input'));
+  search.setAttribute('role', 'searchbox');
+  type('400638133393', WEDGE_GAP_MS, search);
+  expect(onScan).not.toHaveBeenCalled();
+  expect(search.value).toBe('400638133393');
   expect(enters).toHaveBeenCalledTimes(1);
 });
