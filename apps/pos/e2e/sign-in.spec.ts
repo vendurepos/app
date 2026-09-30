@@ -1,4 +1,27 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+declare global {
+  interface Window { cspViolations: string[] }
+}
+
+// public/index.html's CSP meta must hold for the whole flow. A reload starts a new array, so read it before each one.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.cspViolations = [];
+    window.addEventListener('securitypolicyviolation', (event) => {
+      window.cspViolations.push(`${event.effectiveDirective} blocked ${event.blockedURI}`);
+    });
+  });
+});
+
+async function cspViolations(page: Page) {
+  return page.evaluate(() => window.cspViolations);
+}
+
+async function expectCspMeta(page: Page) {
+  expect(await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]') !== null))
+    .toBe(true);
+}
 
 // scripts/smoke-web.sh provides E2E_STORE_URL and defaults the store port to 3200.
 const STORE_URL = process.env.E2E_STORE_URL ?? 'http://127.0.0.1:3200';
@@ -18,6 +41,8 @@ test('wrong password shows an error', async ({ page }) => {
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('sign-in-error')).toHaveText('Email or password is incorrect.');
+  await expectCspMeta(page);
+  expect(await cspViolations(page)).toEqual([]);
 });
 
 test('signs in to the dev store', async ({ page }) => {
@@ -48,6 +73,7 @@ test('signs in to the dev store', async ({ page }) => {
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Espresso Beans', { exact: true })).toHaveCount(0);
   await search.fill('');
+  const violations = await cspViolations(page);
   await page.reload();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   const storedSession = await page.evaluate(() => localStorage.getItem('vendurepos.session'));
@@ -62,6 +88,8 @@ test('signs in to the dev store', async ({ page }) => {
   expect((await beforeSignOut.json()).data.activeAdministrator.id).not.toBeNull();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  // signOut() clears the stored session before the sign-in screen renders (lib/session.ts SESSION_KEY).
+  expect(await page.evaluate(() => localStorage.getItem('vendurepos.session'))).toBeNull();
   const response = await page.request.post(`${STORE_URL}/admin-api`, {
     headers: { Authorization: `Bearer ${token}` },
     data: { query: '{ activeAdministrator { id } }' },
@@ -82,9 +110,15 @@ test('signs in to the dev store', async ({ page }) => {
   await page.getByTestId('sign-in-barcode_field').fill('barcode');
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByText(/Failed to fetch/).first()).toBeVisible();
+  // The status line has left "Syncing catalogue…" for its final state, so the empty list below is not mid-sync.
+  await expect(page.getByText('Syncing catalogue…', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Tally Fixture Mug', { exact: true })).toHaveCount(0);
   await expect(page.getByText('No products yet.', { exact: true })).toBeVisible();
   await page.unroute('**/admin-api');
+  violations.push(...await cspViolations(page));
   await page.reload();
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
+  await expectCspMeta(page);
+  violations.push(...await cspViolations(page));
+  expect(violations).toEqual([]);
 });
