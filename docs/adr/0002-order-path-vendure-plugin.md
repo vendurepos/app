@@ -709,6 +709,32 @@ it proves each of these with a test:
    code calling `StockLevelService` directly; neither passes the strategy. An
    upgrade review of `@vendure/core` must re-check these call sites; the
    plugin's `test/stock-fulfilment-race.e2e.ts` fails if the seam moves.
+   Outside a transaction TypeORM refuses the lock and the write would go
+   ahead unprotected, so it is never silent: the strategy logs it at error
+   level with the method, order line and variant, counts it
+   (`unprotectedStockWrites()`, the plugin's only metric for now), and throws
+   when `NODE_ENV` is `test` or `development`; in production, or with
+   `NODE_ENV` unset, it logs, counts and continues, since failing a
+   merchant's stock write would be worse
+   (`test/stock-lock-no-transaction.e2e.ts`). One transaction can call the
+   strategy for two orders: the admin `addFulfillmentToOrder` mutation (one
+   `@Transaction`, `order.resolver.js:137`, `:44`) accepts lines of several
+   orders (`order.service.js:1398`, `order-utils.js:114`) and sells them line
+   by line (`order.service.js:1426`, `default-fulfillment-process.js:85`,
+   `stock-movement.service.js:165`), and cancelling that fulfillment does the
+   same (`default-fulfillment-process.js:81`, `:82`). The sort is per order,
+   so two such fulfillments, or one and a POS sale, can lock out of a global
+   order and deadlock; Postgres aborts one (40P01), a POS sale answers it as a
+   transient `deadlock`, and no update is lost. Open, reported to the front
+   desk (2026-09-30). With the lock, a Shop settlement that comes after stock
+   runs out gets `MultiChannelStockLocationStrategy`'s empty plan
+   (`multi-channel-stock-location-strategy.js:87`) and settles unallocated;
+   that is Vendure's own planning, which the old race only hid, not the
+   lock's doing (#62 finding 6, reported to Paul). MultiChannel's
+   per-context stock-level cache (`RequestContextCacheService`, `:148`, #62
+   finding 3) can still be stale within one transaction across lines; the
+   lock does not change that, and POS lines already allocate on a copied
+   context.
 8. **Lines.** POS lines stay 1:1 with order lines, including two lines of
    the same variant.
 9. **Tenders.** Split tender and overpayment: the payments cover the order
