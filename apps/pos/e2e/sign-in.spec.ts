@@ -485,6 +485,82 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   expect(cspConsole).toEqual([]);
 });
 
+test("a closure waits for its session's orders: the Z notes them, the next session sells, and the closure goes after them", async ({ page }) => {
+  // Offline, then both outboxes' backoffs, then the sends.
+  test.setTimeout(180_000);
+  // Offline: every command the till tries to send. Online: each command the store applied, in the order its answer came.
+  const attempted: { type: string; sessionId: unknown }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    for (const { type, payload } of route.request().postDataJSON().commands as SentCommand[]) attempted.push({ type, sessionId: payload.sessionId });
+    return route.abort();
+  });
+  const answers: SentCommand[][] = [];
+  const results = new Map<string, CommandResult>();
+  page.on('response', async (response) => {
+    if (response.request().method() !== 'POST' || !response.url().endsWith('/tally/v1/commands')) return;
+    const at = answers.push([]) - 1;
+    const sent: SentCommand[] = response.request().postDataJSON().commands;
+    for (const result of ((await response.json().catch(() => ({}))).results ?? []) as CommandResult[]) results.set(result.id, result);
+    answers[at] = sent.filter(({ id }) => results.get(id)?.status === 'applied');
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  const cart = page.getByTestId('cart');
+  const tender = page.getByTestId('tender');
+  const cashSale = async () => {
+    await page.getByTestId('product-tile-Tally Fixture Mug').click();
+    await cart.getByTestId('pay-cash').click();
+    await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+    await tender.getByTestId('tender-complete').click();
+    await page.getByTestId('new-sale').click();
+  };
+  await openRegister(page, '100.00');
+  await cashSale();
+  await cashSale();
+  await expect(page.getByTestId('orders-waiting')).toHaveText('2 orders waiting to send');
+  // Counted exactly: €100.00 + 2 × €9.52.
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+  await page.getByTestId('register-count').getByTestId('count-amount').fill('119.04');
+  await page.getByTestId('register-count').getByTestId('count-close').click();
+  const sheet = page.getByTestId('closure-sheet');
+  await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €119.04');
+  await expect(page.getByTestId('closure-unsynced')).toHaveText('2 orders still syncing');
+  await sheet.getByTestId('closure-print').click();
+  expect(await page.frameLocator('#vendurepos-print').locator('p').allTextContents())
+    .toEqual(expect.arrayContaining(['Cash expected €119.04', 'Cash variance €0.00', '2 orders still syncing']));
+  await expect(page.getByTestId('register-closing-pending')).toHaveText('Closing — waiting for 2 orders');
+  await sheet.getByTestId('closure-done').click();
+  // The till opens its next session and sells at once, while the closure waits.
+  await openRegister(page, '50.00');
+  await cashSale();
+  await expect(page.getByTestId('orders-waiting')).toHaveText('3 orders waiting to send');
+  await expect(page.getByTestId('register-closing-pending')).toHaveText('Closing — waiting for 2 orders');
+  const firstSession = attempted.find(({ type }) => type === 'register.session.open')!.sessionId;
+  expect(attempted.filter(({ type, sessionId }) => type === 'order.create' && sessionId === firstSession).length).toBeGreaterThan(0);
+  // Held in the till: the closure never went out while its orders could not.
+  expect(attempted.filter(({ type }) => type === 'register.closure.submit')).toEqual([]);
+  await page.unroute('**/tally/v1/commands');
+  const applied = () => answers.flat();
+  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 120_000 });
+  // Flushed as the orders drain, not at the end of the register outbox's backoff (by then 8 s or more).
+  await expect.poll(() => applied().some(({ type }) => type === 'register.closure.submit'), { timeout: 3_000 }).toBe(true);
+  const order = applied().map(({ type, payload }) => `${type}:${payload.sessionId === firstSession ? 1 : 2}`);
+  const closureAt = order.indexOf('register.closure.submit:1');
+  expect(order.filter((entry) => entry === 'order.create:1')).toHaveLength(2);
+  expect(order.lastIndexOf('order.create:1')).toBeLessThan(closureAt);
+  const closure = applied()[closureAt];
+  expect(results.get(closure.id)!.register!.closure).toMatchObject({ expected: { cash: 11904 }, variance: { cash: 0 } });
+  await expect(page.getByTestId('register-closing-pending')).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 // Below WIDE_MIN_WIDTH Products and Cart are tabs (vendurepos #70): an add confirms in place and never switches tab.
 test.describe('on a narrow screen', () => {
   test.use({ viewport: { width: 360, height: 780 } });

@@ -39,6 +39,13 @@ export function zReportLines(closure: Closure, { store, currency, timezone, prin
       ...(tender.counted === '' ? [] : [`${tenderName(tender.name)} counted ${tender.counted_display}`,
         `${tenderName(tender.name)} variance ${tender.variance_display}`]),
     ]),
+    ...(closure.unsynced_count > 0 ? [unsyncedNote(closure.unsynced_count)] : []),
     ...(z.tax_rounding_note ? [z.tax_rounding_note] : []),
   ];
 }
+
+/**
+ * The closure's orders not yet sent when it was written (its own `unsynced_count`): the closure waits for them
+ * (lib/closure-hold.ts), so the store's view of this session lags the Z until they are sent.
+ */
+export const unsyncedNote = (count: number) => `${count} ${count === 1 ? 'order' : 'orders'} still syncing`;

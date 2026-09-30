@@ -33,6 +33,12 @@ it("prints the closure document's own figures", () => {
   ]);
 });
 
+it("notes the closure's orders still syncing when it was written, and nothing when there are none", () => {
+  expect(zReportLines({ ...closure, unsynced_count: 2, unsynced_total_minor: 1904 }, context).at(-1)).toBe('2 orders still syncing');
+  expect(zReportLines({ ...closure, unsynced_count: 1 }, context).at(-1)).toBe('1 order still syncing');
+  expect(zReportLines(closure, context).join('\n')).not.toContain('syncing');
+});
+
 it('prints the mixed tax rounding note when the sales used more than one rounding (TallyUI #318)', () => {
   const mixed = { ...closure, breakdowns: { ...closure.breakdowns, tax_rounding_mixed: true } };
   expect(zReportLines(mixed, context).at(-1)).toBe(TAX_ROUNDING_MIXED_NOTE);
