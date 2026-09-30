@@ -292,3 +292,92 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
+
+test('a rejected sale needs attention, is retried from the Orders panel and applies; a refused batch is sent again', async ({ page }) => {
+  // The store rejects every order it is sent: each stays rejected until the cashier retries it.
+  const sent: { id: string; payload: { clientOrderId: string } }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const commands: typeof sent = route.request().postDataJSON().commands;
+    sent.push(...commands);
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
+      id, status: 'rejected', error: { code: 'invalid_payload', message: 'test refusal' },
+    })) }) });
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const cart = page.getByTestId('cart');
+  const panel = page.getByTestId('orders-panel');
+  // Pays the cart's total in cash; resolves to the order's client id and its receipt total in minor units.
+  const cashSale = async () => {
+    const before = sent.length;
+    await cart.getByTestId('pay-cash').click();
+    const tender = page.getByTestId('tender');
+    await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+    await tender.getByTestId('tender-complete').click();
+    const total = Math.round(Number((await page.getByTestId('receipt').getByTestId('receipt-total').innerText()).replace(/[^\d.]/g, '')) * 100);
+    await expect.poll(() => sent.length).toBeGreaterThan(before);
+    return { orderId: sent[before].payload.clientOrderId, total };
+  };
+  // The Admin API's tallyClientOrderId is the order's id, whatever command id delivered it.
+  const expectOnStore = async ({ orderId, total }: { orderId: string; total: number }) => {
+    const found = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+      data: {
+        query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax } } }',
+        variables: { id: orderId },
+      },
+    });
+    expect((await found.json()).data.orders.items).toEqual([{ totalWithTax: total }]);
+  };
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const first = await cashSale();
+  await expect(page.getByTestId('orders-rejected')).toHaveText('1 order needs attention');
+  await page.getByTestId('new-sale').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  // Opened from the count: the order is under "Needs attention" with its reason, and the sale is out of sight.
+  await page.getByTestId('orders-rejected').click();
+  await expect(panel.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
+  // Both sections list it with its reason; "Needs attention" comes first and alone has its Retry.
+  await expect(panel.getByText("The online store refused this sale: this till sent it in a form the store can't read.", { exact: false }))
+    .toHaveCount(2);
+  await expect(panel.getByRole('button', { name: 'Retry' })).toHaveCount(1);
+  await expect(cart).toBeHidden();
+  await page.getByTestId('orders-close').click();
+  await expect(panel).toHaveCount(0);
+  // Only hidden, never unmounted: the new cart still holds its item.
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  // Retried against the real store: requeue sends it under a new command id, and it applies.
+  await page.unroute('**/tally/v1/commands');
+  await page.getByTestId('orders-open').click();
+  await panel.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByTestId('orders-rejected')).toHaveCount(0, { timeout: 30_000 });
+  await expect(panel.getByRole('heading', { name: 'Needs attention' })).toHaveCount(0);
+  await expect(panel.getByText(/· Synced$/)).toHaveCount(1);
+  await expectOnStore(first);
+  await page.getByTestId('orders-close').click();
+  // The store refuses the whole batch: the outbox keeps it and pauses until Send again flushes.
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push(...route.request().postDataJSON().commands);
+    return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ message: 'test refusal' }) });
+  });
+  const second = await cashSale();
+  await expect(page.getByTestId('orders-notice')).toContainText('The store refused the orders (test refusal)');
+  await expect(page.getByTestId('orders-send-again')).toBeVisible();
+  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  await page.unroute('**/tally/v1/commands');
+  await page.getByTestId('orders-send-again').click();
+  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('orders-notice')).toHaveCount(0);
+  await expectOnStore(second);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
