@@ -49,6 +49,14 @@ function type(keys: string, gapMs: number, target: Element = document.body, ente
   }
 }
 
+/** Presses one key at `target`; a Backspace not prevented deletes before the caret, as the browser would. */
+function press(key: string, target: HTMLInputElement, gapMs = WEDGE_GAP_MS) {
+  vi.advanceTimersByTime(gapMs);
+  if (!target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) || key !== 'Backspace') return;
+  const caret = target.selectionStart ?? target.value.length;
+  target.value = target.value.slice(0, caret - 1) + target.value.slice(caret);
+}
+
 /** A money field as react-native-web renders TallyUI's amount inputs (keyboardType="decimal-pad"). */
 function moneyInput(value: string) {
   const input = document.body.appendChild(document.createElement('input'));
@@ -89,16 +97,47 @@ it('stops listening once unmounted', () => {
   expect(enters).toHaveBeenCalledTimes(1);
 });
 
-it('takes a scanner-fast burst into a money field as a scan, leaving the field as it was', () => {
+it('takes a scanner-fast burst into a money field as a scan, and not one of its keys reaches the field', () => {
   const counted = moneyInput('100.00');
   const inputs = vi.fn();
   counted.addEventListener('input', () => inputs(counted.value));
   type('400638133393', WEDGE_GAP_MS, counted);
+  vi.advanceTimersByTime(100);
   expect(onScan.mock.calls).toEqual([['400638133393']]);
   expect(counted.value).toBe('100.00');
-  // The code's keys after the first never reach the field: the only change it hears puts its value back.
-  expect(inputs.mock.calls).toEqual([['100.00']]);
+  // Not even the first key: the field's onChangeText would have acted on it (a cash payment, the tile counts).
+  expect(inputs).not.toHaveBeenCalled();
   expect(enters).not.toHaveBeenCalled();
+});
+
+it('keeps the Shift a scanner sends for a capital out of a money field too', () => {
+  const counted = moneyInput('');
+  const inputs = vi.fn();
+  counted.addEventListener('input', inputs);
+  for (const key of 'ABC12345') {
+    press('Shift', counted);
+    press(key, counted);
+  }
+  press('Enter', counted);
+  expect(onScan.mock.calls).toEqual([['ABC12345']]);
+  expect(inputs).not.toHaveBeenCalled();
+});
+
+it('types over a selected amount in a money field at human speed', () => {
+  const counted = moneyInput('100.00');
+  counted.setSelectionRange(0, counted.value.length);
+  type('50', 150, counted, false);
+  vi.advanceTimersByTime(100);
+  expect(counted.value).toBe('50');
+});
+
+it('puts held keys in before a Backspace acts: 1, 2 then a quick Backspace is 1', () => {
+  const counted = moneyInput('');
+  type('12', 150, counted, false);
+  press('Backspace', counted);
+  vi.advanceTimersByTime(100);
+  expect(counted.value).toBe('1');
+  expect(onScan).not.toHaveBeenCalled();
 });
 
 it('leaves typing at human speed in a money field alone: 1, 2, 0 then Enter is 120', () => {

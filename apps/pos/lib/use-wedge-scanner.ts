@@ -30,7 +30,7 @@ function setValue(input: HTMLInputElement, value: string) {
  * button. As in WCPOS, a key typed into a text input, textarea or contenteditable belongs to the typist whatever its
  * speed, and drops any burst begun outside it: a field handles its own Enter (the catalogue's search looks the code up).
  * A money field is the exception (Front desk, 2026-09-30: a barcode in an amount is a money error): a burst into it is
- * a scan too, and leaves the field as it was; typing at human speed stays typing.
+ * a scan too, and never reaches the field; typing at human speed stays typing.
  * Web only: a native hardware keyboard is out of scope, so on native this does nothing.
  */
 export function useWedgeScanner(onScan: (code: string) => void) {
@@ -40,12 +40,12 @@ export function useWedgeScanner(onScan: (code: string) => void) {
     if (Platform.OS !== 'web') return;
     let burst = '';
     let lastKeyAt = -Infinity;
-    // A burst into a money field: the field, its value before the burst, and the fast keys kept out of it.
+    // A run of keys into a money field: the field, and the keys kept out of it until the run proves not to be a scan.
     let field: HTMLInputElement | null = null;
-    let before = '';
     let held = '';
     let release: ReturnType<typeof setTimeout> | undefined;
-    // A fast run that turns out not to be a scan (two keys rolled together) is typing: its held keys go in at the caret.
+    // A run that turns out not to be a scan (a slow key follows, or a named key, or nothing) is typing: its held keys go
+    // in at the caret, replacing a selection, through the native setter and an input event as a key would.
     function flush() {
       clearTimeout(release);
       if (!field || !held) return;
@@ -71,28 +71,28 @@ export function useWedgeScanner(onScan: (code: string) => void) {
         }
         event.preventDefault();
         event.stopPropagation();
-        if (field) {
-          clearTimeout(release);
-          held = '';
-          setValue(field, before);
-        }
+        // The scan's keys never reached a money field, so it changed nothing: drop them.
+        clearTimeout(release);
+        held = '';
         latest.current(code);
-      } else if (event.key.length === 1) {
+      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
         if (!fast) {
           flush();
-          [field, before] = [money, money?.value ?? ''];
+          field = money;
         }
         burst = fast ? burst + event.key : event.key;
         lastKeyAt = event.timeStamp;
-        // The first key types (it may be the typist's); a fast key after it is held back until the burst is known.
-        if (fast && field) {
+        // Every key into a money field, the first included, is held until the run is known: a key that typed would
+        // reach the field's onChangeText, whose effects (a cash payment, the tile counts) no later restore undoes.
+        if (field) {
           event.preventDefault();
           held += event.key;
           clearTimeout(release);
           release = setTimeout(flush, WEDGE_KEY_GAP_MS);
         }
-      } else {
-        // Shift and the other named keys neither extend nor end a burst, but act on what the field shows.
+      } else if (event.key !== 'Shift') {
+        // The named keys and shortcuts (Backspace, Delete, the arrows, Cmd+A) neither extend nor end a burst, but act on
+        // what the field shows, so the held keys go in first. Shift, which a scanner sends for a capital, changes nothing.
         flush();
       }
     }

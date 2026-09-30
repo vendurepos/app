@@ -783,6 +783,46 @@ test.describe('on a narrow screen', () => {
     await expect(cartTab).toHaveText('Cart (1) · €9.52');
   });
 
+  // PR #86 review: not even a scan's first key may reach a money field, whose onChangeText a later restore can't undo.
+  test('a scan into the counted cash leaves the tile counts as they were', async ({ page }) => {
+    await signInWithBarcodes(page);
+    await page.getByTestId('tab-cart').click();
+    await openRegister(page);
+    await wedgeScan(page, MUG_BARCODE);
+    await page.getByTestId('register-open-panel').click();
+    await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+    const counted = page.getByTestId('register-count').getByTestId('count-amount');
+    const fiveTile = page.getByTestId('den-tile-500');
+    await fiveTile.click();
+    await fiveTile.click();
+    await expect(counted).toHaveValue('10.00');
+    await expect(page.getByTestId('den-count-500')).toHaveText('2');
+    await counted.click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(page.getByTestId('scan-finish-closing')).toBeVisible();
+    await expect(counted).toHaveValue('10.00');
+    await expect(page.getByTestId('den-count-500')).toHaveText('2');
+    await fiveTile.click();
+    await expect(counted).toHaveValue('15.00');
+  });
+
+  test('a scan into a cleared cash tendered field adds no payment: back to the cart, and the mug is added', async ({ page }) => {
+    await signInWithBarcodes(page);
+    const cartTab = page.getByTestId('tab-cart');
+    const tender = page.getByTestId('tender');
+    await cartTab.click();
+    await openRegister(page);
+    await wedgeScan(page, MUG_BARCODE);
+    await page.getByTestId('cart').getByTestId('pay-cash').click();
+    const cashInput = tender.getByTestId('cash-tendered').locator('input');
+    await cashInput.fill('');
+    await expect(cashInput).toHaveValue('');
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(tender).toHaveCount(0);
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await expect(page.getByTestId('scan-finish-sale')).toHaveCount(0);
+  });
+
   // A scan is never silent: over the Z sheet its notice is on top (a trial click's hit test passes), clear of the unsynced note.
   test('a scan while the Z sheet shows adds nothing and says so over the sheet', async ({ page }) => {
     await signInWithBarcodes(page);
