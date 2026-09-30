@@ -120,7 +120,8 @@ after the replay read, so a stored answer always wins:
   (`21a45c5`, VP3-1), in the order the Front desk ruled on the TallyUI #222
   review. It is refused in step 4 (`service/value-ranges.ts`).
 
-The medusapos file derives from core's shape check, and that is where
+The medusapos file is the origin: core's shape check was lifted from it
+(TallyUI `898e98b`), and core now holds the canonical copy, so that is where
 the checks should split. TallyUI/tallyui#275 asks core to expose its
 structure and value-range checks separately. Once it lands, the next
 vendoring takes the file verbatim from `@tallyui/core/server` rather than
