@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { Button, Catalogue, HStack, OrdersList, Text, VStack } from '@tallyui/components';
+import { Button, Catalogue, HStack, OrdersList, Tabs, TabsList, TabsTrigger, Text, VStack } from '@tallyui/components';
 import { ConnectorProvider, type ServerCapabilities } from '@tallyui/core';
 import {
-  CurrencyProvider, getDeviceId, TaxProvider, taxProviderProps, useOrderOutbox, useSale, type OutboxState, type UseOrderOutboxResult,
+  CurrencyProvider, getDeviceId, TaxProvider, taxProviderProps, useCurrencyFormatter, useOrderOutbox, useSale, type OutboxState, type UseOrderOutboxResult,
 } from '@tallyui/pos';
+import { cartTabLabel } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { logout } from '../lib/logout';
 import { openOrderStore, outboxStoreKey } from '../lib/orders-db';
@@ -20,8 +21,10 @@ import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-
 
 // The till's register id, minted once per device (medusapos uses 'medusapos.register_id').
 const REGISTER_ID_KEY = 'vendurepos.register_id';
-// From this window width the cart sits beside the catalogue; below it, under it.
+// From this window width the cart sits beside the catalogue; below it, Products and Cart are tabs.
 const WIDE_MIN_WIDTH = 768;
+// How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70).
+const CART_HIGHLIGHT_MS = 600;
 
 export default function HomeScreen() {
   const { session, signOut } = useSession();
@@ -170,21 +173,54 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
+  const format = useCurrencyFormatter();
+  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it, and the Cart tab shows
+  // whatever stage the sale is at.
+  const [tab, setTab] = useState<'products' | 'cart'>('products');
+  const [highlight, setHighlight] = useState(false);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(highlightTimer.current), []);
+  const onProducts = !wide && tab === 'products';
+  function add(entry: Parameters<typeof sale.add>[0]) {
+    // Only the cart takes new lines: a tender or a receipt is for the sale as it stands.
+    if (stage.kind !== 'cart') return;
+    sale.add(entry, connector.traits.product);
+    if (!onProducts) return;
+    // Confirmed in place: the Cart tab's count and total tick up and the tab lights up briefly.
+    setHighlight(true);
+    clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlight(false), CART_HIGHLIGHT_MS);
+  }
   return (
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
-      <View className="flex-1">
+      {wide ? null : (
+        <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
+          {/* Keyed on the tab for TallyUI #350 (on web the active fill stays on the tab it mounted with); removed once a
+              fixed @tallyui/components is pinned. */}
+          <TabsList key={tab} className="m-2 flex-row">
+            <TabsTrigger testID="tab-products" value="products" className="flex-1"><Text>Products</Text></TabsTrigger>
+            <TabsTrigger testID="tab-cart" value="cart" className="flex-1">
+              {highlight ? (
+                <View testID="tab-cart-highlight" pointerEvents="none" className="absolute inset-0 rounded-sm border border-primary bg-primary/10" />
+              ) : null}
+              <Text>{cartTabLabel(sale.order, format)}</Text>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+      {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
+      <View className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
         <Catalogue
           products={products}
           traits={connector.traits.product}
           currency={session.settings.currency}
           lastSyncedAt={lastSyncedAt}
           lastStockCheckAt={stockOverlayAsOf ? new Date(stockOverlayAsOf) : null}
-          // Only the cart takes new lines: a tender or a receipt is for the sale as it stands.
-          onSelect={(entry) => { if (stage.kind === 'cart') sale.add(entry, connector.traits.product); }}
+          onSelect={add}
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
         />
       </View>
-      <View className={wide ? 'w-96 border-l border-border' : 'h-80 border-t border-border'}>
+      <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind === 'cart' ? <SaleCart sale={sale} /> : (
           <ScrollView>
             <SaleTender sale={sale} />

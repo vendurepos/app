@@ -12,6 +12,26 @@ export function MoneyRow({ label, amount, testID, strong = false }: { label: str
   );
 }
 
+/**
+ * The Tax row, then each rate's share of it under it, indented, small and muted, "incl. {rate}": a breakdown of the Tax,
+ * not addends (vendurepos #70). A rate's testID is `${testID}-${key}`.
+ */
+export function TaxRows({ label, amount, testID, rates }: {
+  label: string; amount: string; testID: string; rates: { key: string; name: string; amount: string }[];
+}) {
+  return (
+    <>
+      <MoneyRow label={label} amount={amount} testID={testID} />
+      {rates.map((rate) => (
+        <HStack key={rate.key} space="none" className="-mt-1 justify-between pl-4">
+          <Text className="text-xs text-muted-foreground">incl. {rate.name}</Text>
+          <Text testID={`${testID}-${rate.key}`} className="text-xs text-muted-foreground">{rate.amount}</Text>
+        </HStack>
+      ))}
+    </>
+  );
+}
+
 export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
@@ -40,8 +60,8 @@ export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
         <VStack space="none" className="gap-1.5 py-1">
           {sale.error ? <Text accessibilityRole="alert" className="text-sm text-destructive">{sale.error}</Text> : null}
           {row('Subtotal', totals.subtotalMinor, 'cart-subtotal')}
-          {totals.taxRows.map((tax) => row(tax.label, tax.amountMinor, `cart-tax-${tax.label}`))}
-          {row(totals.taxLabel, totals.taxMinor, 'cart-tax')}
+          <TaxRows label={totals.taxLabel} amount={money(totals.taxMinor)} testID="cart-tax"
+            rates={totals.taxRows.map((tax) => ({ key: tax.label, name: tax.name, amount: money(tax.amountMinor) }))} />
           <HStack space="none" className="mt-1 border-t border-border pt-2" />
           {row('Total', totals.totalMinor, 'cart-total', true)}
           <HStack space="sm" className="mt-2">

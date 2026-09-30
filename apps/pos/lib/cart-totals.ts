@@ -5,11 +5,20 @@ export function taxRowLabel(taxInclusive: boolean, code: string | undefined, rat
   return `${taxInclusive ? 'incl. ' : ''}${code ?? 'Tax'} ${ratePpm / 10_000}%`;
 }
 
-/** The cart's figures: the order's display totals (TallyUI ADR-063) and its tax by rate, named by the store's rate. */
+/**
+ * The cart's figures: the order's display totals (TallyUI ADR-063) and its tax by rate, named by the store's rate: `label`
+ * as the rate's testID has it, `name` as the row under Tax reads it.
+ */
 export function cartTotals(order: Order) {
   const { subtotalMinor, taxMinor, totalMinor, taxInclusive } = order.display;
   const taxRows = taxLinesByRate(order.lineItems, order.taxMinor, undefined, order.taxRounding).map(({ code, ratePpm, amountMinor }) => ({
-    label: taxRowLabel(taxInclusive, code, ratePpm), amountMinor,
+    label: taxRowLabel(taxInclusive, code, ratePpm), name: taxRowLabel(false, code, ratePpm), amountMinor,
   }));
   return { subtotalMinor, taxMinor, totalMinor, taxLabel: `${taxInclusive ? 'incl. ' : ''}Tax`, taxRows };
+}
+
+/** The narrow layout's Cart tab: the item count (the sum of quantities) and the total, formatted as the cart formats it. */
+export function cartTabLabel(order: Order, format: (money: { amount: number; currency: string }) => string): string {
+  const count = order.lineItems.reduce((sum, line) => sum + line.quantity, 0);
+  return `Cart (${count}) · ${format({ amount: order.display.totalMinor, currency: order.currency })}`;
 }

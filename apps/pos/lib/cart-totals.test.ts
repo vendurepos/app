@@ -7,7 +7,7 @@ import { createElement } from 'react';
 // @ts-expect-error The app has react-dom (for the web build) but not @types/react-dom.
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { cartTotals } from './cart-totals';
+import { cartTabLabel, cartTotals } from './cart-totals';
 
 // The dev store (dev/vendure-store/src/seed.ts): Germany, Standard 19 % (category 1, the default) and Reduced 7 %
 // (category 2), prices excluding tax, and /info's per_rate_group_items / half_up (vendurepos #60).
@@ -53,7 +53,9 @@ describe('the cart under the store tax settings', () => {
     // 152 + 188.79 -> 189: per_order would give 340.79 -> 341 too.
     expect(cartTotals(order)).toEqual({
       subtotalMinor: 3497, taxMinor: 341, totalMinor: 3838, taxLabel: 'Tax',
-      taxRows: [{ label: 'Standard DE 19%', amountMinor: 152 }, { label: 'Reduced DE 7%', amountMinor: 189 }],
+      taxRows: [
+        { label: 'Standard DE 19%', name: 'Standard DE 19%', amountMinor: 152 }, { label: 'Reduced DE 7%', name: 'Reduced DE 7%', amountMinor: 189 },
+      ],
     });
     expect([expected.subtotalMinor, expected.taxMinor, expected.totalMinor]).toEqual([3497, 341, 3838]);
 
@@ -68,7 +70,7 @@ describe('the cart under the store tax settings', () => {
     expect(taxFiguresForBasket('EUR', false,
       [basketLine(800, 1, standard), basketLine(899, 3, reduced), basketLine(599, 2, standard)]).taxMinor).toBe(568);
     expect(cartTotals(order).taxRows).toEqual(expected.taxByRate.map(({ code, ratePpm, amountMinor }) =>
-      ({ label: `${code} ${ratePpm / 10_000}%`, amountMinor })));
+      ({ label: `${code} ${ratePpm / 10_000}%`, name: `${code} ${ratePpm / 10_000}%`, amountMinor })));
 
     // The cart's − at quantity 1 sets 0, which takes the line off.
     builder.updateQuantity(mug, 0);
@@ -79,7 +81,9 @@ describe('the cart under the store tax settings', () => {
     expect([expected.subtotalMinor, expected.taxMinor, expected.totalMinor]).toEqual([3895, 417, 4312]);
     expect(cartTotals(order)).toEqual({
       subtotalMinor: 3895, taxMinor: 417, totalMinor: 4312, taxLabel: 'Tax',
-      taxRows: [{ label: 'Reduced DE 7%', amountMinor: 189 }, { label: 'Standard DE 19%', amountMinor: 228 }],
+      taxRows: [
+        { label: 'Reduced DE 7%', name: 'Reduced DE 7%', amountMinor: 189 }, { label: 'Standard DE 19%', name: 'Standard DE 19%', amountMinor: 228 },
+      ],
     });
   });
 
@@ -88,5 +92,15 @@ describe('the cart under the store tax settings', () => {
     addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
     addEntryToCart(builder, entry('ESP-250'), traits, 'EUR');
     expect(builder.getSnapshot().lineItems.map((line) => line.taxLines.map((tax) => tax.code))).toEqual([['Standard DE'], ['Reduced DE']]);
+  });
+
+  it("labels the narrow layout's Cart tab with the item count, the sum of quantities, and the total", () => {
+    const builder = createOrderBuilder({ currency: 'EUR', taxContext: saleTaxContext() });
+    const format = ({ amount, currency }: { amount: number; currency: string }) => `${currency} ${amount}`;
+    expect(cartTabLabel(builder.getSnapshot(), format)).toBe('Cart (0) · EUR 0');
+    addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
+    builder.updateQuantity(addEntryToCart(builder, entry('ESP-250'), traits, 'EUR'), 3);
+    // Four items: 800 + 3 x 899 = 3497, plus 341 tax (above) = 3838.
+    expect(cartTabLabel(builder.getSnapshot(), format)).toBe('Cart (4) · EUR 3838');
   });
 });

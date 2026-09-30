@@ -381,3 +381,56 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
+
+// Below WIDE_MIN_WIDTH Products and Cart are tabs (vendurepos #70): an add confirms in place and never switches tab.
+test.describe('on a narrow screen', () => {
+  test.use({ viewport: { width: 360, height: 780 } });
+
+  test('Products and Cart are tabs: the Cart tab carries the count and total, and tax reads as a breakdown', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('sign-in-url').fill(STORE_URL);
+    await page.getByTestId('sign-in-email').fill(USERNAME);
+    await page.getByTestId('sign-in-password').fill(PASSWORD);
+    await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+    await page.getByTestId('sign-in-submit').click();
+    const mug = page.getByTestId('product-tile-Tally Fixture Mug');
+    const cart = page.getByTestId('cart');
+    const cartTab = page.getByTestId('tab-cart');
+    const highlight = page.getByTestId('tab-cart-highlight');
+    await expect(mug).toBeVisible();
+    await expect(page.getByTestId('tab-products')).toHaveText('Products');
+    await expect(cartTab).toHaveText('Cart (0) · €0.00');
+    await expect(cart).toBeHidden();
+    // The mug is €8.00 plus Standard 19 %: €9.52.
+    await mug.click();
+    await expect(highlight).toBeVisible();
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(highlight).toHaveCount(0);
+    await expect(mug).toBeVisible();
+    await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeHidden();
+    await mug.click();
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await expect(mug).toBeVisible();
+    await cartTab.click();
+    await expect(mug).toBeHidden();
+    await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(1);
+    await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€16.00');
+    await expect(cart.getByTestId('cart-total')).toHaveText('€19.04');
+    // Tax first, then its rates under it.
+    const taxRows = /^(Tax|incl\. .+)$/;
+    await expect(cart.getByText(taxRows)).toHaveText(['Tax', 'incl. Standard DE 19%']);
+    await expect(cart.getByTestId('cart-tax')).toHaveText('€3.04');
+    await expect(cart.getByTestId('cart-tax-Standard DE 19%')).toHaveText('€3.04');
+    await cart.getByTestId('pay-cash').click();
+    const tender = page.getByTestId('tender');
+    await tender.getByTestId('cash-tendered').locator('input').fill('20.00');
+    await tender.getByTestId('tender-complete').click();
+    const receipt = page.getByTestId('receipt');
+    await expect(receipt.getByTestId('receipt-total')).toHaveText('€19.04');
+    await expect(receipt.getByText(taxRows)).toHaveText(['Tax', 'incl. Standard DE 19%']);
+    await expect(receipt.getByTestId('receipt-tax-Standard DE 19%')).toHaveText('€3.04');
+    await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.96');
+    expect(await cspViolations(page)).toEqual([]);
+    expect(cspConsole).toEqual([]);
+  });
+});
