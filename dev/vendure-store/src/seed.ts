@@ -34,7 +34,7 @@ async function seed() {
   });
   if (isGraphQlErrorResult(updated)) throw new Error(updated.message);
   await populateInitialData(app, {
-    defaultLanguage: LanguageCode.en, defaultZone: 'Denmark',
+    defaultLanguage: LanguageCode.en, defaultZone: 'Germany',
     countries: [
       { code: 'DK', name: 'Denmark', zone: 'Denmark' },
       { code: 'DE', name: 'Germany', zone: 'Germany' },
@@ -45,13 +45,14 @@ async function seed() {
   const denmark = zones.find(zone => zone.name === 'Denmark');
   const germany = zones.find(zone => zone.name === 'Germany');
   defaultChannel = await channels.getDefaultChannel(ctx);
-  if (!denmark || !germany || defaultChannel.defaultTaxZone?.id !== denmark.id) {
-    throw new Error('Initial data did not set Denmark as the default tax zone or create both zones');
+  if (!denmark || !germany || defaultChannel.defaultTaxZone?.id !== germany.id) {
+    throw new Error('Initial data did not set Germany as the default tax zone or create both zones');
   }
   const categories = app.get(TaxCategoryService);
   const standard = await categories.create(ctx, { name: 'Standard', isDefault: true });
   const reduced = await categories.create(ctx, { name: 'Reduced' });
-  // Denmark has no reduced VAT rate.
+  // The default zone is Germany (Standard 19 %, Reduced 7 %), so the two categories are different
+  // rate groups. The Danish rates stay as they are: Denmark has no reduced VAT rate.
   for (const [category, zone, name, value] of [
     [standard, denmark, 'Standard DK', 25], [standard, germany, 'Standard DE', 19],
     [reduced, denmark, 'Reduced DK', 25], [reduced, germany, 'Reduced DE', 7],
@@ -93,7 +94,7 @@ async function seed() {
   const posChannel = await channels.create(ctx, {
     code: POS_CHANNEL_CODE, token: POS_CHANNEL_TOKEN, defaultLanguageCode: LanguageCode.en,
     defaultCurrencyCode: CurrencyCode.EUR, availableCurrencyCodes: [CurrencyCode.EUR], pricesIncludeTax: false,
-    defaultTaxZoneId: denmark.id, defaultShippingZoneId: denmark.id, sellerId: defaultChannel.sellerId,
+    defaultTaxZoneId: germany.id, defaultShippingZoneId: germany.id, sellerId: defaultChannel.sellerId,
   });
   if (isGraphQlErrorResult(posChannel)) throw new Error(posChannel.message);
   // Reload the superadmin's roles after channel creation, before any channel assignment.

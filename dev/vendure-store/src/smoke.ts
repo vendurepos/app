@@ -21,43 +21,47 @@ function expectEqual(actual: unknown, expected: unknown, what: string) {
   }
 }
 
-// One v3 order.create for 1 x TALLY-MUG: 800 net, DK 25 %, tax-exclusive, paid 1000 cash
-// (the figures as the plugin's test/payloads.ts derives them).
-function mugCommand(variantId: string) {
-  const [quantity, unitPriceMinor, ratePpm] = [1, 800, 250_000];
-  const netMinor = unitPriceMinor * quantity;
-  // Tax-exclusive: the tax is added to the line amount, rounded once (exact here: 200).
+// One v3 order.create for tax-exclusive lines at one rate, paid in cash, with the figures by the
+// till's rule (@tallyui/pos order-builder): each line's net is exact, the tax is rounded once per order.
+function saleCommand(lines: Array<{ variantId: string; quantity: number; unitPriceMinor: number }>, ratePpm: number) {
+  const posLines = lines.map(line => ({ clientLineId: randomUUID(), ...line }));
+  const netMinor = posLines.reduce((sum, line) => sum + line.unitPriceMinor * line.quantity, 0);
+  // Half away from zero: Math.round is that for these positive amounts.
   const taxMinor = Math.round(netMinor * ratePpm / 1_000_000);
   const totalMinor = netMinor + taxMinor;
   const createdAt = new Date().toISOString();
-  const clientLineId = randomUUID();
   return {
     id: randomUUID(), type: 'order.create', version: 3, createdAt, deviceId: 'dev-store-smoke', attempt: 1,
     payload: {
       clientOrderId: randomUUID(), createdAt, currency: 'EUR', pricesIncludeTax: false,
-      lines: [{ clientLineId, variantId, quantity, unitPriceMinor }],
+      lines: posLines,
       subtotalMinor: totalMinor - taxMinor, taxMinor, totalMinor,
       payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
       registerId: 'dev-store-smoke', cashierRef: 'dev-store-smoke', sessionId: randomUUID(),
       // The display mode is the order's (tax-exclusive), so each line shows its net amount.
       display: {
         currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor: totalMinor - taxMinor, discountMinor: 0,
-        taxMinor, totalMinor, orderDiscountMinor: 0, lines: [{ clientLineId, amountMinor: netMinor, discounts: [] }],
+        taxMinor, totalMinor, orderDiscountMinor: 0, lines: posLines.map(({ clientLineId, unitPriceMinor, quantity }) =>
+          ({ clientLineId, amountMinor: unitPriceMinor * quantity, discounts: [] })),
       },
       taxByRate: [{ ratePpm, netMinor, taxMinor, grossMinor: netMinor + taxMinor }],
     },
   };
 }
 
+// 1 x TALLY-MUG: 800 net, DE 19 % (152), paid 952 cash.
+const mugCommand = (variantId: string) => saleCommand([{ variantId, quantity: 1, unitPriceMinor: 800 }], 190_000);
+
 async function commandSmoke(token: string) {
   const admin = { Authorization: `Bearer ${token}`, 'vendure-token': POS_CHANNEL_TOKEN };
-  const mug = async () => (await gql('/admin-api', `query Mug($sku: String!) {
+  const variant = async (sku: string) => (await gql('/admin-api', `query Variant($sku: String!) {
     productVariants(options: { filter: { sku: { eq: $sku } } }) {
       items { id stockLevels { stockOnHand stockLocation { name } } }
     }
-  }`, { sku: 'TALLY-MUG' }, admin)).body.data.productVariants.items[0] as {
+  }`, { sku }, admin)).body.data.productVariants.items[0] as {
     id: string; stockLevels: Array<{ stockOnHand: number; stockLocation: { name: string } }>;
   };
+  const mug = () => variant('TALLY-MUG');
   const shopFloor = (variant: Awaited<ReturnType<typeof mug>>) =>
     variant.stockLevels.find(level => level.stockLocation.name === 'Shop floor')?.stockOnHand;
   const post = async (body: unknown, headers: Record<string, string> = { 'X-Tally-Protocol': '1' }) => {
@@ -71,13 +75,13 @@ async function commandSmoke(token: string) {
   const sold = await post({ commands: [command] });
   expectEqual(sold.status, 200, `the sale's HTTP status (${JSON.stringify(sold.body)})`);
   const result = sold.body.results?.[0];
-  expectEqual([result?.id, result?.status, result?.serverRefs?.totalMinor], [command.id, 'applied', 1000], 'the sale\'s result');
+  expectEqual([result?.id, result?.status, result?.serverRefs?.totalMinor], [command.id, 'applied', 952], 'the sale\'s result');
   expectEqual([result?.warnings, result?.totalWarnings], [undefined, undefined], 'the sale\'s warnings');
   const { order } = (await gql('/admin-api', 'query Order($id: ID!) { order(id: $id) { state totalWithTax } }',
     { id: result.serverRefs.orderId }, admin)).body.data;
-  expectEqual(order, { state: 'Delivered', totalWithTax: 1000 }, `order ${result.serverRefs.orderId} in the Admin API`);
+  expectEqual(order, { state: 'Delivered', totalWithTax: 952 }, `order ${result.serverRefs.orderId} in the Admin API`);
   expectEqual(shopFloor(await mug()), shopFloor(before)! - 1, 'the Shop floor stock of TALLY-MUG');
-  console.log(`ok - POST /tally/v1/commands applied order ${result.serverRefs.displayId}: Delivered, 1000, no warnings, Shop floor stock -1`);
+  console.log(`ok - POST /tally/v1/commands applied order ${result.serverRefs.displayId}: Delivered, 952, no warnings, Shop floor stock -1`);
   const replay = await post({ commands: [command] });
   expectEqual([replay.status, replay.body.results?.[0]?.status, replay.body.results?.[0]?.serverRefs?.orderId],
     [200, 'duplicate', result.serverRefs.orderId], 'the replay');
@@ -85,6 +89,28 @@ async function commandSmoke(token: string) {
   const malformed = await post({ commands: [mugCommand(before.id)] }, {});
   expectEqual([malformed.status, malformed.body.code], [400, 'unsupported_protocol'], 'a batch without X-Tally-Protocol');
   console.log('ok - a batch without X-Tally-Protocol answers 400');
+  // The parity claim (PLAN.md): on a single-rate order the till's tax (rounded once per order) equals
+  // OrderLevelTaxCalculationStrategy's (rounded once per rate group), so no TALLY-ROUNDING bridge.
+  const baskets: Array<[string, number, Array<[string, number, number]>]> = [
+    // Per-line rounding gives a different tax here, so this could not pass under the default strategy.
+    // Standard 19 %: per line 94.81 -> 95, 132.81 -> 133, 113.81 -> 114 = 342; per order 1797 x 19 % = 341.43 -> 341.
+    ['Standard', 190_000, [['NOTE-A6', 1, 499], ['NOTE-A5', 1, 699], ['POST-SET', 1, 599]]],
+    // Per-line rounding gives a different tax here, so this could not pass under the default strategy.
+    // Reduced 7 %: per line 188.79 -> 189, 419.86 -> 420, 272.79 -> 273 = 882; per order 12592 x 7 % = 881.44 -> 881.
+    ['Reduced', 70_000, [['ESP-250', 3, 899], ['ESP-1000', 2, 2999], ['FIL-500', 3, 1299]]],
+  ];
+  for (const [category, ratePpm, basket] of baskets) {
+    const lines = await Promise.all(basket.map(async ([sku, quantity, unitPriceMinor]) =>
+      ({ variantId: (await variant(sku)).id, quantity, unitPriceMinor })));
+    const sale = saleCommand(lines, ratePpm);
+    const response = await post({ commands: [sale] });
+    const applied = response.body.results?.[0];
+    expectEqual([response.status, applied?.status, applied?.serverRefs?.totalMinor], [200, 'applied', sale.payload.totalMinor],
+      `the ${category} parity sale's result (${JSON.stringify(response.body)})`);
+    expectEqual([applied?.warnings, applied?.totalWarnings], [undefined, undefined], `the ${category} parity sale's warnings`);
+    console.log(`ok - a ${basket.length}-line ${category} sale at ${ratePpm / 10_000} % is applied at the till's ` +
+      `${sale.payload.totalMinor} (tax ${sale.payload.taxMinor}), no warnings`);
+  }
 }
 
 async function smoke() {
@@ -139,7 +165,7 @@ async function smoke() {
     const rates = taxRates.items.map((rate: { value: number; zone: { name: string }; category: { name: string } }) =>
       `${rate.category.name}/${rate.zone.name}/${rate.value}`);
     if (channel.code !== POS_CHANNEL_CODE || channel.currencyCode !== 'EUR' || channel.pricesIncludeTax !== false ||
-        channel.defaultTaxZone?.name !== 'Denmark' || productVariants.totalItems !== VARIANT_COUNT ||
+        channel.defaultTaxZone?.name !== 'Germany' || productVariants.totalItems !== VARIANT_COUNT ||
         !['Standard/Denmark/25', 'Standard/Germany/19', 'Reduced/Denmark/25', 'Reduced/Germany/7']
           .every(rate => rates.includes(rate)) ||
         !stockLocations.items.some((location: { name: string }) => location.name === 'Shop floor')) {
