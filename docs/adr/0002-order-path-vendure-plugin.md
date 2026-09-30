@@ -477,7 +477,7 @@ every field is checked against its version in step 4 (ruling 17).
 | `locationId` | instruction | refused with `invalid_payload` until vendurepos/app#35 | strict-shape.ts:49 |
 | `display` (v3) | informational | cross-checked (fields below) and stored in `tallySnapshot` | svc:744 |
 | `taxByRate` (v3) | informational | cross-checked, compared per rate (fields below) and stored in `tallySnapshot` | svc:744 |
-| `sessionId` (v3) | informational | stored as `tallySessionId` | svc:594 |
+| `sessionId` (v3) | instruction (honoured by recording) | recorded verbatim on the order as `tallySessionId`, which ties the sale to its register session for register close, like `payments[].method` (Front desk, 2026-09-30) | svc:594; tested at recipe.e2e.ts:97 |
 | **`lines[]`** | | | |
 | `clientLineId` | informational (reference) | stored as the order line's `tallyClientLineId`; matches the line's discount and display line | svc:645, svc:657 |
 | `variantId` | instruction | the variant sold; `unknown_variant` when missing or disabled | svc:399, svc:610 |
@@ -493,7 +493,7 @@ every field is checked against its version in step 4 (ruling 17).
 | `tenderedMinor`, `changeMinor`, `reference` | informational | range-checked; stored as above | value-ranges.ts:57-58, svc:712, svc:741 |
 | **`customer`** | | | |
 | `email` | instruction | the customer, matched case-insensitively or created | svc:556-557 |
-| `customerId` (v3) | instruction | the customer by id; an unknown or over-long id is disregarded with a `customer_ignored` warning: an instruction the server cannot carry out is refused when the store can make it possible later, so the retry applies, and is recorded as a warning when nothing the store does later would change the answer, as for a customer that no longer exists, where the sale is kept and falls back to the email or walk-in customer with a `customer_ignored` warning naming the id (Front desk, 2026-09-30) | svc:546-551 |
+| `customerId` (v3) | instruction | the customer by id. A well-formed id the store cannot resolve (unknown, in another channel, deleted) never holds the sale: the sale is kept with the email or walk-in customer and a `customer_ignored` warning naming the id. An id over 64 characters is malformed and should be refused as `invalid_payload` (Front desk, 2026-09-30); today this server still keeps the sale with a `customer_ignored` warning (`reason: 'too_long'`) instead, until vendurepos/app#43. A refusal is for a problem that would make every sale from this till fail until the store is fixed (a stock location, a sales channel), so it is noticed at once and the retry applies; a problem with one sale's own references is not, because a sale stuck in an outbox for days is worse (Front desk, 2026-09-30) | svc:546-551 |
 | **`display` (v3)** | | | |
 | `currency` | informational | must equal `payload.currency` | fiscal-figures.ts:91 |
 | `exponent` | informational | must equal the currency's decimals | fiscal-figures.ts:105 |
