@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,7 +22,7 @@ export function allowLanHttp(html: string): string {
   return html.slice(0, policyEnd - policy.length) + directives.join(';') + html.slice(policyEnd);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url) && process.env[LAN_HTTP_ENV] === '1') {
+if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url) && process.env[LAN_HTTP_ENV] === '1') {
   const file = join(process.argv[2], 'index.html');
   writeFileSync(file, allowLanHttp(readFileSync(file, 'utf8')));
   console.log(`CSP: connect-src allows http: (${LAN_HTTP_ENV}=1)`);
