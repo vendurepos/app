@@ -1,7 +1,7 @@
 import { RequestContextService, TransactionalConnection, runMigrations } from '@vendure/core';
 import { TestServer } from '@vendure/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, TallyPos1790648006022, TallyPosVp2a1790720000000 } from '../src';
+import { OrderCreateService, RegisterService, TallyPos1790648006022, TallyPosRegister1790800000000, TallyPosVp2a1790720000000 } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import { createPluginTestEnvironment, dbConnectionOptions, pluginTestConfig } from './env';
 import { orderCommand } from './payloads';
@@ -12,7 +12,7 @@ const tallyColumns = async (query: Query) => (await query(
    AND column_name LIKE 'customFieldsTally%' ORDER BY column_name`)).map(row => row.column_name);
 const tallyIndexes = async (query: Query) => (await query(
   `SELECT indexdef FROM pg_indexes WHERE (tablename = 'order' AND indexdef LIKE '%Tally%')
-   OR tablename = 'tally_command' ORDER BY indexname`)).map(row => row.indexdef);
+   OR tablename LIKE 'tally_%' ORDER BY indexname`)).map(row => row.indexdef);
 
 describe('the TallyPos migration', () => {
   it('runs with synchronize: false on a Vendure database without the plugin\'s schema; the server then starts and sells', async () => {
@@ -22,7 +22,8 @@ describe('the TallyPos migration', () => {
     await seeded.init();
     const raw = seeded.server.app.get(TransactionalConnection).rawConnection;
     const [{ database }] = await raw.query('SELECT current_database() AS database');
-    await raw.query('DROP TABLE "tally_command"');
+    for (const table of ['tally_command', 'tally_register_closure', 'tally_register_movement', 'tally_register_session_status',
+      'tally_register_session', 'tally_register']) await raw.query(`DROP TABLE "${table}"`);
     for (const [table, columns] of [
       ['order', ['Tallyclientorderid', 'Tallysaleat', 'Tallyregisterid', 'Tallysessionid', 'Tallycashierref', 'Tallypayments', 'Tallysnapshot',
         'Tallyrejectedclientorderid', 'Tallyrejected']],
@@ -37,14 +38,15 @@ describe('the TallyPos migration', () => {
     await seeded.server.destroy();
 
     const config = pluginTestConfig({ dbConnectionOptions: {
-      ...dbConnectionOptions, database, synchronize: false, migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000],
+      ...dbConnectionOptions, database, synchronize: false,
+      migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000],
     } });
     // runMigrations prints "Your database schema does not match…" when the schema diff is not empty.
     const printed = vi.spyOn(console, 'log');
     try {
-      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022', 'TallyPosVp2a1790720000000']);
+      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022', 'TallyPosVp2a1790720000000', 'TallyPosRegister1790800000000']);
       const output = printed.mock.calls.flat().join('\n');
-      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000/);
+      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000[\s\S]*Successfully ran migration: TallyPosRegister1790800000000/);
       expect(output).not.toMatch(/does not match/);
     } finally {
       printed.mockRestore();
@@ -62,10 +64,21 @@ describe('the TallyPos migration', () => {
         'customFieldsTallysaleat', 'customFieldsTallysessionid', 'customFieldsTallysnapshot', 'customFieldsTallyunitprice',
       ]);
       expect(await tallyIndexes(migratedQuery)).toEqual([
+        'CREATE INDEX "IDX_57884f6d20b5ab78302240976b" ON public.tally_register_session USING btree ("channelId", "registerId")',
         'CREATE INDEX "IDX_78583fdb4ec084e117c6cf9575" ON public.tally_command USING btree ("clientOrderId")',
+        'CREATE INDEX "IDX_b67faa4ff7b28e4af0694dd306" ON public.tally_register_movement USING btree ("channelId", "sessionId")',
+        'CREATE INDEX "IDX_e1da3bd8299c5d80a4313dc675" ON public.tally_register_session_status USING btree ("channelId", "sessionId")',
         'CREATE INDEX "IDX_tally_order_register_id" ON public."order" USING btree ("customFieldsTallyregisterid")',
         'CREATE INDEX "IDX_tally_order_session_id" ON public."order" USING btree ("customFieldsTallysessionid")',
+        'CREATE UNIQUE INDEX "PK_330cffe5f4469e0c7f55994b786" ON public.tally_register USING btree ("channelId", id)',
+        'CREATE UNIQUE INDEX "PK_441df0923693354d46e6dc30d5e" ON public.tally_register_movement USING btree ("channelId", id)',
+        'CREATE UNIQUE INDEX "PK_694799ddf1a169afc649e41ec4b" ON public.tally_register_session USING btree ("channelId", id)',
+        'CREATE UNIQUE INDEX "PK_8d97c69187624fabbee2bff5955" ON public.tally_register_closure USING btree ("channelId", id)',
         'CREATE UNIQUE INDEX "PK_cb557f149dd2aba503ab051d4fa" ON public.tally_command USING btree (id)',
+        'CREATE UNIQUE INDEX "PK_e3bf54fd35c91c8b9813c6ba23f" ON public.tally_register_session_status USING btree (seq)',
+        'CREATE UNIQUE INDEX "UQ_50e2490a4c8604fe712a3934543" ON public.tally_register_movement USING btree ("channelId", voids)',
+        'CREATE UNIQUE INDEX "UQ_82e1f0bdede8def7051d66f0740" ON public.tally_register_closure USING btree ("channelId", "sessionId")',
+        'CREATE UNIQUE INDEX "UQ_fdc8938aa0359ee820b04de0376" ON public.tally_register_closure USING btree ("channelId", "registerId", number)',
         'CREATE UNIQUE INDEX "UQ_ff88d64a4e987b9203e7d767f46" ON public."order" USING btree ("customFieldsTallyclientorderid")',
       ]);
       // Ruling 2: the register and session indexes are TypeORM metadata on CustomOrderFields, so the
@@ -78,6 +91,11 @@ describe('the TallyPos migration', () => {
         { variantId: seeded.variantIds.mug[0], quantity: 1, unitPriceMinor: 800 },
       ]));
       expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied', serverRefs: { totalMinor: 1000 } });
+      // ADR 0003: a register command's ledger row, without a clientOrderId, and its tables.
+      const opened = await server.app.get(RegisterService).apply(ctx, { id: 'migration-open', type: 'register.session.open', version: 1,
+        createdAt: '2026-09-28T10:00:00Z', deviceId: 'd', attempt: 1,
+        payload: { sessionId: 's-1', registerId: 'r-1', openedAt: '2026-09-28T10:00:00Z', countedFloatMinor: 0 } });
+      expect(opened).toMatchObject({ status: 'applied', register: { session: { id: 's-1', status: 'open' } } });
     } finally {
       await server.destroy();
     }

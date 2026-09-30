@@ -11,9 +11,11 @@ import {
   TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
 } from './config/strategies';
+import { REGISTER_ENTITIES } from './entities/register.entities';
 import { TallyCommand } from './entities/tally-command.entity';
 import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
+import { RegisterService } from './service/register.service';
 import { StoreSetupService } from './service/store-setup.service';
 
 /** A new array: `list` plus each item it does not already hold. */
@@ -53,14 +55,14 @@ function commandsBodyParser(): Middleware['handler'] {
   })) as Middleware['handler'];
 }
 
-/** VendurePOS: TallyUI's order.create as one Postgres transaction per command (ADR 0002). */
+/** VendurePOS: TallyUI's order.create (ADR 0002) and register commands (ADR 0003), one Postgres transaction per command. */
 @VendurePlugin({
   compatibility: '^3.6.0',
   imports: [PluginCommonModule],
-  entities: [TallyCommand],
+  entities: [TallyCommand, ...REGISTER_ENTITIES],
   controllers: [TallyInfoController, TallyCommandsController],
-  providers: [OrderCreateService, StoreSetupService],
-  exports: [OrderCreateService],
+  providers: [OrderCreateService, RegisterService, StoreSetupService],
+  exports: [OrderCreateService, RegisterService],
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
   // run this on arrays that setConfig shares with the caller's config.
   configuration: config => {

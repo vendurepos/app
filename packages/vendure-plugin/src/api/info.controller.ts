@@ -1,10 +1,10 @@
 import { Controller, Get } from '@nestjs/common';
 import { Allow, ConfigService, Permission } from '@vendure/core';
-import { ORDER_CREATE_VERSIONS } from '../service/constants';
+import { ORDER_CREATE_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
-export type TallyInfo = { contracts: { 'order.create': number[] }; taxRounding: TaxRounding };
+export type TallyInfo = { contracts: { 'order.create': number[]; register: number[] }; taxRounding: TaxRounding };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -24,6 +24,6 @@ export class TallyInfoController {
   @Get('info')
   @Allow(Permission.CreateOrder)
   info(): TallyInfo {
-    return { contracts: { 'order.create': [...ORDER_CREATE_VERSIONS] }, taxRounding: this.taxRounding };
+    return { contracts: { 'order.create': [...ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding };
   }
 }
