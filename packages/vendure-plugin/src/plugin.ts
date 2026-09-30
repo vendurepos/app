@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { OnApplicationBootstrap } from '@nestjs/common';
 import {
-  Channel, PluginCommonModule, ProcessContext, RequestContextService, TransactionalConnection, VendurePlugin,
+  Channel, Customer, Logger, PluginCommonModule, ProcessContext, RequestContextService, TransactionalConnection, VendurePlugin,
 } from '@vendure/core';
 import type { Middleware } from '@vendure/core';
 import { TallyCommandsController } from './api/commands.controller';
@@ -12,6 +12,7 @@ import {
   tallyShippingCalculator, tallyShippingChecker,
 } from './config/strategies';
 import { TallyCommand } from './entities/tally-command.entity';
+import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
 import { StoreSetupService } from './service/store-setup.service';
 
@@ -24,6 +25,9 @@ const COMMANDS_ROUTE = '/tally/v1/commands';
 // 50 commands of up to about 20 kB each, as medusapos allows; Vendure's global parser keeps 100 kB.
 const COMMANDS_BODY_LIMIT = '1mb';
 const PROTOCOL_HEADER = 'X-Tally-Protocol';
+// Ruling 16: from about this many customers, the email lookup's sequential scan is worth the README's optional index.
+export const CUSTOMER_INDEX_WARN_ROWS = 50_000;
+export const CUSTOMER_INDEX_SECTION = 'Optional: an index for POS customer lookups';
 
 type Next = (error?: unknown) => void;
 type Reply = { status(code: number): { json(body: unknown): void } };
@@ -104,5 +108,23 @@ export class TallyPosPlugin implements OnApplicationBootstrap {
       const ctx = await this.contexts.create({ apiType: 'admin', channelOrToken: channel.token });
       await this.connection.withTransaction(ctx, tx => this.storeSetup.ensureChannelSetup(tx));
     }
+    await this.warnWithoutEmailIndex().catch((error: unknown) => Logger.debug(`Customer index check skipped: ${String(error)}`, loggerCtx));
+  }
+
+  // Ruling 16: the plugin never indexes Vendure's customer table; a large one without the optional index gets one warning.
+  private async warnWithoutEmailIndex() {
+    const db = this.connection.rawConnection;
+    const table = db.getMetadata(Customer).tablePath;
+    // The planner's estimate (pg_class.reltuples, kept by ANALYZE and autovacuum) rather than a count, so a large table
+    // costs nothing here; it is -1 before the table's first ANALYZE, and then an exact count(*) is taken. Both include
+    // soft-deleted rows, which the unindexed lookup scans too.
+    const [{ estimate }] = await db.query('SELECT reltuples::float8 AS estimate FROM pg_class WHERE oid = $1::regclass', [table]);
+    const rows = estimate >= 0 ? estimate : (await db.query(`SELECT count(*)::float8 AS n FROM ${table}`))[0].n;
+    if (rows <= CUSTOMER_INDEX_WARN_ROWS) return;
+    const indexed = await db.query(`SELECT 1 FROM pg_indexes WHERE format('%I.%I', schemaname, tablename)::regclass = $1::regclass
+      AND indexdef LIKE '%lower(("emailAddress")%'`, [table]);
+    if (indexed.length) return;
+    Logger.warn(`The customer table holds about ${Math.round(rows)} rows and has no lower("emailAddress") index, so each POS sale `
+      + `with an email scans it. See "${CUSTOMER_INDEX_SECTION}" in the @vendurepos/plugin README.`, loggerCtx);
   }
 }

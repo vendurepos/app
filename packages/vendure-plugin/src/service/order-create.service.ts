@@ -105,6 +105,8 @@ export class OrderCreateService {
   /** Test seam: observes the order inside the command's transaction after each pricing stage. */
   testObserver?: (stage: PricingStage, ctx: RequestContext, order: Order) => Promise<void>;
   private clientOrderIdConstraint?: string;
+  /** Ruling 16: the walk-in customer's id, a per-process cache that spares walk-in sales the email scan. */
+  private walkInId?: ID;
 
   constructor(
     private connection: TransactionalConnection,
@@ -406,6 +408,16 @@ export class OrderCreateService {
     return variant?.enabled ? variant : undefined;
   }
 
+  // #22 review: rows stored before Vendure normalised emails (or imported) keep their case, so match case-insensitively;
+  // of several such rows the lowest id wins, so every sale picks the same one. Ruling 16: the expression and predicate
+  // match the README's optional index.
+  private async findByEmail(ctx: RequestContext, emailAddress: string) {
+    return await this.connection.getRepository(ctx, Customer).createQueryBuilder('customer')
+      .leftJoinAndSelect('customer.channels', 'channel')
+      .where('LOWER(customer.emailAddress) = LOWER(:emailAddress)', { emailAddress }).andWhere('customer.deletedAt IS NULL')
+      .orderBy('customer.id', 'ASC').getOne() ?? undefined;
+  }
+
   private async recordedAnywhere(ctx: RequestContext, clientOrderId: string) {
     return !!await this.connection.getRepository(ctx, Order).count({ where: { customFields: { tallyClientOrderId: clientOrderId } } });
   }
@@ -537,19 +549,21 @@ export class OrderCreateService {
     if (!customer) {
       // Review: createOrUpdate matches a customer of any channel and overwrites its names, so find it the
       // same way first (and add this channel, as createOrUpdate did); create only a missing one.
+      const walkIn = !payload.customer?.email;
       const emailAddress = normalizeEmailAddress(payload.customer?.email || WALK_IN_EMAIL);
       const customers = this.connection.getRepository(ctx, Customer);
-      // #22 review: rows stored before Vendure normalised emails (or imported) keep their case, so match case-insensitively;
-      // of several such rows the lowest id wins, so every sale picks the same one.
-      const lookup = async () => await customers.createQueryBuilder('customer').leftJoinAndSelect('customer.channels', 'channel')
-        .where('LOWER(customer.emailAddress) = LOWER(:emailAddress)', { emailAddress }).andWhere('customer.deletedAt IS NULL')
-        .orderBy('customer.id', 'ASC').getOne() ?? undefined;
-      customer = await lookup();
+      // Ruling 16: the walk-in's cached id, checked by primary key on every use; a deleted or changed row falls back to the lookup.
+      if (walkIn && this.walkInId !== undefined) {
+        const cached = await customers.findOne({ where: { id: this.walkInId }, relations: { channels: true } });
+        customer = cached?.emailAddress === WALK_IN_EMAIL && !cached.deletedAt ? cached : undefined;
+      }
+      customer ??= await this.findByEmail(ctx, emailAddress);
       if (!customer) {
         // Ruling 14: emailAddress has no unique index, so a miss is checked again under a per-email lock held to
         // commit (bounded by the recipe's lock timeout). An existing customer, the walk-in included, never takes it.
-        await customers.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [CUSTOMER_LOCK_NAMESPACE, emailAddress]);
-        customer = await lookup();
+        // VP3-4d: keyed on lower(email), as the lookup matches, since Vendure lowercases only what looks like an email.
+        await customers.query('SELECT pg_advisory_xact_lock($1, hashtext(lower($2)))', [CUSTOMER_LOCK_NAMESPACE, emailAddress]);
+        customer = await this.findByEmail(ctx, emailAddress);
       }
       progress.written = true; // The recipe's first write follows: nothing it raises from here is stored.
       if (!customer) {
@@ -561,6 +575,7 @@ export class OrderCreateService {
         await customers.query(`INSERT INTO ${junction.tablePath.split('.').map(quote).join('.')} (${quote(junction.ownerColumns[0].databaseName)},
           ${quote(junction.inverseColumns[0].databaseName)}) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [customer.id, ctx.channelId]);
       }
+      if (walkIn) this.walkInId = customer.id;
     }
     progress.written = true;
     // The recipe's first event is published here (a new customer's CustomerEvent comes just before it).

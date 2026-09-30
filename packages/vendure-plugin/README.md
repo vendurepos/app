@@ -111,6 +111,32 @@ POS lines keep the till's price; every other order line is priced by your config
 `orderItemPriceCalculationStrategy`, which the plugin wraps and whose `init` and `destroy` it
 forwards.
 
+### Optional: an index for POS customer lookups
+
+A sale with an email finds its customer with `LOWER("emailAddress") = LOWER($1)` among customers
+that are not deleted, so customers stored with any case match. Vendure has no index for that, so
+each such lookup is a sequential scan of the `customer` table. Walk-in sales (no email) skip it.
+The plugin never adds an index to Vendure's own table itself (ADR 0002, ruling 16). Add this one
+yourself when the store has **more than about 50,000 customers**, or when POS sales with an email
+are visibly slow:
+
+```sql
+CREATE INDEX CONCURRENTLY "IDX_customer_email_lower" ON "customer" (lower("emailAddress")) WHERE "deletedAt" IS NULL;
+```
+
+`CONCURRENTLY` builds the index without blocking writes to `customer`, and so it must run
+**outside a transaction**: run it on its own in `psql`, not inside a migration that TypeORM wraps in
+a transaction. If it fails part-way, it leaves an `INVALID` index; drop that and run it again. To
+remove the index:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS "IDX_customer_email_lower";
+```
+
+Vendure's `generateMigration` (tested with Vendure 3.7.3 and TypeORM 0.3.31) does not see this
+expression index, so it neither drops nor re-adds it. On start, the server process logs one warning when `customer` holds more than
+50,000 rows (the planner's estimate) and has no `lower("emailAddress")` index.
+
 ## Development
 
 The package is standalone npm, not part of the pnpm workspace.
