@@ -562,6 +562,30 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   expect(cspConsole).toEqual([]);
 });
 
+test('a till update the store rejects shows in the header', async ({ page }) => {
+  // The plugin's answer to a second open session on one register, for every register command; orders reach the store.
+  await page.route('**/tally/v1/commands', (route) => {
+    const commands: SentCommand[] = route.request().method() === 'POST' ? route.request().postDataJSON().commands : [];
+    if (!commands.some(({ type }) => type.startsWith('register.'))) return route.continue();
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
+      id, status: 'rejected', error: { code: 'register_session_already_open', message: 'test refusal' },
+    })) }) });
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await expect(page.getByTestId('register-sync-notice')).toHaveCount(0);
+  await openRegister(page);
+  await expect(page.getByTestId('register-sync-notice')).toHaveText('1 till update needs attention · The online store refused it, '
+    + "and later till updates wait behind it. Ask the store owner to look at the till's sync log.");
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 // Below WIDE_MIN_WIDTH Products and Cart are tabs (vendurepos #70): an add confirms in place and never switches tab.
 test.describe('on a narrow screen', () => {
   test.use({ viewport: { width: 360, height: 780 } });

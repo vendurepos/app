@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RegisterCommandEnvelope } from '@tallyui/core';
 import { readFresh, watchFresh, type CommandTransport, type PosOrder, type RegisterCommand } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
@@ -59,8 +59,10 @@ export function useClosureWaiting(commands: RxCollection<RegisterCommand> | null
   return waiting;
 }
 
-/** Calls `flush` whenever `pending` drops (see `flushOnDrain`); `flush` is read once, so it must be stable. */
+/** Calls the latest `flush` whenever `pending` drops (see `flushOnDrain`): useRegisterOutbox's is new on each render. */
 export function useFlushOnDrain(pending: number, flush: () => void) {
-  const [onPending] = useState(() => flushOnDrain(flush));
+  const latest = useRef(flush);
+  useEffect(() => { latest.current = flush; });
+  const [onPending] = useState(() => flushOnDrain(() => latest.current()));
   useEffect(() => onPending(pending), [onPending, pending]);
 }
