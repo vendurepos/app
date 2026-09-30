@@ -8,8 +8,8 @@ import {
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  catalogueEntries, createRegisterOutbox, CurrencyProvider, findEntryByCode, registerCommandsLogger, TaxProvider, taxProviderProps,
-  useCurrencyFormatter, useOrderOutbox, useRegisterSession, useSale, type OutboxState, type RegisterOutbox, type UseOrderOutboxResult,
+  catalogueEntries, CurrencyProvider, findEntryByCode, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
+  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import { cartTabLabel } from '../lib/cart-totals';
@@ -20,6 +20,7 @@ import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
 import { printLines } from '../lib/print-lines';
+import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
@@ -78,23 +79,20 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const currency = session.settings.currency;
   // The register's collections share the orders database, so they open, close and are kept with it.
   const registerStore = useMemo(() => registerCollections(outbox.orders), [outbox.orders]);
-  // Register commands go to the same POST /tally/v1/commands as the orders. Nothing but the app starts this outbox
-  // (TallyUI #290). No result is applied to the session yet (TallyUI's c2b anchoring), so results are only logged.
-  // A closure waits for its session's orders (lib/closure-hold.ts); the till opens its next session meanwhile.
-  const registerOutbox = useRef<RegisterOutbox | undefined>(undefined);
-  useEffect(() => {
-    if (!registerStore || !outbox.orders) return;
-    const started = registerOutbox.current = createRegisterOutbox({
-      collection: registerStore.commands, transport: holdClosuresForOrders(orderTransport(session), pendingSessionOrders(outbox.orders)),
-      deviceId: registerId,
-      onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
-    });
-    started.start();
-    return () => { started.stop(); registerOutbox.current = undefined; };
-  }, [registerStore, outbox.orders, session, registerId]);
+  // Register commands go to the same POST /tally/v1/commands as the orders, from the one register outbox over this
+  // collection (TallyUI #357: a second would send twice). No result is applied to the session yet (TallyUI's c2b
+  // anchoring), so results are only logged. A closure waits for its session's orders (lib/closure-hold.ts); the till
+  // opens its next session meanwhile. The collection is set only once the orders are open, so `orders` is too.
+  const registerOutbox = useRegisterOutbox({
+    commands: registerStore?.commands ?? null, deviceId: registerId,
+    transport: () => holdClosuresForOrders(orderTransport(session), pendingSessionOrders(outbox.orders!)),
+    onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
+  });
   // Once orders have gone, a held closure goes at once rather than at the end of its backoff.
-  useFlushOnDrain(outbox.state.pending, () => void registerOutbox.current?.flush());
+  useFlushOnDrain(outbox.state.pending, () => void registerOutbox.flush());
   const closingWaiting = useClosureWaiting(registerStore?.commands ?? null, outbox.orders);
+  const rejectedRegisterCommands = useRejectedRegisterCommands(registerStore?.commands ?? null);
+  const registerNotice = registerSyncNotice(registerOutbox.state, rejectedRegisterCommands);
   const [boundRegisterId] = useState(() => mintBoundRegisterId(defaultStore()));
   const [tenderInProgress, setTenderInProgress] = useState(false);
   const actor = useMemo(() => ({ id: session.email, name: session.email }), [session.email]);
@@ -179,6 +177,11 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               <Text>Send again</Text>
             </Button>
           ) : null}
+        </HStack>
+      ) : null}
+      {registerNotice ? (
+        <HStack className="items-center border-b border-border px-4 py-2" space="sm">
+          <Text testID="register-sync-notice" className="flex-1 text-sm text-muted-foreground">{registerNotice}</Text>
         </HStack>
       ) : null}
       {ordersOpen ? (
