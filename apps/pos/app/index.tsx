@@ -33,7 +33,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [pending, setPending] = useState(false);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
-  const waiting = usePendingOrderCount();
+  const waiting = usePendingOrderCount(session);
   const traitContext = useMemo(() => ({ currency: session.settings.currency }), [session.settings.currency]);
 
   async function handleSignOut() {
@@ -85,9 +85,10 @@ function Sale({ session, capabilities, catalogue, onSaving }: {
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const [registerId] = useState(() => getDeviceId(defaultStore(), REGISTER_ID_KEY));
-  // The session knows the cashier only by the email they signed in with.
+  // The session knows the cashier only by the email they signed in with. Its orders go to its own store's database.
   const sale = useSale(session.settings, {
-    registerId, cashierRef: session.email, capabilities, onSaleCompleted: recordOrder, isStored: isOrderStored,
+    registerId, cashierRef: session.email, capabilities,
+    onSaleCompleted: (order) => recordOrder(session, order), isStored: (order) => isOrderStored(session, order),
   });
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;

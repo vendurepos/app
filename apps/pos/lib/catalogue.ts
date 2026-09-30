@@ -1,15 +1,13 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { TallyConnector } from '@tallyui/core';
 import { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, type TallyDatabase, type TallyReplicationState } from '@tallyui/database';
-import { sessionContext, type Session } from './session';
+import { sessionContext, storeKeyHash, type Session } from './session';
 import { appStorage } from './app-storage';
 
 // One database per store, channel and barcode field so rows and checkpoints cannot be reused across settings.
 export function databaseName({ url, channelToken, barcodeField }: Pick<Session, 'url' | 'channelToken' | 'barcodeField'>): string {
   const key = `${url}\n${channelToken ?? ''}${barcodeField ? `\n${barcodeField}` : ''}`;
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 0x01000193);
-  return `vendurepos_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  return `vendurepos_${storeKeyHash(key)}`;
 }
 // Vendure's feeds have no push stream, so re-pull on this interval.
 export const RESYNC_INTERVAL_MS = 60_000;
