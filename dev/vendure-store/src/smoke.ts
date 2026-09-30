@@ -162,6 +162,11 @@ async function smoke() {
       stockLocations { items { name } }
     }`, {}, { Authorization: `Bearer ${token}`, 'vendure-token': POS_CHANNEL_TOKEN });
     const { activeChannel: channel, productVariants, taxRates, stockLocations } = body.data;
+    // A store seeded before #56 keeps Denmark, because the seed refuses a seeded database: name the fix.
+    if (channel.defaultTaxZone?.name !== 'Germany') {
+      throw new Error(`The dev store was seeded with default tax zone ${channel.defaultTaxZone?.name}, ` +
+        'not Germany (vendurepos/app#56): run ./reset.sh to reseed it.');
+    }
     const rates = taxRates.items.map((rate: { value: number; zone: { name: string }; category: { name: string } }) =>
       `${rate.category.name}/${rate.zone.name}/${rate.value}`);
     if (channel.code !== POS_CHANNEL_CODE || channel.currencyCode !== 'EUR' || channel.pricesIncludeTax !== false ||
