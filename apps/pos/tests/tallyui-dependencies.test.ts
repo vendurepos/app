@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
-import { vendureConnector } from '@tallyui/connector-vendure';
+import { createVendureConnector } from '@tallyui/connector-vendure';
 import { describe, it, expect } from 'vitest';
 
 const packageJson = JSON.parse(
@@ -11,6 +11,9 @@ const tallyuiDependencies = [
   ...Object.entries(packageJson.devDependencies),
 ].filter(([name]) => name.startsWith('@tallyui/'));
 
+// An exact published version: a release, or a numbered prerelease on a TallyUI dist-tag (e.g. 3.0.0-next.0 on `next`).
+const EXACT_VERSION = /^\d+\.\d+\.\d+(-(alpha|beta|rc|next)\.\d+)?$/;
+
 describe('TallyUI dependencies', () => {
   it('Every @tallyui/* dependency is an exact published version', () => {
     expect(tallyuiDependencies.length).toBeGreaterThan(0);
@@ -18,7 +21,13 @@ describe('TallyUI dependencies', () => {
       '@tallyui/connector-vendure',
     );
     for (const [, version] of tallyuiDependencies) {
-      expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(version).toMatch(EXACT_VERSION);
+    }
+  });
+
+  it('The exact-version shape refuses unnumbered prereleases and ranges', () => {
+    for (const version of ['3.0.0-next', '3.0.0-rc', '^3.0.0-next.0']) {
+      expect(version).not.toMatch(EXACT_VERSION);
     }
   });
 
@@ -35,6 +44,6 @@ describe('TallyUI dependencies', () => {
   });
 
   it('The published Vendure connector resolves', () => {
-    expect(vendureConnector.id).toBe('vendure');
+    expect(createVendureConnector({ pricesIncludeTax: true }).id).toBe('vendure');
   });
 });

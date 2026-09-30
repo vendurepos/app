@@ -1,8 +1,7 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { TallyConnector } from '@tallyui/core';
-import { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, type TallyDatabase } from '@tallyui/database';
+import { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, type TallyDatabase, type TallyReplicationState } from '@tallyui/database';
 import type { RxStorage } from 'rxdb';
-import type { RxReplicationState } from 'rxdb/plugins/replication';
 import { sessionContext, type Session } from './session';
 import { createStorage } from './storage';
 
@@ -22,7 +21,7 @@ export const SIGN_OUT_WAIT_MS = 5_000;
 
 let storage: RxStorage<any, any> | undefined;
 let database: Promise<TallyDatabase> | undefined;
-let sync: { replication: RxReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[] } | undefined;
+let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[] } | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -41,7 +40,7 @@ export function catalogueConnector(session: Session): TallyConnector {
 }
 
 export async function startCatalogueSync(session: Session, connector: TallyConnector): Promise<{
-  db: TallyDatabase; replication: RxReplicationState<any, any>; stockLevels: TallyDatabase[typeof STOCK_LEVELS_COLLECTION];
+  db: TallyDatabase; replication: TallyReplicationState<any, any>; stockLevels: TallyDatabase[typeof STOCK_LEVELS_COLLECTION];
 }> {
   return enqueue(() => startUnqueued(session, connector));
 }

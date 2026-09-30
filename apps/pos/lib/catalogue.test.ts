@@ -1,3 +1,4 @@
+import type { SyncNotice } from '@tallyui/core';
 import { createTallyDatabase, getStorageHealth, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, STOCK_LEVELS_LAST_PASS } from '@tallyui/database';
 import { useEffect, useMemo, useState } from 'react';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
@@ -22,6 +23,7 @@ vi.mock('@tallyui/database', async (importActual) => {
     startReplication: vi.fn(() => ({
       cancel: vi.fn(async () => {}), reSync: vi.fn(),
       active$: new Subject<boolean>(), error$: new Subject<Error>(), received$: new Subject(),
+      notice$: new Subject<SyncNotice | undefined>(), resume: vi.fn(async () => {}),
     })),
   };
 });
@@ -272,7 +274,8 @@ describe('catalogue sync lifecycle', () => {
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
       .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, setError])
-      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
+      .mockReturnValueOnce([undefined, vi.fn()]);
     let cleanup: (() => void) | void = undefined;
     vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
     const health = new Subject<{ status: 'ok' | 'stalled' | 'dead'; stalledWrites: number }>();
@@ -296,6 +299,82 @@ describe('catalogue sync lifecycle', () => {
     (cleanup as (() => void) | undefined)?.();
   });
 
+  it('shows a session the store refused from notice$ and keeps it over later sync events', async () => {
+    const { useCatalogue: catalogueHook, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+    const { stopCatalogueSync } = await import('./catalogue');
+    const setLastSyncedAt = vi.fn();
+    const setError = vi.fn();
+    const setPullNotice = vi.fn();
+    vi.mocked(useMemo).mockImplementation((create) => create());
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, setLastSyncedAt]).mockReturnValueOnce([null, setError])
+      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
+      .mockReturnValueOnce([undefined, setPullNotice]);
+    let cleanup: (() => void) | void = undefined;
+    vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
+    catalogueHook(session);
+    await stopCatalogueSync();
+    const replication = vi.mocked(startReplication).mock.results[0].value;
+    // TallyUI 3.0 (#261): a refused session emits a till notice and ends the run with an empty page, never error$.
+    const notice: SyncNotice = { code: 'unauthorized', since: Date.now(), fixedBy: 'till' };
+    replication.active$.next(true);
+    replication.notice$.next(notice);
+    replication.active$.next(false);
+    expect(setPullNotice).toHaveBeenLastCalledWith(notice);
+    expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
+    // A later reSync run returns the paused empty page: the catalogue must not report itself synced.
+    replication.active$.next(true);
+    replication.received$.next({});
+    replication.error$.next(new Error('Later pull failed'));
+    replication.active$.next(false);
+    expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
+    expect(setLastSyncedAt).not.toHaveBeenCalled();
+    (cleanup as (() => void) | undefined)?.();
+  });
+
+  it('builds a new connector, and so new reconcile feeds, when the session moves to another store', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { stopCatalogueSync } = await import('./catalogue');
+    // React's semantics: a memo or effect runs again only when one of its dependencies changes.
+    const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((dep, i) => Object.is(dep, b[i]));
+    const memos: { deps: readonly unknown[]; value: unknown }[] = [];
+    let slot = 0;
+    vi.mocked(useMemo).mockImplementation((create, deps) => {
+      const index = slot++;
+      if (memos[index] && same(deps!, memos[index].deps)) return memos[index].value;
+      memos[index] = { deps: deps!, value: create() };
+      return memos[index].value;
+    });
+    vi.mocked(useState).mockImplementation((initial?: unknown) => [initial, vi.fn()] as any);
+    let effectDeps: readonly unknown[] | undefined;
+    let cleanup: (() => void) | void = undefined;
+    vi.mocked(useEffect).mockImplementation((effect, deps) => {
+      if (effectDeps && same(deps!, effectDeps)) return;
+      (cleanup as (() => void) | undefined)?.();
+      effectDeps = deps;
+      cleanup = effect();
+    });
+    const render = (current: Session) => { slot = 0; return catalogueHook(current); };
+    const first = render(session);
+    expect(render(session).connector).toBe(first.connector);
+    const other: Session = { ...session, url: 'https://another-store.example', token: 'other-token' };
+    const second = render(other);
+    await stopCatalogueSync();
+    expect(second.connector).not.toBe(first.connector);
+    // The connector's reconcile feed (TallyUI #307) is reached through the id and price enqueues and the product pull.
+    // reconcile.stock is a stateless module constant in connector-vendure, shared by design.
+    for (const feed of ['ids', 'prices'] as const) {
+      expect(second.connector.reconcile![feed]!.enqueue).not.toBe(first.connector.reconcile![feed]!.enqueue);
+    }
+    expect(second.connector.replication!.products).not.toBe(first.connector.replication!.products);
+    for (const start of [startReplication, startIdReconcile, startFingerprintReconcile]) {
+      const [a, b] = vi.mocked(start).mock.calls.map(([options]) => options.adapter);
+      expect(b).toBeDefined();
+      expect(b).not.toBe(a);
+    }
+    (cleanup as (() => void) | undefined)?.();
+  });
+
   it('returns reconciled stock for the chooser without mutating raw products', async () => {
     const { useCatalogue: catalogueHook } = await import('./use-catalogue');
     const raw = { id: 'product-1', variants: [{ id: 'variant-1', stockOnHand: 3 }] };
@@ -303,7 +382,8 @@ describe('catalogue sync lifecycle', () => {
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[raw], vi.fn()])
       .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
-      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
+      .mockReturnValueOnce([undefined, vi.fn()]);
     const { products, connector, stockOverlay } = catalogueHook(session);
     expect(connector.traits.product.getVariants!(products[0])[0].stock?.quantity).toBe(7);
     expect(connector.traits.product.getVariants!(raw)[0].stock?.quantity).toBe(1);
@@ -320,7 +400,8 @@ describe('catalogue sync lifecycle', () => {
     vi.mocked(useMemo).mockImplementation((create) => create());
     vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
       .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
-      .mockReturnValueOnce([undefined, setOverlay]).mockReturnValueOnce([undefined, setAsOf]);
+      .mockReturnValueOnce([undefined, setOverlay]).mockReturnValueOnce([undefined, setAsOf])
+      .mockReturnValueOnce([undefined, vi.fn()]);
     let cleanup: (() => void) | void = undefined;
     vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
     catalogueHook(session);

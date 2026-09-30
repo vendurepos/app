@@ -5,14 +5,19 @@ declare global {
 }
 
 let cspConsole: string[] = [];
+let sharedConnectorConsole: string[] = [];
 
 // public/index.html's CSP meta must hold for the whole flow. A reload starts a new array, so read it before each one.
 test.beforeEach(async ({ page }) => {
   // An invalid CSP source is a build mistake and a refusal is a violation, so either console message fails the smoke.
   const messages: string[] = [];
   cspConsole = messages;
+  const shared: string[] = [];
+  sharedConnectorConsole = shared;
   page.on('console', (message) => {
     if (/Content Security Policy/i.test(message.text())) messages.push(message.text());
+    // TallyUI #315's warning: one connector instance replicating into two databases.
+    if (/one connector instance is replicating into two databases/i.test(message.text())) shared.push(message.text());
   });
   await page.addInitScript(() => {
     window.cspViolations = [];
@@ -131,4 +136,46 @@ test('signs in to the dev store', async ({ page }) => {
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
+  expect(sharedConnectorConsole).toEqual([]);
+});
+
+test('a session revoked on the store stops the catalogue with a notice', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  // Ends the session on the store behind the app's back, as an expiry or an admin would.
+  const logout = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { query: 'mutation { logout { success } }' },
+  });
+  expect((await logout.json()).data.logout.success).toBe(true);
+  const violations = await cspViolations(page);
+  // A reload starts a product pull with the stored, now revoked, token.
+  const pull = page.waitForResponse((response) => {
+    const body = response.request().postData() ?? '';
+    return response.request().method() === 'POST' && response.url().endsWith('/admin-api')
+      && (body.includes('products(') || body.includes('productVariants('));
+  });
+  await page.reload();
+  await pull;
+  // TallyUI's notice$ (#261), never a stale catalogue that looks synced.
+  await expect(page.getByText('Your session has ended. Sign out, then sign in again.', { exact: true })).toBeVisible();
+  await page.getByTestId('sign-out').click();
+  await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Your session has ended. Sign out, then sign in again.', { exact: true })).toHaveCount(0);
+  violations.push(...await cspViolations(page));
+  expect(violations).toEqual([]);
+  expect(cspConsole).toEqual([]);
+  expect(sharedConnectorConsole).toEqual([]);
 });

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { withStockOverlay, type TallyConnector } from '@tallyui/core';
+import { withStockOverlay, type SyncNotice, type TallyConnector } from '@tallyui/core';
 import { getStorageHealth } from '@tallyui/database';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import { isStorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
 import type { Session } from './session';
+
+// A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
+export const SESSION_ENDED_TEXT = 'Your session has ended. Sign out, then sign in again.';
 
 export function useCatalogue(session: Session): {
   connector: TallyConnector;
@@ -14,13 +17,16 @@ export function useCatalogue(session: Session): {
   error: string | null;
   stockOverlay: ReadonlyMap<string, unknown> | undefined;
   stockOverlayAsOf: string | undefined;
+  pullNotice: SyncNotice | undefined;
 } {
+  // One connector per store session (TallyUI #307): a shared instance would share its reconcile feeds across stores.
   const connector = useMemo(() => catalogueConnector(session), [session]);
   const [products, setProducts] = useState<any[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [stockOverlayAsOf, setStockOverlayAsOf] = useState<string>();
+  const [pullNotice, setPullNotice] = useState<SyncNotice>();
   const overlaidProducts = useMemo(() => products.map(doc => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay)), [products, connector, stockOverlay]);
 
   useEffect(() => {
@@ -29,6 +35,8 @@ export function useCatalogue(session: Session): {
     let failed = false;
     let errorShown = false;
     let dead = false;
+    // From TallyUI 3.0 a refused session reaches notice$, never error$, and the pull pauses without an error.
+    let tillStopped = false;
     const subscriptions: Subscription[] = [];
     void startCatalogueSync(session, connector).then(({ db, replication, stockLevels }) => {
       if (cancelled) return;
@@ -41,8 +49,17 @@ export function useCatalogue(session: Session): {
       subscriptions.push(stockOverlayAsOf$(stockLevels).subscribe((asOf) => {
         if (!cancelled) setStockOverlayAsOf(asOf);
       }));
+      subscriptions.push(replication.notice$.subscribe((notice) => {
+        if (cancelled) return;
+        setPullNotice(notice);
+        if (dead) return;
+        tillStopped = notice?.fixedBy === 'till';
+        if (!tillStopped) return;
+        errorShown = true;
+        setError(SESSION_ENDED_TEXT);
+      }));
       subscriptions.push(replication.active$.subscribe((active) => {
-        if (cancelled || dead) return;
+        if (cancelled || dead || tillStopped) return;
         // A new run starts clean; received$ also clears an error recovered by a retry within the same run.
         if (active && !wasActive) failed = false;
         if (wasActive && !active && !failed) {
@@ -53,7 +70,7 @@ export function useCatalogue(session: Session): {
         wasActive = active;
       }));
       subscriptions.push(replication.error$.subscribe((error) => {
-        if (cancelled || dead) return;
+        if (cancelled || dead || tillStopped) return;
         failed = true;
         let inner: any = error;
         while (inner.parameters?.errors?.[0]) inner = inner.parameters.errors[0];
@@ -61,7 +78,7 @@ export function useCatalogue(session: Session): {
         setError(inner.message ?? String(inner));
       }));
       subscriptions.push(replication.received$.subscribe(() => {
-        if (cancelled || dead || !errorShown) return;
+        if (cancelled || dead || tillStopped || !errorShown) return;
         failed = false;
         errorShown = false;
         setError(null);
@@ -86,5 +103,5 @@ export function useCatalogue(session: Session): {
     };
   }, [session, connector]);
 
-  return { connector, products: overlaidProducts, lastSyncedAt, error, stockOverlay, stockOverlayAsOf };
+  return { connector, products: overlaidProducts, lastSyncedAt, error, stockOverlay, stockOverlayAsOf, pullNotice };
 }
