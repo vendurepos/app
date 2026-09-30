@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { Button, Catalogue, HStack, OrdersList, Tabs, TabsList, TabsTrigger, Text, VStack } from '@tallyui/components';
-import { ConnectorProvider, type ServerCapabilities } from '@tallyui/core';
+import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  CurrencyProvider, getDeviceId, TaxProvider, taxProviderProps, useCurrencyFormatter, useOrderOutbox, useSale, type OutboxState, type UseOrderOutboxResult,
+  catalogueEntries, CurrencyProvider, findEntryByCode, getDeviceId, TaxProvider, taxProviderProps, useCurrencyFormatter, useOrderOutbox, useSale, type OutboxState, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { cartTabLabel } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
@@ -18,12 +18,14 @@ import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
+import { useWedgeScanner } from '../lib/use-wedge-scanner';
 
 // The till's register id, minted once per device (medusapos uses 'medusapos.register_id').
 const REGISTER_ID_KEY = 'vendurepos.register_id';
 // From this window width the cart sits beside the catalogue; below it, Products and Cart are tabs.
 const WIDE_MIN_WIDTH = 768;
-// How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70).
+// How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70), and a cart line
+// when an add lands where the cart shows.
 const CART_HIGHLIGHT_MS = 600;
 
 export default function HomeScreen() {
@@ -177,7 +179,10 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
   // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it, and the Cart tab shows
   // whatever stage the sale is at.
   const [tab, setTab] = useState<'products' | 'cart'>('products');
-  const [highlight, setHighlight] = useState(false);
+  // The Cart tab, or the SKU of the cart line an add just landed on.
+  const [highlight, setHighlight] = useState<'tab' | { sku: string | undefined } | null>(null);
+  // A scanned code no product has, shown on either tab until the next add.
+  const [notFound, setNotFound] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   const onProducts = !wide && tab === 'products';
@@ -185,22 +190,30 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
     // Only the cart takes new lines: a tender or a receipt is for the sale as it stands.
     if (stage.kind !== 'cart') return;
     sale.add(entry, connector.traits.product);
-    if (!onProducts) return;
-    // Confirmed in place: the Cart tab's count and total tick up and the tab lights up briefly.
-    setHighlight(true);
+    setNotFound(null);
+    // Confirmed in place: on Products the Cart tab's count and total tick up and the tab lights up briefly; where the
+    // cart shows, the line lights up.
+    setHighlight(onProducts ? 'tab' : { sku: entry.variant.sku });
     clearTimeout(highlightTimer.current);
-    highlightTimer.current = setTimeout(() => setHighlight(false), CART_HIGHLIGHT_MS);
+    highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
+  // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
+  // stock-overlaid entries. A scan into the search field is the field's alone (the listener leaves inputs be): one add.
+  const scannable = useStockOverlaid(products) as typeof products;
+  useWedgeScanner((code) => {
+    if (stage.kind !== 'cart') return;
+    const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
+    if (entry) add(entry);
+    else setNotFound(code);
+  });
   return (
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
       {wide ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
-          {/* Keyed on the tab for TallyUI #350 (on web the active fill stays on the tab it mounted with); removed once a
-              fixed @tallyui/components is pinned. */}
-          <TabsList key={tab} className="m-2 flex-row">
+          <TabsList className="m-2 flex-row">
             <TabsTrigger testID="tab-products" value="products" className="flex-1"><Text>Products</Text></TabsTrigger>
             <TabsTrigger testID="tab-cart" value="cart" className="flex-1">
-              {highlight ? (
+              {highlight === 'tab' ? (
                 <View testID="tab-cart-highlight" pointerEvents="none" className="absolute inset-0 rounded-sm border border-primary bg-primary/10" />
               ) : null}
               <Text>{cartTabLabel(sale.order, format)}</Text>
@@ -208,6 +221,12 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
           </TabsList>
         </Tabs>
       )}
+      {notFound ? (
+        // The catalogue search's own wording for a code with no product.
+        <Text testID="scan-not-found" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          {`No products match "${notFound}".`}
+        </Text>
+      ) : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
       <View className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
         <Catalogue
@@ -221,7 +240,7 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
         />
       </View>
       <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
-        {stage.kind === 'cart' ? <SaleCart sale={sale} /> : (
+        {stage.kind === 'cart' ? <SaleCart sale={sale} highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} /> : (
           <ScrollView>
             <SaleTender sale={sale} />
             <SaleReceipt sale={sale} store={session.url} cashier={session.email} registerId={registerId} />

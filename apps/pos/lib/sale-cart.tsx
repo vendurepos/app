@@ -1,3 +1,4 @@
+import { View } from 'react-native';
 import { Button, CartPanel, HStack, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
@@ -32,7 +33,8 @@ export function TaxRows({ label, amount, testID, rates }: {
   );
 }
 
-export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
+/** `highlightSku` lights up that line, as an add confirms in place. */
+export function SaleCart({ sale, highlightSku }: { sale: ReturnType<typeof useSale>; highlightSku?: string }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
   const money = (amount: number) => format({ amount, currency: order.currency });
@@ -45,6 +47,9 @@ export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
       renderItem={(line) => (
         <HStack testID={`cart-line-${line.sku}`} space="sm" className="items-center border-b border-border px-3 py-2">
+          {highlightSku && line.sku === highlightSku ? (
+            <View testID={`cart-line-highlight-${line.sku}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
+          ) : null}
           <VStack space="none" className="flex-1">
             <Text className="text-sm font-medium" numberOfLines={2}>{line.name}</Text>
             <Text className="text-xs text-muted-foreground">{money(line.unitPriceMinor)} each</Text>
