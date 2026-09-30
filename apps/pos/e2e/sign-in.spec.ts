@@ -134,6 +134,47 @@ test('signs in to the dev store', async ({ page }) => {
   expect(cspConsole).toEqual([]);
 });
 
+// The store's /info advertises per_rate_group_items / half_up (vendurepos #60); lib/cart-totals.test.ts checks every
+// figure below against TallyUI's taxFiguresForBasket.
+test('the cart totals a sale with the store tax settings', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  const cart = page.getByTestId('cart');
+  const expectTotals = async (subtotal: string, tax: string, total: string, rates: Record<string, string>) => {
+    await expect(cart.getByTestId('cart-subtotal')).toHaveText(subtotal);
+    await expect(cart.getByTestId('cart-tax')).toHaveText(tax);
+    await expect(cart.getByTestId('cart-total')).toHaveText(total);
+    // Named by the store's own rates, which per_rate_group_items groups by.
+    for (const [label, amount] of Object.entries(rates)) await expect(cart.getByTestId(`cart-tax-${label}`)).toHaveText(amount);
+    await expect(cart.getByTestId(/^cart-tax-/)).toHaveCount(Object.keys(rates).length);
+  };
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Espresso Beans').click();
+  await page.getByRole('button', { name: /ESP-250/ }).click();
+  const beans = cart.getByTestId('cart-line-ESP-250');
+  await beans.getByText('+', { exact: true }).click();
+  await beans.getByText('+', { exact: true }).click();
+  await expect(beans).toContainText('Espresso Beans');
+  await expect(beans).toContainText('€26.97');
+  // 152 + 188.79 -> 189 = 341 (per_order gives 341 too).
+  await expectTotals('€34.97', '€3.41', '€38.38', { 'Standard DE 19%': '€1.52', 'Reduced DE 7%': '€1.89' });
+  // Two postcard sets: Standard 1998 x 19 % = 379.62 -> 380, so 569, where per_order's 568.41 gives 568.
+  await page.getByTestId('product-tile-Postcard Set').click();
+  await page.getByTestId('product-tile-Postcard Set').click();
+  await expectTotals('€46.95', '€5.69', '€52.64', { 'Standard DE 19%': '€3.80', 'Reduced DE 7%': '€1.89' });
+  // − at quantity 1 takes the mug off: Standard 1198 x 19 % = 227.62 -> 228, so 417 (per_order 416).
+  await cart.getByTestId('cart-line-TALLY-MUG').getByText('−', { exact: true }).click();
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await expectTotals('€38.95', '€4.17', '€43.12', { 'Standard DE 19%': '€2.28', 'Reduced DE 7%': '€1.89' });
+  await expectCspMeta(page);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('a session revoked on the store stops the catalogue with a notice', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('sign-in-url').fill(STORE_URL);
