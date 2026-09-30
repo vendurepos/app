@@ -411,10 +411,14 @@ first release, because v3 is what TallyUI `main` sends:
 - a declared field is either an **instruction** or **informational**
   (Front desk ruling 19, 2026-09-30, made precise the same day). An
   instruction asks the server to do something different (where stock
-  comes from, which customer, which price): it is honoured or refused. An
-  informational field is the till's own record (`title`, `subtotalMinor`,
-  `taxMinor`, `deviceId`, `attempt`): it may be disregarded and is never
-  refused. `payload.locationId`, which the contract declares without a
+  comes from, which customer, which price): it is honoured or refused.
+  Informational fields are the till's own record (`title`, `subtotalMinor`,
+  `taxMinor`, `deviceId`, `attempt`). A server may leave them unused, and
+  never refuses a command because they differ from its own computation. A
+  command whose own figures contradict each other, or carries a malformed
+  value, is malformed and is refused as `invalid_payload` (version 3:
+  `taxMinor` against `display.taxMinor` and the `taxByRate` sum); that is a
+  check of the command, not of the server's view of it. `payload.locationId`, which the contract declares without a
   version, is an instruction this server does not honour yet, so it is
   refused in every version with `invalid_payload` "payload.locationId:
   not supported by this server yet" until vendurepos/app#35 honours it
@@ -472,12 +476,12 @@ every field is checked against its version in step 4 (ruling 17).
 | `discountMinor` (v2+) | instruction | a negative `POS discount` surcharge carrying the line's tax lines | svc:656-661 |
 | **`payments[]`** | | | |
 | `clientPaymentId` | informational (reference) | stored in the payment's metadata and in `tallyPayments` | svc:712, svc:741 |
-| `method` | instruction (honoured by recording) | recorded, never refused: each Vendure payment keeps its tender, `method` included, in its metadata, and the order keeps every tender in `tallyPayments` (a surplus tender after the covering one only there); every payment runs through the one POS payment method, so the till's method is what tells cash from external at register close (Front desk, 2026-09-30) | svc:712, strategies.ts:95, svc:741; tested at recipe.e2e.ts:161-162 |
+| `method` | instruction (honoured by recording) | recorded, never refused: each Vendure payment keeps its tender, `method` included, in its metadata, and the order keeps every tender in `tallyPayments` (a surplus tender after the covering one only there, tested at recipe.e2e.ts:179); every payment runs through the one POS payment method, so the till's method is what tells cash from external at register close (Front desk, 2026-09-30) | svc:712, strategies.ts:95, svc:741; tested at recipe.e2e.ts:161-162 |
 | `amountMinor` | instruction | the payment's amount, capped at what the total still needs; `underpaid` when the sum is below the total | svc:397, svc:711-712 |
 | `tenderedMinor`, `changeMinor`, `reference` | informational | range-checked; stored as above | value-ranges.ts:57-58, svc:712, svc:741 |
 | **`customer`** | | | |
 | `email` | instruction | the customer, matched case-insensitively or created | svc:556-557 |
-| `customerId` (v3) | instruction | the customer by id; an unknown or over-long id is disregarded with a `customer_ignored` warning | svc:546-551 |
+| `customerId` (v3) | instruction | the customer by id; an unknown or over-long id is disregarded with a `customer_ignored` warning: an instruction the server cannot carry out is refused when the store can make it possible later, so the retry applies, and is recorded as a warning when nothing the store does later would change the answer, as for a customer that no longer exists, where the sale is kept and falls back to the email or walk-in customer with a `customer_ignored` warning naming the id (Front desk, 2026-09-30) | svc:546-551 |
 | **`display` (v3)** | | | |
 | `currency` | informational | must equal `payload.currency` | fiscal-figures.ts:91 |
 | `exponent` | informational | must equal the currency's decimals | fiscal-figures.ts:105 |
