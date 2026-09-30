@@ -18,10 +18,10 @@ const stackValues: Record<string, string> = existsSync(stackFile)
   ? Object.fromEntries(readFileSync(stackFile, 'utf8').trim().split('\n').map(line => line.split('=')))
   : {};
 export const testStack = {
-  pgPort: Number(process.env.PLUGIN_TEST_PG_PORT ?? stackValues.PLUGIN_TEST_PG_PORT ?? 5445),
-  smtpPort: Number(process.env.PLUGIN_TEST_SMTP_PORT ?? stackValues.PLUGIN_TEST_SMTP_PORT ?? 1045),
-  mailpitPort: Number(process.env.PLUGIN_TEST_MAILPIT_PORT ?? stackValues.PLUGIN_TEST_MAILPIT_PORT ?? 8045),
-  serverPort: Number(process.env.PLUGIN_TEST_SERVER_PORT ?? stackValues.PLUGIN_TEST_SERVER_PORT ?? 3050),
+  pgPort: Number(process.env.PLUGIN_TEST_PG_PORT || stackValues.PLUGIN_TEST_PG_PORT || 5445),
+  smtpPort: Number(process.env.PLUGIN_TEST_SMTP_PORT || stackValues.PLUGIN_TEST_SMTP_PORT || 1045),
+  mailpitPort: Number(process.env.PLUGIN_TEST_MAILPIT_PORT || stackValues.PLUGIN_TEST_MAILPIT_PORT || 8045),
+  serverPort: Number(process.env.PLUGIN_TEST_SERVER_PORT || stackValues.PLUGIN_TEST_SERVER_PORT || 3050),
 };
 export const dbConnectionOptions = {
   type: 'postgres' as const, host: '127.0.0.1', port: testStack.pgPort,

@@ -10,7 +10,14 @@ PG_RESERVED=(5432 5442 5443 5444 5445) # Host Homebrew Postgres, dev store, smok
 SMTP_BASE=11000 # Base for worktree SMTP ports.
 MAILPIT_BASE=18000 # Base for worktree Mailpit API ports.
 SERVER_BASE=13000 # Base for worktree Vendure test-server ports.
-port_free() { ! lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+if command -v lsof >/dev/null; then
+  port_free() { ! lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+elif command -v nc >/dev/null; then # Fallback probe: the port is in use when nc can connect.
+  port_free() { ! nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
+else
+  echo "test-stack.sh needs lsof or nc to find free ports; install one of them." >&2
+  exit 1
+fi
 
 reuse=0
 if [[ -f .test-stack.env ]]; then
@@ -23,11 +30,17 @@ if [[ -f .test-stack.env ]]; then
   reuse=1
 fi
 export PLUGIN_TEST_PROJECT=${PLUGIN_TEST_PROJECT:-${recorded_PLUGIN_TEST_PROJECT:-vendurepos-plugin-${key}}}
+recorded=${recorded_PLUGIN_TEST_PROJECT:-}
+if [[ "${1:-}" == up && -n $recorded && $recorded != "$PLUGIN_TEST_PROJECT" ]] &&
+   [[ -n $(docker compose -p "$recorded" ps -q) ]]; then
+  echo "Test stack $recorded is still running; run npm run db:down before starting $PLUGIN_TEST_PROJECT." >&2
+  exit 1
+fi
 if [[ "${1:-}" == up && $reuse == 1 ]] &&
    [[ -z $(docker compose -p "$PLUGIN_TEST_PROJECT" ps -q) ]]; then
   for k in PG SMTP MAILPIT SERVER; do
     v=recorded_PLUGIN_TEST_${k}_PORT
-    if ! port_free "${!v}"; then reuse=0; break; fi
+    if [[ -z ${!v:-} ]] || ! port_free "${!v}"; then reuse=0; break; fi # A missing port is not reusable.
   done
 fi
 if [[ "${1:-}" != down && $reuse == 0 ]]; then
