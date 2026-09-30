@@ -465,6 +465,21 @@ first release, because v3 is what TallyUI `main` sends:
   not supported by this server yet" until vendurepos/app#35 honours it
   (see "Stock"). Each field's kind and what the server does with it today
   are listed under "Field kinds" below;
+- the server sends **no subtotal or tax warning**. `subtotalMinor` and
+  `taxMinor` are not compared with Vendure's figures, and only
+  `totalMinor` is (`total_mismatch` and the rounding bridge). The reason is
+  measured: the till rounds tax once per order, while Vendure rounds per
+  line (default strategy) or per rate group (order-level). On the demo
+  catalogue an exact compare differs by 1–3 minor units on 13–60 % of
+  multi-line sales (vendurepos/app#38). By Front desk ruling, 2026-09-30,
+  the fix is the rounding rule, not a tolerant warning:
+  - the till computes its figures with the tax rounding strategy the store
+    advertises in `/info` (TallyUI/tallyui#287, after order.create v4);
+  - this plugin advertises Vendure's configured strategy as part of that
+    work;
+  - only then does `figures_mismatch` (TallyUI #281's shape) ship here,
+    comparing exactly: `subtotalMinor` and `taxMinor`, and `discountMinor`
+    from v4 on;
 - a higher version gets `unsupported_version` with `data.orderCreate: 3`
   before the claim;
 - v1 and v2 orders simply have no snapshot or session id.
