@@ -1,4 +1,4 @@
-import { Button, HStack, Text, VStack } from '@tallyui/components';
+import { Button, discountLabel, HStack, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { taxRowLabel } from './cart-totals';
 import { MoneyRow, TaxRows } from './sale-cart';
@@ -9,7 +9,8 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
 }) {
   const format = useCurrencyFormatter();
   if (sale.stage.kind !== 'receipt') return null;
-  const receipt = buildReceiptData(sale.stage.order, { storeName: store, cashier, register: registerId });
+  const { order } = sale.stage;
+  const receipt = buildReceiptData(order, { storeName: store, cashier, register: registerId });
   const money = (amount: number) => format({ amount, currency: receipt.currency });
   const { totals } = receipt;
   const taxLabel = `${totals.taxInclusive ? 'incl. ' : ''}Tax`;
@@ -18,12 +19,26 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
       <Text className="font-semibold">{receipt.header.storeName}</Text>
       <Text className="text-xs text-muted-foreground">Order {receipt.header.orderNumber.slice(-8)} · {receipt.header.cashier}</Text>
       {receipt.lineItems.map((line, index) => (
-        <HStack key={index} space="sm" className="justify-between border-b border-border py-1">
-          <Text className="flex-1 text-sm">{line.quantity} × {line.name}</Text>
-          <Text className="text-sm">{money(line.displayAmountMinor)}</Text>
-        </HStack>
+        <VStack key={index} space="none" className="border-b border-border py-1">
+          <HStack space="sm" className="justify-between">
+            <Text className="flex-1 text-sm">{line.quantity} × {line.name}</Text>
+            <Text className="text-sm">{money(line.displayAmountMinor)}</Text>
+          </HStack>
+          {/* Before any discount, then the line's own discounts under it, as TallyUI's Receipt (ADR-063). */}
+          {line.displayDiscounts.map((discount, i) => (
+            <HStack key={i} space="none" className="justify-between pl-4">
+              <Text className="text-xs text-muted-foreground">
+                {discountLabel(order.lineItems[index].discounts[i], receipt.currency)} off
+              </Text>
+              <Text testID={`receipt-line-${index}-discount-${i}`} className="text-xs text-muted-foreground">−{money(discount.amountMinor)}</Text>
+            </HStack>
+          ))}
+        </VStack>
       ))}
+      {receipt.orderDiscountMinor > 0
+        ? <MoneyRow label="Order discount" amount={`−${money(receipt.orderDiscountMinor)}`} testID="receipt-order-discount" /> : null}
       <MoneyRow label="Subtotal" amount={money(totals.subtotalMinor)} testID="receipt-subtotal" />
+      {totals.discountMinor > 0 ? <MoneyRow label="Discount" amount={`−${money(totals.discountMinor)}`} testID="receipt-discount" /> : null}
       <TaxRows label={taxLabel} amount={money(totals.taxMinor)} testID="receipt-tax" rates={totals.taxLines.map((tax) => ({
         key: taxRowLabel(totals.taxInclusive, tax.code, tax.ratePpm), name: taxRowLabel(false, tax.code, tax.ratePpm),
         amount: money(tax.amountMinor),

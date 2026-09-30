@@ -486,6 +486,95 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   expect(cspConsole).toEqual([]);
 });
 
+test('a discounted sale: line and order discounts, paid, and applied by the plugin with the receipt\'s totals', async ({ page }) => {
+  // Every order.create as sent, recorded at the route.
+  const sent: { type: string; version: number; payload: { clientOrderId: string } }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() === 'POST') {
+      sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
+    }
+    return route.continue();
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  const cart = page.getByTestId('cart');
+  await openRegister(page);
+  // TallyUI's DiscountForm: Percent or Amount, the value, Apply.
+  const discount = async (open: string, form: string, type: 'Percent' | 'Amount', value: string) => {
+    await cart.getByTestId(open).click();
+    const group = cart.getByRole('group', { name: form });
+    await group.getByRole('button', { name: type }).click();
+    await group.getByLabel('Discount value').fill(value);
+    await group.getByRole('button', { name: 'Apply' }).click();
+    await expect(group).toHaveCount(0);
+  };
+  const expectFigures = async (prefix: 'cart' | 'receipt', figures: Record<string, string>) => {
+    const scope = prefix === 'cart' ? cart : page.getByTestId('receipt');
+    for (const [id, text] of Object.entries(figures)) await expect(scope.getByTestId(`${prefix}-${id}`)).toHaveText(text);
+  };
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Filter Coffee').click();
+  await discount('line-discount-TALLY-MUG', 'Discount on Tally Fixture Mug', 'Percent', '10');
+  await discount('order-discount', 'Order discount', 'Amount', '1.00');
+  await expect(cart.getByTestId('line-discounts-TALLY-MUG').getByRole('button')).toHaveAccessibleName('Remove discount 10% −€1.60');
+  await expect(cart.getByTestId('line-discounts-FIL-500')).toHaveCount(0);
+  await expect(cart.getByTestId('order-discounts').getByRole('button')).toHaveAccessibleName('Remove discount Order discount −€1.00');
+  // Seed: mug €8.00 (Standard DE 19 %), Filter Coffee €12.99 (Reduced DE 7 %), prices excluding tax; /info's rounding
+  // per_rate_group_items / half_up. Mug line 2 × 800 = 1600, 10 % off = 160, so 1440. The €1.00 order discount is
+  // split by the lines after their own discounts, 1440 : 1299, largest remainder: 100 × 1440 / 2739 = 52.57 -> 53,
+  // 100 × 1299 / 2739 = 47.43 -> 47. Nets: Standard 1440 − 53 = 1387, Reduced 1299 − 47 = 1252. Tax per rate group:
+  // 1387 × 19 % = 263.53 -> 264, 1252 × 7 % = 87.64 -> 88, so 352. Subtotal (before discounts) 1600 + 1299 = 2899,
+  // discount 160 + 100 = 260, total 2899 − 260 + 352 = 2991.
+  const figures = { subtotal: '€28.99', discount: '−€2.60', tax: '€3.52', 'tax-Standard DE 19%': '€2.64', 'tax-Reduced DE 7%': '€0.88', total: '€29.91' };
+  await expectFigures('cart', figures);
+  await cart.getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await expect(tender.getByTestId('tender-total')).toHaveText('€29.91');
+  await tender.getByTestId('cash-tendered').locator('input').fill('30.00');
+  await tender.getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  await expectFigures('receipt', { ...figures, 'line-0-discount-0': '−€1.60', 'order-discount': '−€1.00', change: '€0.09' });
+  await expect(receipt).toContainText('10% off');
+  // The plugin's order.create 4: every discountMinor net, posted as a TALLY-DISCOUNT surcharge per line (mug 160 + 53,
+  // coffee 47), and Vendure's own total is the receipt's, with no TALLY-ROUNDING bridge.
+  await expect.poll(() => sent.length).toBeGreaterThan(0);
+  const orderId = sent[0].payload.clientOrderId;
+  expect(sent.every((command) => command.version === 4 && command.payload.clientOrderId === orderId)).toBe(true);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const onStore = async () => (await (await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax surcharges { sku description price } } } }',
+      variables: { id: orderId },
+    },
+  })).json()).data.orders.items;
+  await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: 2991, surcharges: [
+    { sku: 'TALLY-DISCOUNT', description: 'POS discount', price: -213 }, { sku: 'TALLY-DISCOUNT', description: 'POS discount', price: -47 },
+  ] }]);
+  // A second cart: each discount's chip takes it off again, back to the undiscounted €9.52 (800 + 152).
+  await receipt.getByTestId('new-sale').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expectFigures('cart', { total: '€9.52' });
+  await discount('line-discount-TALLY-MUG', 'Discount on Tally Fixture Mug', 'Percent', '10');
+  await discount('order-discount', 'Order discount', 'Amount', '1.00');
+  // 800 − 80 − 100 = 620, tax 117.8 -> 118: 738.
+  await expectFigures('cart', { discount: '−€1.80', total: '€7.38' });
+  await cart.getByTestId('line-discounts-TALLY-MUG').getByRole('button').click();
+  // 800 − 100 = 700, tax 133: 833.
+  await expectFigures('cart', { discount: '−€1.00', total: '€8.33' });
+  await cart.getByTestId('order-discounts').getByRole('button').click();
+  await expectFigures('cart', { subtotal: '€8.00', tax: '€1.52', total: '€9.52' });
+  await expect(cart.getByTestId('cart-discount')).toHaveCount(0);
+  await expect(cart.getByTestId('order-discounts')).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test("a closure waits for its session's orders: the Z notes them, the next session sells, and the closure goes after them", async ({ page }) => {
   // Offline, then both outboxes' backoffs, then the sends.
   test.setTimeout(180_000);
