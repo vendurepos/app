@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
-import { ConfigService, LanguageCode, RequestContextService, mergeConfig } from '@vendure/core';
+import { ConfigService, LanguageCode, RequestContextService, bootstrap, mergeConfig } from '@vendure/core';
 import type { VendureConfig } from '@vendure/core';
 import { createTestEnvironment, PostgresInitializer, registerInitializer, testConfig } from '@vendure/testing';
 import { parse } from 'graphql';
@@ -32,6 +34,23 @@ export function pluginTestConfig(override: Override = {}, plugins: Plugin[] = [T
   registerInitializer('postgres', new PostgresInitializer());
   return mergeConfig(mergeConfig(testConfig, { dbConnectionOptions, plugins, apiOptions: { port: testStack.serverPort } }), override);
 }
+
+// A second Vendure server on the harness's database (no synchronize, no population), on a port the OS reports free.
+// The harness names its database after the test file, so the caller passes it. Its connections are named, so
+// pg_stat_activity tells the two instances apart.
+export async function bootstrapSecondInstance(database: string, override: Override = {}, plugins?: Plugin[]) {
+  const port = await new Promise<number>((resolve, reject) => {
+    const probe = createServer().once('error', reject).listen(0, () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+  const config = mergeConfig(pluginTestConfig(override, plugins), {
+    apiOptions: { port }, dbConnectionOptions: { database, synchronize: false, applicationName: SECOND_INSTANCE },
+  });
+  return { app: await bootstrap(config), config, url: `http://localhost:${port}` };
+}
+export const SECOND_INSTANCE = 'vendurepos-instance-2';
 
 export function createPluginTestEnvironment(override: Override = {}, plugins?: Plugin[]) {
   const environment = createTestEnvironment(pluginTestConfig(override, plugins));
