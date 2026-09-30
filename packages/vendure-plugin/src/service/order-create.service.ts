@@ -348,7 +348,7 @@ export class OrderCreateService {
     errors.push(...valueRangeErrors(command.payload, maxMoney));
     // ADR-038 #220: createdAt has only an upper bound (an offline till sends old sales).
     errors.push(...createdAtError(command.createdAt, 'createdAt'), ...createdAtError(command.payload.createdAt, 'payload.createdAt'));
-    if (!errors.length && command.version === 3) errors.push(...fiscalFiguresErrors(command.payload));
+    if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? rejected(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
 
@@ -594,7 +594,7 @@ export class OrderCreateService {
       tallyClientOrderId: payload.clientOrderId,
       tallySaleAt: new Date(payload.createdAt),
       tallyRegisterId: payload.registerId,
-      tallySessionId: command.version === 3 ? payload.sessionId : undefined,
+      tallySessionId: command.version >= 3 ? payload.sessionId : undefined,
       tallyCashierRef: payload.cashierRef,
     };
     // The collision guard's in-progress case: another transaction still recording this sale holds
@@ -655,12 +655,16 @@ export class OrderCreateService {
     });
     order = unwrap(await this.orders.setShippingMethod(ctx, order.id, [shipping.id]));
     await this.testObserver?.('setShippingMethod', ctx, order);
+    // TallyUI #286: from v4 every discountMinor is tax-exclusive, so the surcharge is net whatever the line's mode, and
+    // Vendure grosses it up by the line's taxLines with its own rounding. v2/v3 send it in the line's own mode.
+    // vendored/commands.ts still types version as 1 | 2 | 3, hence the widening.
+    const netDiscounts = (command.version as number) >= 4;
     for (const line of payload.lines) {
       if (!(line.discountMinor! > 0)) continue;
       const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId) ?? pluginBug(`No order line for clientLineId ${line.clientLineId}`);
       const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
         order, description: 'POS discount', sku: 'TALLY-DISCOUNT', listPrice: -line.discountMinor!,
-        listPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
+        listPriceIncludesTax: netDiscounts ? false : line.taxInclusive ?? payload.pricesIncludeTax,
         taxLines: orderLine.taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
       }));
       order.surcharges.push(surcharge);
@@ -681,7 +685,7 @@ export class OrderCreateService {
       this.calculator.calculateOrderTotals(order);
       totalWarnings.push({ code: 'total_mismatch', expectedMinor: payload.totalMinor, serverMinor, bridgeMinor });
     }
-    if (command.version === 3) {
+    if (command.version >= 3) {
       // For an integer count, half-away rounding of count/2 equals ceil(count/2).
       const T = Number(roundHalfAwayFromZero(BigInt(order.lines.length + order.surcharges.length), 2n));
       const pos = new Map<number, number>();
@@ -743,7 +747,7 @@ export class OrderCreateService {
     }
     order.customFields.tallyPayments = JSON.stringify(payload.payments);
     order.orderPlacedAt = new Date(payload.createdAt);
-    if (command.version === 3) {
+    if (command.version >= 3) {
       order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate });
     }
     await this.connection.getRepository(ctx, Order).save(order);

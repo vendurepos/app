@@ -1,0 +1,84 @@
+{
+  "id": "01a0e775-0100-7f43-976b-7f93a7bbcfe3",
+  "type": "order.create",
+  "version": 4,
+  "createdAt": "2026-09-28T10:00:00.000Z",
+  "deviceId": "device_v4",
+  "attempt": 1,
+  "payload": {
+    "clientOrderId": "01a0e775-0100-7f83-97ab-bfd3e7fb0f23",
+    "createdAt": "2026-09-28T10:00:00.000Z",
+    "currency": "EUR",
+    "pricesIncludeTax": false,
+    "lines": [
+      {
+        "clientLineId": "01a0e775-0100-7ff3-871b-2f43576b7f93",
+        "variantId": "VARIANT_A",
+        "title": "Line a",
+        "quantity": 2,
+        "unitPriceMinor": 1250,
+        "discountMinor": 596
+      },
+      {
+        "clientLineId": "01a0e775-0100-7f63-b78b-9fb3c7dbef03",
+        "variantId": "VARIANT_B",
+        "title": "Line b",
+        "quantity": 1,
+        "unitPriceMinor": 999,
+        "discountMinor": 154
+      }
+    ],
+    "payments": [
+      {
+        "clientPaymentId": "01a0e775-0100-7fd3-a7fb-0f23374b5f73",
+        "method": "cash",
+        "amountMinor": 3437,
+        "tenderedMinor": 3437,
+        "changeMinor": 0
+      }
+    ],
+    "subtotalMinor": 2749,
+    "discountMinor": 750,
+    "taxMinor": 688,
+    "totalMinor": 3437,
+    "display": {
+      "currency": "EUR",
+      "exponent": 2,
+      "taxInclusive": false,
+      "subtotalMinor": 3499,
+      "discountMinor": 750,
+      "taxMinor": 688,
+      "totalMinor": 3437,
+      "lines": [
+        {
+          "clientLineId": "01a0e775-0100-7ff3-871b-2f43576b7f93",
+          "amountMinor": 2500,
+          "discounts": [
+            {
+              "discountId": "1790589600000-4",
+              "label": "10 % off",
+              "amountMinor": 250
+            }
+          ]
+        },
+        {
+          "clientLineId": "01a0e775-0100-7f63-b78b-9fb3c7dbef03",
+          "amountMinor": 999,
+          "discounts": []
+        }
+      ],
+      "orderDiscountMinor": 500
+    },
+    "taxByRate": [
+      {
+        "ratePpm": 250000,
+        "netMinor": 2749,
+        "taxMinor": 688,
+        "grossMinor": 3437
+      }
+    ],
+    "customer": null,
+    "registerId": "register_v4",
+    "cashierRef": "cashier_v4"
+  }
+}

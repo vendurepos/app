@@ -73,14 +73,14 @@ describe('order.create recipe through OrderCreateService', () => {
       { ...command, payload: null },
       { ...command, payload: { ...command.payload, lines: [] } },
       { ...command, payload: { ...command.payload, display: { ...command.payload.display, totalMinor: 1 } } },
-      { ...command, version: 4 },
+      { ...command, version: 5 },
     ];
     const results = [];
     for (const item of invalid) results.push(await run(item as unknown as CommandEnvelope<OrderCreatePayload>));
     expect(results.map(result => [result.status, result.error?.code])).toEqual([
       ...Array(6).fill(['rejected', 'invalid_payload']), ['rejected', 'unsupported_version'],
     ]);
-    expect(results.at(-1)!.error!.data).toEqual({ orderCreate: 3 });
+    expect(results.at(-1)!.error!.data).toEqual({ orderCreate: 4 });
     expect(await counts()).toEqual(before);
   });
 
