@@ -136,7 +136,10 @@ test('signs in to the dev store', async ({ page }) => {
 
 // The store's /info advertises per_rate_group_items / half_up (vendurepos #60); lib/cart-totals.test.ts checks every
 // figure below against TallyUI's taxFiguresForBasket.
-test('the cart totals a sale with the store tax settings', async ({ page }) => {
+test('the cart waits for the store tax settings, then totals a sale with them', async ({ page }) => {
+  // An unreachable /info is a failed read, not the default per_order rounding: no cart until a retry gets through.
+  let infoAborts = 0;
+  await page.route('**/tally/v1/info', (route) => { infoAborts++; return route.abort(); });
   await page.goto('/');
   await page.getByTestId('sign-in-url').fill(STORE_URL);
   await page.getByTestId('sign-in-email').fill(USERNAME);
@@ -144,6 +147,14 @@ test('the cart totals a sale with the store tax settings', async ({ page }) => {
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   const cart = page.getByTestId('cart');
+  await expect(page.getByTestId('sale-settings-retrying')).toHaveText("Can't reach the store's settings yet. Retrying…");
+  await expect(cart).toHaveCount(0);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toHaveCount(0);
+  // Sign-in's own read and at least one of the sale's have failed.
+  expect(infoAborts).toBeGreaterThanOrEqual(2);
+  await page.unroute('**/tally/v1/info');
+  await expect(cart).toBeVisible();
+  await expect(page.getByTestId('sale-settings-retrying')).toHaveCount(0);
   const expectTotals = async (subtotal: string, tax: string, total: string, rates: Record<string, string>) => {
     await expect(cart.getByTestId('cart-subtotal')).toHaveText(subtotal);
     await expect(cart.getByTestId('cart-tax')).toHaveText(tax);
