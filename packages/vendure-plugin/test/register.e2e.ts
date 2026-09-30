@@ -111,6 +111,28 @@ describe('register commands', () => {
     await applyAll(open(uuid(), r));
   });
 
+  it('register_session_closed, stored: a movement, a void or a counting transition once the closure is submitted, with no closing transition', async () => {
+    const [s, r] = [uuid(), uuid()];
+    const paidIn = movement(s, 'paid_in', 100);
+    await applyAll(open(s, r), paidIn, closure(s, r, 1, { movementIds: [movementId(paidIn)], tillExpected: { cash: 10100 } }));
+    for (const command of [movement(s, 'paid_out', 50), voidOf(s, movementId(paidIn)), transition(s, 'counting')]) {
+      await refused(command, 'register_session_closed', `Session ${s} is closed`, true);
+    }
+    expect((await send(transition(s, 'closed'))).register).toEqual({ session: { id: s, status: 'closed', expected: { cash: 10100 }, salesCount: 0 } });
+  });
+
+  it('a closure applies only the voids in its movementIds: a void recorded after the till froze its list leaves its target counted, as on the Z', async () => {
+    const [s, r] = [uuid(), uuid()];
+    const paidIn = movement(s, 'paid_in', 500);
+    const stranded = voidOf(s, movementId(paidIn));
+    await applyAll(open(s, r), paidIn);
+    // The live figure applies every void of the session.
+    expect((await send(stranded)).register).toEqual({ session: { id: s, status: 'open', expected: { cash: 10000 }, salesCount: 0 } });
+    await applyAll(transition(s, 'closed', { counted: { cash: 10500 } }));
+    const submit = closure(s, r, 1, { movementIds: [movementId(paidIn)], tillExpected: { cash: 10500 }, counted: { cash: 10500 } });
+    expect((await send(submit)).register).toMatchObject({ closure: { expected: { cash: 10500 }, variance: { cash: 0 } } });
+  });
+
   it('register_closure_exists and register_closure_number_invalid are stored with their data', async () => {
     const [s, r] = [uuid(), uuid()];
     await applyAll(open(s, r), transition(s, 'closed'));

@@ -159,7 +159,14 @@ session's movement rows.
   its index (`IDX_tally_order_session_id`).
 - **At the closure**: the float, plus the orders in `orderIds` found in
   the channel by `tallyClientOrderId`, plus the movements in
-  `movementIds`, with every void row of the session applied (d13.2).
+  `movementIds` (d13.2). A void excludes its target only if the void
+  row itself is in `movementIds`: the till's Z derives `tillExpected`
+  from exactly the rows it freezes into `movement_ids` (TallyUI
+  `@tallyui/pos` `src/register/session-store.ts`, `writeClosure`), so a
+  void recorded after that snapshot, stranded by a racing close, leaves
+  its target counted in the closure as on the Z. This is the literal
+  reading of d13.2's "the movements in `movementIds`"; the live figure
+  still applies every void row of the session.
 - **Received** means `order.create` finished the sale: `tallyPayments`
   is set, which the recipe writes at its end, so a partial sale awaiting
   an admin is not counted. A `tallyRejected` order never counts

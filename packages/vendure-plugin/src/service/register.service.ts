@@ -187,10 +187,11 @@ export class RegisterService {
       if (p.number !== counters.lastClosureNumber + 1) {
         return conflict('register_closure_number_invalid', `Closure number ${p.number} is not ${counters.lastClosureNumber + 1}`, { counters });
       }
-      // ADR-068 d13.2: the float, the received orders in orderIds and the movements in movementIds; any void row excludes its target.
+      // ADR-068 d13.2: the float, the received orders in orderIds and the movements in movementIds; a void excludes its
+      // target only if the void is in movementIds, as on the till's Z (TallyUI session-store.ts writeClosure).
       const orders = p.orderIds.length ? await this.receivedOrders(tx, { tallyClientOrderId: In(p.orderIds) }) : [];
       const movements = (await repo(TallyRegisterMovement).findBy({ channelId, sessionId: session!.id }))
-        .filter(row => row.type === 'void' || p.movementIds.includes(row.id));
+        .filter(row => p.movementIds.includes(row.id));
       const { expected } = deriveSessionFigures({ countedFloatMinor: session!.countedFloatMinor, orders, movements });
       const variance = deriveVariance(p.counted, expected);
       await repo(TallyRegisterClosure).insert({
