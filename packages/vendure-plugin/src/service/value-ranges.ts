@@ -6,7 +6,7 @@ import type { OrderCreatePayload } from '../vendored/commands';
 export const MAX_INT4 = 2_147_483_647;
 // Vendure's default varchar length for the string custom fields and the ledger's columns.
 export const MAX_STRING = 255;
-// The customerId bound both plugins share; a longer one is ignored, never refused.
+// The customerId bound both plugins share; a longer one is refused as invalid_payload (#43).
 export const CUSTOMER_ID_MAX = 64;
 export const SESSION_ID_MAX = 36; // a UUID's length, the contract's sessionId bound
 
@@ -39,7 +39,11 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor', 'discountMinor'] as const) minor(payload[field], field, maxMoney);
   for (const field of ['clientOrderId', 'registerId', 'cashierRef'] as const) text(payload[field], field);
   text(payload.sessionId, 'sessionId', SESSION_ID_MAX);
-  // customerId over CUSTOMER_ID_MAX is never refused: the recipe treats it as absent (customer_ignored).
+  // #43 (Front desk, 2026-09-30): an over-long customerId is malformed; the message is TallyUI core's.
+  const customerId = payload.customer?.customerId;
+  if (typeof customerId === 'string' && customerId.length > CUSTOMER_ID_MAX) {
+    errors.push(`customer.customerId: a string of at most ${CUSTOMER_ID_MAX} characters`);
+  }
   // The bound both plugins share (RFC 5321's 254), inside Vendure's varchar(255) emailAddress.
   text(payload.customer?.email, 'customer.email', 254);
   payload.lines.forEach((line, index) => {

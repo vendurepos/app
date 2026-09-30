@@ -61,7 +61,7 @@ export function payloadShapeErrors(payload: unknown): string[] {
     }
     if (object(payload.customer) && payload.customer.customerId !== undefined) {
       const id = payload.customer.customerId
-      // VP2a (Front desk): over 64 is ignored by the recipe (customer_ignored), never refused here.
+      // #43 (Front desk): its length bound is a value refusal (value-ranges.ts), after the replay read.
       check(typeof id === 'string' && id.length > 0, 'customer.customerId', 'a non-empty string')
     }
   }

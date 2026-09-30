@@ -27,7 +27,7 @@ import {
 import { StoreSetupService } from './store-setup.service';
 import { roundHalfAwayFromZero } from './rounding';
 import { strictShapeErrors } from './strict-shape';
-import { CUSTOMER_ID_MAX, MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
+import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
 export type TotalWarning =
@@ -35,7 +35,7 @@ export type TotalWarning =
   | { code: 'tax_rate_mismatch'; ratePpm: number; expectedMinor: number; serverMinor: number };
 
 /** A customerId treated as absent (the fallback chain); the till ignores the code as unknown. */
-export type CustomerIgnored = { code: 'customer_ignored'; customerId: string; reason: 'too_long' | 'unknown' };
+export type CustomerIgnored = { code: 'customer_ignored'; customerId: string; reason: 'unknown' };
 
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
   & { warnings?: Array<CommandWarning | CustomerIgnored>; totalWarnings?: TotalWarning[] };
@@ -542,13 +542,13 @@ export class OrderCreateService {
   // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
   private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress): Promise<SaleOutcome> {
     const payload = command.payload;
-    // ADR 0002 "Customer": a customerId over its bound, or unknown here, is treated as absent, with a warning.
+    // ADR 0002 "Customer": a customerId unknown here is treated as absent, with a warning.
+    // #43: one over CUSTOMER_ID_MAX never gets here; step 4 refuses it as invalid_payload.
     const given = payload.customer?.customerId;
-    const tooLong = !!given && given.length > CUSTOMER_ID_MAX;
-    const customerId = given && !tooLong ? this.decodeId(given) : undefined;
+    const customerId = given ? this.decodeId(given) : undefined;
     let customer = customerId !== undefined ? await this.customers.findOne(ctx, customerId) : undefined;
     const ignored: CustomerIgnored[] = given && !customer
-      ? [{ code: 'customer_ignored', customerId: given.slice(0, CUSTOMER_ID_MAX), reason: tooLong ? 'too_long' : 'unknown' }] : [];
+      ? [{ code: 'customer_ignored', customerId: given, reason: 'unknown' }] : [];
     await this.runTestHook('beforeFirstWrite', command.id);
     if (!customer) {
       // Review: createOrUpdate matches a customer of any channel and overwrites its names, so find it the
