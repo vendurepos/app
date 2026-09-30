@@ -39,7 +39,7 @@ cat > "$root/bin/nc/nc" <<EOF
 while read -r b; do [[ \$b == "\$2 \$3" ]] && exit 0; done < "\$STACK_FAKE_STATE/nc-busy"
 exit 1
 EOF
-chmod +x "$root"/bin/*/*
+chmod +x "$root/bin/base/docker" "$root/bin/lsof/lsof" "$root/bin/nc/nc" # Not the symlinks.
 
 n=0
 new_pkg() { # A fresh package copy (its own derived key) and fake state.
@@ -62,14 +62,26 @@ record() { printf '%s\n' "PLUGIN_TEST_PROJECT=$1" PLUGIN_TEST_PG_PORT=5460 \
   > "$PKG/.test-stack.env"; }
 
 case_empty_env() {
-  new_pkg; run env PLUGIN_TEST_PG_PORT= || return 1
-  [[ $(field PLUGIN_TEST_PG_PORT "$STATE/out") =~ ^54[0-9][0-9]$ ]]
+  new_pkg; run env PLUGIN_TEST_PG_PORT= PLUGIN_TEST_SMTP_PORT= PLUGIN_TEST_MAILPIT_PORT= \
+    PLUGIN_TEST_SERVER_PORT= || return 1
+  [[ $(field PLUGIN_TEST_PG_PORT "$STATE/out") =~ ^54[0-9][0-9]$ &&
+     $(field PLUGIN_TEST_SMTP_PORT "$STATE/out") =~ ^110[0-9][0-9]$ &&
+     $(field PLUGIN_TEST_MAILPIT_PORT "$STATE/out") =~ ^180[0-9][0-9]$ &&
+     $(field PLUGIN_TEST_SERVER_PORT "$STATE/out") =~ ^130[0-9][0-9]$ ]]
 }
 case_reuse() { # While the stack runs its ports are busy, so only reuse keeps them.
   new_pkg; run up || return 1
   cp "$PKG/.test-stack.env" "$STATE/first"
   field PLUGIN_TEST_PG_PORT "$STATE/first" >> "$STATE/lsof-busy"
   run up && cmp -s "$PKG/.test-stack.env" "$STATE/first"
+}
+case_reuse_stopped() { # Own project stopped (ps -q empty, ps -aq not), recorded ports free.
+  new_pkg; run env || return 1
+  local p; p=$(field PLUGIN_TEST_PROJECT "$STATE/out")
+  record "$p"; : > "$STATE/stopped/$p"; cp "$PKG/.test-stack.env" "$STATE/before"
+  # Offset 61 would derive x61 ports, so only reuse keeps the recorded x60 ones.
+  run up PLUGIN_TEST_OFFSET=61 || return 1
+  cmp -s "$PKG/.test-stack.env" "$STATE/before" && grep -qx "compose -p $p up -d --wait" "$STATE/docker.log"
 }
 refused() { # A recorded project `rec` in state $1 refuses `up` of another project.
   new_pkg; record rec; : > "$STATE/$1/rec"; cp "$PKG/.test-stack.env" "$STATE/before"
@@ -118,6 +130,7 @@ case_down_uses_record() {
 
 failed=0
 for c in "empty env:case_empty_env" "the recorded stack is reused:case_reuse" \
+  "a stopped recorded stack is reused:case_reuse_stopped" \
   "a second project is refused (running):case_refuse_running" \
   "a second project is refused (stopped):case_refuse_stopped" \
   "a partial record:case_partial_record" "a busy port is skipped:case_busy_port" \
