@@ -66,13 +66,13 @@ describe('#62 finding 4: Vendure fulfilment and cancellation writes racing a POS
   }
   // The level as the variant's movements sum it: on-hand from adjustments, sales (negative), cancellations and returns;
   // allocated from allocations, sales (negative) and releases (subtracted), as StockMovementService writes them.
-  async function ledger() {
+  async function ledger(productVariantId = mugId) {
     const [sums] = await connection.rawConnection.query(`SELECT
         coalesce(sum(quantity) FILTER (WHERE type IN ('ADJUSTMENT', 'SALE', 'CANCELLATION', 'RETURN')), 0)::int AS "onHand",
         (coalesce(sum(quantity) FILTER (WHERE type IN ('ALLOCATION', 'SALE')), 0)
           - coalesce(sum(quantity) FILTER (WHERE type = 'RELEASE'), 0))::int AS allocated
-      FROM stock_movement WHERE "productVariantId" = $1`, [mugId]) as Array<{ onHand: number; allocated: number }>;
-    return { movements: sums, level: await level() };
+      FROM stock_movement WHERE "productVariantId" = $1`, [productVariantId]) as Array<{ onHand: number; allocated: number }>;
+    return { movements: sums, level: await level(productVariantId) };
   }
 
   // A Shop API guest order for one of each variant (one Mug by default), in that line order, paid and settled (Vendure
@@ -372,5 +372,47 @@ describe('#62 finding 4: Vendure fulfilment and cancellation writes racing a POS
       const change = { onHand: fulfilling ? -2 : 0, allocated: 0 };
       return { results: Array(2).fill(fulfilling ? 'Pending' : 'Cancelled'), waiting: true, a: change, b: change };
     }));
+  });
+
+  // Accepted (Front desk ruling (a), 2026-09-30; ADR 0002): Vendure 3.7.3's addFulfillmentToOrder takes lines from several
+  // orders in one transaction, and createSalesForOrder calls the strategy line by line (stock-movement.service.js:165), so
+  // the lock, sorted within one order, is taken order by order. O1 is [A x2], O2 is [B x2]; a fulfilment of [O1.A, O2.B]
+  // locks A then B, one of [O2.B, O1.A] locks B then A, and through the crossing barrier they deadlock. Postgres aborts
+  // exactly one (40P01); Vendure's own retry misses it (it matches code 'deadlock_detected', transaction-wrapper.js:106),
+  // so the caller retries, and the retry succeeds. No stock update is lost.
+  it('multi-order deadlock: fulfilments [O1.A, O2.B] and [O2.B, O1.A] together, one aborts 40P01, its retry succeeds, stock exact', async () => {
+    const [a, b] = [variantIds.print[0], variantIds.beans[0]];
+    const [aId, bId] = [serviceIds.print[0], serviceIds.beans[0]];
+    await setOnHand(1000, a);
+    await setOnHand(1000, b);
+    const [o1, o2] = [await settledShopOrder([a, a]), await settledShopOrder([b, b])];
+    const sides = { AB: [o1.lineId, o2.lineId], BA: [o2.lineId, o1.lineId] };
+    const before = { a: await level(aId), b: await level(bId) };
+    const attempt = (lines: string[]) => fulfil(...lines).then(result => result, (error: Error) => error);
+    const remove = crossingBarrier(1_000);
+    let first: Array<Awaited<ReturnType<typeof attempt>>>;
+    try {
+      first = await Promise.all(Object.values(sides).map(attempt));
+    } finally {
+      remove();
+    }
+    const aborted = Object.keys(sides).filter((_, index) => first[index] instanceof Error);
+    // The caller's retry: the aborted fulfilment again, alone.
+    const retried = await Promise.all(Object.values(sides).map((lines, index) =>
+      first[index] instanceof Error ? attempt(lines) : first[index]));
+    const after = { a: await level(aId), b: await level(bId) };
+    const change = (key: 'a' | 'b') => ({ onHand: after[key].onHand - before[key].onHand,
+      allocated: after[key].allocated - before[key].allocated });
+    const report = { aborted, errors: first.flatMap(result => result instanceof Error ? [result.message] : []),
+      states: retried.map(result => result instanceof Error ? `error: ${result.message}` : outcome(result)),
+      a: change('a'), b: change('b'), ledger: { a: await ledger(aId), b: await ledger(bId) } };
+    console.log(`#62 multi-order deadlock ${JSON.stringify(report)}`);
+    // Pending, not Shipped: the Sales are written on Created -> Pending, and Vendure 3.7.3 cannot ship a multi-order
+    // fulfilment at all (default-fulfillment-process.js:98 runs each order's transitionToState, a savepoint, concurrently on
+    // one query runner: "savepoint typeorm_3 does not exist"). Each fulfilment sells one A and one B: -2 on each.
+    expect(report).toMatchObject({ aborted: [expect.stringMatching(/^(AB|BA)$/)], errors: ['deadlock detected'],
+      states: ['Pending', 'Pending'], a: { onHand: -2, allocated: -2 }, b: { onHand: -2, allocated: -2 } });
+    expect(report.ledger.a.movements).toEqual(report.ledger.a.level);
+    expect(report.ledger.b.movements).toEqual(report.ledger.b.level);
   });
 });
