@@ -9,10 +9,12 @@ import {
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
   catalogueEntries, createRegisterOutbox, CurrencyProvider, findEntryByCode, registerCommandsLogger, TaxProvider, taxProviderProps,
-  useCurrencyFormatter, useOrderOutbox, useRegisterSession, useSale, type OutboxState, type UseOrderOutboxResult,
+  useCurrencyFormatter, useOrderOutbox, useRegisterSession, useSale, type OutboxState, type RegisterOutbox, type UseOrderOutboxResult,
 } from '@tallyui/pos';
+import { Portal } from '@tallyui/primitives';
 import { cartTabLabel } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
+import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { logout } from '../lib/logout';
 import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
@@ -27,7 +29,7 @@ import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-id
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
-import { zReportLines } from '../lib/z-report';
+import { unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
 const APP_VERSION = Constants.expoConfig?.version ?? 'unknown';
@@ -78,15 +80,21 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const registerStore = useMemo(() => registerCollections(outbox.orders), [outbox.orders]);
   // Register commands go to the same POST /tally/v1/commands as the orders. Nothing but the app starts this outbox
   // (TallyUI #290). No result is applied to the session yet (TallyUI's c2b anchoring), so results are only logged.
+  // A closure waits for its session's orders (lib/closure-hold.ts); the till opens its next session meanwhile.
+  const registerOutbox = useRef<RegisterOutbox | undefined>(undefined);
   useEffect(() => {
-    if (!registerStore) return;
-    const registerOutbox = createRegisterOutbox({
-      collection: registerStore.commands, transport: orderTransport(session), deviceId: registerId,
+    if (!registerStore || !outbox.orders) return;
+    const started = registerOutbox.current = createRegisterOutbox({
+      collection: registerStore.commands, transport: holdClosuresForOrders(orderTransport(session), pendingSessionOrders(outbox.orders)),
+      deviceId: registerId,
       onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
     });
-    registerOutbox.start();
-    return () => registerOutbox.stop();
-  }, [registerStore, session, registerId]);
+    started.start();
+    return () => { started.stop(); registerOutbox.current = undefined; };
+  }, [registerStore, outbox.orders, session, registerId]);
+  // Once orders have gone, a held closure goes at once rather than at the end of its backoff.
+  useFlushOnDrain(outbox.state.pending, () => void registerOutbox.current?.flush());
+  const closingWaiting = useClosureWaiting(registerStore?.commands ?? null, outbox.orders);
   const [boundRegisterId] = useState(() => mintBoundRegisterId(defaultStore()));
   const [tenderInProgress, setTenderInProgress] = useState(false);
   const actor = useMemo(() => ({ id: session.email, name: session.email }), [session.email]);
@@ -129,6 +137,11 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         {outbox.state.pending ? (
           <Text testID="orders-waiting" className="text-sm text-muted-foreground">
             {countOrders(outbox.state.pending)} waiting to send{outbox.state.sending ? ' · sending…' : ''}
+          </Text>
+        ) : null}
+        {closingWaiting ? (
+          <Text testID="register-closing-pending" className="text-sm text-muted-foreground">
+            Closing — waiting for {countOrders(closingWaiting)}
           </Text>
         ) : null}
         {outbox.state.rejected ? (
@@ -206,7 +219,17 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {/* Dialogs, drawn through the root PortalHost. */}
       <RegisterPanel register={register} currency={currency} open={registerOpen && sessionStatus === 'open'} onOpenChange={setRegisterOpen} />
       {closingSessionId && register.lastClosure?.id === closingSessionId ? (
-        <ClosureSheet register={register} currency={currency} onPrint={printZ} onDone={() => setClosingSessionId(null)} />
+        <>
+          <ClosureSheet register={register} currency={currency} onPrint={printZ} onDone={() => setClosingSessionId(null)} />
+          {/* Drawn after the sheet, so above it: the store's figures may lag this Z until these orders are sent. */}
+          {register.lastClosure.unsynced_count > 0 ? (
+            <Portal name="closure-unsynced">
+              <View className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-md border border-border bg-background px-4 py-2">
+                <Text testID="closure-unsynced">{unsyncedNote(register.lastClosure.unsynced_count)}</Text>
+              </View>
+            </Portal>
+          ) : null}
+        </>
       ) : null}
     </VStack>
   );
