@@ -32,7 +32,9 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
       headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` },
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ contracts: { 'order.create': [1, 2, 3] } });
+    expect(await response.json()).toEqual({
+      contracts: { 'order.create': [1, 2, 3] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+    });
   });
 
   it('a version 4 order.create is still rejected as unsupported_version and writes no order', async () => {

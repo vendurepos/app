@@ -488,11 +488,14 @@ first release, because v3 is what TallyUI `main` sends:
     - The till computes its figures with the tax rounding strategy the
       store advertises in `/info` (TallyUI/tallyui#287, after order.create
       v4).
-    - This plugin advertises Vendure's configured strategy as part of that
-      work.
-    - Only then does `figures_mismatch` (TallyUI #281's shape) ship here,
-      comparing exactly: `subtotalMinor` and `taxMinor`, and
-      `discountMinor` from v4 on.
+    - This plugin advertises Vendure's configured strategy as `taxRounding`
+      (see "`taxRounding`" below).
+    - `figures_mismatch` (TallyUI #281's shape) may ship once tills that
+      follow the strategy are released. It is its own PR, comparing
+      exactly: `subtotalMinor` and `taxMinor`, and `discountMinor` from v4
+      on.
+    - A store advertising `{"granularity":"custom"}` never gets a subtotal
+      or tax `figures_mismatch` from this server.
 - a higher version gets `unsupported_version` with `data.orderCreate: 3`
   before the claim;
 - v1 and v2 orders simply have no snapshot or session id.
@@ -501,6 +504,40 @@ first release, because v3 is what TallyUI `main` sends:
 (`service/constants.ts`), not the vendored `SUPPORTED_ORDER_CREATE_VERSIONS`,
 so a new version is advertised only by the plugin PR that implements it
 (Front desk, 2026-09-30). `test/versions.e2e.ts` pins this.
+
+**`taxRounding`.** Beside `contracts`, `/info` has a top-level
+`taxRounding`, whose value is core's TaxRounding JSON
+(TallyUI/tallyui#287). The till computes its figures with it, so they
+match Vendure's (Front desk ruling on vendurepos/app#38, 2026-09-30).
+`service/tax-rounding.ts` maps the configured strategies once at
+bootstrap. They are store-wide, so every channel gets the same value.
+
+| Vendure configuration | `taxRounding` |
+|---|---|
+| `DefaultOrderTaxCalculationStrategy` (the default) | `{"granularity":"per_line_items","mode":"half_up"}` |
+| `OrderLevelTaxCalculationStrategy` (the dev store) | `{"granularity":"per_rate_group_items","mode":"half_up"}` |
+| Any other order tax strategy (a subclass included), a money strategy other than `DefaultMoneyStrategy`, or a tax line strategy other than `DefaultTaxLineCalculationStrategy` | `{"granularity":"custom"}` |
+
+- **Exact classes, never `instanceof`.** A subclass may round
+  differently. The field is never omitted: absence means an older server,
+  and the till would then assume `per_order`.
+- **The items** are each undiscounted line and its −D `TALLY-DISCOUNT`
+  surcharge (svc:654-667). A surcharge joins its line's rate group, which
+  is keyed by the rate's name and value.
+- **Measured** (vendurepos/app#38 and the discount scoring): 0 of 1,420
+  undiscounted baskets differ, and 0 of 1,000 discounted baskets in each
+  strategy and price-mode cell.
+- **`half_up`:** `DefaultMoneyStrategy` is `Math.round`. It differs from
+  half away from zero only on exact negative halves: −59.5 on a discount
+  surcharge becomes −59 (see "Tax and money authority").
+- **One rate per line.** `DefaultTaxLineCalculationStrategy` gives each
+  line one rate. Another tax line strategy may stack rates, and the till
+  splits a stacked line's tax differently from Vendure (TallyUI #312), so
+  such a store is `custom`.
+- **Known gap: inclusive lines under `per_rate_group_items`.** The till
+  uses `per_order` figures for them until TallyUI #310. Until then, those
+  baskets are still bridged with a `total_mismatch` warning, never
+  refused.
 
 #### Field kinds (ruling 19)
 
