@@ -1,10 +1,6 @@
 # Spec — advertise the store's tax rounding strategy in /info (TallyUI/tallyui#287, server side)
 
-**Status:** ready, gated on a release. Build it the day `@tallyui/core` publishes #287's `taxRounding` capability. #287 is built after order.create v4 (TallyUI #291), so this PR follows `order-create-v4.md`. Before dispatching:
-- read `~/.claude/state/route-implementation`;
-- copy this into a Codex/Opus job spec;
-- check every file:line against `main` on the day;
-- read TallyUI's contract docs for each granularity's written-out algorithm.
+**Status: buildable now** (2026-09-30). The contract and its wire location are ruled (below). The plugin does not depend on `@tallyui` packages, so it needs no release: it emits the ruled JSON. An older till ignores the extra top-level field. Dispatch through `~/.claude/bin/pool-agent.sh` while the direct login is over pace (see "Quota lanes" in `~/Projects/CLAUDE.md`).
 
 ## The contract (Front desk ruling on TallyUI/tallyui#287, 2026-09-30)
 
@@ -17,7 +13,9 @@
 - **An absent `taxRounding`** means an older server: the till assumes `per_order` / `half_away_from_zero`, its behaviour today. **`{ granularity: 'custom' }`** (no `mode`) means a store whose rounding the server cannot describe: the till uses its default figures, and that server never emits `figures_mismatch` for subtotal or tax.
 - **No flags.** Each granularity's algorithm is written out in TallyUI's contract docs from Vendure's and Medusa's real code. A variant that needs a different algorithm gets its own granularity **name**. The two `mode` values differ only on exact negative halves.
 - **A capability, not an order.create version.** The till reads it at sale time and records the strategy on the sale's own record, not in the payload. The figures are frozen at finalize.
-- **Where it goes on the `/info` wire:** follow core's `/info` parser on the day. This plugin's `/info` today is `{ contracts: { 'order.create': [...] } }`, and core's `ServerCapabilities` is the connector's parsed view of it.
+- **Where it goes on the `/info` wire (ruled, 2026-09-30):** a **top-level `taxRounding` sibling of `contracts`**, whose value is exactly core's TaxRounding JSON. For example:
+  `{"contracts":{"order.create":[1,2,3]},"taxRounding":{"granularity":"per_rate_group_items","mode":"half_up"}}`, or `…,"taxRounding":{"granularity":"custom"}}`.
+  TallyUI's Vendure connector reads it from there.
 
 ## Goal
 
