@@ -328,6 +328,38 @@ describe('catalogue sync lifecycle', () => {
     (cleanup as (() => void) | undefined)?.();
   });
 
+  it('shows a forbidden account its own notice, never the sign-out one, until the store answers again', async () => {
+    const { useCatalogue: catalogueHook, FORBIDDEN_TEXT, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+    const { stopCatalogueSync } = await import('./catalogue');
+    const setLastSyncedAt = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(useMemo).mockImplementation((create) => create());
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, setLastSyncedAt]).mockReturnValueOnce([null, setError])
+      .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    let cleanup: (() => void) | void = undefined;
+    vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
+    catalogueHook(session);
+    await stopCatalogueSync();
+    const replication = vi.mocked(startReplication).mock.results[0].value;
+    // TallyUI #342: a 403 is fixed by the store; the pull rethrows it on the store's schedule.
+    replication.active$.next(true);
+    replication.notice$.next({ code: 'forbidden', since: Date.now(), fixedBy: 'store' } satisfies SyncNotice);
+    replication.error$.next(new Error('Vendure API error: 403'));
+    replication.active$.next(false);
+    expect(setError).toHaveBeenLastCalledWith(FORBIDDEN_TEXT);
+    expect(setError).not.toHaveBeenCalledWith(SESSION_ENDED_TEXT);
+    expect(setLastSyncedAt).not.toHaveBeenCalled();
+    // The store lets the account in again: the next pull clears the notice and the catalogue is synced.
+    replication.active$.next(true);
+    replication.notice$.next(undefined);
+    replication.received$.next({});
+    replication.active$.next(false);
+    expect(setError).toHaveBeenLastCalledWith(null);
+    expect(setLastSyncedAt).toHaveBeenCalledTimes(1);
+    (cleanup as (() => void) | undefined)?.();
+  });
+
   it('builds a new connector, and so new reconcile feeds, when the session moves to another store', async () => {
     const { useCatalogue: catalogueHook } = await import('./use-catalogue');
     const { stopCatalogueSync } = await import('./catalogue');

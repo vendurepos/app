@@ -50,7 +50,8 @@ it("opens the outbox only once the store's settings, and so its order.create ver
   // Opened earlier, a pending order's first send would go at order.create 3 and keep that version for good.
   expect(outboxStoreKey(session, { status: 'resolving', attempt: 1 })).toBeNull();
   expect(outboxStoreKey(session, { status: 'retrying', attempt: 2, lastError: new Error('offline') })).toBeNull();
-  expect(outboxStoreKey(session, { status: 'ready', settings: session.settings, rateCodes: {}, capabilities: { orderCreate: 4 } }))
+  expect(outboxStoreKey(session, { status: 'plugin', attempt: 3 })).toBeNull();
+  expect(outboxStoreKey(session, { status: 'ready', settings: session.settings, capabilities: { orderCreate: 4 } }))
     .toBe(ordersDatabaseName(session));
 });
 

@@ -13,10 +13,10 @@ import { orderTransport } from '../lib/order-transport';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
-import { defaultStore, sessionContext, type Session } from '../lib/session';
+import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
-import { SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
-import { useSaleSettings } from '../lib/use-sale-settings';
+import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
+import { readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 
 // The till's register id, minted once per device (medusapos uses 'medusapos.register_id').
 const REGISTER_ID_KEY = 'vendurepos.register_id';
@@ -46,7 +46,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     storeKey: outboxStoreKey(session, saleSettings), open: openOrderStore, transport: () => orderTransport(session), deviceId: registerId,
     getMaxOrderCreateVersion: () => capabilities.current?.orderCreate,
     refreshCapabilities: async () => {
-      const read = await connector.capabilities?.(sessionContext(session));
+      // Timed out like the sale's own read, so a hung /info can't hold the outbox's send.
+      const read = connector.capabilities && await readCapabilities(session, connector);
       if (read) capabilities.current = read;
     },
   });
@@ -86,14 +87,19 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
         {saleSettings.status === 'ready' ? (
           <CurrencyProvider currencyCode={saleSettings.settings.currency}>
-            <TaxProvider {...taxProviderProps(saleSettings.settings)} rateCodes={saleSettings.rateCodes}>
+            <TaxProvider {...taxProviderProps(saleSettings.settings)}>
               <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
                 outbox={outbox} onSaving={setSaving} />
             </TaxProvider>
           </CurrencyProvider>
-        ) : catalogue.error === SESSION_ENDED_TEXT ? (
-          // A refused session fails the settings reads too, and no retry fixes that: the catalogue's notice says why.
-          <Text className="p-4 text-sm text-muted-foreground">{SESSION_ENDED_TEXT}</Text>
+        ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === FORBIDDEN_TEXT ? (
+          // A refused session or account fails the settings reads too: the catalogue's notice says why.
+          <Text className="p-4 text-sm text-muted-foreground">{catalogue.error}</Text>
+        ) : saleSettings.status === 'plugin' ? (
+          // Below order.create 4 a discounted sale would lose the net-discount rule: no sale until the plugin is updated.
+          <Text testID="sale-settings-plugin" className="p-4 text-sm text-muted-foreground">
+            {"This store's VendurePOS plugin is missing or out of date. Install or update it, then this till continues."}
+          </Text>
         ) : saleSettings.status === 'retrying' ? (
           // No sale on guessed settings: the cart waits until both reads succeed.
           <Text testID="sale-settings-retrying" className="p-4 text-sm text-muted-foreground">{"Can't reach the store's settings yet. Retrying…"}</Text>

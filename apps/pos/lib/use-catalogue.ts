@@ -9,6 +9,8 @@ import type { Session } from './session';
 
 // A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
 export const SESSION_ENDED_TEXT = 'Your session has ended. Sign out, then sign in again.';
+// A `forbidden` notice (TallyUI #342): a 403, fixed by the store; the pull retries on its own, and signing out won't help.
+export const FORBIDDEN_TEXT = "This account isn't allowed to use the till on this store. Ask the store's admin; the till retries on its own.";
 
 export function useCatalogue(session: Session): {
   connector: TallyConnector;
@@ -35,6 +37,8 @@ export function useCatalogue(session: Session): {
     let dead = false;
     // From TallyUI 3.0 a refused session reaches notice$, never error$, and the pull pauses without an error.
     let tillStopped = false;
+    // A forbidden notice stands until the store answers a pull again: the errors rethrown meanwhile don't replace it.
+    let forbidden = false;
     const subscriptions: Subscription[] = [];
     void startCatalogueSync(session, connector).then(({ db, replication, stockLevels }) => {
       if (cancelled) return;
@@ -51,12 +55,14 @@ export function useCatalogue(session: Session): {
         if (cancelled) return;
         if (dead) return;
         tillStopped = notice?.fixedBy === 'till';
-        if (!tillStopped) return;
+        forbidden = notice?.code === 'forbidden';
+        const text = notice?.code === 'unauthorized' ? SESSION_ENDED_TEXT : forbidden ? FORBIDDEN_TEXT : undefined;
+        if (!text) return;
         errorShown = true;
-        setError(SESSION_ENDED_TEXT);
+        setError(text);
       }));
       subscriptions.push(replication.active$.subscribe((active) => {
-        if (cancelled || dead || tillStopped) return;
+        if (cancelled || dead || tillStopped || forbidden) return;
         // A new run starts clean; received$ also clears an error recovered by a retry within the same run.
         if (active && !wasActive) failed = false;
         if (wasActive && !active && !failed) {
@@ -67,7 +73,7 @@ export function useCatalogue(session: Session): {
         wasActive = active;
       }));
       subscriptions.push(replication.error$.subscribe((error) => {
-        if (cancelled || dead || tillStopped) return;
+        if (cancelled || dead || tillStopped || forbidden) return;
         failed = true;
         let inner: any = error;
         while (inner.parameters?.errors?.[0]) inner = inner.parameters.errors[0];
@@ -75,7 +81,7 @@ export function useCatalogue(session: Session): {
         setError(inner.message ?? String(inner));
       }));
       subscriptions.push(replication.received$.subscribe(() => {
-        if (cancelled || dead || tillStopped || !errorShown) return;
+        if (cancelled || dead || tillStopped || forbidden || !errorShown) return;
         failed = false;
         errorShown = false;
         setError(null);
