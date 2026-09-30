@@ -271,6 +271,18 @@ describe('order.create recipe through OrderCreateService', () => {
     expect((await applied(offset)).order.customFields.tallySaleAt).toEqual(new Date('2026-09-28T10:00:00.000Z'));
   });
 
+  it('audit 4.7b: an order discountMinor that is not the lines\' sum is an unstored invalid_payload', async () => {
+    // v2, so ruling 17 knows discountMinor at both levels and only the vendored sum check refuses it.
+    const command = orderCommand([{ ...mug(), discountMinor: 100 }], undefined, undefined, { version: 2 });
+    command.payload.discountMinor = 101;
+    const before = await counts();
+    expect(await run(command)).toMatchObject({
+      id: command.id, status: 'rejected',
+      error: { code: 'invalid_payload', message: 'discountMinor: expected the sum of lines[].discountMinor' },
+    });
+    expect(await counts()).toEqual(before);
+  });
+
   it('proof 9: zero-total sale reaches PaymentSettled without a payment, then is Delivered', async () => {
     const command = orderCommand([{ ...mug(), unitPriceMinor: 0 }], []);
     const { order } = await applied(command);
