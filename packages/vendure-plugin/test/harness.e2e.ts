@@ -78,12 +78,12 @@ describe('plugin harness, custom fields and GET /tally/v1/info', () => {
     expect(commandFingerprint(changed)).not.toBe(fingerprint);
   });
 
-  it('GET /tally/v1/info advertises order.create 1, 2 and 3 to an authenticated caller, and refuses an anonymous one', async () => {
+  it('GET /tally/v1/info advertises order.create 1, 2, 3 and 4 to an authenticated caller, and refuses an anonymous one', async () => {
     const url = `${await server.app.getUrl()}/tally/v1/info`;
     const response = await fetch(url, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      contracts: { 'order.create': [1, 2, 3] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      contracts: { 'order.create': [1, 2, 3, 4] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
     });
     expect((await fetch(url)).status).toBe(403);
   });

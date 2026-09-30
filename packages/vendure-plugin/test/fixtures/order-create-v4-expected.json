@@ -1,0 +1,78 @@
+{
+  "generator": "@tallyui/pos@3.0.0-next.0 toOrderCreateEnvelope; taxRounding per_line_items half_up; 25 % rate",
+  "exclusive": {
+    "totalMinor": 3437,
+    "lines": {
+      "01a0e775-0100-7ff3-871b-2f43576b7f93": {
+        "taxInclusive": false,
+        "grossDiscountMinor": 745,
+        "sentDiscountMinor": 596
+      },
+      "01a0e775-0100-7f63-b78b-9fb3c7dbef03": {
+        "taxInclusive": false,
+        "grossDiscountMinor": 192,
+        "sentDiscountMinor": 154
+      }
+    }
+  },
+  "inclusive": {
+    "totalMinor": 2749,
+    "lines": {
+      "01a0e775-0100-7e12-a63a-4e62768a9eb2": {
+        "taxInclusive": true,
+        "grossDiscountMinor": 596,
+        "sentDiscountMinor": 477
+      },
+      "01a0e775-0100-7e82-96aa-bed2e6fa0e22": {
+        "taxInclusive": true,
+        "grossDiscountMinor": 154,
+        "sentDiscountMinor": 123
+      }
+    }
+  },
+  "mixed-inclusive": {
+    "totalMinor": 2961,
+    "lines": {
+      "01a0e775-0100-7d31-8559-6d8195a9bdd1": {
+        "taxInclusive": true,
+        "grossDiscountMinor": 596,
+        "sentDiscountMinor": 477
+      },
+      "01a0e775-0100-7da1-b5c9-ddf105192d41": {
+        "taxInclusive": false,
+        "grossDiscountMinor": 192,
+        "sentDiscountMinor": 154
+      }
+    }
+  },
+  "mixed-exclusive": {
+    "totalMinor": 3225,
+    "lines": {
+      "01a0e775-0100-7c50-a478-8ca0b4c8dcf0": {
+        "taxInclusive": false,
+        "grossDiscountMinor": 745,
+        "sentDiscountMinor": 596
+      },
+      "01a0e775-0100-7cc0-94e8-fc1024384c60": {
+        "taxInclusive": true,
+        "grossDiscountMinor": 154,
+        "sentDiscountMinor": 123
+      }
+    }
+  },
+  "inclusive-sent-as-v3": {
+    "totalMinor": 2749,
+    "lines": {
+      "01a0e775-0100-7b6f-8397-abbfd3e7fb0f": {
+        "taxInclusive": true,
+        "grossDiscountMinor": 596,
+        "sentDiscountMinor": 596
+      },
+      "01a0e775-0100-7bdf-b307-1b2f43576b7f": {
+        "taxInclusive": true,
+        "grossDiscountMinor": 154,
+        "sentDiscountMinor": 154
+      }
+    }
+  }
+}
