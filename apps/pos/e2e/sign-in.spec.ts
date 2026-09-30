@@ -153,6 +153,13 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   // Sign-in's own read and at least one of the sale's have failed.
   expect(infoAborts).toBeGreaterThanOrEqual(2);
   await page.unroute('**/tally/v1/info');
+  // The store can't be reached for orders: the sale is kept and waits, and each attempt is recorded.
+  const sent: { version: number; payload: { clientOrderId: string } }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push(...route.request().postDataJSON().commands);
+    return route.abort();
+  });
   await expect(cart).toBeVisible();
   await expect(page.getByTestId('sale-settings-retrying')).toHaveCount(0);
   const expectTotals = async (subtotal: string, tax: string, total: string, rates: Record<string, string>) => {
@@ -195,6 +202,10 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€50.00');
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€6.88');
   await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  // Sent at the plugin's order.create 4 (its /info was read before the outbox opened), one order under one id.
+  await expect.poll(() => sent.length).toBeGreaterThan(0);
+  const orderId = sent[0].payload.clientOrderId;
+  expect(sent.every((command) => command.version === 4 && command.payload.clientOrderId === orderId)).toBe(true);
   await receipt.getByTestId('new-sale').click();
   await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(0);
   await expect(cart.getByTestId('cart-total')).toHaveText('€0.00');
@@ -212,6 +223,19 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   // And after a reload, read back from storage rather than any handle the page still held.
   await page.reload();
   await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  // The reload's outbox retries from a 1 s backoff, doubling, so its next attempt after the un-route comes within
+  // seconds: no second reload to flush.
+  await page.unroute('**/tally/v1/commands');
+  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 30_000 });
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const created = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax } } }',
+      variables: { id: orderId },
+    },
+  });
+  expect((await created.json()).data.orders.items).toEqual([{ totalWithTax: 4312 }]);
   await expectCspMeta(page);
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
