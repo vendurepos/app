@@ -553,12 +553,25 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     const now = Date.parse('2026-10-01T14:05:00.789Z');
     const upper = '2026-10-02T14:05:00Z';
     const text = (path: string) => `${path} must be a time from ${floor} to ${upper}`;
+    const format = (path: string) => `${path} must be an RFC 3339 time with Z or an offset`;
     const before = await counts();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
     try {
       for (const [envelope, payload, message] of [
         [at(now + day + 1), undefined, text('createdAt')], [undefined, at(now + day + 1), text('payload.createdAt')],
-        ['not a date', undefined, text('createdAt')],
+        ['not a date', undefined, format('createdAt')],
+        [undefined, '2026-09-30T10:00:00', format('payload.createdAt')],
+        ['2026-09-30', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00z', undefined, format('createdAt')],
+        ['2026-09-30 10:00:00Z', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00+0200', undefined, format('createdAt')],
+        ['2026-02-29T00:00:00Z', undefined, format('createdAt')],
+        ['2026-09-30T24:00:00Z', undefined, format('createdAt')],
+        ['2026-09-30T10:00:60Z', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00+24:00', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00', '2019-12-31T23:59:59Z', `${format('createdAt')}; ${text('payload.createdAt')}`],
+        ['2026-10-02T16:05:00.790+02:00', undefined, text('createdAt')],
+        ['2026-10-02T10:05:00.790-04:00', undefined, text('createdAt')],
         ['1969-07-20T20:17:00Z', '2019-12-31T23:59:59Z', `${text('createdAt')}; ${text('payload.createdAt')}`],
         [at(now + day + 60_000), '1970-01-01T00:00:00Z', `${text('createdAt')}; ${text('payload.createdAt')}`],
       ]) {
@@ -592,9 +605,12 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     // The floor itself, the exact bound and later apply: an offline till sends old sales.
     const exact = vi.spyOn(Date, 'now').mockReturnValue(now);
     try {
-      const input = command();
-      input.createdAt = input.payload.createdAt = at(now + day);
-      expect(await run(input)).toMatchObject({ status: 'applied' });
+      for (const value of [at(now + day), '2026-10-02T16:05:00.789+02:00',
+        '2026-10-02T10:05:00.789-04:00', '2026-10-02T14:05:00.789-00:00', '2024-02-29T12:00:00.123456Z']) {
+        const input = command();
+        input.createdAt = input.payload.createdAt = value;
+        expect(await run(input), value).toMatchObject({ status: 'applied' });
+      }
     } finally {
       exact.mockRestore();
     }

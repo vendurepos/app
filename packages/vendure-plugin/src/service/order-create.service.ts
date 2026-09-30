@@ -90,11 +90,31 @@ function nulPath(value: unknown, path: string): string | undefined {
   return undefined;
 }
 
+// Front desk, 2026-09-30: RFC 3339 with Z or an offset, strict form.
+function clientTimeMs(value: unknown): number | undefined {
+  const match = typeof value === 'string'
+    ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value) : null;
+  if (!match) return undefined;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]
+    || hour > 23 || minute > 59 || second > 59) return undefined;
+  const zone = match[8];
+  const offsetHour = zone === 'Z' ? 0 : Number(zone.slice(1, 3));
+  const offsetMinute = zone === 'Z' ? 0 : Number(zone.slice(4, 6));
+  if (offsetHour > 23 || offsetMinute > 59) return undefined;
+  const fractionMs = Number((match[7]?.slice(1, 4) ?? '').padEnd(3, '0'));
+  const offsetMs = zone === 'Z' ? 0 : (zone[0] === '+' ? 1 : -1) * (offsetHour * 60 + offsetMinute) * 60_000;
+  return Date.UTC(year, month - 1, day, hour, minute, second) + fractionMs - offsetMs;
+}
+
 /** TallyUI #337 (b65c8ff): one message per client-time field outside the bounds, the bound compared exactly, shown to the second. */
 const clientTimeErrors = (fields: [path: string, value: unknown][], upperBoundMs: number) => {
   const upper = new Date(upperBoundMs).toISOString().replace(/\.\d+Z$/, 'Z');
   return fields.flatMap(([path, value]) => {
-    const time = typeof value === 'string' ? Date.parse(value) : NaN;
+    const time = clientTimeMs(value);
+    if (time === undefined) return [`${path} must be an RFC 3339 time with Z or an offset`];
     return time >= CREATED_AT_FLOOR_MS && time <= upperBoundMs ? []
       : [`${path} must be a time from ${CREATED_AT_FLOOR} to ${upper}`];
   });
