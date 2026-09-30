@@ -202,7 +202,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   outbox={outbox} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
                   onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
-                  registerClosing={(!!sessionStatus && sessionStatus !== 'open') || register.closing || closureShown} />
+                  registerClosing={(!!sessionStatus && sessionStatus !== 'open') || register.closing || closureShown}
+                  overSheet={closureShown} />
               </TaxProvider>
             </CurrencyProvider>
           ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === FORBIDDEN_TEXT ? (
@@ -253,7 +254,7 @@ function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxSt
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing,
+  registerClosing, overSheet,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -262,6 +263,8 @@ function Sale({
   panelOpen: boolean; onClosePanels(): void;
   /** The register is counting, closing or showing its Z. */
   registerClosing: boolean;
+  /** The Z sheet shows: the scan notice goes over it. */
+  overSheet: boolean;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   // The session knows the cashier only by the email they signed in with. Its orders go to its own store's outbox, each
@@ -333,6 +336,14 @@ function Sale({
     if (panelOpen) setTab('cart');
     add(entry, panelOpen || !onProducts, true);
   });
+  const notice = scanNotice === 'finish-sale' ? (
+    <Text testID="scan-finish-sale" className="text-sm text-muted-foreground">Finish this sale before scanning the next item.</Text>
+  ) : scanNotice === 'finish-closing' ? (
+    <Text testID="scan-finish-closing" className="text-sm text-muted-foreground">Finish closing the register before scanning.</Text>
+  ) : scanNotice ? (
+    // The catalogue search's own wording for a code with no product.
+    <Text testID="scan-not-found" className="text-sm text-muted-foreground">{`No products match "${scanNotice.notFound}".`}</Text>
+  ) : null;
   return (
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
       {wide ? null : (
@@ -348,20 +359,12 @@ function Sale({
           </TabsList>
         </Tabs>
       )}
-      {scanNotice === 'finish-sale' ? (
-        <Text testID="scan-finish-sale" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
-          Finish this sale before scanning the next item.
-        </Text>
-      ) : scanNotice === 'finish-closing' ? (
-        <Text testID="scan-finish-closing" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
-          Finish closing the register before scanning.
-        </Text>
-      ) : scanNotice ? (
-        // The catalogue search's own wording for a code with no product.
-        <Text testID="scan-not-found" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
-          {`No products match "${scanNotice.notFound}".`}
-        </Text>
-      ) : null}
+      {notice && overSheet ? (
+        // Drawn after the Z sheet, so above it, and below its unsynced note: a scan is never silent.
+        <Portal name="scan-notice">
+          <View className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-md border border-border bg-background px-4 py-2">{notice}</View>
+        </Portal>
+      ) : notice ? <View className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
       <View className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
         <Catalogue

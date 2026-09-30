@@ -749,6 +749,36 @@ test.describe('on a narrow screen', () => {
     await expect(page.getByTestId('register-count')).toBeVisible();
   });
 
+  // A scan is never silent: over the Z sheet its notice is on top (a trial click's hit test passes), clear of the unsynced note.
+  test('a scan while the Z sheet shows adds nothing and says so over the sheet', async ({ page }) => {
+    await signInWithBarcodes(page);
+    await page.route('**/tally/v1/commands', (route) => route.request().method() === 'POST' ? route.abort() : route.continue());
+    const cartTab = page.getByTestId('tab-cart');
+    await cartTab.click();
+    await openRegister(page);
+    await wedgeScan(page, MUG_BARCODE);
+    await page.getByTestId('cart').getByTestId('pay-cash').click();
+    await page.getByTestId('tender').getByTestId('cash-tendered').locator('input').fill('9.52');
+    await page.getByTestId('tender').getByTestId('tender-complete').click();
+    await page.getByTestId('new-sale').click();
+    await page.getByTestId('register-open-panel').click();
+    await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+    await page.getByTestId('register-count').getByTestId('count-amount').fill('109.52');
+    await page.getByTestId('register-count').getByTestId('count-close').click();
+    await expect(page.getByTestId('closure-unsynced')).toHaveText('1 order still syncing');
+    // Off the count's field, into the sheet, so the listener takes the scan.
+    await page.getByTestId('closure-title').click();
+    await wedgeScan(page, MUG_BARCODE);
+    const notice = page.getByTestId('scan-finish-closing');
+    await expect(notice).toHaveText('Finish closing the register before scanning.');
+    await notice.click({ trial: true, timeout: 5_000 });
+    const [note, box] = [await page.getByTestId('closure-unsynced').boundingBox(), await notice.boundingBox()];
+    expect(box!.y).toBeGreaterThan(note!.y + note!.height);
+    await expect(cartTab).toHaveText('Cart (0) · €0.00');
+    await wedgeScan(page, '9999999999999');
+    await page.getByTestId('scan-not-found').click({ trial: true, timeout: 5_000 });
+  });
+
   // Front desk, 2026-09-30: a scan at a tender with nothing entered goes back to the cart and adds; with a payment it
   // changes nothing and says so; at the receipt it starts the next sale. An unknown code never leaves the stage.
   test('a scan at a tender or the receipt adds to the cart, unless a payment is entered', async ({ page }) => {
