@@ -1,10 +1,12 @@
 import type { SyncNotice } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
+import {
+  createOrderBuilder, finalizeOrder, openSession, readRegister, reconcileRegisterCommands, recordMovement, type PosOrder,
+} from '@tallyui/pos';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { Subject } from 'rxjs';
 import { expect, it, vi } from 'vitest';
 import { catalogueConnector, databaseName, removeCatalogueDatabaseWithin, startCatalogueSync } from './catalogue';
-import { openOrderStore, ordersDatabaseName, outboxStoreKey, type OrderStore } from './orders-db';
+import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections, type OrderStore } from './orders-db';
 import type { Session } from './session';
 
 // Memory storage stands in for SQLite: like the web engine, one storage serves both databases, each under its own name.
@@ -27,6 +29,8 @@ const session: Session = {
   settings: { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 190000 } },
   stock: { trackInventory: true, outOfStockThreshold: 2 },
 };
+// ensureRegister's platform, stamped on the register document.
+const PLATFORM = 'web';
 // Another channel of the same server: a store of its own for orders.
 const otherStore: OrderStore = { url: session.url, channelToken: 'channel-b-token' };
 
@@ -51,20 +55,20 @@ it("opens the outbox only once the store's settings, and so its order.create ver
   expect(outboxStoreKey(session, { status: 'resolving', attempt: 1 })).toBeNull();
   expect(outboxStoreKey(session, { status: 'retrying', attempt: 2, lastError: new Error('offline') })).toBeNull();
   expect(outboxStoreKey(session, { status: 'plugin', attempt: 3 })).toBeNull();
-  expect(outboxStoreKey(session, { status: 'ready', settings: session.settings, capabilities: { orderCreate: 4 } }))
+  expect(outboxStoreKey(session, { status: 'ready', settings: session.settings, capabilities: { orderCreate: 4, register: 1 } }))
     .toBe(ordersDatabaseName(session));
 });
 
 it("keeps each store's orders apart, and a closed store's orders are there when it opens again", async () => {
   const order = cashSale();
-  const here = await openOrderStore(ordersDatabaseName(session));
+  const here = await openOrderStore(ordersDatabaseName(session), PLATFORM);
   await here.orders.insert(order);
-  const other = await openOrderStore(ordersDatabaseName(otherStore));
+  const other = await openOrderStore(ordersDatabaseName(otherStore), PLATFORM);
   expect(await other.orders.findOne(order.id).exec()).toBeNull();
   await other.close();
   await here.close();
   expect(here.orders.closed).toBe(true);
-  const again = await openOrderStore(ordersDatabaseName(session));
+  const again = await openOrderStore(ordersDatabaseName(session), PLATFORM);
   expect((await again.orders.findOne(order.id).exec())?.toJSON()).toMatchObject({ id: order.id, syncStatus: 'pending', totalMinor: 952 });
   await again.close();
 });
@@ -72,11 +76,11 @@ it("keeps each store's orders apart, and a closed store's orders are there when 
 it('opens a name again straight after a close() that is still running, and finds its orders', async () => {
   const name = ordersDatabaseName(session);
   const order = cashSale();
-  const first = await openOrderStore(name);
+  const first = await openOrderStore(name, PLATFORM);
   await first.orders.insert(order);
   const settled: string[] = [];
   const closing = first.close().then(() => { settled.push('closed'); });
-  const second = await openOrderStore(name).finally(() => { settled.push('opened'); });
+  const second = await openOrderStore(name, PLATFORM).finally(() => { settled.push('opened'); });
   await closing;
   // The reopen waited for the close (dev mode's ignoreDuplicate would let a production build's DB8 through here):
   // the first handle is closed, the second one open, and it holds the order.
@@ -91,7 +95,7 @@ it('still holds a stored order after sign-out removes the catalogue database, an
   const name = ordersDatabaseName(session);
   await startCatalogueSync(session, catalogueConnector(session));
   const order = cashSale();
-  const store = await openOrderStore(name);
+  const store = await openOrderStore(name, PLATFORM);
   await store.orders.insert(order);
   expect(await removeCatalogueDatabaseWithin()).toBe('removed');
   expect(store.orders.closed).toBe(false);
@@ -103,7 +107,38 @@ it('still holds a stored order after sign-out removes the catalogue database, an
   // database closed (memory storage keeps its data on close, never on remove), the module fresh, the store reopened.
   await store.close();
   vi.resetModules();
-  const reloaded = await (await import('./orders-db')).openOrderStore(name);
+  const reloaded = await (await import('./orders-db')).openOrderStore(name, PLATFORM);
   expect((await reloaded.orders.findOne(order.id).exec())?.syncStatus).toBe('pending');
+  await reloaded.close();
+});
+
+it("adds the register's collections to the orders database, and its records survive sign-out and a reload", async () => {
+  const name = ordersDatabaseName(session);
+  await startCatalogueSync(session, catalogueConnector(session));
+  const store = await openOrderStore(name, PLATFORM);
+  const register = registerCollections(store.orders)!;
+  expect(register.sessions.database).toBe(store.orders.database);
+  const minted = await readRegister(register.sessions);
+  expect(minted).toMatchObject({ platform: PLATFORM });
+  const opened = await openSession(register.sessions, {
+    registerId: 'drawer-1', expectedFloatMinor: null, countedFloatMinor: 10000, openedBy: session.email,
+    businessDay: { year: 2026, month: 9, day: 30 }, storeKey: name,
+  });
+  const movement = await recordMovement(register.sessions, register.movements, register.closures,
+    { sessionId: opened.id, type: 'paid_in', amountMinor: 1000, reason: 'Change', actor: session.email });
+  const commands = await reconcileRegisterCommands({ ...register, host: register.sessions, storeKey: name, registerId: 'drawer-1' });
+  expect(commands).toEqual([`session.open:${opened.id}`, `movement.record:${movement.id}`]);
+  // Sign-out removes the catalogue database only; the orders database is read back as a reload would, as above.
+  expect(await removeCatalogueDatabaseWithin()).toBe('removed');
+  await store.close();
+  vi.resetModules();
+  const reloadedModule = await import('./orders-db');
+  const reloaded = await reloadedModule.openOrderStore(name, PLATFORM);
+  const again = reloadedModule.registerCollections(reloaded.orders)!;
+  expect((await again.sessions.findOne(opened.id).exec())?.status).toBe('open');
+  expect((await again.movements.findOne(movement.id).exec())?.amountMinor).toBe(1000);
+  expect((await again.commands.find().exec()).map(({ key }) => key)).toEqual(expect.arrayContaining(commands));
+  // ensureRegister keeps the register document it minted.
+  expect((await readRegister(again.sessions))?.id).toBe(minted!.id);
   await reloaded.close();
 });

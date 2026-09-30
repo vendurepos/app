@@ -16,6 +16,9 @@ export const MAX_RETRY_MS = 30_000;
 // The plugin this app ships with advertises order.create 4, and v4 carries the net-discount rule. A store below it (no
 // plugin, or an older one: a 404 /info reads as 1) would take a discounted sale at 3 and apply it without that rule.
 export const MIN_ORDER_CREATE = 4;
+// A sale is taken only inside an open register session, synced as the plugin's register commands (vendurepos #79):
+// a store without them has no server record of the drawer, so it waits as `plugin` too.
+export const MIN_REGISTER = 1;
 
 export function retryDelayMs(attempt: number): number {
   return Math.min(FIRST_RETRY_MS * 2 ** (attempt - 1), MAX_RETRY_MS);
@@ -42,8 +45,8 @@ export function readCapabilities(session: Session, connector: TallyConnector, un
  * rate names the connector reads beside the rates), with the store's `taxRounding` from its capabilities as
  * `useStoreSettings` adds it (TallyUI #324). A failed read is not an absent value: a read that throws, times out or
  * comes back inconclusive (`undefined` from `connector.capabilities`) keeps the sale waiting and is retried with
- * backoff, so no sale runs on guessed rounding. A store whose plugin is below MIN_ORDER_CREATE waits the same way, as
- * `plugin`. Only a connector with no `capabilities` read at all gets the default rounding. Once ready, the reads stop.
+ * backoff, so no sale runs on guessed rounding. A store whose plugin is below MIN_ORDER_CREATE or MIN_REGISTER waits the
+ * same way, as `plugin`. Only a connector with no `capabilities` read at all gets the default rounding. Once ready, the reads stop.
  */
 export function useSaleSettings(session: Session, connector: TallyConnector): SaleSettingsState {
   const [state, setState] = useState<SaleSettingsState>({ status: 'resolving', attempt: 1 });
@@ -58,8 +61,10 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
         try {
           capabilities = await readCapabilities(session, connector, unmount.signal);
           if (capabilities === undefined) throw new Error("The store's capabilities read was inconclusive");
-          // Written so a missing or non-numeric orderCreate waits too.
-          if (!(capabilities.orderCreate >= MIN_ORDER_CREATE)) waiting = { status: 'plugin', attempt: count };
+          // Written so a missing or non-numeric orderCreate or register waits too.
+          if (!(capabilities.orderCreate >= MIN_ORDER_CREATE) || !((capabilities.register ?? 0) >= MIN_REGISTER)) {
+            waiting = { status: 'plugin', attempt: count };
+          }
         } catch (error) {
           waiting = { status: 'retrying', attempt: count, lastError: error };
         }
