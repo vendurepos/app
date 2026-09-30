@@ -13,8 +13,10 @@ TallyUI command. The client side is already built and platform-neutral:
   answers 413 `{ code: 'batch_too_large', maxCommands: 50, message }`, as
   medusapos does, while an empty or malformed batch stays 400
   `invalid_payload` (Front desk ruling 18, 2026-09-30). A body over the
-  route's 1 MB limit answers 413 `{ code: 'body_too_large', maxBytes:
-  1048576, message }`, never `invalid_payload`, because a size limit is not
+  route's 1 MiB limit answers 413 `{ code: 'body_too_large', maxBytes:
+  1048576, message: 'The request body exceeds 1048576 bytes' }`, with or
+  without `Content-Length`. One constant sets both the parser's limit and
+  `maxBytes`. The answer is never `invalid_payload`, because a size limit is not
   order-specific; other unparseable bodies stay 4xx `invalid_payload` (Front
   desk ruling 20, 2026-09-30). The command `id` is a
   UUIDv7 and is the idempotency key. The server fingerprints the canonical

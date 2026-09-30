@@ -10,6 +10,7 @@ import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TallyPosPlugin } from '../src';
+import { COMMANDS_BODY_MAX_BYTES } from '../src/plugin';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -160,21 +161,50 @@ describe('POST /tally/v1/commands', () => {
     expect(await ledgerCount()).toBe(before);
   });
 
-  it('accepts a body above Vendure\'s 100 kB default and refuses one above 1 MB with 413 body_too_large (ruling 20)', async () => {
+  // A JSON body of exactly `bytes` bytes: the value plus ASCII padding.
+  function sized(value: object, bytes: number) {
+    const body = JSON.stringify({ ...value, padding: '' });
+    return body.replace('"padding":""', `"padding":"${'x'.repeat(bytes - body.length)}"`);
+  }
+  const bodyTooLarge = {
+    status: 413, body: { code: 'body_too_large', maxBytes: 1_048_576, message: 'The request body exceeds 1048576 bytes' },
+  };
+
+  it('accepts a body above Vendure\'s 100 kB default and refuses one above 1 MiB with 413 body_too_large (ruling 20)', async () => {
     const input = mug();
     const large = await post({ commands: [input], padding: 'x'.repeat(200_000) });
     expect(large.status).toBe(200);
     expect(large.body.results[0]).toMatchObject({ id: input.id, status: 'applied' });
+    // The parser's limit and the answer's maxBytes are the same number: the limit itself passes, one byte more is refused.
+    expect(COMMANDS_BODY_MAX_BYTES).toBe(1_048_576);
+    const atLimit = await post(sized({ commands: [mug()] }, COMMANDS_BODY_MAX_BYTES));
+    expect(atLimit.status).not.toBe(413);
     const before = await ledgerCount();
-    const body = JSON.stringify({ commands: [mug()], padding: '' });
-    // Just over 1 MB (1,048,576 bytes): one byte too many.
-    const tooLarge = await post(body.replace('"padding":""', `"padding":"${'x'.repeat(1_048_577 - body.length)}"`));
-    expect(tooLarge).toEqual({
-      status: 413, body: { code: 'body_too_large', maxBytes: 1_048_576, message: 'The request body exceeds 1 MB' },
-    });
+    expect(await post(sized({ commands: [mug()] }, COMMANDS_BODY_MAX_BYTES + 1))).toEqual(bodyTooLarge);
     expect(await ledgerCount()).toBe(before);
     // Malformed JSON is the client's fault too, never a 500 the outbox would retry.
     expect(await post('{"commands": [')).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
+  });
+
+  it('refuses a chunked body over the limit (no Content-Length) with the same 413 body_too_large', async () => {
+    const bytes = new TextEncoder().encode(sized({ commands: [mug()] }, COMMANDS_BODY_MAX_BYTES + 1));
+    // A stream body has no known length, so fetch sends it with Transfer-Encoding: chunked.
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (let i = 0; i < bytes.length; i += 64 * 1024) controller.enqueue(bytes.subarray(i, i + 64 * 1024));
+      controller.close();
+    } });
+    const before = await ledgerCount();
+    const response = await fetch(`${base}/tally/v1/commands`, { method: 'POST', headers: headers(), body, duplex: 'half' } as RequestInit);
+    expect({ status: response.status, body: await response.json() }).toEqual(bodyTooLarge);
+    expect(await ledgerCount()).toBe(before);
+  });
+
+  it('answers 200 for 50 commands in a body just under the limit: a full batch fits', async () => {
+    const commands = Array.from({ length: 50 }, () => mug());
+    const response = await post(sized({ commands }, COMMANDS_BODY_MAX_BYTES - 1));
+    expect(response.status).toBe(200);
+    expect(response.body.results.map((result: { id: string; status: string }) => [result.id, result.status]))
+      .toEqual(commands.map(command => [command.id, 'applied']));
   });
 
   it('refuses an anonymous caller, and allows a CORS preflight carrying X-Tally-Protocol without auth', async () => {
