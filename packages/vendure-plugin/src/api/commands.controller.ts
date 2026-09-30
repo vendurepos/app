@@ -71,9 +71,11 @@ export class TallyCommandsController {
     }
     markTallyRoute(ctx);
     const results: OrderCreateResult[] = [];
+    // TallyUI #337: the client-time upper bound is the server clock read once per request, the same for every command in the batch.
+    const requestTimeMs = Date.now();
     for (const command of batch.commands) {
       try {
-        results.push(await this.orders.create(ctx, command));
+        results.push(await this.orders.create(ctx, command, { requestTimeMs }));
       } catch (error) {
         // Stop at the first transient result; the earlier commands have committed and replay as duplicate.
         const kind = error instanceof TransientCommandError ? error.kind : 'unclassified';
