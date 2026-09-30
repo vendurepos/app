@@ -54,12 +54,12 @@ const STOCK_LOCK_TIMEOUT = '5s';
 // Ruling 14: the two-int advisory key (this, hashtext(email)) serialises creating a customer per email.
 // Distinct from StoreSetupService's 0x7a11; two-int keys are apart from other plugins' single-bigint keys.
 const CUSTOMER_LOCK_NAMESPACE = 0x7a12;
-// ADR-038 #220: a createdAt no later than now plus this skew, which absorbs a till whose clock runs
-// ahead; the lower bound is CREATED_AT_FLOOR_MS, and an offline till's old sales from 2020 on still apply.
-// Later, earlier or unparseable: invalid_payload.
+// ADR-038 #220: a client time no later than the request's clock plus this skew, which absorbs a till whose clock
+// runs ahead; the lower bound is CREATED_AT_FLOOR, and an offline till's old sales from 2020 on still apply.
 const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
 // Front desk ruling 2026-09-30, the same bound in both backends: no POS sale predates the product, and a 1970 clock is a broken till.
-const CREATED_AT_FLOOR_MS = Date.parse('2020-01-01T00:00:00Z');
+const CREATED_AT_FLOOR = '2020-01-01T00:00:00Z';
+const CREATED_AT_FLOOR_MS = Date.parse(CREATED_AT_FLOOR);
 /** The environment variable that enables the test hooks; production never sets it. */
 export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
@@ -90,11 +90,34 @@ function nulPath(value: unknown, path: string): string | undefined {
   return undefined;
 }
 
-const createdAtError = (value: unknown, path: string) => {
-  const time = typeof value === 'string' ? Date.parse(value) : NaN;
-  if (time < CREATED_AT_FLOOR_MS) return [`${path}: expected a time no earlier than 2020-01-01T00:00:00Z`];
-  return time <= Date.now() + CREATED_AT_SKEW_MS ? []
-    : [`${path}: expected a time no later than one day from now`];
+// Front desk, 2026-09-30: RFC 3339 with Z or an offset, strict form.
+function clientTimeMs(value: unknown): number | undefined {
+  const match = typeof value === 'string'
+    ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value) : null;
+  if (!match) return undefined;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]
+    || hour > 23 || minute > 59 || second > 59) return undefined;
+  const zone = match[8];
+  const offsetHour = zone === 'Z' ? 0 : Number(zone.slice(1, 3));
+  const offsetMinute = zone === 'Z' ? 0 : Number(zone.slice(4, 6));
+  if (offsetHour > 23 || offsetMinute > 59) return undefined;
+  const fractionMs = Number((match[7]?.slice(1, 4) ?? '').padEnd(3, '0'));
+  const offsetMs = zone === 'Z' ? 0 : (zone[0] === '+' ? 1 : -1) * (offsetHour * 60 + offsetMinute) * 60_000;
+  return Date.UTC(year, month - 1, day, hour, minute, second) + fractionMs - offsetMs;
+}
+
+/** TallyUI #337 (b65c8ff): one message per client-time field outside the bounds, the bound compared exactly, shown to the second. */
+const clientTimeErrors = (fields: [path: string, value: unknown][], upperBoundMs: number) => {
+  const upper = new Date(upperBoundMs).toISOString().replace(/\.\d+Z$/, 'Z');
+  return fields.flatMap(([path, value]) => {
+    const time = clientTimeMs(value);
+    if (time === undefined) return [`${path} must be an RFC 3339 time with Z or an offset`];
+    return time >= CREATED_AT_FLOOR_MS && time <= upperBoundMs ? []
+      : [`${path} must be a time from ${CREATED_AT_FLOOR} to ${upper}`];
+  });
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,7 +154,7 @@ export class OrderCreateService {
    * result; throws TransientCommandError for every failure that may be retried (classification.ts),
    * and with kind `needs_admin` once part of a sale remains that the plugin cannot finish or undo.
    */
-  async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, options?: { repaired?: boolean }): Promise<OrderCreateResult> {
+  async create(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, options?: { repaired?: boolean; requestTimeMs?: number }): Promise<OrderCreateResult> {
     // ADR-038 #220's step order. 1. Shape, NUL included, before any database access.
     const invalid = this.shapeRefusal(command);
     if (invalid) return invalid;
@@ -144,9 +167,10 @@ export class OrderCreateService {
       if (replay) return replay;
       // 3. The collision lookup: a sale already recorded is answered by the collision guard after the claim.
       const recorded = await this.recordedAnywhere(ctx, payload.clientOrderId);
-      // 4. The value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal figures, the future-only
-      // createdAt bound): unstored.
-      const invalidValue = recorded ? undefined : this.valueRefusal(command);
+      // 4. The value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal figures): unstored. Then the
+      // client-time stage (TallyUI #337), its own refusal with only time messages; the clock is the request's, read once.
+      const invalidValue = recorded ? undefined
+        : this.valueRefusal(command) ?? this.clientTimeRefusal(command, (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
       if (invalidValue) return invalidValue;
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       commandCtx = new RequestContext({
@@ -187,7 +211,7 @@ export class OrderCreateService {
           const kind = transientKind(repairError);
           throw new TransientCommandError(command.id, kind === 'lock' ? 'timeout' : kind ?? 'unclassified', repairError);
         }
-        return this.create(ctx, command, { repaired: true });
+        return this.create(ctx, command, { ...options, repaired: true });
       }
       if (error instanceof SetupRefusal) return error.result;
       if (error instanceof StoreConfigurationRefusal) return error.message
@@ -346,10 +370,13 @@ export class OrderCreateService {
     // Ruling 17: strict per version, by path; here, not in step 1, so a stored answer always wins (#36 review).
     const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
     errors.push(...valueRangeErrors(command.payload, maxMoney));
-    // ADR-038 #220: createdAt has only an upper bound (an offline till sends old sales).
-    errors.push(...createdAtError(command.createdAt, 'createdAt'), ...createdAtError(command.payload.createdAt, 'payload.createdAt'));
     if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? rejected(command.id, 'invalid_payload', errors.join('; ')) : undefined;
+  }
+  // ADR-038 #220 step 4, the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's.
+  private clientTimeRefusal(command: CommandEnvelope<OrderCreatePayload>, upperBoundMs: number): OrderCreateResult | undefined {
+    const errors = clientTimeErrors([['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]], upperBoundMs);
+    return errors.length ? rejected(command.id, 'invalid_payload', errors.slice(0, 10).join('; ')) : undefined;
   }
 
   // ADR 0002 "Store configuration": the POS payment and shipping methods and a usable tax zone.

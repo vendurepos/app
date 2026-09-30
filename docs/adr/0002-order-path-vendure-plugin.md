@@ -164,10 +164,18 @@ medusapos, and calls the two parts at this server's own stages.
       against the command's own version (ruling 17, §5), the amounts, the
       pure quantity checks (at or below 0, fractional, above int4), the v3
       fiscal figures, the length bounds (`customer.email` 254; refs, ids
-      and names 255; `sessionId` 36), and the `createdAt` bound, which is
-      bounded at both ends (no earlier than 2020-01-01T00:00:00Z, at most 24 h
-      after the server clock; Front desk, 2026-09-30, one rule for both
-      backends). `invalid_payload` keeps one meaning
+      and names 255; `sessionId` 36). After those, the client-time stage
+      (TallyUI #337 `b65c8ff`; Front desk, 2026-09-30, one rule for both
+      backends) requires each `createdAt`, envelope and payload, to be a strict
+      RFC 3339 date-time with uppercase `T`, `Z` or a numeric offset, and valid
+      calendar, clock and offset parts, never checked by `Date.parse` (TallyUI
+      #343). Otherwise it refuses with `{path} must be an RFC 3339 time with Z
+      or an offset`, that field's only message. A valid time earlier than
+      2020-01-01T00:00:00Z or later than the server clock plus 24 h (read once
+      per request, compared exactly) gets `{path} must be a time from
+      2020-01-01T00:00:00Z to {upperBound}`. One message per field is joined
+      with `; ` (`createdAt` first); the bound is shown to the second, never clamped.
+      `invalid_payload` keeps one meaning
       across the contract, as in `@tallyui/core/server`'s `precheckCommand`.
       The length bounds and the strict check sit here, not in step 1 (Front
       desk, TallyUI #222 review; #36 review), so a stored answer always
@@ -480,7 +488,7 @@ vendurepos/app#53):
   - **v3 adds one per-rate check:** each rate's `taxByRate` total is
     compared with Vendure's `taxSummary` for that rate, within the tolerance
     ⌈(lines + surcharges) / 2⌉. A difference beyond the tolerance comes back
-    as a `tax_rate_mismatch` warning (svc:688-707).
+    as a `tax_rate_mismatch` warning (svc:715-734).
   - **That tolerance absorbs the rounding measured in #38:** no measured
     difference exceeds it. `subtotalMinor` is not compared in any version.
   - **Why the warnings stop there** is measured. The till rounds tax once
@@ -509,11 +517,11 @@ vendurepos/app#53):
   line's discount D on amount A as `net(A) − net(A − D)`, and
   `payload.discountMinor` is still Σ `lines[].discountMinor`. Everything
   v3 does (fiscal figures, per-rate check, session id, snapshot) applies
-  to v3 and above (svc:351, svc:597, svc:688, svc:750). The only v4
+  to v3 and above (svc:373, svc:624, svc:715, svc:777). The only v4
   difference is the discount surcharge: its list price is the net
   discount with `listPriceIncludesTax: false` whatever the line's mode,
   keeping the line's tax lines, so Vendure grosses it up by that line's
-  rate with its own rounding (svc:658-672). Surcharges stay the way
+  rate with its own rounding (svc:685-699). Surcharges stay the way
   discounts are posted (#287 ruling); the till rounds each undiscounted
   line and its discount as separate items. `test/order-create-v4.e2e.ts`
   proves exclusive, inclusive and both mixed orders apply with no bridge,
@@ -544,7 +552,7 @@ bootstrap. They are store-wide, so every channel gets the same value.
   differently. The field is never omitted: absence means an older server,
   and the till would then assume `per_order`.
 - **The items** are each undiscounted line and its −D `TALLY-DISCOUNT`
-  surcharge (svc:662-675). A surcharge joins its line's rate group, which
+  surcharge (svc:689-702). A surcharge joins its line's rate group, which
   is keyed by the rate's name and value.
 - **Measured** (vendurepos/app#38 and the discount scoring): 0 of 1,420
   undiscounted baskets differ, and 0 of 1,000 discounted baskets in each
@@ -576,47 +584,47 @@ every field is checked against its version in step 4 (ruling 17).
 | Field | Kind | What the server does today | Where |
 |---|---|---|---|
 | **Envelope** | | | |
-| `id` | instruction (identity) | the idempotency key: the replay read and the ledger claim | svc:143, svc:505 |
-| `type` | instruction | only `order.create` is accepted | svc:322 |
-| `version` | instruction | selects the shape: the strict check, v3's fiscal figures, session id and snapshot (v3 and v4), and from v4 the net discount surcharge | svc:327, svc:347, svc:351, svc:597, svc:661, svc:750 |
-| `createdAt` | informational | type-checked and bounded (2020-01-01 to one day ahead; Front desk, 2026-09-30, one rule for both backends); not stored | svc:324, svc:350 |
-| `deviceId` | informational | type-checked only; not stored | svc:325 |
-| `attempt` | informational | type-checked only; not stored | svc:326 |
+| `id` | instruction (identity) | the idempotency key: the replay read and the ledger claim | svc:166, svc:532 |
+| `type` | instruction | only `order.create` is accepted | svc:346 |
+| `version` | instruction | selects the shape: the strict check, v3's fiscal figures, session id and snapshot (v3 and v4), and from v4 the net discount surcharge | svc:351, svc:371, svc:373, svc:624, svc:688, svc:777 |
+| `createdAt` | informational | strict RFC 3339 with `Z` or an offset, then bounded (2020-01-01 to one day ahead); invalid form gets `createdAt must be an RFC 3339 time with Z or an offset`, valid out-of-bounds time gets `createdAt must be a time from 2020-01-01T00:00:00Z to <server clock plus 24 h, to the second>` (TallyUI #337 `b65c8ff`; Front desk, 2026-09-30, one rule for both backends); not stored | svc:348, svc:378 |
+| `deviceId` | informational | type-checked only; not stored | svc:349 |
+| `attempt` | informational | type-checked only; not stored | svc:350 |
 | `payload` | the order | the fields below | |
 | **Payload** | | | |
-| `clientOrderId` | instruction (identity) | the collision lookup and guard; stored as `tallyClientOrderId` | svc:146, svc:594 |
-| `createdAt` | instruction | the sale's time, bounded like the envelope's (2020-01-01 to one day ahead): stored as `tallySaleAt` and `orderPlacedAt` | svc:595, svc:749 |
-| `currency` | instruction | the order's currency; `unsupported_currency` when the channel does not offer it | svc:154, svc:384 |
-| `pricesIncludeTax` | instruction | each line's tax mode, unless the line gives its own | svc:649, svc:667 |
-| `lines` | instruction | one Vendure order line each | svc:644-650 |
+| `clientOrderId` | instruction (identity) | the collision lookup and guard; stored as `tallyClientOrderId` | svc:169, svc:621 |
+| `createdAt` | instruction | the sale's time, strict RFC 3339 with `Z` or an offset, then bounded like the envelope's (2020-01-01 to one day ahead); invalid form gets `payload.createdAt must be an RFC 3339 time with Z or an offset`, valid out-of-bounds time gets `payload.createdAt must be a time from 2020-01-01T00:00:00Z to <server clock plus 24 h, to the second>` (TallyUI #337 `b65c8ff`): stored as `tallySaleAt` and `orderPlacedAt` | svc:622, svc:776 |
+| `currency` | instruction | the order's currency; `unsupported_currency` when the channel does not offer it | svc:178, svc:411 |
+| `pricesIncludeTax` | instruction | each line's tax mode, unless the line gives its own | svc:676, svc:694 |
+| `lines` | instruction | one Vendure order line each | svc:671-677 |
 | `subtotalMinor` | informational | type- and range-checked only; not compared, not stored (vendurepos/app#38) | payload-shape.ts:52, value-ranges.ts:39 |
 | `discountMinor` (v2+) | instruction | must equal Σ `lines[].discountMinor`, which is what is applied; range-checked. v2/v3: each line's part in that line's own tax mode; v4: tax-exclusive | payload-shape.ts:56, value-ranges.ts:39 |
 | `taxMinor` | informational | v1/v2: type- and range-checked only (vendurepos/app#38); v3: must equal `display.taxMinor` and Σ `taxByRate[].taxMinor`; not stored | payload-shape.ts:52, value-ranges.ts:39, fiscal-figures.ts:93, fiscal-figures.ts:95 |
-| `totalMinor` | instruction | the order's total: Vendure's total is bridged to it with a `total_mismatch` warning; `underpaid` below it; caps the payments | svc:400, svc:678-686, svc:715 |
-| `payments` | instruction | one Vendure payment per tender until the total is covered; stored as `tallyPayments` | svc:716-719, svc:748 |
-| `customer` | instruction | the order's customer (fields below); absent or `null` is the walk-in customer | svc:559-560 |
-| `registerId` | informational | stored as `tallyRegisterId` | svc:596 |
-| `cashierRef` | informational | stored as `tallyCashierRef` | svc:598 |
+| `totalMinor` | instruction | the order's total: Vendure's total is bridged to it with a `total_mismatch` warning; `underpaid` below it; caps the payments | svc:427, svc:705-713, svc:742 |
+| `payments` | instruction | one Vendure payment per tender until the total is covered; stored as `tallyPayments` | svc:743-746, svc:775 |
+| `customer` | instruction | the order's customer (fields below); absent or `null` is the walk-in customer | svc:586-587 |
+| `registerId` | informational | stored as `tallyRegisterId` | svc:623 |
+| `cashierRef` | informational | stored as `tallyCashierRef` | svc:625 |
 | `locationId` | instruction | refused with `invalid_payload` until vendurepos/app#35 | strict-shape.ts:49 |
-| `display` (v3+) | informational | cross-checked (fields below) and stored in `tallySnapshot` | svc:751 |
-| `taxByRate` (v3+) | informational | cross-checked, compared per rate (fields below) and stored in `tallySnapshot` | svc:751 |
-| `sessionId` (v3+) | instruction (honoured by recording) | recorded verbatim on the order as `tallySessionId`, which ties the sale to its register session for register close, like `payments[].method` (Front desk, 2026-09-30) | svc:597; tested at recipe.e2e.ts:97 (v3) and order-create-v4.e2e.ts (v4) |
+| `display` (v3+) | informational | cross-checked (fields below) and stored in `tallySnapshot` | svc:778 |
+| `taxByRate` (v3+) | informational | cross-checked, compared per rate (fields below) and stored in `tallySnapshot` | svc:778 |
+| `sessionId` (v3+) | instruction (honoured by recording) | recorded verbatim on the order as `tallySessionId`, which ties the sale to its register session for register close, like `payments[].method` (Front desk, 2026-09-30) | svc:624; tested at recipe.e2e.ts:97 (v3) and order-create-v4.e2e.ts (v4) |
 | **`lines[]`** | | | |
-| `clientLineId` | informational (reference) | stored as the order line's `tallyClientLineId`; matches the line's discount and display line | svc:648, svc:664 |
-| `variantId` | instruction | the variant sold; `unknown_variant` when missing or disabled | svc:402, svc:613 |
+| `clientLineId` | informational (reference) | stored as the order line's `tallyClientLineId`; matches the line's discount and display line | svc:675, svc:691 |
+| `variantId` | instruction | the variant sold; `unknown_variant` when missing or disabled | svc:429, svc:640 |
 | `title` | informational | type-checked only; not stored (the Vendure line takes the variant's name) | payload-shape.ts:37-38 |
-| `quantity` | instruction | the line's quantity | svc:646 |
-| `unitPriceMinor` | instruction | the line's unit price, through the POS price strategy | svc:647, strategies.ts:29 |
-| `taxInclusive` | instruction | the line's tax mode | svc:649 |
-| `discountMinor` (v2+) | instruction | a negative `POS discount` surcharge carrying the line's tax lines: v2/v3 in the line's own tax mode; v4 tax-exclusive whatever the line's mode, grossed up by Vendure at the line's rate | svc:661-669; tested at order-create-v4.e2e.ts |
+| `quantity` | instruction | the line's quantity | svc:673 |
+| `unitPriceMinor` | instruction | the line's unit price, through the POS price strategy | svc:674, strategies.ts:29 |
+| `taxInclusive` | instruction | the line's tax mode | svc:676 |
+| `discountMinor` (v2+) | instruction | a negative `POS discount` surcharge carrying the line's tax lines: v2/v3 in the line's own tax mode; v4 tax-exclusive whatever the line's mode, grossed up by Vendure at the line's rate | svc:688-696; tested at order-create-v4.e2e.ts |
 | **`payments[]`** | | | |
-| `clientPaymentId` | informational (reference) | stored in the payment's metadata and in `tallyPayments` | svc:719, svc:748 |
-| `method` | instruction (honoured by recording) | recorded, never refused: each Vendure payment keeps its tender, `method` included, in its metadata, and the order keeps every tender in `tallyPayments` (a surplus tender after the covering one only there, tested at recipe.e2e.ts:179); every payment runs through the one POS payment method, so the till's method is what tells cash from external at register close (Front desk, 2026-09-30) | svc:719, strategies.ts:95, svc:748; tested at recipe.e2e.ts:161-162 |
-| `amountMinor` | instruction | the payment's amount, capped at what the total still needs; `underpaid` when the sum is below the total | svc:400, svc:718-719 |
-| `tenderedMinor`, `changeMinor`, `reference` | informational | range-checked; stored as above | value-ranges.ts:61-62, svc:719, svc:748 |
+| `clientPaymentId` | informational (reference) | stored in the payment's metadata and in `tallyPayments` | svc:746, svc:775 |
+| `method` | instruction (honoured by recording) | recorded, never refused: each Vendure payment keeps its tender, `method` included, in its metadata, and the order keeps every tender in `tallyPayments` (a surplus tender after the covering one only there, tested at recipe.e2e.ts:179); every payment runs through the one POS payment method, so the till's method is what tells cash from external at register close (Front desk, 2026-09-30) | svc:746, strategies.ts:95, svc:775; tested at recipe.e2e.ts:161-162 |
+| `amountMinor` | instruction | the payment's amount, capped at what the total still needs; `underpaid` when the sum is below the total | svc:427, svc:745-746 |
+| `tenderedMinor`, `changeMinor`, `reference` | informational | range-checked; stored as above | value-ranges.ts:61-62, svc:746, svc:775 |
 | **`customer`** | | | |
-| `email` | instruction | the customer, matched case-insensitively or created | svc:559-560 |
-| `customerId` (v3+) | instruction | the customer by id. A well-formed id the store cannot resolve (unknown, in another channel, deleted) never holds the sale: the sale is kept with the email or walk-in customer and a `customer_ignored` warning naming the id. An id over 64 characters is malformed and refused as unstored `invalid_payload`, "customer.customerId: expected a string of at most 64 characters" (TallyUI core's message), after the replay read, so an applied command still replays (Front desk, 2026-09-30, vendurepos/app#43). A refusal is for a problem that would make every sale from this till fail until the store is fixed (a stock location, a sales channel), so it is noticed at once and the retry applies; a problem with one sale's own references is not, because a sale stuck in an outbox for days is worse (Front desk, 2026-09-30) | value-ranges.ts:42-48, payload-shape.ts:65, svc:548-554; tested at ledger.e2e.ts:246 (unknown; another channel: the walk-in, not added to it), ledger.e2e.ts:271 (64 applies, over 64 refused), ledger.e2e.ts:642 (over 64 replays) |
+| `email` | instruction | the customer, matched case-insensitively or created | svc:586-587 |
+| `customerId` (v3+) | instruction | the customer by id. A well-formed id the store cannot resolve (unknown, in another channel, deleted) never holds the sale: the sale is kept with the email or walk-in customer and a `customer_ignored` warning naming the id. An id over 64 characters is malformed and refused as unstored `invalid_payload`, "customer.customerId: expected a string of at most 64 characters" (TallyUI core's message), after the replay read, so an applied command still replays (Front desk, 2026-09-30, vendurepos/app#43). A refusal is for a problem that would make every sale from this till fail until the store is fixed (a stock location, a sales channel), so it is noticed at once and the retry applies; a problem with one sale's own references is not, because a sale stuck in an outbox for days is worse (Front desk, 2026-09-30) | value-ranges.ts:42-48, payload-shape.ts:65, svc:575-581; tested at ledger.e2e.ts:246 (unknown; another channel: the walk-in, not added to it), ledger.e2e.ts:271 (64 applies, over 64 refused), ledger.e2e.ts:642 (over 64 replays) |
 | **`display` (v3+)** | | | |
 | `currency` | informational | must equal `payload.currency` | fiscal-figures.ts:91 |
 | `exponent` | informational | must equal the currency's decimals | fiscal-figures.ts:105 |
@@ -628,16 +636,16 @@ every field is checked against its version in step 4 (ruling 17).
 | `lines[].amountMinor` | informational | type-checked only | fiscal-figures.ts:71 |
 | `lines[].discounts[].discountId`, `.label`, `.amountMinor` | informational | type-checked only | fiscal-figures.ts:76-78 |
 | **`taxByRate[]` (v3+)** | | | |
-| `ratePpm` | informational | keys the comparison with Vendure's tax summary | fiscal-figures.ts:86, svc:694 |
+| `ratePpm` | informational | keys the comparison with Vendure's tax summary | fiscal-figures.ts:86, svc:721 |
 | `code` | informational | type-checked only | fiscal-figures.ts:87 |
 | `netMinor` | informational | `grossMinor` must equal `netMinor + taxMinor` | fiscal-figures.ts:96 |
-| `taxMinor` | informational | Σ must equal `payload.taxMinor`; each rate is compared with Vendure's tax for that rate, a difference beyond the rounding tolerance giving a `tax_rate_mismatch` warning | fiscal-figures.ts:95, svc:693-704 |
+| `taxMinor` | informational | Σ must equal `payload.taxMinor`; each rate is compared with Vendure's tax for that rate, a difference beyond the rounding tolerance giving a `tax_rate_mismatch` warning | fiscal-figures.ts:95, svc:720-731 |
 | `grossMinor` | informational | must equal `netMinor + taxMinor` | fiscal-figures.ts:96 |
 
 **When the till's amounts differ from the server's.** In every version
 `totalMinor` is compared with the server's own computation: Vendure's
 total is bridged to it by a `POS rounding` surcharge, and the result
-carries a `total_mismatch` warning (svc:678-686). In v1 and v2 it is the
+carries a `total_mismatch` warning (svc:705-713). In v1 and v2 it is the
 only amount compared: `subtotalMinor` and `taxMinor` are only type- and
 range-checked (payload-shape.ts:52, value-ranges.ts:39), so a difference
 from the server's subtotal or tax passes silently, with no warning and
@@ -646,7 +654,7 @@ In v3, `taxMinor` must also equal `display.taxMinor` and Σ
 `taxByRate[].taxMinor` (fiscal-figures.ts:93, 95), and each rate's tax
 is compared with Vendure's, a difference of more than half a minor unit
 per line and surcharge (rounded up) giving a `tax_rate_mismatch` warning
-(svc:688-707); v3 `subtotalMinor` is only range-checked, as in v1 and
+(svc:715-734); v3 `subtotalMinor` is only range-checked, as in v1 and
 v2. vendurepos/app#38 decided the next step; see the §5 bullet on
 subtotal and tax warnings.
 

@@ -545,36 +545,75 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('ADR-038 #220: createdAt is bounded (2020-01-01 to one day ahead), unstored; an old sale from 2020 on applies', async () => {
+  it('ADR-038 #220 / TallyUI #337: a client time outside 2020-01-01 to the request clock plus a day is refused with the contract text, unstored; an old sale from 2020 on applies', async () => {
     const day = 24 * 60 * 60 * 1000;
     const at = (ms: number) => new Date(ms).toISOString();
+    const floor = '2020-01-01T00:00:00Z';
+    // The clock is fixed with milliseconds: the bound is compared exactly and shown to the second, 2026-10-02T14:05:00Z.
+    const now = Date.parse('2026-10-01T14:05:00.789Z');
+    const upper = '2026-10-02T14:05:00Z';
+    const text = (path: string) => `${path} must be a time from ${floor} to ${upper}`;
+    const format = (path: string) => `${path} must be an RFC 3339 time with Z or an offset`;
     const before = await counts();
-    for (const [path, value] of [
-      ['createdAt', at(Date.now() + day + 60_000)], ['createdAt', 'not a date'], ['payload.createdAt', at(Date.now() + day + 60_000)],
-    ]) {
-      const input = command();
-      if (path === 'createdAt') input.createdAt = value;
-      else input.payload.createdAt = value;
-      expect(await run(input), `${path} ${value}`).toEqual({ id: input.id, status: 'rejected', error: {
-        code: 'invalid_payload', message: `${path}: expected a time no later than one day from now`,
-      } });
-      expect(await ledgerFor(input)).toBeNull();
-    }
-    expect(await counts()).toEqual(before);
-    // Front desk 2026-09-30: a time before 2020-01-01T00:00:00Z is refused, never clamped.
-    for (const value of ['1969-07-20T20:17:00Z', '1970-01-01T00:00:00Z', '2019-12-31T23:59:59Z']) {
-      for (const path of ['createdAt', 'payload.createdAt']) {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      for (const [envelope, payload, message] of [
+        [at(now + day + 1), undefined, text('createdAt')], [undefined, at(now + day + 1), text('payload.createdAt')],
+        ['not a date', undefined, format('createdAt')],
+        [undefined, '2026-09-30T10:00:00', format('payload.createdAt')],
+        ['2026-09-30', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00z', undefined, format('createdAt')],
+        ['2026-09-30 10:00:00Z', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00+0200', undefined, format('createdAt')],
+        ['2026-02-29T00:00:00Z', undefined, format('createdAt')],
+        ['2026-09-30T24:00:00Z', undefined, format('createdAt')],
+        ['2026-09-30T10:00:60Z', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00+24:00', undefined, format('createdAt')],
+        ['2026-09-30T10:00:00', '2019-12-31T23:59:59Z', `${format('createdAt')}; ${text('payload.createdAt')}`],
+        ['2026-10-02T16:05:00.790+02:00', undefined, text('createdAt')],
+        ['2026-10-02T10:05:00.790-04:00', undefined, text('createdAt')],
+        ['1969-07-20T20:17:00Z', '2019-12-31T23:59:59Z', `${text('createdAt')}; ${text('payload.createdAt')}`],
+        [at(now + day + 60_000), '1970-01-01T00:00:00Z', `${text('createdAt')}; ${text('payload.createdAt')}`],
+      ]) {
         const input = command();
-        if (path === 'createdAt') input.createdAt = value;
-        else input.payload.createdAt = value;
-        expect(await run(input), `${path} ${value}`).toEqual({ id: input.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: `${path}: expected a time no earlier than 2020-01-01T00:00:00Z`,
-        } });
+        if (envelope) input.createdAt = envelope;
+        if (payload !== undefined) input.payload.createdAt = payload;
+        expect(await run(input), message).toEqual({ id: input.id, status: 'rejected', error: { code: 'invalid_payload', message } });
         expect(await ledgerFor(input)).toBeNull();
       }
+    } finally {
+      clock.mockRestore();
+    }
+    // The clock is read once per request: with one that moves an hour on every read, both fields get the same bound.
+    const moving = command();
+    moving.createdAt = moving.payload.createdAt = at(now + day + 30 * 60_000);
+    const original = recipe['recordedAnywhere' as keyof typeof recipe] as (...args: unknown[]) => Promise<unknown>;
+    const seam = vi.spyOn(recipe as unknown as { recordedAnywhere: typeof original }, 'recordedAnywhere').mockImplementation(async function (this: unknown, ...args) {
+      const found = await original.apply(this, args);
+      let reads = 0;
+      vi.spyOn(Date, 'now').mockImplementation(() => now + reads++ * 60 * 60_000);
+      return found;
+    });
+    try {
+      expect(await run(moving)).toEqual({ id: moving.id, status: 'rejected', error: { code: 'invalid_payload',
+        message: `${text('createdAt')}; ${text('payload.createdAt')}` } });
+    } finally {
+      vi.mocked(Date.now).mockRestore();
+      seam.mockRestore();
     }
     expect(await counts()).toEqual(before);
-    // The floor itself and later apply: an offline till sends old sales.
+    // The floor itself, the exact bound and later apply: an offline till sends old sales.
+    const exact = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      for (const value of [at(now + day), '2026-10-02T16:05:00.789+02:00',
+        '2026-10-02T10:05:00.789-04:00', '2026-10-02T14:05:00.789-00:00', '2024-02-29T12:00:00.123456Z']) {
+        const input = command();
+        input.createdAt = input.payload.createdAt = value;
+        expect(await run(input), value).toMatchObject({ status: 'applied' });
+      }
+    } finally {
+      exact.mockRestore();
+    }
     for (const value of ['2020-01-01T00:00:00Z', '2021-06-01T00:00:00Z', at(Date.now() + day - 60_000)]) {
       const input = command();
       input.createdAt = value;
