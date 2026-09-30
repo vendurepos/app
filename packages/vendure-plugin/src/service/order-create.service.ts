@@ -26,6 +26,7 @@ import {
 } from './errors';
 import { StoreSetupService } from './store-setup.service';
 import { roundHalfAwayFromZero } from './rounding';
+import { strictShapeErrors } from './strict-shape';
 import { CUSTOMER_ID_MAX, MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
@@ -324,6 +325,10 @@ export class OrderCreateService {
         { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
+    // Ruling 17: strict per version; an unknown or later-version field is refused, by path.
+    if (SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
+      errors.push(...strictShapeErrors(command as unknown as Record<string, unknown>, command.version));
+    }
     // #12 review: a repeated clientLineId could merge order lines and meet ORDER_LIMIT_ERROR after the draft.
     const seen = new Set<string>();
     (Array.isArray(command.payload?.lines) ? command.payload.lines : []).forEach((line, index) => {

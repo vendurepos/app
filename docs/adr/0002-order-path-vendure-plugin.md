@@ -97,7 +97,8 @@ marked temporary. The plugin's first PR after S1 consumes the package.
 1. It first validates every envelope in the batch (`validateBatch`).
 2. Each command then goes through exactly these steps (ADR-038 #220):
    1. **shape validation**: types, presence, versions and U+0000 in any
-      string (which Postgres cannot hold, even for the lookup), with no
+      string (which Postgres cannot hold, even for the lookup), and every
+      field against the command's own version (ruling 17, §5), with no
       database access: `invalid_payload` or `unsupported_version`, not
       stored. The deliberate exceptions are the envelope `id` bound (≤ 64), because the id is
       the replay key itself, so no stored row can have a longer id and a replay can
@@ -281,7 +282,7 @@ lock and `resume.ts`.
 | The sale | A draft `Order` in the request's channel, moved through Vendure's own order process: `Draft → ArrangingPayment → PaymentSettled`, then fulfilled. `orderPlacedAt` is set on the last transition; the plugin overwrites it with `tallySaleAt` (the payload's sale time) in the same transaction, so Vendure's reports match the till | Status workarounds such as WCPOS's `pos-open`/`pos-partial`; a sale that reaches the server is always paid |
 | Currency | `ctx.currencyCode` is set from `payload.currency` before any line is added. A currency the channel does not offer is `unsupported_currency`, answered after the claim and before any write with the claim rolled back and nothing stored (TallyUI #219), so the same command id applies once the channel is fixed. S1 did not prove this; VP1 implements and tests it | Repricing lines in the channel's default currency |
 | Lines | One `OrderLine` per POS line. Vendure merges equal lines, so a read-only line custom field `tallyClientLineId` keeps them 1:1 | — |
-| Stock | After the stock lock, probe `StockLocationStrategy` with a copied context: top up at the first planned location if the plan covers q, otherwise at `defaultStockLocation`. Top up by `max(0, q − saleable)` before `addItemToOrder` and `ArrangingPayment`, then check saleable ≥ q. The POS-only `TallyStockLocationStrategy` caps allocations cumulatively at q and adds any remainder at the default location; storefront plans are unchanged. After `PaymentSettled`, check Σ allocations per POS line = its quantity. Either failed check is an unstored `store_configuration`. Manual fulfilment draws where allocated; take back each top-up at its own location in the transaction. `payload.locationId` remains unused. Warn only for positive `max(0, q − max(0, onHand − allocated))`: it is the units of this sale not covered by physical stock, never more than q and never counting the out-of-stock threshold; a pre-existing negative on-hand is store state, not this sale's shortfall, and the till learns it through stock sync, not the warning (Front desk, 2026-09-29). | Stock-reduction hooks and reservation tables |
+| Stock | After the stock lock, probe `StockLocationStrategy` with a copied context: top up at the first planned location if the plan covers q, otherwise at `defaultStockLocation`. Top up by `max(0, q − saleable)` before `addItemToOrder` and `ArrangingPayment`, then check saleable ≥ q. The POS-only `TallyStockLocationStrategy` caps allocations cumulatively at q and adds any remainder at the default location; storefront plans are unchanged. After `PaymentSettled`, check Σ allocations per POS line = its quantity. Either failed check is an unstored `store_configuration`. Manual fulfilment draws where allocated; take back each top-up at its own location in the transaction. `payload.locationId` is refused (invalid_payload) until a ruling says how it is honoured (ruling 19). Warn only for positive `max(0, q − max(0, onHand − allocated))`: it is the units of this sale not covered by physical stock, never more than q and never counting the out-of-stock threshold; a pre-existing negative on-hand is store state, not this sale's shortfall, and the till learns it through stock sync, not the warning (Front desk, 2026-09-29). | Stock-reduction hooks and reservation tables |
 | As-sold price and tax mode | An `OrderItemPriceCalculationStrategy` that wraps the configured one. Only on orders with `tallyClientOrderId`, it returns the read-only line custom field `tallyUnitPrice`, with `priceIncludesTax` set to the line's own mode (`lines[].taxInclusive`, falling back to the order's `pricesIncludeTax`), which it reads from a second read-only line field, `tallyPriceIncludesTax`, because the strategy sees only the order and the line's custom fields. Vendure's `PriceCalculationResult` carries both, so per-line tax mode needs no other workaround (proved in S1) | Rewriting line totals through post meta |
 | Discounts (v2/v3) | One negative, **taxable** `Surcharge` per discounted line (`POS discount`, SKU `TALLY-DISCOUNT`) of `-discountMinor`, in that line's tax mode. Its tax lines copy the line's rate and description, so the order-level tax group for that rate shrinks by the discount. A net unit price was rejected: `(unit × qty − discount) / qty` is not an integer in general | Coupon emulation |
 | Server promotions | **None on POS orders.** The POS has already applied its own discounts. Four calls re-apply the channel's active promotions while the order is built: `addItemsToOrder`, `addSurchargeToOrder`, `setShippingMethod`, and the coupon revalidation inside `addPaymentToOrder`. So the recipe ends with one final pricing pass, `orderCalculator.applyPriceAdjustments(ctx, order, [])`, followed by explicit saves of the order, its lines and its shipping lines. `order.promotions` and every line's promotion adjustments are saved empty. A later edit in the Dashboard would re-apply the channel's promotions; POS orders are not meant to be edited there | Settling promotion differences in a surcharge |
@@ -386,7 +387,25 @@ The plugin advertises `{"contracts":{"order.create":[1,2,3]}}` from its
 first release, because v3 is what TallyUI `main` sends:
 
 - each version is validated strictly against its own shape, and v3 is
-  pinned by ADR-065's `order-create-v3.json` fixture;
+  pinned by ADR-065's `order-create-v3.json` fixture. Strictly means
+  (Front desk ruling 17, 2026-09-30): a field the command's version does
+  not know, at any level (envelope, payload, `lines[]`, `payments[]`,
+  `customer`, v3's `display` and `taxByRate`), is an unstored
+  `invalid_payload` in step 1 naming its full path, e.g.
+  `lines[2].discountMinr`; a field of a later version (v1
+  `discountMinor`, v1 or v2 `sessionId`, `display`, `taxByRate`,
+  `customer.customerId`) names the version it requires. The contract
+  declares no free-form map inside `order.create`, so no object takes
+  arbitrary keys, and every new field needs a version bump. The reason: a
+  money field accepted and ignored makes the till believe a discount was
+  given while the server charges the full price. No released till is
+  refused: `@tallyui/pos` 2.0.0 sends v1 only without a discount and v2
+  with one, and its exact envelopes are the regression fixtures
+  (`test/strict-shape.e2e.ts`, `src/service/strict-shape.ts`);
+- `payload.locationId`, which the contract declares without a version,
+  is refused in every version with `invalid_payload` "payload.locationId:
+  not supported by this server yet" until a ruling says how it is honoured
+  (Front desk ruling 19, 2026-09-30; see "Stock");
 - a higher version gets `unsupported_version` with `data.orderCreate: 3`
   before the claim;
 - v1 and v2 orders simply have no snapshot or session id.
