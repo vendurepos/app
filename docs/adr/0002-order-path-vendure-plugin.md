@@ -325,6 +325,36 @@ tax rates, and setup still missing after the single repair also answer
 (TallyUI #219). Repair errors are transient; a repair lock timeout is a 503,
 never a 409 (Front desk rulings 9–13, 2026-09-29).
 
+**The customer lookup and its index (Front desk ruling 16, 2026-09-30).** The
+lookup stays `LOWER(customer.emailAddress) = LOWER(:emailAddress)` among rows
+with `deletedAt IS NULL`. Vendure has no index for that expression, so **every
+lookup that has an email is a sequential scan of `customer`**: on 100,000
+customers, 1,334 shared buffers and about 15 ms, against an index scan of 4
+buffers and 0.02 ms with the index below (VP3-4d `EXPLAIN (ANALYZE, BUFFERS)`).
+The per-email advisory lock hashes `lower(email)`, as the lookup matches,
+because Vendure's `normalizeEmailAddress` lowercases only input that looks like
+an email (`Jane@Localhost` keeps its case) (VP3-4d).
+**The plugin leaves Vendure's `customer` table alone**: no migration, no
+TypeORM metadata and no index created at start. An index on a table the plugin
+does not own is schema drift in every merchant's `migration:generate`. VP3-4d
+probed it on Vendure 3.7.3 with TypeORM 0.3.31: a plain index TypeORM does not
+know comes out as `DROP INDEX "public"."IDX_probe_plain_email"`; the expression
+index below comes out as nothing ("No changes in database schema were found -
+cannot generate a migration."), because TypeORM's Postgres schema reader finds
+index columns with an inner join on `pg_attribute`, which an expression has no
+row in, so it never loads the index. The ruling stands on the rest: that silence is a TypeORM
+detail a later version may change, and an index the plugin created would
+surprise a merchant at uninstall (left behind on Vendure's table) and at a
+Vendure upgrade that alters `customer`. The index is therefore the merchant's
+choice: the plugin README's section "Optional: an index for POS customer
+lookups" gives `CREATE INDEX CONCURRENTLY "IDX_customer_email_lower" ON
+"customer" (lower("emailAddress")) WHERE "deletedAt" IS NULL;`, whose expression
+and predicate the lookup matches. On start the server process logs one warning
+when `customer` has more than 50,000 rows (the planner's estimate) and no
+`lower("emailAddress")` index. A walk-in sale skips the email lookup: its
+customer's id is cached per process, and the id cache is checked by primary key
+on every use, so an admin's delete or change falls back to the lookup.
+
 ### 4. TallyUI's contract, and the WCPOS engine it moves to
 
 The command envelope, the fingerprint rule, the result and error

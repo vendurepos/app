@@ -1,9 +1,10 @@
 import { ChannelService, Customer, Order,ProductVariantService, RequestContextService, TransactionalConnection, User } from '@vendure/core';
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TallyPosPlugin, TransientCommandError } from '../src';
 import type { OrderCreateResult } from '../src';
+import { WALK_IN_EMAIL } from '../src/service/constants';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -44,7 +45,7 @@ describe('VP3-4b: concurrent customer lookups', () => {
     await adminClient.query(parse(`mutation Untrack($input: [UpdateProductVariantInput!]!) { updateProductVariants(input: $input) { id } }`),
       { input: [variantIds.mug[0], variantIds.print[0]].map(id => ({ id, trackInventory: 'FALSE' })) });
   });
-  afterEach(() => { recipe.testObserver = undefined; });
+  afterEach(() => { recipe.testObserver = undefined; vi.restoreAllMocks(); });
   afterAll(() => server.destroy());
 
   const mug = (email?: string) => orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
@@ -187,5 +188,63 @@ describe('VP3-4b: concurrent customer lookups', () => {
     expect(await orderCustomer(sale)).toBe(String(inserted.id));
     expect((await connection.rawConnection.query(`SELECT count(*)::int AS n FROM customer
       WHERE LOWER("emailAddress") = 'mixed.case@example.com' AND "deletedAt" IS NULL`) as Array<{ n: number }>)[0].n).toBe(1);
+  });
+
+  it('#24 1: Jane@Localhost and jane@localhost (not lowercased by Vendure) share the advisory lock: one customer', async () => {
+    const a = mug('Jane@Localhost');
+    const b = print('jane@localhost');
+    const held = hold(a);
+    const first = timed(run(a));
+    await held.reached;
+    const secondSale = timed(run(b));
+    const blocked = await lockWait('%pg_advisory_xact_lock%', 3_000);
+    held.release();
+    const results = await Promise.all([first, secondSale]);
+    const customers = (await connection.rawConnection.query(`SELECT count(*)::int AS n FROM customer
+      WHERE LOWER("emailAddress") = 'jane@localhost' AND "deletedAt" IS NULL`) as Array<{ n: number }>)[0].n;
+    expect({ blocked, results: results.map(status), customers }).toEqual({ blocked: true, results: ['applied', 'applied'], customers: 1 });
+  });
+
+  const walkInCustomer = async (id: string) => await connection.rawConnection.getRepository(Customer).findOneByOrFail({ id });
+
+  it('ruling 16: a second walk-in sale loads the cached walk-in by primary key and skips the email query', async () => {
+    const lookups = vi.spyOn(recipe as unknown as { findByEmail: () => Promise<unknown> }, 'findByEmail');
+    const first = await run(mug());
+    const before = lookups.mock.calls.length;
+    const second = await run(mug());
+    expect({ first: first.status, second: second.status, lookups: lookups.mock.calls.length - before })
+      .toEqual({ first: 'applied', second: 'applied', lookups: 0 });
+    const [one, two] = [await orderCustomer(first), await orderCustomer(second)];
+    expect({ same: one === two, email: (await walkInCustomer(two)).emailAddress }).toEqual({ same: true, email: WALK_IN_EMAIL });
+  });
+
+  it('ruling 16: a soft-deleted cached walk-in is not used; the next walk-in sale uses a live walk-in', async () => {
+    const warm = await run(mug()); // The cache holds this walk-in's id.
+    const deleted = await orderCustomer(warm);
+    await connection.rawConnection.query('UPDATE customer SET "deletedAt" = now() WHERE id = $1', [deleted]);
+    const sale = await run(mug());
+    expect(sale).toMatchObject({ status: 'applied' });
+    const used = await orderCustomer(sale);
+    const row = await walkInCustomer(used);
+    expect({ other: used !== deleted, email: row.emailAddress, deletedAt: row.deletedAt })
+      .toEqual({ other: true, email: WALK_IN_EMAIL, deletedAt: null });
+  });
+
+  it('#24 5: of two stored case twins the lower id wins; neither changes and no third customer is made', async () => {
+    const customers = connection.rawConnection.getRepository(Customer);
+    const channel = await server.app.get(ChannelService).getDefaultChannel();
+    const twin = (emailAddress: string, firstName: string) =>
+      customers.save(new Customer({ emailAddress, firstName, lastName: 'Twin', channels: [channel] }));
+    const older = await twin('Case.Twin@Example.com', 'Older');
+    const newer = await twin('case.twin@example.com', 'Newer');
+    const sale = await run(mug('CASE.TWIN@example.com'));
+    expect(sale).toMatchObject({ status: 'applied' });
+    expect(await orderCustomer(sale)).toBe(String(older.id));
+    const rows = await connection.rawConnection.query(`SELECT id::text, "emailAddress", "firstName", "lastName" FROM customer
+      WHERE LOWER("emailAddress") = 'case.twin@example.com' AND "deletedAt" IS NULL ORDER BY customer.id`);
+    expect(rows).toEqual([
+      { id: String(older.id), emailAddress: 'Case.Twin@Example.com', firstName: 'Older', lastName: 'Twin' },
+      { id: String(newer.id), emailAddress: 'case.twin@example.com', firstName: 'Newer', lastName: 'Twin' },
+    ]);
   });
 });
