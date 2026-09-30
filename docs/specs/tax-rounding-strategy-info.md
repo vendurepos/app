@@ -95,6 +95,7 @@ Evidence:
 - The mapping returns `per_line_items` for the order-level strategy: test 2 fails.
 - Detection uses `instanceof`, so the subclass is advertised as `per_rate_group_items`: test 3 fails.
 - A custom strategy omits `taxRounding` instead of advertising `{ granularity: 'custom' }`: test 3 fails.
+- The tax-line strategy is not checked, so a custom `taxLineCalculationStrategy` is advertised as `_items`: test 3 fails.
 
 ## Acceptance
 
