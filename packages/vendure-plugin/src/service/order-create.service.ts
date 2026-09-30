@@ -840,3 +840,6 @@ export class OrderCreateService {
     ]);
   }
 }
+
+// Shared with RegisterService (ADR 0003): the register commands take the same claim, bounds and client-time stage.
+export { CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, clientTimeErrors, nulPath };

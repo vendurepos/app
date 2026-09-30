@@ -56,3 +56,36 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   each(payload.taxByRate, TAX_RATE, 'taxByRate');
   return errors;
 }
+
+// ADR-070 d1 for the register commands (ADR 0003), until core checks fields (TallyUI #255) and map keys (#256): each
+// type's version 1 fields, and the declared maps' keys, PaymentMethodKind, both declared at version 1.
+const REGISTER_PAYLOADS: Record<string, Fields> = {
+  'register.session.open': since(1, 'sessionId registerId storeKey businessDay openedAt openedBy expectedFloatMinor countedFloatMinor openingVarianceMinor'),
+  'register.session.transition': since(1, 'sessionId status at counted closedBy approvedBy'),
+  'register.movement.record': since(1, 'movementId sessionId type amountMinor reason createdAt createdBy'),
+  'register.movement.void': since(1, 'movementId sessionId voids createdAt createdBy'),
+  'register.closure.submit': since(1, 'closureId sessionId registerId number businessDay openedAt closedAt closedBy approvedBy tillExpected '
+    + 'counted periodSalesTotalMinor periodRefundsTotalMinor perpetualSalesTotalMinor perpetualRefundsTotalMinor unsyncedCount '
+    + 'unsyncedTotalMinor softwareVersion orderIds movementIds'),
+};
+const METHOD_KINDS = since(1, 'cash external');
+
+/** A register command's unknown fields and map keys by path, worded as strictShapeErrors words them, e.g.
+ * 'counted.card: unknown key in register.closure.submit version 1'; [] when none. The payload's shape is already valid. */
+export function registerStrictErrors(command: Record<string, unknown>, type: string, version: number): string[] {
+  const errors: string[] = [];
+  const check = (value: object, fields: Fields, path: string, what: string) => {
+    for (const key of Object.keys(value)) {
+      const at = path ? `${path}.${key}` : key;
+      const first = Object.hasOwn(fields, key) ? fields[key] : undefined;
+      if (errors.length >= 10) break;
+      if (first === undefined) errors.push(`${at}: unknown ${what} in ${type} version ${version}`);
+      else if (first > version) errors.push(`${at}: requires ${type} version ${first}, command is version ${version}`);
+    }
+  };
+  check(command, ENVELOPE, 'envelope', 'field');
+  const payload = command.payload as Record<string, object | undefined>;
+  check(payload, REGISTER_PAYLOADS[type], '', 'field');
+  for (const map of ['counted', 'tillExpected']) if (payload[map]) check(payload[map], METHOD_KINDS, map, 'key');
+  return errors;
+}

@@ -83,7 +83,7 @@ describe('plugin harness, custom fields and GET /tally/v1/info', () => {
     const response = await fetch(url, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      contracts: { 'order.create': [1, 2, 3, 4] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      contracts: { 'order.create': [1, 2, 3, 4], register: [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
     });
     expect((await fetch(url)).status).toBe(403);
   });

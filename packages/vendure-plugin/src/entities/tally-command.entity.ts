@@ -13,9 +13,10 @@ export class TallyCommand {
   @Column('varchar')
   channelId: string;
 
+  /** The sale's clientOrderId; null for a register command (migration TallyPosRegister). */
   @Index()
-  @Column('varchar')
-  clientOrderId: string;
+  @Column('varchar', { nullable: true })
+  clientOrderId: string | null;
 
   @Column('varchar')
   fingerprint: string;
