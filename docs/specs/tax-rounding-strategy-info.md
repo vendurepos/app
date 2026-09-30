@@ -36,7 +36,7 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 |---|---|
 | `DefaultOrderTaxCalculationStrategy` (Vendure's default, or no `orderTaxCalculationStrategy` set) | `{ granularity: 'per_line_items', mode: 'half_up' }` |
 | `OrderLevelTaxCalculationStrategy` | `{ granularity: 'per_rate_group_items', mode: 'half_up' }` |
-| Anything else (a custom tax strategy, including a subclass of either), or a money strategy other than `DefaultMoneyStrategy` | `{ granularity: 'custom' }` (no `mode`). **Never omit the field:** absence means an older server, which is the wrong assumption for exactly this store. |
+| Anything else (a custom tax strategy, including a subclass of either), a money strategy other than `DefaultMoneyStrategy`, or a `taxLineCalculationStrategy` other than exactly `DefaultTaxLineCalculationStrategy` | `{ granularity: 'custom' }` (no `mode`). **Never omit the field:** absence means an older server, which is the wrong assumption for exactly this store. |
 
 **Why these names describe Vendure** (measured, vendurepos #38 and the discount scoring, 2026-09-30):
 
@@ -50,6 +50,13 @@ Evidence:
 - Undiscounted: 0 of 1,420 baskets differ in both price modes.
 - Discounted: 0 of 1,000 baskets differ in each of the four strategy and price-mode cells. The prorated rule, which rounds each line's discounted amount, was off on 29–39 % in three of the four.
 
+**Stacked rates (TallyUI #312 item 2):**
+- Under `per_line_items`, the till gives the remainder of a multi-rate line's tax to the last rate, while Vendure rounds each rate's share on its own (`default-order-tax-calculation-strategy.js:51-66`).
+- Neither the plugin nor the dev store overrides `taxLineCalculationStrategy` (checked on main, 2026-09-30), so both run Vendure's `DefaultTaxLineCalculationStrategy`, which gives **one rate per line**.
+- A store with any other tax-line strategy may stack rates, so this plugin advertises `custom` for it (the table above), and the stacking gap never reaches a store advertising `_items`.
+
+**Rate names (TallyUI #312 item 1):** `per_rate_group_items` groups by the tax rate's **name** and value. The till knows a rate's name only when the app passes `TaxProvider`'s `rateCodes` (tax class → Vendure TaxRate name, TallyUI #288). That wiring is the **app's** job in the `@tallyui` bump PR (vendurepos/app#25), not this plugin PR's.
+
 **Known gap (the till's side is TallyUI's):** inclusive lines under `per_rate_group_items`.
 - The till uses `per_order` figures for them until TallyUI #310, a display row that explains the plugin's `TALLY-ROUNDING` bridge (svc:670-678).
 - Until then, those baskets keep being bridged with a `total_mismatch` **warning**, never a refusal.
@@ -59,7 +66,7 @@ Evidence:
 - Vendure's `DefaultMoneyStrategy` is `Math.round`, which rounds **half up**. It differs from `half_away_from_zero` only on exact negative halves, e.g. a −59.5 discount surcharge becomes −59, not −60 (already noted in ADR 0002). The contract gained `half_up` for exactly this (Front desk, 2026-09-30).
 - `DefaultMoneyStrategy` is Vendure's default, and `moneyStrategy` is configurable. A store with a different money strategy has unknown rounding, so it advertises `{ granularity: 'custom' }`, as a custom tax strategy does. Detect the exact class, as below.
 
-**Detect by exact class, never by name string.** Compare `config.taxOptions.orderTaxCalculationStrategy.constructor` with Vendure's `DefaultOrderTaxCalculationStrategy` and `OrderLevelTaxCalculationStrategy`. Do not use `instanceof`: a subclass may round differently, so it counts as custom and advertises `{ granularity: 'custom' }`. The dev store sets `OrderLevelTaxCalculationStrategy` (`dev/vendure-store/src/vendure-config.ts:58`).
+**Detect by exact class, never by name string.** Compare `config.taxOptions.orderTaxCalculationStrategy.constructor`, `config.taxOptions.taxLineCalculationStrategy.constructor` (must be `DefaultTaxLineCalculationStrategy`) and the money strategy's constructor with Vendure's `DefaultOrderTaxCalculationStrategy` and `OrderLevelTaxCalculationStrategy`. Do not use `instanceof`: a subclass may round differently, so it counts as custom and advertises `{ granularity: 'custom' }`. The dev store sets `OrderLevelTaxCalculationStrategy` (`dev/vendure-store/src/vendure-config.ts:58`).
 
 ## In scope
 
@@ -80,7 +87,7 @@ Evidence:
 
 1. **Default strategy:** `/info` advertises `{ granularity: 'per_line_items', mode: 'half_up' }`.
 2. **Order-level strategy:** `{ granularity: 'per_rate_group_items', mode: 'half_up' }`.
-3. **A subclass of `OrderLevelTaxCalculationStrategy`, an unrelated custom tax strategy, and a custom money strategy:** each advertises exactly `{ granularity: 'custom' }` with **no `mode`**, the field is present (never absent), and the rest of `/info` is unchanged.
+3. **A subclass of `OrderLevelTaxCalculationStrategy`, an unrelated custom tax strategy, a custom money strategy, and a custom `taxLineCalculationStrategy`:** each advertises exactly `{ granularity: 'custom' }` with **no `mode`**, the field is present (never absent), and the rest of `/info` is unchanged.
 4. **`/info`'s existing `contracts`** are unchanged in all three.
 
 ## Mutation checks (the dispatching session reruns each)
