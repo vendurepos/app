@@ -1,7 +1,8 @@
 // vendurepos addition, ruling 17; to be upstreamed to @tallyui/core/server.
 // Front desk ruling 17 (ADR 0002 §5): a field the command's version does not know, misspelt or from a later version,
-// is an unstored invalid_payload in step 1, since a money field accepted and ignored (v1 `discountMinor`) would charge
-// the full price for a sale the till discounted. The contract declares no free-form map inside order.create.
+// is an unstored invalid_payload in step 4 (after the replay read, so a stored answer wins), since a money field
+// accepted and ignored (v1 `discountMinor`) would charge the full price for a sale the till discounted. The contract
+// declares no free-form map inside order.create.
 type Fields = Record<string, number>;
 // Each field with the version that introduced it, from src/vendored/commands.ts (`locationId`, declared unversioned, is refused below).
 const since = (version: number, names: string): Fields => Object.fromEntries(names.split(' ').map(name => [name, version]));
@@ -24,12 +25,13 @@ const TAX_RATE = since(1, 'ratePpm code netMinor taxMinor grossMinor');
  * Payload paths are relative to the payload, as in payloadShapeErrors; envelope fields read `envelope.<field>`. */
 export function strictShapeErrors(command: Record<string, unknown>, version: number): string[] {
   const errors: string[] = [];
+  const full = () => errors.length >= 10; // The cap, for every push.
   const check = (value: unknown, fields: Fields, path: string): value is Record<string, unknown> => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
     for (const key of Object.keys(value)) {
       const at = path ? `${path}.${key}` : key;
       const first = Object.hasOwn(fields, key) ? fields[key] : undefined;
-      if (errors.length === 10) break;
+      if (full()) break;
       if (first === undefined) errors.push(`${at}: unknown field in order.create version ${version}`);
       else if (first > version) errors.push(`${at}: requires order.create version ${first}, command is version ${version}`);
     }
@@ -42,8 +44,9 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   check(command, ENVELOPE, 'envelope');
   const payload = command.payload;
   if (!check(payload, PAYLOAD, '')) return errors;
-  // Front desk ruling 19: refused in every version until a ruling says how it is honoured (ADR 0002 "Stock").
-  if (Object.hasOwn(payload, 'locationId')) errors.push('payload.locationId: not supported by this server yet');
+  // Front desk ruling 19: an instruction field, refused in every version until it is honoured: vendurepos/app#35
+  // (ADR 0002 "Stock", §5).
+  if (Object.hasOwn(payload, 'locationId') && !full()) errors.push('payload.locationId: not supported by this server yet');
   each(payload.lines, LINE, 'lines');
   each(payload.payments, PAYMENT, 'payments');
   check(payload.customer, CUSTOMER, 'customer');

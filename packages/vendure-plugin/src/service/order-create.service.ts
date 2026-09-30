@@ -141,7 +141,8 @@ export class OrderCreateService {
       if (replay) return replay;
       // 3. The collision lookup: a sale already recorded is answered by the collision guard after the claim.
       const recorded = await this.recordedAnywhere(ctx, payload.clientOrderId);
-      // 4. The value refusals (amounts, quantities, v3 fiscal figures, the future-only createdAt bound): unstored.
+      // 4. The value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal figures, the future-only
+      // createdAt bound): unstored.
       const invalidValue = recorded ? undefined : this.valueRefusal(command);
       if (invalidValue) return invalidValue;
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
@@ -325,10 +326,6 @@ export class OrderCreateService {
         { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
-    // Ruling 17: strict per version; an unknown or later-version field is refused, by path.
-    if (SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
-      errors.push(...strictShapeErrors(command as unknown as Record<string, unknown>, command.version));
-    }
     // #12 review: a repeated clientLineId could merge order lines and meet ORDER_LIMIT_ERROR after the draft.
     const seen = new Set<string>();
     (Array.isArray(command.payload?.lines) ? command.payload.lines : []).forEach((line, index) => {
@@ -343,7 +340,9 @@ export class OrderCreateService {
   // an unstored invalid_payload (Front desk, matching precheckCommand).
   private valueRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
     const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
-    const errors = valueRangeErrors(command.payload, maxMoney);
+    // Ruling 17: strict per version, by path; here, not in step 1, so a stored answer always wins (#36 review).
+    const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
+    errors.push(...valueRangeErrors(command.payload, maxMoney));
     // ADR-038 #220: createdAt has only an upper bound (an offline till sends old sales).
     errors.push(...createdAtError(command.createdAt, 'createdAt'), ...createdAtError(command.payload.createdAt, 'payload.createdAt'));
     if (!errors.length && command.version === 3) errors.push(...fiscalFiguresErrors(command.payload));

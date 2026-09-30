@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TransactionalConnection } from '@vendure/core';
+import { Order, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TallyCommand } from '../src';
+import * as strictShape from '../src/service/strict-shape';
 import { strictShapeErrors } from '../src/service/strict-shape';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -53,18 +54,22 @@ describe('ruling 17: order.create is validated strictly per version', () => {
     };
   }
   const ledgerCount = () => connection.rawConnection.getRepository(TallyCommand).count();
-  // An unstored step-1 refusal: no database access at all, so no ledger row.
-  async function expectRefused(input: Envelope, messages: string[]) {
+  // An unstored step-4 refusal: only the replay read and the collision lookup (none in step 1), no transaction, so no
+  // claim and no ledger row.
+  async function expectRefused(input: Envelope, messages: string[], reads: unknown[] = [TallyCommand, Order]) {
     const before = await ledgerCount();
     const repositories = vi.spyOn(connection, 'getRepository');
+    const transactions = vi.spyOn(connection, 'withTransaction');
     let result;
     try {
       result = await run(input);
       expect(result).toMatchObject({ id: input.id, status: 'rejected', error: { code: 'invalid_payload' } });
       for (const message of messages) expect(result.error!.message).toContain(message);
-      expect(repositories).not.toHaveBeenCalled();
+      expect(repositories.mock.calls.map(call => call[1])).toEqual(reads);
+      expect(transactions).not.toHaveBeenCalled();
     } finally {
       repositories.mockRestore();
+      transactions.mockRestore();
     }
     expect(await ledgerCount()).toBe(before);
     return result;
@@ -100,12 +105,13 @@ describe('ruling 17: order.create is validated strictly per version', () => {
       'discountMinor: requires order.create version 2, command is version 1',
       'lines[0].discountMinor: requires order.create version 2, command is version 1',
     ]);
+    // Order-level or line-level alone fails the vendored discount-sum check in step 1 first, with no database access.
     const order = tillEnvelope();
     order.payload.discountMinor = 100;
-    await expectRefused(order, ['discountMinor: requires order.create version 2, command is version 1']);
+    await expectRefused(order, ['discountMinor: expected the sum of lines[].discountMinor'], []);
     const line = tillEnvelope();
     line.payload.lines[0].discountMinor = 100;
-    await expectRefused(line, ['lines[0].discountMinor: requires order.create version 2, command is version 1']);
+    await expectRefused(line, ['discountMinor: expected the sum of lines[].discountMinor'], []);
   });
 
   it('an unknown field at every level is an unstored invalid_payload naming its full path', async () => {
@@ -156,5 +162,26 @@ describe('ruling 17: order.create is validated strictly per version', () => {
     const applied = await run(input);
     expect(applied).toMatchObject({ status: 'applied' });
     expect(await run(structuredClone(input))).toMatchObject({ id: input.id, status: 'duplicate', serverRefs: applied.serverRefs });
+  });
+
+  it('#36 review: a stored answer wins; a command stored before the strict check is answered as recorded, never invalid_payload', async () => {
+    // Stored as it would have been before ruling 17: a v1 command carrying discountMinor, applied.
+    const input = tillEnvelope();
+    input.payload.lines[0].discountMinor = 50;
+    input.payload.discountMinor = 50;
+    const strict = vi.spyOn(strictShape, 'strictShapeErrors').mockReturnValueOnce([]);
+    let applied;
+    try {
+      applied = await run(input);
+    } finally {
+      strict.mockRestore();
+    }
+    expect(applied).toMatchObject({ id: input.id, status: 'applied' });
+    expect(strictShapeErrors(input as unknown as Record<string, unknown>, 1)).not.toEqual([]);
+    // The same id: the replay read answers with the recorded duplicate.
+    expect(await run(structuredClone(input))).toMatchObject({ id: input.id, status: 'duplicate', serverRefs: applied.serverRefs });
+    // A new id for the same clientOrderId: the collision guard stores and answers applied with the first sale's refs.
+    const retry = { ...structuredClone(input), id: uuid() };
+    expect(await run(retry)).toMatchObject({ id: retry.id, status: 'applied', serverRefs: applied.serverRefs });
   });
 });
