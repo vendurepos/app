@@ -351,7 +351,8 @@ lookups" gives `CREATE INDEX CONCURRENTLY "IDX_customer_email_lower" ON
 "customer" (lower("emailAddress")) WHERE "deletedAt" IS NULL;`, whose expression
 and predicate the lookup matches. On start the server process logs one warning
 when `customer` has more than 50,000 rows (the planner's estimate) and no
-`lower("emailAddress")` index. A walk-in sale skips the email lookup: its
+`lower("emailAddress")` index. After the first walk-in sale in each process, a
+walk-in sale skips the email lookup: its
 customer's id is cached per process, and the id cache is checked by primary key
 on every use, so an admin's delete or change falls back to the lookup.
 

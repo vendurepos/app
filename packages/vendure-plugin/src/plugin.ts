@@ -108,7 +108,8 @@ export class TallyPosPlugin implements OnApplicationBootstrap {
       const ctx = await this.contexts.create({ apiType: 'admin', channelOrToken: channel.token });
       await this.connection.withTransaction(ctx, tx => this.storeSetup.ensureChannelSetup(tx));
     }
-    await this.warnWithoutEmailIndex().catch((error: unknown) => Logger.debug(`Customer index check skipped: ${String(error)}`, loggerCtx));
+    // Not awaited: the check never delays the start.
+    void this.warnWithoutEmailIndex().catch((error: unknown) => Logger.debug(`Customer index check skipped: ${String(error)}`, loggerCtx));
   }
 
   // Ruling 16: the plugin never indexes Vendure's customer table; a large one without the optional index gets one warning.
@@ -116,12 +117,17 @@ export class TallyPosPlugin implements OnApplicationBootstrap {
     const db = this.connection.rawConnection;
     const table = db.getMetadata(Customer).tablePath;
     // The planner's estimate (pg_class.reltuples, kept by ANALYZE and autovacuum) rather than a count, so a large table
-    // costs nothing here; it is -1 before the table's first ANALYZE, and then an exact count(*) is taken. Both include
-    // soft-deleted rows, which the unindexed lookup scans too.
-    const [{ estimate }] = await db.query('SELECT reltuples::float8 AS estimate FROM pg_class WHERE oid = $1::regclass', [table]);
-    const rows = estimate >= 0 ? estimate : (await db.query(`SELECT count(*)::float8 AS n FROM ${table}`))[0].n;
+    // costs nothing here; it includes soft-deleted rows, which the unindexed lookup scans too. It is -1 before the table's
+    // first ANALYZE (a restore, say): the check is skipped, and a start after autovacuum has analysed the table warns.
+    const [{ rows }] = await db.query('SELECT reltuples::float8 AS rows FROM pg_class WHERE oid = $1::regclass', [table]);
+    if (rows < 0) {
+      Logger.debug('Customer index check skipped: the customer table has not been analysed', loggerCtx);
+      return;
+    }
     if (rows <= CUSTOMER_INDEX_WARN_ROWS) return;
-    const indexed = await db.query(`SELECT 1 FROM pg_indexes WHERE format('%I.%I', schemaname, tablename)::regclass = $1::regclass
+    // Only a valid index counts: a failed CREATE INDEX CONCURRENTLY leaves an INVALID one that pg_indexes still lists.
+    const indexed = await db.query(`SELECT 1 FROM pg_indexes JOIN pg_index ON indexrelid = format('%I.%I', schemaname, indexname)::regclass
+      WHERE format('%I.%I', schemaname, tablename)::regclass = $1::regclass AND indisvalid
       AND indexdef LIKE '%lower(("emailAddress")%'`, [table]);
     if (indexed.length) return;
     Logger.warn(`The customer table holds about ${Math.round(rows)} rows and has no lower("emailAddress") index, so each POS sale `
