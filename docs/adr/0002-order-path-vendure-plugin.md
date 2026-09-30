@@ -477,7 +477,7 @@ every field is checked against its version in step 4 (ruling 17).
 | `locationId` | instruction | refused with `invalid_payload` until vendurepos/app#35 | strict-shape.ts:49 |
 | `display` (v3) | informational | cross-checked (fields below) and stored in `tallySnapshot` | svc:744 |
 | `taxByRate` (v3) | informational | cross-checked, compared per rate (fields below) and stored in `tallySnapshot` | svc:744 |
-| `sessionId` (v3) | informational | stored as `tallySessionId` | svc:594 |
+| `sessionId` (v3) | instruction (honoured by recording) | recorded verbatim on the order as `tallySessionId`, which ties the sale to its register session for register close, like `payments[].method` (Front desk, 2026-09-30) | svc:594; tested at recipe.e2e.ts:97 |
 | **`lines[]`** | | | |
 | `clientLineId` | informational (reference) | stored as the order line's `tallyClientLineId`; matches the line's discount and display line | svc:645, svc:657 |
 | `variantId` | instruction | the variant sold; `unknown_variant` when missing or disabled | svc:399, svc:610 |
