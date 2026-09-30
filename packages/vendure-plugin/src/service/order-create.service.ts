@@ -55,8 +55,11 @@ const STOCK_LOCK_TIMEOUT = '5s';
 // Distinct from StoreSetupService's 0x7a11; two-int keys are apart from other plugins' single-bigint keys.
 const CUSTOMER_LOCK_NAMESPACE = 0x7a12;
 // ADR-038 #220: a createdAt no later than now plus this skew, which absorbs a till whose clock runs
-// ahead; there is no lower bound, since an offline till sends old sales. Later or unparseable: invalid_payload.
+// ahead; the lower bound is CREATED_AT_FLOOR_MS, and an offline till's old sales from 2020 on still apply.
+// Later, earlier or unparseable: invalid_payload.
 const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
+// Front desk ruling 2026-09-30, the same bound in both backends: no POS sale predates the product, and a 1970 clock is a broken till.
+const CREATED_AT_FLOOR_MS = Date.parse('2020-01-01T00:00:00Z');
 /** The environment variable that enables the test hooks; production never sets it. */
 export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
@@ -89,6 +92,7 @@ function nulPath(value: unknown, path: string): string | undefined {
 
 const createdAtError = (value: unknown, path: string) => {
   const time = typeof value === 'string' ? Date.parse(value) : NaN;
+  if (time < CREATED_AT_FLOOR_MS) return [`${path}: expected a time no earlier than 2020-01-01T00:00:00Z`];
   return time <= Date.now() + CREATED_AT_SKEW_MS ? []
     : [`${path}: expected a time no later than one day from now`];
 };
