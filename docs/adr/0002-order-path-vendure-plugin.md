@@ -492,6 +492,11 @@ first release, because v3 is what TallyUI `main` sends:
   before the claim;
 - v1 and v2 orders simply have no snapshot or session id.
 
+`/info` and the version gate read the plugin's own `ORDER_CREATE_VERSIONS`
+(`service/constants.ts`), not the vendored `SUPPORTED_ORDER_CREATE_VERSIONS`,
+so a new version is advertised only by the plugin PR that implements it
+(Front desk, 2026-09-30). `test/versions.e2e.ts` pins this.
+
 #### Field kinds (ruling 19)
 
 Every declared `order.create` field, its kind, and what the server does

@@ -17,7 +17,7 @@ import { commandFingerprint } from '../vendored/fingerprint';
 import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
-import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
+import { ORDER_CREATE_VERSIONS } from './constants';
 import { classify } from './classification';
 import { WALK_IN_EMAIL } from './constants';
 import {
@@ -321,9 +321,9 @@ export class OrderCreateService {
     if (typeof command.createdAt !== 'string') errors.push('Invalid createdAt');
     if (typeof command.deviceId !== 'string') errors.push('Invalid deviceId');
     if (!Number.isSafeInteger(command.attempt) || command.attempt < 1) errors.push('Invalid attempt');
-    if (!errors.length && !SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
+    if (!errors.length && !ORDER_CREATE_VERSIONS.includes(command.version)) {
       return rejected(id, 'unsupported_version', 'Unsupported order.create version',
-        { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) });
+        { orderCreate: Math.max(...ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
     // #12 review: a repeated clientLineId could merge order lines and meet ORDER_LIMIT_ERROR after the draft.

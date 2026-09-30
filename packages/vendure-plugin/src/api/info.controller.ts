@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { Allow, Permission } from '@vendure/core';
-import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../vendored/versions';
+import { ORDER_CREATE_VERSIONS } from '../service/constants';
 
 export type TallyInfo = { contracts: { 'order.create': number[] } };
 
@@ -10,6 +10,6 @@ export class TallyInfoController {
   @Get('info')
   @Allow(Permission.CreateOrder)
   info(): TallyInfo {
-    return { contracts: { 'order.create': [...SUPPORTED_ORDER_CREATE_VERSIONS] } };
+    return { contracts: { 'order.create': [...ORDER_CREATE_VERSIONS] } };
   }
 }
