@@ -75,3 +75,10 @@ export function sessionContext(session: Session): SyncContext {
     }),
   };
 }
+
+/** FNV-1a of a store key as 8 hex digits: a stable, filesystem-safe database name part that never holds the key. */
+export function storeKeyHash(key: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 0x01000193);
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
