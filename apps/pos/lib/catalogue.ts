@@ -1,9 +1,8 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { TallyConnector } from '@tallyui/core';
 import { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, type TallyDatabase, type TallyReplicationState } from '@tallyui/database';
-import type { RxStorage } from 'rxdb';
 import { sessionContext, type Session } from './session';
-import { createStorage } from './storage';
+import { appStorage } from './app-storage';
 
 // One database per store, channel and barcode field so rows and checkpoints cannot be reused across settings.
 export function databaseName({ url, channelToken, barcodeField }: Pick<Session, 'url' | 'channelToken' | 'barcodeField'>): string {
@@ -19,7 +18,6 @@ export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 // A hung storage worker must not prevent the cashier from signing out.
 export const SIGN_OUT_WAIT_MS = 5_000;
 
-let storage: RxStorage<any, any> | undefined;
 let database: Promise<TallyDatabase> | undefined;
 let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[] } | undefined;
 let queue: Promise<unknown> = Promise.resolve();
@@ -47,7 +45,6 @@ export async function startCatalogueSync(session: Session, connector: TallyConne
 
 async function startUnqueued(session: Session, connector: TallyConnector) {
   await stopUnqueued();
-  storage ??= createStorage();
   const name = databaseName(session);
   if (database) {
     const db = await database;
@@ -56,7 +53,7 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
       database = undefined;
     }
   }
-  database ??= createTallyDatabase({ connector, name, storage });
+  database ??= createTallyDatabase({ connector, name, storage: appStorage() });
   const current = database;
   const db = await current.catch((error) => {
     if (database === current) database = undefined;

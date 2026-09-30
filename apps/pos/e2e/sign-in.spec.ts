@@ -136,7 +136,7 @@ test('signs in to the dev store', async ({ page }) => {
 
 // The store's /info advertises per_rate_group_items / half_up (vendurepos #60); lib/cart-totals.test.ts checks every
 // figure below against TallyUI's taxFiguresForBasket.
-test('the cart waits for the store tax settings, then totals a sale with them', async ({ page }) => {
+test('the cart waits for the store tax settings, totals a sale with them, takes cash and keeps the order past sign-out', async ({ page }) => {
   // An unreachable /info is a failed read, not the default per_order rounding: no cart until a retry gets through.
   let infoAborts = 0;
   await page.route('**/tally/v1/info', (route) => { infoAborts++; return route.abort(); });
@@ -181,8 +181,40 @@ test('the cart waits for the store tax settings, then totals a sale with them', 
   await cart.getByTestId('cart-line-TALLY-MUG').getByText('−', { exact: true }).click();
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
   await expectTotals('€38.95', '€4.17', '€43.12', { 'Standard DE 19%': '€2.28', 'Reduced DE 7%': '€1.89' });
+  // Cash 50.00 for the €43.12 total: €6.88 change.
+  await cart.getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await expect(tender.getByTestId('tender-total')).toHaveText('€43.12');
+  await tender.getByTestId('cash-tendered').locator('input').fill('50.00');
+  await expect(tender.getByTestId('tender-change')).toContainText('€6.88');
+  await tender.getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  await expect(receipt.getByTestId('receipt-total')).toHaveText('€43.12');
+  await expect(receipt.getByTestId('receipt-tax-Standard DE 19%')).toHaveText('€2.28');
+  await expect(receipt.getByTestId('receipt-tax-Reduced DE 7%')).toHaveText('€1.89');
+  await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€50.00');
+  await expect(receipt.getByTestId('receipt-change')).toHaveText('€6.88');
+  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  await receipt.getByTestId('new-sale').click();
+  await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(0);
+  await expect(cart.getByTestId('cart-total')).toHaveText('€0.00');
+  // Sign-out removes the catalogue database; the stored order is in its own database and must still be there.
+  await page.getByTestId('sign-out').click();
+  await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  const violations = await cspViolations(page);
+  // And after a reload, read back from storage rather than any handle the page still held.
+  await page.reload();
+  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
   await expectCspMeta(page);
-  expect(await cspViolations(page)).toEqual([]);
+  violations.push(...await cspViolations(page));
+  expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
 

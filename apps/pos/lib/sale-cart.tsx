@@ -1,18 +1,25 @@
-import { CartPanel, HStack, QuantityStepper, Text, VStack } from '@tallyui/components';
+import { Button, CartPanel, HStack, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
+
+/** A label and its amount on one line, as the cart, tender and receipt show their figures. */
+export function MoneyRow({ label, amount, testID, strong = false }: { label: string; amount: string; testID: string; strong?: boolean }) {
+  return (
+    <HStack space="none" className="justify-between">
+      <Text className={strong ? 'font-bold' : 'text-sm text-muted-foreground'}>{label}</Text>
+      <Text testID={testID} className={strong ? 'font-bold' : 'text-sm'}>{amount}</Text>
+    </HStack>
+  );
+}
 
 export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
   const money = (amount: number) => format({ amount, currency: order.currency });
   const totals = cartTotals(order);
-  const row = (label: string, amount: number, testID: string, strong = false) => (
-    <HStack key={testID} space="none" className="justify-between">
-      <Text className={strong ? 'font-bold' : 'text-sm text-muted-foreground'}>{label}</Text>
-      <Text testID={testID} className={strong ? 'font-bold' : 'text-sm'}>{money(amount)}</Text>
-    </HStack>
-  );
+  const row = (label: string, amount: number, testID: string, strong = false) =>
+    <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
+  const empty = !order.lineItems.length;
   return (
     <CartPanel testID="cart" items={order.lineItems}
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
@@ -37,6 +44,14 @@ export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
           {row(totals.taxLabel, totals.taxMinor, 'cart-tax')}
           <HStack space="none" className="mt-1 border-t border-border pt-2" />
           {row('Total', totals.totalMinor, 'cart-total', true)}
+          <HStack space="sm" className="mt-2">
+            <Button testID="pay-cash" className="flex-1" disabled={empty} onPress={() => sale.startTender('cash')}>
+              <Text>Pay cash</Text>
+            </Button>
+            <Button testID="pay-card" variant="secondary" className="flex-1" disabled={empty} onPress={() => sale.startTender('external')}>
+              <Text>Pay by card</Text>
+            </Button>
+          </HStack>
         </VStack>
       }
     />
