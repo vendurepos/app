@@ -44,8 +44,9 @@ describe('the stock lock outside a transaction', () => {
     error.mockRestore();
   });
 
-  it.each(methods)('%s rejects under NODE_ENV=test and never reaches the inner strategy', async method => {
-    process.env.NODE_ENV = 'test';
+  const loud = methods.flatMap(method => ['test', 'development'].map(env => [method, env] as const));
+  it.each(loud)('%s rejects under NODE_ENV=%s and never reaches the inner strategy', async (method, env) => {
+    process.env.NODE_ENV = env;
     const { tally, inner, levels } = strategy();
     await expect(call(tally, method)).rejects.toThrow(
       new RegExp(`TallyStockLocationStrategy\\.${method} ran outside a transaction \\(order line 41, variant 7\\): `

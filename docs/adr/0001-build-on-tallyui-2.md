@@ -50,3 +50,10 @@ yet published. That needed a second checkout in CI (`TALLYUI_REF`), tsconfig
   - **storage-sqlite.** `@tallyui/storage-sqlite` is in, with `rxdb-premium`,
     because RxDB Premium covers every platform POS app, which closes plan
     V-D5 (#4).
+- 2026-09-30: The app is on `@tallyui/*` **3.0.0-next.0**, every package at
+  that exact pin (vendurepos #66); the pin rule above is unchanged, and 3.0.0
+  will be a pin flip. A store that refuses the session (401) reaches the
+  till's notice (TallyUI #261), which tells the cashier to sign in again; the
+  app never calls `resume()` on that replication, because a new sign-in makes
+  a new Session and replication restarts from its checkpoint (Front desk
+  ruling).

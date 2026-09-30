@@ -497,7 +497,7 @@ vendurepos/app#53):
     - `figures_mismatch` (TallyUI #281's shape) may ship once tills that
       follow the strategy are released. It is its own PR, comparing
       exactly: `subtotalMinor` and `taxMinor`, and `discountMinor` from v4
-      on. Only v4's net `discountMinor` is comparable, because Vendure
+      on. Only v4's net `discountMinor` is comparable, because
       from v4 the surcharge's list price is the till's net discount; a v2/v3 gross discount on an
       inclusive line is not. It is still compared only after
       TallyUI/tallyui#287 (see TallyUI's `tax-rounding-strategy-info.md`).
@@ -722,11 +722,23 @@ it proves each of these with a test:
    orders (`order.service.js:1398`, `order-utils.js:114`) and sells them line
    by line (`order.service.js:1426`, `default-fulfillment-process.js:85`,
    `stock-movement.service.js:165`), and cancelling that fulfillment does the
-   same (`default-fulfillment-process.js:81`, `:82`). The sort is per order,
-   so two such fulfillments, or one and a POS sale, can lock out of a global
-   order and deadlock; Postgres aborts one (40P01), a POS sale answers it as a
-   transient `deadlock`, and no update is lost. Open, reported to the front
-   desk (2026-09-30). With the lock, a Shop settlement that comes after stock
+   same (`default-fulfillment-process.js:81`, `:82`). The sort is per order
+   (`lockOrderStock` in `strategies.ts`), so two such fulfillments, or one and
+   a POS sale, can lock out of a global order and deadlock. **Accepted**
+   (Front desk ruling (a), 2026-09-30): Postgres aborts exactly one side with
+   40P01, its retry succeeds, and no stock update is lost. A POS sale answers
+   it as a transient `deadlock` and the till retries; the admin mutation
+   fails with "deadlock detected" and the admin retries, because Vendure's own
+   `@Transaction` retry matches only the code `deadlock_detected`
+   (`transaction-wrapper.js:106`), never 40P01. `test/stock-fulfilment-race.e2e.ts`,
+   "multi-order deadlock: fulfilments [O1.A, O2.B] and [O2.B, O1.A] together,
+   one aborts 40P01, its retry succeeds, stock exact", forces the inversion
+   and pins that outcome against the `stock_movement` ledger. It stops at
+   `Pending`, where the Sales are written: Vendure 3.7.3 cannot ship a
+   multi-order fulfillment at all, since it transitions each order
+   concurrently on one query runner (`default-fulfillment-process.js:98`,
+   `order.service.js:1030`: "savepoint typeorm_3 does not exist"; reported to
+   the front desk). With the lock, a Shop settlement that comes after stock
    runs out gets `MultiChannelStockLocationStrategy`'s empty plan
    (`multi-channel-stock-location-strategy.js:87`) and settles unallocated;
    that is Vendure's own planning, which the old race only hid, not the
