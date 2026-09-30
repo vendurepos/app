@@ -39,12 +39,22 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Types `keys` then Enter at `target`, `gapMs` apart, as a keyboard or a wedge would. */
-function type(keys: string, gapMs: number, target: Element = document.body) {
-  for (const key of [...keys, 'Enter']) {
+/** Types `keys` then Enter (unless `enter` is false) at `target`, `gapMs` apart, as a keyboard or a wedge would. */
+function type(keys: string, gapMs: number, target: Element = document.body, enter = true) {
+  for (const key of enter ? [...keys, 'Enter'] : keys) {
     vi.advanceTimersByTime(gapMs);
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    // happy-dom has no default action: a key not prevented types into an input, at its end, as the browser would.
+    if (target.dispatchEvent(event) && key.length === 1 && target instanceof HTMLInputElement) target.value += key;
   }
+}
+
+/** A money field as react-native-web renders TallyUI's amount inputs (keyboardType="decimal-pad"). */
+function moneyInput(value: string) {
+  const input = document.body.appendChild(document.createElement('input'));
+  input.setAttribute('inputmode', 'decimal');
+  input.value = value;
+  return input;
 }
 
 it('takes a scanner-fast burst ended by Enter as a scan, and its Enter goes no further', () => {
@@ -76,5 +86,43 @@ it('stops listening once unmounted', () => {
   unmount();
   type(CODE, WEDGE_GAP_MS);
   expect(onScan).not.toHaveBeenCalled();
+  expect(enters).toHaveBeenCalledTimes(1);
+});
+
+it('takes a scanner-fast burst into a money field as a scan, leaving the field as it was', () => {
+  const counted = moneyInput('100.00');
+  const inputs = vi.fn();
+  counted.addEventListener('input', () => inputs(counted.value));
+  type('400638133393', WEDGE_GAP_MS, counted);
+  expect(onScan.mock.calls).toEqual([['400638133393']]);
+  expect(counted.value).toBe('100.00');
+  // The code's keys after the first never reach the field: the only change it hears puts its value back.
+  expect(inputs.mock.calls).toEqual([['100.00']]);
+  expect(enters).not.toHaveBeenCalled();
+});
+
+it('leaves typing at human speed in a money field alone: 1, 2, 0 then Enter is 120', () => {
+  const counted = moneyInput('');
+  type('120', 150, counted);
+  expect(onScan).not.toHaveBeenCalled();
+  expect(counted.value).toBe('120');
+  expect(enters).toHaveBeenCalledTimes(1);
+});
+
+it('puts two keys rolled together into a money field back in the field once the run ends', () => {
+  const counted = moneyInput('');
+  type('12', WEDGE_GAP_MS, counted, false);
+  vi.advanceTimersByTime(WEDGE_KEY_GAP_MS);
+  type('0', 150, counted);
+  expect(counted.value).toBe('120');
+  expect(onScan).not.toHaveBeenCalled();
+});
+
+it('leaves a scanner-fast burst into a text field such as the search to the field', () => {
+  const search = document.body.appendChild(document.createElement('input'));
+  search.setAttribute('role', 'searchbox');
+  type('400638133393', WEDGE_GAP_MS, search);
+  expect(onScan).not.toHaveBeenCalled();
+  expect(search.value).toBe('400638133393');
   expect(enters).toHaveBeenCalledTimes(1);
 });

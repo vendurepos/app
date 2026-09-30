@@ -749,6 +749,40 @@ test.describe('on a narrow screen', () => {
     await expect(page.getByTestId('register-count')).toBeVisible();
   });
 
+  // Front desk, 2026-09-30: a barcode landing in a cash-counted or tendered field is a money error, so a scanner burst
+  // into a money field is a scan; typed digits stay typing.
+  test('a scan into the counted cash leaves the count as it was and says to finish closing; typed 1-2-0 is 120', async ({ page }) => {
+    await signInWithBarcodes(page);
+    const cartTab = page.getByTestId('tab-cart');
+    await cartTab.click();
+    await openRegister(page);
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await page.getByTestId('register-open-panel').click();
+    await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+    const counted = page.getByTestId('register-count').getByTestId('count-amount');
+    const finishClosing = page.getByTestId('scan-finish-closing');
+    // A cashier's 1, 2, 0 then Enter is typing, and no scan.
+    await counted.click();
+    await page.keyboard.type('120', { delay: 150 });
+    await page.keyboard.press('Enter');
+    await expect(counted).toHaveValue('120');
+    await expect(finishClosing).toHaveCount(0);
+    await expect(page.getByTestId('scan-not-found')).toHaveCount(0);
+    // A 12-digit burst is a scan: the count keeps its value. That code is in no catalogue, so the unknown-code row applies.
+    // The typed Enter blurred the field (react-native-web's blurOnSubmit), so focus it again.
+    await counted.click();
+    await wedgeScan(page, '400638133393');
+    await expect(page.getByTestId('scan-not-found')).toBeVisible();
+    await expect(counted).toHaveValue('120');
+    // A catalogue code gets the counting row's notice, and still leaves the count alone.
+    await counted.click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(finishClosing).toHaveText('Finish closing the register before scanning.');
+    await expect(counted).toHaveValue('120');
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+  });
+
   // A scan is never silent: over the Z sheet its notice is on top (a trial click's hit test passes), clear of the unsynced note.
   test('a scan while the Z sheet shows adds nothing and says so over the sheet', async ({ page }) => {
     await signInWithBarcodes(page);
