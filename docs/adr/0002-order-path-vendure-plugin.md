@@ -498,7 +498,7 @@ vendurepos/app#53):
       follow the strategy are released. It is its own PR, comparing
       exactly: `subtotalMinor` and `taxMinor`, and `discountMinor` from v4
       on. Only v4's net `discountMinor` is comparable, because Vendure
-      holds each discount as a net surcharge; a v2/v3 gross discount on an
+      from v4 the surcharge's list price is the till's net discount; a v2/v3 gross discount on an
       inclusive line is not. It is still compared only after
       TallyUI/tallyui#287 (see TallyUI's `tax-rounding-strategy-info.md`).
     - A store advertising `{"granularity":"custom"}` never gets a subtotal
@@ -598,8 +598,8 @@ every field is checked against its version in step 4 (ruling 17).
 | `registerId` | informational | stored as `tallyRegisterId` | svc:596 |
 | `cashierRef` | informational | stored as `tallyCashierRef` | svc:598 |
 | `locationId` | instruction | refused with `invalid_payload` until vendurepos/app#35 | strict-shape.ts:49 |
-| `display` (v3) | informational | cross-checked (fields below) and stored in `tallySnapshot` | svc:751 |
-| `taxByRate` (v3) | informational | cross-checked, compared per rate (fields below) and stored in `tallySnapshot` | svc:751 |
+| `display` (v3+) | informational | cross-checked (fields below) and stored in `tallySnapshot` | svc:751 |
+| `taxByRate` (v3+) | informational | cross-checked, compared per rate (fields below) and stored in `tallySnapshot` | svc:751 |
 | `sessionId` (v3) | instruction (honoured by recording) | recorded verbatim on the order as `tallySessionId`, which ties the sale to its register session for register close, like `payments[].method` (Front desk, 2026-09-30) | svc:597; tested at recipe.e2e.ts:97 |
 | **`lines[]`** | | | |
 | `clientLineId` | informational (reference) | stored as the order line's `tallyClientLineId`; matches the line's discount and display line | svc:648, svc:664 |
