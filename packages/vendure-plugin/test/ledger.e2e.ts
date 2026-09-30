@@ -6,6 +6,7 @@ import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TransientCommandError } from '../src';
 import { markTallyRoute, tallyPaymentHandler } from '../src/config/strategies';
+import { WALK_IN_EMAIL } from '../src/service/constants';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
 import { PluginBugError } from '../src/service/errors';
 import type { CommandEnvelope } from '../src/vendored/commands';
@@ -256,16 +257,28 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       // Sold with the default channel's token.
       const result = await run(orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { customerId }));
       expect(result, kind).toMatchObject({ status: 'applied' });
+      // The fallback is the walk-in, never the other channel's customer.
+      const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
+        where: { id: decode(result.serverRefs!.orderId) }, relations: ['customer'],
+      });
+      expect(order.customer!.emailAddress, kind).toBe(WALK_IN_EMAIL);
       expect(result.warnings, kind).toEqual([{ code: 'customer_ignored', customerId, reason: 'unknown' }]);
     }
+    const otherChannels = await connection.rawConnection.getRepository(Customer).findOneOrFail({ where: { id: other.id }, relations: ['channels'] });
+    expect(otherChannels.channels.map(c => c.id)).not.toContain(channel.id);
   });
 
-  it('#43 (Front desk, 2026-09-30): a customerId over 64 characters is an unstored invalid_payload', async () => {
+  it('#43 (Front desk, 2026-09-30): a customerId of 64 characters applies; one over 64 is an unstored invalid_payload', async () => {
+    const atBound = 'T_'.padEnd(64, '9');
+    const accepted = await run(orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
+      { customerId: atBound }));
+    expect(accepted).toMatchObject({ status: 'applied' });
+    expect(accepted.warnings).toEqual([{ code: 'customer_ignored', customerId: atBound, reason: 'unknown' }]);
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
       { customerId: 'T_'.padEnd(65, '9') });
     const before = await counts();
     expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
-      code: 'invalid_payload', message: 'customer.customerId: a string of at most 64 characters',
+      code: 'invalid_payload', message: 'customer.customerId: expected a string of at most 64 characters',
     } });
     expect(await ledgerFor(input)).toBeNull();
     expect(await counts()).toEqual(before);

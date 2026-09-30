@@ -40,9 +40,11 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   for (const field of ['clientOrderId', 'registerId', 'cashierRef'] as const) text(payload[field], field);
   text(payload.sessionId, 'sessionId', SESSION_ID_MAX);
   // #43 (Front desk, 2026-09-30): an over-long customerId is malformed; the message is TallyUI core's.
+  // The vendored payload-shape.ts checks only a non-empty string (its comment there predates #43);
+  // the length bound is refused here, after the replay read.
   const customerId = payload.customer?.customerId;
   if (typeof customerId === 'string' && customerId.length > CUSTOMER_ID_MAX) {
-    errors.push(`customer.customerId: a string of at most ${CUSTOMER_ID_MAX} characters`);
+    errors.push(`customer.customerId: expected a string of at most ${CUSTOMER_ID_MAX} characters`);
   }
   // The bound both plugins share (RFC 5321's 254), inside Vendure's varchar(255) emailAddress.
   text(payload.customer?.email, 'customer.email', 254);
