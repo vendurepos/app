@@ -268,6 +268,28 @@ describe('POST /tally/v1/commands', () => {
     expect((await first).body.results[0]).toMatchObject({ status: 'applied' });
   });
 
+  it('409 after a committed command: the earlier command stays applied, and the retry replays it as duplicate (medusapos parity)', async () => {
+    // pre and post sell another variant: the gated held sale keeps the mug's stock rows locked (ruling 5).
+    const beans = () => orderCommand([{ variantId: variantIds.beans[0], quantity: 1, unitPriceMinor: 500 }]);
+    const [pre, held, post3] = [beans(), mug(), beans()];
+    const barrier = gate();
+    recipe.testObserver = async (stage, _ctx, order) => {
+      if (stage === 'addItemToOrder' && order.customFields.tallyClientOrderId === held.payload.clientOrderId) await barrier.hold();
+    };
+    const first = post({ commands: [held] });
+    await barrier.reached;
+    const second = await post({ commands: [pre, held, post3] });
+    barrier.release();
+    expect(second).toEqual({ status: 409, body: { code: 'in_progress', id: held.id } });
+    expect(await ledgerFor(pre)).toMatchObject({ status: 'applied' });
+    expect(await ledgerFor(post3)).toBeNull();
+    expect((await first).body.results[0]).toMatchObject({ status: 'applied' });
+    const retry = await post({ commands: [pre, held, post3] });
+    expect(retry.status).toBe(200);
+    expect(retry.body.results.map((result: { id: string; status: string }) => [result.id, result.status]))
+      .toEqual([[pre.id, 'duplicate'], [held.id, 'duplicate'], [post3.id, 'applied']]);
+  });
+
   it('stops at a 503 transient without leaking internals; earlier commands stay committed and replay as duplicate', async () => {
     const [a, b, c] = [mug(), mug(), mug()];
     recipe.testObserver = async (_stage, _ctx, order) => {
