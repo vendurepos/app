@@ -3,6 +3,7 @@ import { SimpleGraphQLClient } from '@vendure/testing';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { OrderCreateService } from '../src';
+import type { OrderCreateResult } from '../src';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 import { SECOND_INSTANCE, bootstrapSecondInstance, createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -41,14 +42,17 @@ describe('#62: stock with two Vendure instances on one database', () => {
   let sales = 0;
   const sale = (variantId: string, unitPriceMinor: number) => orderCommand([{ variantId, quantity: 1, unitPriceMinor }], undefined,
     { email: `i62-${++sales}-${Date.now()}@example.com` });
-  // One command through the route of the given instance; answers its status, or the HTTP failure.
-  async function post(instance: number, command: CommandEnvelope<OrderCreatePayload>) {
+  // One command through the route of the given instance; answers its result, or the HTTP failure as its status.
+  type Posted = { status: string; warnings?: OrderCreateResult['warnings'] };
+  async function post(instance: number, command: CommandEnvelope<OrderCreatePayload>): Promise<Posted> {
     const { base, token } = instances[instance];
     const response = await fetch(`${base}/tally/v1/commands`, { method: 'POST', body: JSON.stringify({ commands: [command] }),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Tally-Protocol': '1' } });
-    const body = await response.json() as { results?: Array<{ status: string }> };
-    return body.results?.[0]?.status ?? `${response.status} ${JSON.stringify(body)}`;
+    const body = await response.json() as { results?: Posted[] };
+    return body.results?.[0] ?? { status: `${response.status} ${JSON.stringify(body)}` };
   }
+  const warned = (results: Posted[]) =>
+    results.filter(result => result.warnings?.some(warning => warning.code === 'insufficient_stock')).length;
   async function setOnHand(id: string, stockOnHand: number) {
     await adminClient.query(parse(`mutation SetStock($input: [UpdateProductVariantInput!]!) {
       updateProductVariants(input: $input) { id }
@@ -89,11 +93,12 @@ describe('#62: stock with two Vendure instances on one database', () => {
     return false;
   }
 
-  it('A: eight POS sales alternating over two instances all apply; on-hand ends at exactly start - 8', async () => {
+  // VP3-2 test 2 over two instances. Starting below the sales' units makes half of them top up, which is the write the
+  // stock lock keeps from losing an update; from a start above them, a missing lock goes unseen (#62 review).
+  it('A: eight POS sales from on-hand 4, alternating over two instances, all apply; on-hand ends at exactly -4', async () => {
     const mug = variantIds.mug[0];
-    const start = 20;
-    await setOnHand(mug, start);
-    expect(await level(serviceIds.mug[0])).toEqual({ onHand: start, allocated: 0 });
+    await setOnHand(mug, 4);
+    expect(await level(serviceIds.mug[0])).toEqual({ onHand: 4, allocated: 0 });
     const commands = Array.from({ length: 8 }, () => sale(mug, 800));
     // Instance 1's first sale holds the stock rows, so the second instance's sales must wait on it; then all race.
     const held = hold(commands[0]);
@@ -102,9 +107,28 @@ describe('#62: stock with two Vendure instances on one database', () => {
     const rest = commands.slice(1).map((command, index) => post((index + 1) % 2, command));
     const crossed = await crossInstanceWait(3_000);
     held.release();
-    const statuses = await Promise.all([first, ...rest]);
-    expect({ crossed, statuses, ...await level(serviceIds.mug[0]) })
-      .toEqual({ crossed: true, statuses: Array(8).fill('applied'), onHand: start - 8, allocated: 0 });
+    const results = await Promise.all([first, ...rest]);
+    expect({ crossed, statuses: results.map(result => result.status), warned: warned(results), ...await level(serviceIds.mug[0]) })
+      .toEqual({ crossed: true, statuses: Array(8).fill('applied'), warned: 4, onHand: -4, allocated: 0 });
+  });
+
+  // VP3-2 test 1 over two instances: from on-hand 0, both sales top up, and the second waits across instances for the first.
+  it('A2: a sale on instance 2 waits on instance 1\'s held stock rows, and neither top-up is lost', async () => {
+    const mug = variantIds.mug[0];
+    await setOnHand(mug, 0);
+    expect(await level(serviceIds.mug[0])).toEqual({ onHand: 0, allocated: 0 });
+    const [a, b] = [sale(mug, 800), sale(mug, 800)];
+    const held = hold(a);
+    const first = post(0, a);
+    await held.reached;
+    const second = post(1, b);
+    const crossed = await crossInstanceWait(3_000);
+    held.release();
+    const results = await Promise.all([first, second]);
+    // A tops up 1 from on-hand 0 and leaves -1; B tops up 2 from -1 but warns for its own 1 unit (VP3-3).
+    const warning = { code: 'insufficient_stock', variantId: mug, quantity: 1 };
+    expect({ crossed, results: results.map(({ status, warnings }) => ({ status, warnings })), ...await level(serviceIds.mug[0]) })
+      .toEqual({ crossed: true, results: Array(2).fill({ status: 'applied', warnings: [warning] }), onHand: -2, allocated: 0 });
   });
 
   // K POS sales, split over both instances, race the payments of M Shop API guest checkouts, split likewise. Each Shop
@@ -120,7 +144,7 @@ describe('#62: stock with two Vendure instances on one database', () => {
       expect((await shop.arrangePayment()).state).toBe('ArrangingPayment');
       return shop;
     }));
-    const [statuses, paid] = await Promise.all([
+    const [results, paid] = await Promise.all([
       Promise.all(Array.from({ length: posSales }, (_, index) => post(index % 2, sale(variantId, unitPriceMinor)))),
       Promise.all(shops.map(shop => shop.pay(dummyPaymentCode))),
     ]);
@@ -128,7 +152,7 @@ describe('#62: stock with two Vendure instances on one database', () => {
     const [{ n: allocations }] = await connection.rawConnection.query(`SELECT count(*)::int AS n FROM stock_movement movement
       JOIN order_line line ON line.id = movement."orderLineId" JOIN "order" o ON o.id = line."orderId"
       WHERE movement.type = 'ALLOCATION' AND o.code = ANY($1)`, [paid.map(order => order.code)]) as Array<{ n: number }>;
-    return { statuses, states: paid.map(order => order.state ?? order.errorCode), before, after: await level(id), allocations };
+    return { statuses: results.map(result => result.status), states: paid.map(order => order.state ?? order.errorCode), before, after: await level(id), allocations };
   }
 
   // Measured 2026-09-30, three runs of this race as a plain it() with K = M = 6: on-hand ended exact (44), every sale
@@ -145,9 +169,10 @@ describe('#62: stock with two Vendure instances on one database', () => {
         before: { onHand: start, allocated: 0 }, onHand: start - posSales, allocated: settled, saleable: start - posSales - settled });
   });
 
-  // B's POS side, which it.fails above cannot guard: in the same race, every POS unit leaves on-hand exactly.
-  it('B-pos: in the same race, on-hand ends at exactly start - K and every Shop settlement records its allocation', async () => {
-    const [start, posSales, shopSales] = [50, 6, 6];
+  // B's POS side, which it.fails above cannot guard: in the same race, every POS unit leaves on-hand exactly. It starts
+  // below K, so the POS sales top up while the settlements race. stockAllocated is B's measurement (Vendure's own loss).
+  it('B-pos: from on-hand 3, on-hand ends at exactly 3 - K and every Shop settlement records its allocation', async () => {
+    const [start, posSales, shopSales] = [3, 6, 6];
     const { statuses, states, before, after, allocations } = await race(variantIds.beans[0], serviceIds.beans[0], 500, start, posSales, shopSales);
     expect({ statuses, states, before, onHand: after.onHand, allocations }).toEqual({ statuses: Array(posSales).fill('applied'),
       states: Array(shopSales).fill('PaymentSettled'), before: { onHand: start, allocated: 0 }, onHand: start - posSales, allocations: shopSales });
