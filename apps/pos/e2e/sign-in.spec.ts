@@ -547,7 +547,9 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   expect(attempted.filter(({ type }) => type === 'register.closure.submit')).toEqual([]);
   await page.unroute('**/tally/v1/commands');
   const applied = () => answers.flat();
-  await expect.poll(() => applied().some(({ type }) => type === 'register.closure.submit'), { timeout: 120_000 }).toBe(true);
+  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 120_000 });
+  // Flushed as the orders drain, not at the end of the register outbox's backoff (by then 8 s or more).
+  await expect.poll(() => applied().some(({ type }) => type === 'register.closure.submit'), { timeout: 3_000 }).toBe(true);
   const order = applied().map(({ type, payload }) => `${type}:${payload.sessionId === firstSession ? 1 : 2}`);
   const closureAt = order.indexOf('register.closure.submit:1');
   expect(order.filter((entry) => entry === 'order.create:1')).toHaveLength(2);
