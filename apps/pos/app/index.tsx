@@ -111,6 +111,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
   useEffect(() => { if (sessionId && sessionStatus !== 'open') setClosingSessionId(sessionId); }, [sessionId, sessionStatus]);
+  const closureShown = !!closingSessionId && register.lastClosure?.id === closingSessionId;
+  const registerPanelShown = registerOpen && sessionStatus === 'open';
   const printZ = async () => {
     const closure = register.lastClosure;
     if (!closure) return;
@@ -198,8 +200,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
                   outbox={outbox} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} ordersOpen={ordersOpen}
-                  onCloseOrders={() => setOrdersOpen(false)} />
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
+                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
+                  registerClosing={(!!sessionStatus && sessionStatus !== 'open') || register.closing || closureShown} />
               </TaxProvider>
             </CurrencyProvider>
           ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === FORBIDDEN_TEXT ? (
@@ -217,8 +220,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </ConnectorProvider>
       </View>
       {/* Dialogs, drawn through the root PortalHost. */}
-      <RegisterPanel register={register} currency={currency} open={registerOpen && sessionStatus === 'open'} onOpenChange={setRegisterOpen} />
-      {closingSessionId && register.lastClosure?.id === closingSessionId ? (
+      {/* Mounted only while open, so a scan that closes it closes a cash-movement sheet within it for good. */}
+      {registerPanelShown ? <RegisterPanel register={register} currency={currency} open onOpenChange={setRegisterOpen} /> : null}
+      {closureShown && register.lastClosure ? (
         <>
           <ClosureSheet register={register} currency={currency} onPrint={printZ} onDone={() => setClosingSessionId(null)} />
           {/* Drawn after the sheet, so above it: the store's figures may lag this Z until these orders are sent. */}
@@ -248,11 +252,16 @@ function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxSt
 }
 
 function Sale({
-  session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, ordersOpen, onCloseOrders,
+  session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
+  registerClosing,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
-  boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void; ordersOpen: boolean; onCloseOrders(): void;
+  boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
+  /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
+  panelOpen: boolean; onClosePanels(): void;
+  /** The register is counting, closing or showing its Z. */
+  registerClosing: boolean;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   // The session knows the cashier only by the email they signed in with. Its orders go to its own store's outbox, each
@@ -276,15 +285,16 @@ function Sale({
     setPayError(await startTenderInSession(register, sale, method));
   }
   const format = useCurrencyFormatter();
-  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes the
-  // Orders panel), and the Cart tab shows whatever stage the sale is at.
+  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes a
+  // panel), and the Cart tab shows whatever stage the sale is at.
   const [tab, setTab] = useState<'products' | 'cart'>('products');
   // The Cart tab, or the SKU of the cart line an add just landed on.
   const [highlight, setHighlight] = useState<'tab' | { sku: string | undefined } | null>(null);
-  // A scanned code no product has, or a scan while this sale is being paid: shown on either tab until the next add (a
-  // payment's notice also until the tender ends).
-  const [scanNotice, setScanNotice] = useState<{ notFound: string } | 'finish-sale' | null>(null);
+  // A scanned code no product has, or a scan while this sale is being paid or the register closed: shown on either tab
+  // until the next add (a payment's notice also until the tender ends, a closing one until the register is done).
+  const [scanNotice, setScanNotice] = useState<{ notFound: string } | 'finish-sale' | 'finish-closing' | null>(null);
   useEffect(() => { if (stage.kind !== 'tender') setScanNotice((notice) => notice === 'finish-sale' ? null : notice); }, [stage.kind]);
+  useEffect(() => { if (!registerClosing) setScanNotice((notice) => notice === 'finish-closing' ? null : notice); }, [registerClosing]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   const onProducts = !wide && tab === 'products';
@@ -306,20 +316,22 @@ function Sale({
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
   // stock-overlaid entries. A scan into the search field is the field's alone (the listener leaves inputs be): one add.
   const scannable = useStockOverlaid(products) as typeof products;
-  // A scan is intent to sell (Front desk, 2026-09-30): it closes the Orders panel, and an add shows its line on the Cart
-  // tab. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the cart
-  // (Back to the cart), then adds. A payment entered (cash typed, a card tender's own payment) or saving is this sale
+  // A scan is intent to sell (Front desk, 2026-09-30; docs/scan-policy.md): it closes the Orders or Register panel (and a
+  // cash-movement sheet), and an add shows its line on the Cart tab. The register counting or closing adds nothing and
+  // says so. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the
+  // cart (Back to the cart), then adds. A payment entered (cash typed, a card tender's own payment) or saving is this sale
   // being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
   useWedgeScanner((code) => {
     const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
     const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0);
-    if (ordersOpen) onCloseOrders();
+    if (panelOpen) onClosePanels();
     if (!entry) return setScanNotice({ notFound: code });
+    if (registerClosing) return setScanNotice('finish-closing');
     if (paying) return setScanNotice('finish-sale');
     if (stage.kind === 'receipt') sale.newSale();
     if (stage.kind === 'tender') sale.cancelTender();
-    if (ordersOpen) setTab('cart');
-    add(entry, ordersOpen || !onProducts, true);
+    if (panelOpen) setTab('cart');
+    add(entry, panelOpen || !onProducts, true);
   });
   return (
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
@@ -339,6 +351,10 @@ function Sale({
       {scanNotice === 'finish-sale' ? (
         <Text testID="scan-finish-sale" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
           Finish this sale before scanning the next item.
+        </Text>
+      ) : scanNotice === 'finish-closing' ? (
+        <Text testID="scan-finish-closing" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          Finish closing the register before scanning.
         </Text>
       ) : scanNotice ? (
         // The catalogue search's own wording for a code with no product.

@@ -466,8 +466,9 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   ]));
   // The plugin applied the closure, and its expected and variance, from its own ledger, are the Z's.
   const open = commands.find(({ type }) => type === 'register.session.open')!;
+  // Held until the session's orders have gone (lib/closure-hold.ts), so it may not be sent yet.
+  await expect.poll(() => commands.some(({ type }) => type === 'register.closure.submit'), { timeout: 30_000 }).toBe(true);
   const closure = commands.find(({ type }) => type === 'register.closure.submit');
-  expect(closure).toBeDefined();
   await expect.poll(() => results.get(closure!.id)?.status, { timeout: 30_000 }).toBe('applied');
   expect(results.get(closure!.id)!.register!.closure).toMatchObject({ expected: { cash: 10452, external: 952 }, variance: { cash: 0 } });
   expect(closure!.payload).toMatchObject({ sessionId: open.payload.sessionId, tillExpected: { cash: 10452, external: 952 }, counted: { cash: 10452 } });
@@ -672,6 +673,81 @@ test.describe('on a narrow screen', () => {
       await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
     });
   }
+
+  // Front desk, 2026-09-30 (docs/scan-policy.md): with the Register panel open a scan closes it and adds, as for the
+  // Orders panel; an unknown code closes it too, so its notice shows.
+  for (const width of [360, 1280]) {
+    test(`a scan with the Register panel open closes it and lights up the cart line (${width} px wide)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 780 });
+      await signInWithBarcodes(page);
+      const panel = page.getByTestId('register-panel');
+      const cart = page.getByTestId('cart');
+      if (width < 768) await page.getByTestId('tab-cart').click();
+      await openRegister(page);
+      if (width < 768) await page.getByTestId('tab-products').click();
+      await page.getByTestId('register-open-panel').click();
+      await expect(panel).toBeVisible();
+      await wedgeScan(page, MUG_BARCODE);
+      await expect(cart.getByTestId('cart-line-highlight-TALLY-MUG')).toBeVisible();
+      await expect(panel).toHaveCount(0);
+      await expect(page.getByTestId('tab-cart-highlight')).toHaveCount(0);
+      await page.getByTestId('register-open-panel').click();
+      await expect(panel).toBeVisible();
+      await wedgeScan(page, '9999999999999');
+      await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
+      await expect(panel).toHaveCount(0);
+      await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€8.00');
+    });
+  }
+
+  test('a scan with a paid-in sheet open: into a field it is typing, off the fields it closes the sheet and adds', async ({ page }) => {
+    await signInWithBarcodes(page);
+    const cartTab = page.getByTestId('tab-cart');
+    const cart = page.getByTestId('cart');
+    const panel = page.getByTestId('register-panel');
+    const sheet = page.getByTestId('movement-sheet');
+    await cartTab.click();
+    await openRegister(page);
+    await page.getByTestId('register-open-panel').click();
+    await panel.getByTestId('register-panel-paid-in').click();
+    await expect(sheet).toBeVisible();
+    // Into the reason field the keys are the field's: nothing is added.
+    await sheet.getByTestId('movement-reason').click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(sheet.getByTestId('movement-reason')).toHaveValue(MUG_BARCODE);
+    await expect(sheet).toBeVisible();
+    await expect(cartTab).toHaveText('Cart (0) · €0.00');
+    // Off the fields, the scan closes the sheet and the panel, and adds.
+    await sheet.getByText('Paid in').click();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(cart.getByTestId('cart-line-highlight-TALLY-MUG')).toBeVisible();
+    await expect(sheet).toHaveCount(0);
+    await expect(panel).toHaveCount(0);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    // Closed for good: the panel opens again without it.
+    await page.getByTestId('register-open-panel').click();
+    await expect(panel).toBeVisible();
+    await expect(sheet).toHaveCount(0);
+  });
+
+  test('a scan while the register is counting adds nothing and says to finish closing', async ({ page }) => {
+    await signInWithBarcodes(page);
+    const cartTab = page.getByTestId('tab-cart');
+    await cartTab.click();
+    await openRegister(page);
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await page.getByTestId('register-open-panel').click();
+    await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+    await expect(page.getByTestId('register-count')).toBeVisible();
+    // Off the count's fields, so the listener takes the scan.
+    await page.getByTestId('signed-in-store').click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(page.getByTestId('scan-finish-closing')).toHaveText('Finish closing the register before scanning.');
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(page.getByTestId('register-count')).toBeVisible();
+  });
 
   // Front desk, 2026-09-30: a scan at a tender with nothing entered goes back to the cart and adds; with a payment it
   // changes nothing and says so; at the receipt it starts the next sale. An unknown code never leaves the stage.
