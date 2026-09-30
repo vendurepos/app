@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { Controller, Post } from '@nestjs/common';
 import {
   Allow, Ctx, Logger, Order, OrderService, Payment, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
-  RequestContextService, StockLevel, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
+  RequestContextService, ShippingMethod, StockLevel, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
   defaultOrderProcess,
 } from '@vendure/core';
 import type { OrderProcess, OrderState } from '@vendure/core';
 import { parse } from 'graphql';
+import { IsNull } from 'typeorm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand, TallyPosPlugin } from '../src';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
@@ -375,5 +376,55 @@ describe('POST /tally/v1/commands', () => {
     } finally {
       logged.mockRestore();
     }
+  });
+
+  it('@Allow(CreateOrder): a CreateOrder-only administrator sells and repairs the setup; a ReadOrder-only one is refused', async () => {
+    const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
+    // A role on the default channel with one permission, an administrator holding it, and that administrator's bearer token.
+    async function tokenWith(permission: 'CreateOrder' | 'ReadOrder') {
+      const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
+        createRole(input: $input) { id }
+      }`), { input: { code: `till-${permission}-${randomUUID()}`, description: permission, permissions: [permission], channelIds: [activeChannel.id] } });
+      const emailAddress = `${permission}-${randomUUID()}@till.example`;
+      await adminClient.query(parse(`mutation Admin($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }`),
+        { input: { firstName: 'Till', lastName: permission, emailAddress, password: 'till-password', roleIds: [createRole.id] } });
+      const response = await fetch(`${base}/admin-api`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: `mutation { login(username: "${emailAddress}", password: "till-password") {
+          ... on CurrentUser { id } ... on ErrorResult { errorCode } } }` }),
+      });
+      expect((await response.json()).data.login).toMatchObject({ id: expect.any(String) });
+      const token = response.headers.get('vendure-auth-token');
+      expect(token).toBeTruthy();
+      return { Authorization: `Bearer ${token}` };
+    }
+    const createOrder = await tokenWith('CreateOrder');
+    const readOrder = await tokenWith('ReadOrder');
+
+    const sold = mug();
+    const response = await post({ commands: [sold] }, createOrder);
+    expect(response.status).toBe(200);
+    expect(response.body.results[0]).toMatchObject({ id: sold.id, status: 'applied' });
+    expect((await ordersFor(sold)).map(order => order.state)).toEqual(['Delivered']);
+
+    // The on-demand repair runs with the till's ctx: with tally-in-store soft-deleted, a CreateOrder-only sale recreates it.
+    const liveShipping = () => connection.rawConnection.getRepository(ShippingMethod).find({
+      where: { code: 'tally-in-store', deletedAt: IsNull() },
+    });
+    const [shipping] = await liveShipping();
+    expect(await adminClient.query(parse('mutation Delete($id: ID!) { deleteShippingMethod(id: $id) { result } }'),
+      { id: encode(shipping.id) })).toEqual({ deleteShippingMethod: { result: 'DELETED' } });
+    expect(await liveShipping()).toHaveLength(0);
+    const repaired = mug();
+    const repair = await post({ commands: [repaired] }, createOrder);
+    expect(repair.status).toBe(200);
+    expect(repair.body.results[0]).toMatchObject({ id: repaired.id, status: 'applied' });
+    const live = await liveShipping();
+    expect(live).toHaveLength(1);
+    expect(String(live[0].id)).not.toBe(String(shipping.id));
+
+    const refused = mug();
+    expect((await post({ commands: [refused] }, readOrder)).status).toBe(403);
+    expect(await ledgerFor(refused)).toBeNull();
   });
 });
