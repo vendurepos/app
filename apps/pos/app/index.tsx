@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { Button, Catalogue, HStack, OrdersList, Text, VStack } from '@tallyui/components';
+import { Button, Catalogue, HStack, OrdersList, Tabs, TabsList, TabsTrigger, Text, VStack } from '@tallyui/components';
 import { ConnectorProvider, type ServerCapabilities } from '@tallyui/core';
 import {
   CurrencyProvider, getDeviceId, TaxProvider, taxProviderProps, useOrderOutbox, useSale, type OutboxState, type UseOrderOutboxResult,
@@ -10,6 +10,7 @@ import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { logout } from '../lib/logout';
 import { openOrderStore, outboxStoreKey } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
+import { PROTO_LAYOUT } from '../lib/proto-70';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
@@ -170,9 +171,25 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
+  // PROTOTYPE (#70): B puts the cart above the catalogue at ~58% of the height; C switches between them by tab.
+  const layout = wide ? 'A' : PROTO_LAYOUT;
+  const [tab, setTab] = useState<'products' | 'cart'>('products');
+  // A tender or receipt belongs to the cart tab: it shows whatever the tab was.
+  const cartTab = layout === 'C' && (tab === 'cart' || stage.kind !== 'cart');
+  const items = sale.order.lineItems.reduce((sum, line) => sum + line.quantity, 0);
   return (
-    <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
-      <View className="flex-1">
+    <View className={wide ? 'flex-1 flex-row' : layout === 'B' ? 'flex-1 flex-col-reverse' : 'flex-1'}>
+      {layout === 'C' ? (
+        <Tabs value={cartTab ? 'cart' : 'products'} onValueChange={(value) => setTab(value as 'products' | 'cart')}>
+          {/* Keyed: on web the trigger kept the active fill of the tab it mounted with. */}
+          <TabsList key={cartTab ? 'cart' : 'products'} className="m-2 flex-row">
+            <TabsTrigger testID="tab-products" value="products" className="flex-1"><Text>Products</Text></TabsTrigger>
+            <TabsTrigger testID="tab-cart" value="cart" className="flex-1"><Text>Cart ({items})</Text></TabsTrigger>
+          </TabsList>
+        </Tabs>
+      ) : null}
+      <View className={layout === 'B' ? 'border-t border-border' : 'flex-1'}
+        style={layout === 'B' ? { flex: 42 } : cartTab ? { display: 'none' } : undefined}>
         <Catalogue
           products={products}
           traits={connector.traits.product}
@@ -184,7 +201,8 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
         />
       </View>
-      <View className={wide ? 'w-96 border-l border-border' : 'h-80 border-t border-border'}>
+      <View className={wide ? 'w-96 border-l border-border' : layout === 'C' ? 'flex-1' : layout === 'B' ? '' : 'h-80 border-t border-border'}
+        style={layout === 'B' ? { flex: 58 } : layout === 'C' && !cartTab ? { display: 'none' } : undefined}>
         {stage.kind === 'cart' ? <SaleCart sale={sale} /> : (
           <ScrollView>
             <SaleTender sale={sale} />

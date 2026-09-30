@@ -9,7 +9,7 @@ export function taxRowLabel(taxInclusive: boolean, code: string | undefined, rat
 export function cartTotals(order: Order) {
   const { subtotalMinor, taxMinor, totalMinor, taxInclusive } = order.display;
   const taxRows = taxLinesByRate(order.lineItems, order.taxMinor, undefined, order.taxRounding).map(({ code, ratePpm, amountMinor }) => ({
-    label: taxRowLabel(taxInclusive, code, ratePpm), amountMinor,
+    label: taxRowLabel(taxInclusive, code, ratePpm), name: taxRowLabel(false, code, ratePpm), amountMinor,
   }));
   return { subtotalMinor, taxMinor, totalMinor, taxLabel: `${taxInclusive ? 'incl. ' : ''}Tax`, taxRows };
 }
