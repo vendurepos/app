@@ -4,8 +4,16 @@ declare global {
   interface Window { cspViolations: string[] }
 }
 
+let cspConsole: string[] = [];
+
 // public/index.html's CSP meta must hold for the whole flow. A reload starts a new array, so read it before each one.
 test.beforeEach(async ({ page }) => {
+  // An invalid CSP source is a build mistake and a refusal is a violation, so either console message fails the smoke.
+  const messages: string[] = [];
+  cspConsole = messages;
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) messages.push(message.text());
+  });
   await page.addInitScript(() => {
     window.cspViolations = [];
     window.addEventListener('securitypolicyviolation', (event) => {
@@ -43,6 +51,7 @@ test('wrong password shows an error', async ({ page }) => {
   await expect(page.getByTestId('sign-in-error')).toHaveText('Email or password is incorrect.');
   await expectCspMeta(page);
   expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
 });
 
 test('signs in to the dev store', async ({ page }) => {
@@ -121,4 +130,5 @@ test('signs in to the dev store', async ({ page }) => {
   await expectCspMeta(page);
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
+  expect(cspConsole).toEqual([]);
 });

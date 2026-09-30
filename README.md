@@ -42,6 +42,17 @@ pnpm --filter @vendurepos/pos exec tallyui-build-sqlite-worker public/   # the S
 pnpm --filter @vendurepos/pos web   # http://localhost:8081
 ```
 
+## Web till and plain-http stores
+
+A web till served over https talks to https stores only: the browser's
+mixed-content rule blocks http before the Content-Security-Policy does.
+`http://localhost` and `http://127.0.0.1`, on any port, are allowed for
+development. The sign-in screen's plain-http rule for loopback, private and
+`.local` hosts is for the native apps, and for a web export served over plain
+http on the same LAN as the store. That LAN build needs
+`VENDUREPOS_WEB_ALLOW_LAN_HTTP=1` at build time, which adds `http:` to the
+CSP's `connect-src`. It is off by default.
+
 ## Checks
 
 ```bash
