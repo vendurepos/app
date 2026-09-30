@@ -1,8 +1,9 @@
 import {
-  LanguageCode, PaymentMethodEligibilityChecker, PaymentMethodHandler,
+  LanguageCode, Logger, PaymentMethodEligibilityChecker, PaymentMethodHandler,
   OrderLine, ShippingCalculator, ShippingEligibilityChecker, StockLevel, StockLocationService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
 import type { Injector, Order, OrderItemPriceCalculationStrategy, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
+import { loggerCtx } from '../service/errors';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
 export const TALLY_SHIPPING_METHOD_CODE = 'tally-in-store';
@@ -34,8 +35,16 @@ export class TallyPriceStrategy implements OrderItemPriceCalculationStrategy {
   }
 }
 
+// The plugin has no metrics system, so this count of stock writes made without the lock is the metric for now.
+let unprotectedWrites = 0;
+
+/** Stock writes made without the #62 finding 5 lock because Vendure called the strategy outside a transaction. */
+export function unprotectedStockWrites() {
+  return unprotectedWrites;
+}
+
 /**
- * Every line, POS and Shop: locks the order's stock_level rows before each stock write (below).
+ * Every line, POS and Shop: locks the stock_level rows of the variants on the line's order before each stock write (below).
  * POS lines only (Front desk, 2026-09-29): cap Vendure 3.7.3's MultiChannel over-allocation
  * and fill its threshold under-allocation. Storefront plans are otherwise unchanged.
  */
@@ -53,9 +62,17 @@ export class TallyStockLocationStrategy implements StockLocationStrategy {
   // sale's order (variant, then location), so the read is locked and two orders listing A, B and B, A cannot deadlock.
   // Taken on every call, as rows already held return at once; a per-transaction marker would outlive the locks of a
   // rolled-back savepoint, or a manual-mode transaction's commit on the same query runner.
-  private async lockOrderStock(ctx: RequestContext, orderLine: OrderLine) {
+  // Outside a transaction TypeORM refuses the lock: loud, a throw in test and development, else logged and counted.
+  private async lockOrderStock(path: string, ctx: RequestContext, orderLine: OrderLine) {
     const levels = this.injector.get(TransactionalConnection).getRepository(ctx, StockLevel);
-    if (!levels.manager.queryRunner?.isTransactionActive) return; // TypeORM refuses a pessimistic lock outside one
+    if (!levels.manager.queryRunner?.isTransactionActive) {
+      unprotectedWrites += 1;
+      const message = `TallyStockLocationStrategy.${path} ran outside a transaction (order line ${orderLine.id}, variant `
+        + `${orderLine.productVariantId}): its stock write is unprotected (#62 finding 5); ${unprotectedWrites} so far`;
+      Logger.error(message, loggerCtx);
+      if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') throw new Error(message);
+      return;
+    }
     const query = levels.createQueryBuilder('level');
     const order = query.subQuery().select('self.orderId').from(OrderLine, 'self').where('self.id = :lineId').getQuery();
     const variants = query.subQuery().select('line.productVariantId').from(OrderLine, 'line').where(`line.orderId = ${order}`).getQuery();
@@ -64,20 +81,20 @@ export class TallyStockLocationStrategy implements StockLocationStrategy {
       .orderBy('level.productVariantId').addOrderBy('level.stockLocationId').setLock('pessimistic_write').getMany();
   }
   async forRelease(...args: Parameters<StockLocationStrategy['forRelease']>) {
-    await this.lockOrderStock(args[0], args[2]);
+    await this.lockOrderStock('forRelease', args[0], args[2]);
     return this.inner.forRelease(...args);
   }
   async forSale(...args: Parameters<StockLocationStrategy['forSale']>) {
-    await this.lockOrderStock(args[0], args[2]);
+    await this.lockOrderStock('forSale', args[0], args[2]);
     return this.inner.forSale(...args);
   }
   async forCancellation(...args: Parameters<StockLocationStrategy['forCancellation']>) {
-    await this.lockOrderStock(args[0], args[2]);
+    await this.lockOrderStock('forCancellation', args[0], args[2]);
     return this.inner.forCancellation(...args);
   }
   async forAllocation(...args: Parameters<StockLocationStrategy['forAllocation']>) {
     const [ctx, stockLocations, orderLine, quantity] = args;
-    await this.lockOrderStock(ctx, orderLine);
+    await this.lockOrderStock('forAllocation', ctx, orderLine);
     if (!orderLine.customFields?.tallyClientLineId) return this.inner.forAllocation(...args);
     // Re-read stock levels for each POS line of the same variant while retaining the transaction.
     const plan = await this.inner.forAllocation(ctx.copy(), stockLocations, orderLine, quantity);
