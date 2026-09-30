@@ -468,6 +468,32 @@ test.describe('on a narrow screen', () => {
     await expect(page.getByTestId('cart').getByTestId('cart-total')).toHaveText('€28.56');
   });
 
+  // A scan is intent to sell (Front desk, 2026-09-30): it closes the Orders panel, adds, and shows the line lit up. The
+  // wide run overrides this describe's viewport to share its helpers.
+  for (const width of [360, 1280]) {
+    test(`a scan with the Orders panel open closes it and lights up the cart line (${width} px wide)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 780 });
+      await signInWithBarcodes(page);
+      const panel = page.getByTestId('orders-panel');
+      const cart = page.getByTestId('cart');
+      // On the Products tab when narrow: the scan switches to Cart because the cashier must see the line.
+      await page.getByTestId('orders-open').click();
+      await expect(panel).toBeVisible();
+      await wedgeScan(page, MUG_BARCODE);
+      await expect(cart.getByTestId('cart-line-highlight-TALLY-MUG')).toBeVisible();
+      await expect(panel).toHaveCount(0);
+      await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+      await expect(page.getByTestId('tab-cart-highlight')).toHaveCount(0);
+      // An unknown code closes it too, and says so.
+      await page.getByTestId('orders-open').click();
+      await expect(panel).toBeVisible();
+      await wedgeScan(page, '9999999999999');
+      await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
+      await expect(panel).toHaveCount(0);
+      await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+    });
+  }
+
   test('Products and Cart are tabs: the Cart tab carries the count and total, and tax reads as a breakdown', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('sign-in-url').fill(STORE_URL);

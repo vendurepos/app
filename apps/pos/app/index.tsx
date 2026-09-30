@@ -130,7 +130,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
-                  outbox={outbox} onSaving={setSaving} />
+                  outbox={outbox} onSaving={setSaving} ordersOpen={ordersOpen} onCloseOrders={() => setOrdersOpen(false)} />
               </TaxProvider>
             </CurrencyProvider>
           ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === FORBIDDEN_TEXT ? (
@@ -163,9 +163,9 @@ function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxSt
   if (stuck) return `${countOrders(stuck.commandIds.length)} keep failing at the store. They are kept and retried.`;
 }
 
-function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }: {
+function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, ordersOpen, onCloseOrders }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
-  outbox: UseOrderOutboxResult; onSaving(saving: boolean): void;
+  outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; ordersOpen: boolean; onCloseOrders(): void;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   // The session knows the cashier only by the email they signed in with. Its orders go to its own store's outbox.
@@ -176,8 +176,8 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
   const format = useCurrencyFormatter();
-  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it, and the Cart tab shows
-  // whatever stage the sale is at.
+  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes the
+  // Orders panel), and the Cart tab shows whatever stage the sale is at.
   const [tab, setTab] = useState<'products' | 'cart'>('products');
   // The Cart tab, or the SKU of the cart line an add just landed on.
   const [highlight, setHighlight] = useState<'tab' | { sku: string | undefined } | null>(null);
@@ -186,24 +186,28 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving }
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   const onProducts = !wide && tab === 'products';
-  function add(entry: Parameters<typeof sale.add>[0]) {
+  function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts) {
     // Only the cart takes new lines: a tender or a receipt is for the sale as it stands.
     if (stage.kind !== 'cart') return;
     sale.add(entry, connector.traits.product);
     setNotFound(null);
     // Confirmed in place: on Products the Cart tab's count and total tick up and the tab lights up briefly; where the
     // cart shows, the line lights up.
-    setHighlight(onProducts ? 'tab' : { sku: entry.variant.sku });
+    setHighlight(showLine ? { sku: entry.variant.sku } : 'tab');
     clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
   // stock-overlaid entries. A scan into the search field is the field's alone (the listener leaves inputs be): one add.
   const scannable = useStockOverlaid(products) as typeof products;
+  // A scan is intent to sell (Front desk, 2026-09-30): with the Orders panel open it closes the panel, and an add shows
+  // its line on the Cart tab. Outside the cart the scan does nothing to the sale, so the panel stays as it is.
   useWedgeScanner((code) => {
     if (stage.kind !== 'cart') return;
     const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
-    if (entry) add(entry);
+    if (ordersOpen) onCloseOrders();
+    if (entry && ordersOpen) setTab('cart');
+    if (entry) add(entry, ordersOpen || !onProducts);
     else setNotFound(code);
   });
   return (
