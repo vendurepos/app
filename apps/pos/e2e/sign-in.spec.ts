@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
 declare global {
   interface Window { cspViolations: string[] }
@@ -137,9 +137,15 @@ test('signs in to the dev store', async ({ page }) => {
 // The store's /info advertises per_rate_group_items / half_up (vendurepos #60); lib/cart-totals.test.ts checks every
 // figure below against TallyUI's taxFiguresForBasket.
 test('the cart waits for the store tax settings, totals a sale with them, takes cash and keeps the order past sign-out', async ({ page }) => {
+  // A 404 /info is a store with no plugin (or one from before /info): it reads as order.create 1, below the 4 whose
+  // net-discount rule a discounted sale needs, so no cart until the plugin is there.
+  const infoNotFound = (route: Route) => route.request().method() === 'GET'
+    ? route.fulfill({ status: 404, body: 'Not Found' }) : route.continue();
   // An unreachable /info is a failed read, not the default per_order rounding: no cart until a retry gets through.
   let infoAborts = 0;
   await page.route('**/tally/v1/info', (route) => { infoAborts++; return route.abort(); });
+  // Registered last, so it answers first; un-routed, the abort above takes over with no gap.
+  await page.route('**/tally/v1/info', infoNotFound);
   await page.goto('/');
   await page.getByTestId('sign-in-url').fill(STORE_URL);
   await page.getByTestId('sign-in-email').fill(USERNAME);
@@ -147,11 +153,16 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   const cart = page.getByTestId('cart');
+  await expect(page.getByTestId('sale-settings-plugin'))
+    .toHaveText("This store's VendurePOS plugin is missing or out of date. Install or update it, then this till continues.");
+  await expect(cart).toHaveCount(0);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toHaveCount(0);
+  await page.unroute('**/tally/v1/info', infoNotFound);
   await expect(page.getByTestId('sale-settings-retrying')).toHaveText("Can't reach the store's settings yet. Retrying…");
   await expect(cart).toHaveCount(0);
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toHaveCount(0);
-  // Sign-in's own read and at least one of the sale's have failed.
-  expect(infoAborts).toBeGreaterThanOrEqual(2);
+  // At least one of the sale's reads has failed (sign-in's own read was the 404 above).
+  expect(infoAborts).toBeGreaterThanOrEqual(1);
   await page.unroute('**/tally/v1/info');
   // The store can't be reached for orders: the sale is kept and waits, and each attempt is recorded.
   const sent: { version: number; payload: { clientOrderId: string } }[] = [];

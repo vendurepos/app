@@ -20,8 +20,8 @@ export function ordersDatabaseName({ url, channelToken }: OrderStore): string {
 }
 
 /**
- * useOrderOutbox's storeKey: none until the store's capabilities are read. A first send takes the store's
- * order.create max, and without one it goes at 3, where the plugin's 4 carries the net-discount rule.
+ * useOrderOutbox's storeKey: none until the store's capabilities are read and at MIN_ORDER_CREATE. A first send takes
+ * the store's order.create max, and without one it goes at 3, where the plugin's 4 carries the net-discount rule.
  */
 export function outboxStoreKey(store: OrderStore, saleSettings: SaleSettingsState): string | null {
   return saleSettings.status === 'ready' ? ordersDatabaseName(store) : null;

@@ -8,18 +8,15 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { cartTotals } from './cart-totals';
-import { taxRateCodes } from './tax-rate-codes';
 
 // The dev store (dev/vendure-store/src/seed.ts): Germany, Standard 19 % (category 1, the default) and Reduced 7 %
 // (category 2), prices excluding tax, and /info's per_rate_group_items / half_up (vendurepos #60).
 const ROUNDING = { granularity: 'per_rate_group_items', mode: 'half_up' } as const;
+// The rate names as vendureStoreSettings gives them (TallyUI #334; lib/store-settings.test.ts checks its keys).
 const settings: StoreSettings = {
   currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 190_000, '1': 190_000, '2': 70_000 }, taxRounding: ROUNDING,
+  taxRateCodes: { default: 'Standard DE', '1': 'Standard DE', '2': 'Reduced DE' },
 };
-const rateCodes = taxRateCodes('DE', [{ id: '1', isDefault: true }, { id: '2', isDefault: false }], [
-  { name: 'Standard DE', enabled: true, category: { id: '1' }, zone: { id: 'DE' }, customerGroup: null },
-  { name: 'Reduced DE', enabled: true, category: { id: '2' }, zone: { id: 'DE' }, customerGroup: null },
-]);
 
 const variant = (id: string, sku: string, price: number, category: string, name = sku) =>
   ({ id, name, sku, price, currencyCode: 'EUR', enabled: true, trackInventory: 'FALSE', taxCategory: { id: category } });
@@ -31,11 +28,11 @@ const products = [
 const traits = createVendureConnector({ pricesIncludeTax: false }).traits.product;
 const entry = (sku: string) => catalogueEntries(products, traits).find((item) => item.variant.sku === sku)!;
 
-/** The context the app's `<TaxProvider {...taxProviderProps(settings)} rateCodes={rateCodes}>` gives the sale. */
+/** The context the app's `<TaxProvider {...taxProviderProps(settings)}>` gives the sale. */
 function saleTaxContext(): TaxContext {
   let context: TaxContext | undefined;
   const Probe = () => { context = useTax(); return null; };
-  renderToString(createElement(TaxProvider, { ...taxProviderProps(settings), rateCodes } as TaxProviderProps, createElement(Probe)));
+  renderToString(createElement(TaxProvider, taxProviderProps(settings) as TaxProviderProps, createElement(Probe)));
   return context!;
 }
 

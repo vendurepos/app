@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { ServerCapabilities, StoreSettings, TallyConnector } from '@tallyui/core';
 import { sessionContext, type Session } from './session';
-import { fetchTaxRateCodes } from './tax-rate-codes';
 
-export type SaleSettings = { settings: StoreSettings; rateCodes: Record<string, string>; capabilities?: ServerCapabilities };
+export type SaleSettings = { settings: StoreSettings; capabilities?: ServerCapabilities };
 export type SaleSettingsState =
-  | { status: 'resolving' | 'retrying'; attempt: number; lastError?: unknown }
+  | { status: 'resolving' | 'retrying' | 'plugin'; attempt: number; lastError?: unknown }
   | ({ status: 'ready' } & SaleSettings);
 
 // A read that has not settled by then is a failed read, so a hung request is retried rather than waited on forever.
@@ -14,6 +13,9 @@ export const READ_TIMEOUT_MS = 10_000;
 export const FIRST_RETRY_MS = 1_000;
 // …up to this cap; retries go on for as long as the screen is mounted.
 export const MAX_RETRY_MS = 30_000;
+// The plugin this app ships with advertises order.create 4, and v4 carries the net-discount rule. A store below it (no
+// plugin, or an older one: a 404 /info reads as 1) would take a discounted sale at 3 and apply it without that rule.
+export const MIN_ORDER_CREATE = 4;
 
 export function retryDelayMs(attempt: number): number {
   return Math.min(FIRST_RETRY_MS * 2 ** (attempt - 1), MAX_RETRY_MS);
@@ -30,42 +32,46 @@ function readWithTimeout<T>(read: (signal: AbortSignal) => Promise<T>, unmount: 
     .finally(() => { clearTimeout(timer); unmount.removeEventListener('abort', abort); });
 }
 
+/** One read of the store's capabilities, rejected after READ_TIMEOUT_MS or at `unmount`. The connector must have the read. */
+export function readCapabilities(session: Session, connector: TallyConnector, unmount = new AbortController().signal) {
+  return readWithTimeout((signal) => connector.capabilities!({ ...sessionContext(session), signal }), unmount);
+}
+
 /**
- * The sale's settings: the session's store settings (read at sign-in, the same copy the connector's traits use), with
- * the store's `taxRounding` from its capabilities as `useStoreSettings` adds it (TallyUI #324), and the rate names.
- * A failed read is not an absent value: a read that throws, times out or comes back inconclusive (`undefined` from
- * `connector.capabilities`) keeps the sale waiting and is retried with backoff, so no sale runs on guessed rounding.
- * Only a connector with no `capabilities` read at all gets the default rounding. Once ready, the reads stop.
+ * The sale's settings: the session's store settings (read at sign-in, the same copy the connector's traits use, with the
+ * rate names the connector reads beside the rates), with the store's `taxRounding` from its capabilities as
+ * `useStoreSettings` adds it (TallyUI #324). A failed read is not an absent value: a read that throws, times out or
+ * comes back inconclusive (`undefined` from `connector.capabilities`) keeps the sale waiting and is retried with
+ * backoff, so no sale runs on guessed rounding. A store whose plugin is below MIN_ORDER_CREATE waits the same way, as
+ * `plugin`. Only a connector with no `capabilities` read at all gets the default rounding. Once ready, the reads stop.
  */
 export function useSaleSettings(session: Session, connector: TallyConnector): SaleSettingsState {
   const [state, setState] = useState<SaleSettingsState>({ status: 'resolving', attempt: 1 });
   useEffect(() => {
     const unmount = new AbortController();
-    const context = sessionContext(session);
-    let capabilities: { value?: ServerCapabilities } | undefined = connector.capabilities ? undefined : {};
-    let rateCodes: Record<string, string> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     setState({ status: 'resolving', attempt: 1 });
     const attempt = async (count: number) => {
-      const errors: unknown[] = [];
-      await Promise.all([
-        capabilities ?? readWithTimeout((signal) => connector.capabilities!({ ...context, signal }), unmount.signal).then((value) => {
-          if (value === undefined) throw new Error("The store's capabilities read was inconclusive");
-          capabilities = { value };
-        }).catch((error) => { errors.push(error); }),
-        rateCodes ?? readWithTimeout((signal) => fetchTaxRateCodes({ ...context, signal }), unmount.signal).then((value) => {
-          rateCodes = value;
-        }).catch((error) => { errors.push(error); }),
-      ]);
+      let capabilities: ServerCapabilities | undefined;
+      let waiting: Extract<SaleSettingsState, { attempt: number }> | undefined;
+      if (connector.capabilities) {
+        try {
+          capabilities = await readCapabilities(session, connector, unmount.signal);
+          if (capabilities === undefined) throw new Error("The store's capabilities read was inconclusive");
+          // Written so a missing or non-numeric orderCreate waits too.
+          if (!(capabilities.orderCreate >= MIN_ORDER_CREATE)) waiting = { status: 'plugin', attempt: count };
+        } catch (error) {
+          waiting = { status: 'retrying', attempt: count, lastError: error };
+        }
+      }
       if (unmount.signal.aborted) return;
-      if (capabilities && rateCodes) {
-        const taxRounding = capabilities.value?.taxRounding;
-        const settings = taxRounding ? { ...session.settings, taxRounding } : session.settings;
-        setState({ status: 'ready', settings, rateCodes, capabilities: capabilities.value });
+      if (!waiting) {
+        const taxRounding = capabilities?.taxRounding;
+        setState({ status: 'ready', settings: taxRounding ? { ...session.settings, taxRounding } : session.settings, capabilities });
         return;
       }
-      console.warn("Could not read the store's sale settings; retrying", errors[0]);
-      setState({ status: 'retrying', attempt: count, lastError: errors[0] });
+      console.warn("Could not read the store's sale settings; retrying", waiting.status === 'plugin' ? capabilities : waiting.lastError);
+      setState(waiting);
       timer = setTimeout(() => void attempt(count + 1), retryDelayMs(count));
     };
     void attempt(1);

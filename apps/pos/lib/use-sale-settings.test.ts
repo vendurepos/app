@@ -2,24 +2,22 @@ import type { ServerCapabilities, TallyConnector } from '@tallyui/core';
 import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from './session';
-import { fetchTaxRateCodes } from './tax-rate-codes';
 // Renamed so the hook can run outside a component here, where React's hooks are mocked.
-import { READ_TIMEOUT_MS, retryDelayMs, useSaleSettings as saleSettingsHook, type SaleSettingsState } from './use-sale-settings';
+import { MIN_ORDER_CREATE, READ_TIMEOUT_MS, readCapabilities, retryDelayMs, useSaleSettings as saleSettingsHook, type SaleSettingsState } from './use-sale-settings';
 
 vi.mock('react', async (importActual) => ({
   ...await importActual<typeof import('react')>(),
   useEffect: vi.fn(), useState: vi.fn(),
 }));
-vi.mock('./tax-rate-codes', () => ({ fetchTaxRateCodes: vi.fn() }));
 
 const session: Session = {
   url: 'http://127.0.0.1:1', email: 'cashier@example.com', token: 'test-token',
-  settings: { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 190000 } },
+  // Sign-in's settings carry the connector's rate names (TallyUI #334).
+  settings: { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 190000 }, taxRateCodes: { default: 'Standard DE 19%' } },
   stock: { trackInventory: true, outOfStockThreshold: 2 },
 };
-// The dev store's /info (vendurepos #60).
-const storeCapabilities: ServerCapabilities = { orderCreate: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' } };
-const names = { '1': 'Standard DE 19%', default: 'Standard DE 19%' };
+// The dev store's /info (vendurepos #60), from the plugin this app ships with.
+const storeCapabilities: ServerCapabilities = { orderCreate: 4, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' } };
 
 let states: SaleSettingsState[];
 let cleanup: (() => void) | void;
@@ -35,7 +33,6 @@ beforeEach(() => {
   states = [];
   vi.mocked(useState).mockImplementation(((initial: SaleSettingsState) => [initial, (next: SaleSettingsState) => { states.push(next); }]) as any);
   vi.mocked(useEffect).mockImplementation((effect) => { cleanup = effect(); });
-  vi.mocked(fetchTaxRateCodes).mockResolvedValue(names);
 });
 
 afterEach(() => {
@@ -59,39 +56,37 @@ describe('useSaleSettings', () => {
     await vi.advanceTimersByTimeAsync(retryDelayMs(1));
     expect(capabilities).toHaveBeenCalledTimes(2);
     expect(ready()).toEqual([{
-      status: 'ready', settings: { ...session.settings, taxRounding: storeCapabilities.taxRounding }, rateCodes: names, capabilities: storeCapabilities,
+      status: 'ready', settings: { ...session.settings, taxRounding: storeCapabilities.taxRounding }, capabilities: storeCapabilities,
     }]);
-    // The names read succeeded the first time and is not repeated; once ready, nothing is read again.
-    expect(fetchTaxRateCodes).toHaveBeenCalledTimes(1);
+    // Once ready, nothing is read again.
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(capabilities).toHaveBeenCalledTimes(2);
     expect(states.at(-1)!.status).toBe('ready');
   });
 
-  it('waits and retries when the rate-names read fails', async () => {
-    const capabilities = vi.fn().mockResolvedValue(storeCapabilities);
-    vi.mocked(fetchTaxRateCodes).mockRejectedValueOnce(new Error('HTTP 502'));
+  it.each([
+    ['no plugin (a 404 /info)', { orderCreate: 1 }],
+    ['an older plugin', { orderCreate: 3, taxRounding: storeCapabilities.taxRounding }],
+  ])('never readies a store with %s, and shows the plugin notice across its retries', async (_, below) => {
+    const capabilities = vi.fn().mockResolvedValue(below);
     mount({ capabilities });
     await vi.advanceTimersByTimeAsync(0);
-    expect(states.at(-1)).toMatchObject({ status: 'retrying', attempt: 1, lastError: new Error('HTTP 502') });
+    for (const attempt of [1, 2, 3, 4]) {
+      expect(capabilities).toHaveBeenCalledTimes(attempt);
+      expect(states.at(-1)).toEqual({ status: 'plugin', attempt });
+      await vi.advanceTimersByTimeAsync(retryDelayMs(attempt));
+    }
     expect(ready()).toEqual([]);
-    await vi.advanceTimersByTimeAsync(retryDelayMs(1));
-    expect(fetchTaxRateCodes).toHaveBeenCalledTimes(2);
-    expect(capabilities).toHaveBeenCalledTimes(1);
-    expect(ready()).toMatchObject([{ settings: { taxRounding: storeCapabilities.taxRounding }, rateCodes: names }]);
-  });
-
-  it('readies with no names when the names read succeeds empty', async () => {
-    vi.mocked(fetchTaxRateCodes).mockResolvedValue({});
-    mount({ capabilities: vi.fn().mockResolvedValue(storeCapabilities) });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(states.at(-1)).toMatchObject({ status: 'ready', rateCodes: {} });
+    // Updated on the store, the plugin is picked up by the next retry.
+    capabilities.mockResolvedValue(storeCapabilities);
+    await vi.advanceTimersByTimeAsync(retryDelayMs(5));
+    expect(states.at(-1)).toMatchObject({ status: 'ready', capabilities: { orderCreate: MIN_ORDER_CREATE } });
   });
 
   it('gives the default rounding only to a connector that declares no capabilities read', async () => {
     mount({});
     await vi.advanceTimersByTimeAsync(0);
-    expect(states.at(-1)).toEqual({ status: 'ready', settings: session.settings, rateCodes: names, capabilities: undefined });
+    expect(states.at(-1)).toEqual({ status: 'ready', settings: session.settings, capabilities: undefined });
   });
 
   it('times out a hung read and retries it', async () => {
@@ -128,5 +123,20 @@ describe('useSaleSettings', () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(capabilities).toHaveBeenCalledTimes(8);
     expect(ready()).toEqual([]);
+  });
+});
+
+describe('readCapabilities, the outbox refresh', () => {
+  it('rejects a read that has not settled within READ_TIMEOUT_MS, and aborts it', async () => {
+    let signal: AbortSignal | undefined;
+    const capabilities = vi.fn(({ signal: given }: { signal: AbortSignal }) => { signal = given; return new Promise(() => {}); });
+    const read = readCapabilities(session, { capabilities } as unknown as TallyConnector);
+    const settled = vi.fn();
+    read.catch(settled);
+    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS - 1);
+    expect(settled).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toHaveBeenCalledWith(new Error(`No answer within ${READ_TIMEOUT_MS} ms`));
+    expect(signal!.aborted).toBe(true);
   });
 });
