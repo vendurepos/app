@@ -1,7 +1,7 @@
 import { Button, HStack, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { taxRowLabel } from './cart-totals';
-import { MoneyRow } from './sale-cart';
+import { MoneyRow, TaxRows } from './sale-cart';
 
 /** The completed sale's receipt, from the order as finalized and stored; New sale starts the next one. */
 export function SaleReceipt({ sale, store, cashier, registerId }: {
@@ -24,11 +24,10 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
         </HStack>
       ))}
       <MoneyRow label="Subtotal" amount={money(totals.subtotalMinor)} testID="receipt-subtotal" />
-      {totals.taxLines.map((tax) => {
-        const label = taxRowLabel(totals.taxInclusive, tax.code, tax.ratePpm);
-        return <MoneyRow key={label} label={label} amount={money(tax.amountMinor)} testID={`receipt-tax-${label}`} />;
-      })}
-      <MoneyRow label={taxLabel} amount={money(totals.taxMinor)} testID="receipt-tax" />
+      <TaxRows label={taxLabel} amount={money(totals.taxMinor)} testID="receipt-tax" rates={totals.taxLines.map((tax) => ({
+        key: taxRowLabel(totals.taxInclusive, tax.code, tax.ratePpm), name: taxRowLabel(false, tax.code, tax.ratePpm),
+        amount: money(tax.amountMinor),
+      }))} />
       <MoneyRow label="Total" amount={money(totals.totalMinor)} testID="receipt-total" strong />
       {receipt.payments.map((payment, index) => (
         <MoneyRow key={index} label={payment.method === 'cash' ? 'Cash tendered' : 'Card'} amount={money(payment.amountMinor)}
