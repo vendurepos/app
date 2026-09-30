@@ -51,7 +51,8 @@ development. The sign-in screen's plain-http rule for loopback, private and
 `.local` hosts is for the native apps, and for a web export served over plain
 http on the same LAN as the store. That LAN build needs
 `VENDUREPOS_WEB_ALLOW_LAN_HTTP=1` at build time, which adds `http:` to the
-CSP's `connect-src`. It is off by default.
+CSP's `connect-src` and `img-src`, since product images come from the same
+store. It is off by default.
 
 ## Checks
 
