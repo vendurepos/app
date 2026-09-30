@@ -13,7 +13,7 @@ SERVER_BASE=13000 # Base for worktree Vendure test-server ports.
 if command -v lsof >/dev/null; then
   port_free() { ! lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 elif command -v nc >/dev/null; then # Fallback probe: the port is in use when nc can connect.
-  port_free() { ! nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
+  port_free() { ! nc -z 127.0.0.1 "$1" >/dev/null 2>&1 && ! nc -z ::1 "$1" >/dev/null 2>&1; }
 else
   echo "test-stack.sh needs lsof or nc to find free ports; install one of them." >&2
   exit 1
@@ -32,8 +32,8 @@ fi
 export PLUGIN_TEST_PROJECT=${PLUGIN_TEST_PROJECT:-${recorded_PLUGIN_TEST_PROJECT:-vendurepos-plugin-${key}}}
 recorded=${recorded_PLUGIN_TEST_PROJECT:-}
 if [[ "${1:-}" == up && -n $recorded && $recorded != "$PLUGIN_TEST_PROJECT" ]] &&
-   [[ -n $(docker compose -p "$recorded" ps -q) ]]; then
-  echo "Test stack $recorded is still running; run npm run db:down before starting $PLUGIN_TEST_PROJECT." >&2
+   [[ -n $(docker compose -p "$recorded" ps -aq) ]]; then # -a: a stopped stack also counts.
+  echo "Test stack $recorded still exists (running or stopped); run npm run db:down before starting $PLUGIN_TEST_PROJECT." >&2
   exit 1
 fi
 if [[ "${1:-}" == up && $reuse == 1 ]] &&

@@ -26,6 +26,7 @@
     "db:up": "scripts/test-stack.sh up",
     "db:down": "scripts/test-stack.sh down",
     "test": "vitest run --maxWorkers=1",
+    "test:stack": "bash scripts/test-stack.test.sh",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
