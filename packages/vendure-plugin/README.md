@@ -115,7 +115,8 @@ forwards.
 
 A sale with an email finds its customer with `LOWER("emailAddress") = LOWER($1)` among customers
 that are not deleted, so customers stored with any case match. Vendure has no index for that, so
-each such lookup is a sequential scan of the `customer` table. Walk-in sales (no email) skip it.
+each such lookup is a sequential scan of the `customer` table. Walk-in sales (no email) skip it
+after the first walk-in sale in each process.
 The plugin never adds an index to Vendure's own table itself (ADR 0002, ruling 16). Add this one
 yourself when the store has **more than about 50,000 customers**, or when POS sales with an email
 are visibly slow:
