@@ -17,9 +17,8 @@ import { commandFingerprint } from '../vendored/fingerprint';
 import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
-import { ORDER_CREATE_VERSIONS } from './constants';
+import { ORDER_CREATE_VERSIONS, WALK_IN_EMAIL } from './constants';
 import { classify } from './classification';
-import { WALK_IN_EMAIL } from './constants';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
