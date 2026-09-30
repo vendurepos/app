@@ -87,6 +87,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - run: bash scripts/test-stack.test.sh
       - run: npm test
 
   # No artifacts are uploaded: dist, public, apps/pos/test-results and
