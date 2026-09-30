@@ -6,19 +6,23 @@ import { OrderCreateService } from '../service/order-create.service';
 import type { OrderCreateResult } from '../service/order-create.service';
 import type { CommandEnvelope, OrderCreatePayload } from '../vendored/commands';
 
-// TallyUI ADR-038: a batch holds 1 to 50 commands.
+// TallyUI ADR-038: a batch holds 1 to 50 commands; more answers 413 batch_too_large (ruling 18).
 const MAX_COMMANDS = 50;
 
 type StatusResponse = { status(code: number): unknown };
 type Envelope = CommandEnvelope<OrderCreatePayload>;
+type TooLarge = { status: 413; code: 'batch_too_large'; maxCommands: number; message: string };
 
 /** ADR 0002 §2 step 1: every envelope in the batch, before any command is claimed. */
-export function validateBatch(body: unknown): { commands: Envelope[] } | { message: string } {
+export function validateBatch(body: unknown): { commands: Envelope[] } | { message: string } | TooLarge {
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
   const commands = object(body) ? body.commands : undefined;
   if (!Array.isArray(commands)) return { message: 'Expected a body of { commands }' };
-  if (commands.length < 1 || commands.length > MAX_COMMANDS) return { message: `Expected 1 to ${MAX_COMMANDS} commands` };
+  if (commands.length > MAX_COMMANDS) {
+    return { status: 413, code: 'batch_too_large', maxCommands: MAX_COMMANDS, message: `At most ${MAX_COMMANDS} commands are allowed` };
+  }
+  if (commands.length < 1) return { message: `Expected 1 to ${MAX_COMMANDS} commands` };
   for (const [index, command] of commands.entries()) {
     if (!object(command)) return { message: `Invalid commands[${index}]: expected an object` };
     const field = typeof command.id !== 'string' || !command.id.length || command.id.length > 64 ? 'id'
@@ -56,6 +60,11 @@ export class TallyCommandsController {
       return { code: 'unsupported_protocol', message: 'Expected X-Tally-Protocol: 1' };
     }
     const batch = validateBatch(body);
+    if ('status' in batch) {
+      const { status, ...tooLarge } = batch;
+      res.status(status);
+      return tooLarge;
+    }
     if ('message' in batch) {
       res.status(400);
       return { code: 'invalid_payload', message: batch.message };

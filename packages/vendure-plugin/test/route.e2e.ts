@@ -131,10 +131,10 @@ describe('POST /tally/v1/commands', () => {
     expect(await ledgerCount()).toBe(before);
   });
 
-  it('validates the whole batch first: 1 to 50 well-formed envelopes, else 400 invalid_payload and nothing runs', async () => {
+  it('validates the whole batch first: at least one well-formed envelope, else 400 invalid_payload and nothing runs', async () => {
     const valid = mug();
     const cases: unknown[] = [
-      {}, { commands: 'x' }, { commands: [] }, { commands: Array.from({ length: 51 }, () => mug()) },
+      {}, { commands: 'x' }, { commands: [] },
       { commands: [valid, { ...mug(), id: 5 }] }, { commands: [valid, { ...mug(), attempt: 0 }] }, { commands: [valid, null] },
     ];
     for (const body of cases) {
@@ -148,6 +148,14 @@ describe('POST /tally/v1/commands', () => {
     const accepted = await post({ commands: fifty });
     expect(accepted.status).toBe(200);
     expect(accepted.body.results).toHaveLength(50);
+  });
+
+  it('answers 413 batch_too_large with maxCommands for more than 50 commands, and nothing runs (ruling 18)', async () => {
+    const commands = Array.from({ length: 51 }, () => mug());
+    expect(await post({ commands })).toEqual({
+      status: 413, body: { code: 'batch_too_large', maxCommands: 50, message: 'At most 50 commands are allowed' },
+    });
+    expect(await ledgerFor(commands[0])).toBeNull();
   });
 
   it('accepts a body above Vendure\'s 100 kB default and refuses one above 1 MB', async () => {
