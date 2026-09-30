@@ -12,7 +12,11 @@ TallyUI command. The client side is already built and platform-neutral:
   (`X-Tally-Protocol: 1`, 1–50 commands per batch). A batch of more than 50
   answers 413 `{ code: 'batch_too_large', maxCommands: 50, message }`, as
   medusapos does, while an empty or malformed batch stays 400
-  `invalid_payload` (Front desk ruling 18, 2026-09-30). The command `id` is a
+  `invalid_payload` (Front desk ruling 18, 2026-09-30). A body over the
+  route's 1 MB limit answers 413 `{ code: 'body_too_large', maxBytes:
+  1048576, message }`, never `invalid_payload`, because a size limit is not
+  order-specific; other unparseable bodies stay 4xx `invalid_payload` (Front
+  desk ruling 20, 2026-09-30). The command `id` is a
   UUIDv7 and is the idempotency key. The server fingerprints the canonical
   `{type, version, payload}` with SHA-256 (TallyUI ADR-038, ADR-039).
 - **The results.** Each command comes back `applied`, `duplicate` or
@@ -327,6 +331,12 @@ tax rates, and setup still missing after the single repair also answer
 `store_configuration`, with the claim rolled back and nothing stored
 (TallyUI #219). Repair errors are transient; a repair lock timeout is a 503,
 never a 409 (Front desk rulings 9–13, 2026-09-29).
+The repair runs in the till's own request context and grants its role
+nothing. It works because the Vendure 3.7.3 service methods it calls
+(`ShippingMethodService.create`, `PaymentMethodService.create` and `update`,
+`ChannelService.assignToChannels`, `CustomerService.createOrUpdate`) check no
+permissions, so a `CreateOrder`-only till can repair. The least-privilege test
+in `route.e2e.ts` is what fails if a Vendure upgrade adds such a check.
 
 **The customer lookup and its index (Front desk ruling 16, 2026-09-30).** The
 lookup stays `LOWER(customer.emailAddress) = LOWER(:emailAddress)` among rows

@@ -24,6 +24,8 @@ function withMissing<T>(list: T[], items: T[], same: (a: T, b: T) => boolean): T
 const COMMANDS_ROUTE = '/tally/v1/commands';
 // 50 commands of up to about 20 kB each, as medusapos allows; Vendure's global parser keeps 100 kB.
 const COMMANDS_BODY_LIMIT = '1mb';
+// COMMANDS_BODY_LIMIT in bytes (body-parser's 'mb' is 1024 × 1024), which a 413 body_too_large reports (ruling 20).
+const COMMANDS_BODY_MAX_BYTES = 1_048_576;
 const PROTOCOL_HEADER = 'X-Tally-Protocol';
 // Ruling 16: from about this many customers, the email lookup's sequential scan is worth the README's optional index.
 export const CUSTOMER_INDEX_WARN_ROWS = 50_000;
@@ -42,6 +44,10 @@ function commandsBodyParser(): Middleware['handler'] {
   return ((req: unknown, res: Reply, next: Next) => parse(req, res, error => {
     const status = (error as { status?: unknown } | undefined)?.status;
     if (typeof status !== 'number' || status < 400 || status >= 500) return next(error);
+    // Ruling 20: a size limit is not order-specific, so never invalid_payload.
+    if (status === 413 || (error as { type?: unknown }).type === 'entity.too.large') {
+      return res.status(413).json({ code: 'body_too_large', maxBytes: COMMANDS_BODY_MAX_BYTES, message: 'The request body exceeds 1 MB' });
+    }
     res.status(status).json({ code: 'invalid_payload', message: (error as Error).message });
   })) as Middleware['handler'];
 }

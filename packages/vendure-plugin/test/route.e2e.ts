@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Controller, Post } from '@nestjs/common';
 import {
-  Allow, Ctx, Logger, Order, OrderService, Payment, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
+  Allow, Ctx, Logger, Order, OrderService, Payment, PaymentMethod, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
   RequestContextService, ShippingMethod, StockLevel, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
   defaultOrderProcess,
 } from '@vendure/core';
@@ -51,7 +51,7 @@ describe('POST /tally/v1/commands', () => {
   const environment = createPluginTestEnvironment({ orderOptions: { process: [defaultOrderProcess, {
     onTransitionStart: (_from, to) => (refuseCancel && to === 'Cancelled' ? 'Test process refuses Cancelled' : undefined),
   } satisfies OrderProcess<OrderState>] } }, [MerchantCorsPlugin, TallyPosPlugin, DummyRestPlugin]);
-  const { server, adminClient, variantIds, serviceIds, encode } = environment;
+  const { server, adminClient, variantIds, serviceIds, decode, encode } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
   let base: string;
@@ -152,20 +152,27 @@ describe('POST /tally/v1/commands', () => {
   });
 
   it('answers 413 batch_too_large with maxCommands for more than 50 commands, and nothing runs (ruling 18)', async () => {
+    const before = await ledgerCount();
     const commands = Array.from({ length: 51 }, () => mug());
     expect(await post({ commands })).toEqual({
       status: 413, body: { code: 'batch_too_large', maxCommands: 50, message: 'At most 50 commands are allowed' },
     });
-    expect(await ledgerFor(commands[0])).toBeNull();
+    expect(await ledgerCount()).toBe(before);
   });
 
-  it('accepts a body above Vendure\'s 100 kB default and refuses one above 1 MB', async () => {
+  it('accepts a body above Vendure\'s 100 kB default and refuses one above 1 MB with 413 body_too_large (ruling 20)', async () => {
     const input = mug();
     const large = await post({ commands: [input], padding: 'x'.repeat(200_000) });
     expect(large.status).toBe(200);
     expect(large.body.results[0]).toMatchObject({ id: input.id, status: 'applied' });
-    const tooLarge = await post({ commands: [mug()], padding: 'x'.repeat(1_100_000) });
-    expect(tooLarge).toEqual({ status: 413, body: { code: 'invalid_payload', message: 'request entity too large' } });
+    const before = await ledgerCount();
+    const body = JSON.stringify({ commands: [mug()], padding: '' });
+    // Just over 1 MB (1,048,576 bytes): one byte too many.
+    const tooLarge = await post(body.replace('"padding":""', `"padding":"${'x'.repeat(1_048_577 - body.length)}"`));
+    expect(tooLarge).toEqual({
+      status: 413, body: { code: 'body_too_large', maxBytes: 1_048_576, message: 'The request body exceeds 1 MB' },
+    });
+    expect(await ledgerCount()).toBe(before);
     // Malformed JSON is the client's fault too, never a 500 the outbox would retry.
     expect(await post('{"commands": [')).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
   });
@@ -381,10 +388,10 @@ describe('POST /tally/v1/commands', () => {
   it('@Allow(CreateOrder): a CreateOrder-only administrator sells and repairs the setup; a ReadOrder-only one is refused', async () => {
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
     // A role on the default channel with one permission, an administrator holding it, and that administrator's bearer token.
-    async function tokenWith(permission: 'CreateOrder' | 'ReadOrder') {
+    async function tokenWith(permission: 'CreateOrder' | 'ReadOrder', channelIds = [activeChannel.id]) {
       const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
         createRole(input: $input) { id }
-      }`), { input: { code: `till-${permission}-${randomUUID()}`, description: permission, permissions: [permission], channelIds: [activeChannel.id] } });
+      }`), { input: { code: `till-${permission}-${randomUUID()}`, description: permission, permissions: [permission], channelIds } });
       const emailAddress = `${permission}-${randomUUID()}@till.example`;
       await adminClient.query(parse(`mutation Admin($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }`),
         { input: { firstName: 'Till', lastName: permission, emailAddress, password: 'till-password', roleIds: [createRole.id] } });
@@ -426,5 +433,44 @@ describe('POST /tally/v1/commands', () => {
     const refused = mug();
     expect((await post({ commands: [refused] }, readOrder)).status).toBe(403);
     expect(await ledgerFor(refused)).toBeNull();
+
+    // Review #32, the re-assign path: tally-pos still exists but is unassigned from the till's channel. Vendure refuses to
+    // unassign from the default channel, so a second channel (as channels.e2e.ts makes it) with the Mug and the stock location.
+    const { zones, stockLocations } = await adminClient.query<{
+      zones: { items: Array<{ id: string; name: string }> }; stockLocations: { items: Array<{ id: string }> };
+    }>(parse('query { zones { items { id name } } stockLocations { items { id } } }'));
+    const denmark = zones.items.find(zone => zone.name === 'Denmark')!.id;
+    const { createChannel: second } = await adminClient.query<{ createChannel: { id: string; token: string } }>(parse(`
+      mutation Channel($input: CreateChannelInput!) { createChannel(input: $input) { ... on Channel { id token } } }`), { input: {
+      code: 'vp4-least-privilege', token: 'vp4-least-privilege-token', defaultLanguageCode: 'en', pricesIncludeTax: false,
+      defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: denmark, defaultShippingZoneId: denmark,
+    } });
+    await adminClient.query(parse(`mutation Assign($input: AssignProductVariantsToChannelInput!) {
+      assignProductVariantsToChannel(input: $input) { id }
+    }`), { input: { productVariantIds: [variantIds.mug[0]], channelId: second.id } });
+    await adminClient.query(parse(`mutation Assign($input: AssignStockLocationsToChannelInput!) {
+      assignStockLocationsToChannel(input: $input) { id }
+    }`), { input: { stockLocationIds: stockLocations.items.map(location => location.id), channelId: second.id } });
+    const paymentMethods = async () => (await connection.rawConnection.getRepository(PaymentMethod).find({
+      where: { code: 'tally-pos' }, relations: ['channels'],
+    })).map(method => ({ id: String(method.id), channels: method.channels.map(channel => String(channel.id)).sort() }));
+    const channels = [decode(activeChannel.id), decode(second.id)].sort();
+    const [method] = await paymentMethods();
+    // Assigned to the second channel by an admin, then unassigned, so the till's sale finds it existing but unassigned.
+    await adminClient.query(parse(`mutation Assign($input: AssignPaymentMethodsToChannelInput!) {
+      assignPaymentMethodsToChannel(input: $input) { id }
+    }`), { input: { paymentMethodIds: [encode(method.id)], channelId: second.id } });
+    expect(await paymentMethods()).toEqual([{ id: method.id, channels }]);
+    await adminClient.query(parse(`mutation Remove($input: RemovePaymentMethodsFromChannelInput!) {
+      removePaymentMethodsFromChannel(input: $input) { id }
+    }`), { input: { paymentMethodIds: [encode(method.id)], channelId: second.id } });
+    expect(await paymentMethods()).toEqual([{ id: method.id, channels: [decode(activeChannel.id)] }]);
+    const secondTill = { ...await tokenWith('CreateOrder', [activeChannel.id, second.id]), 'vendure-token': second.token };
+    const reassigned = mug();
+    const reassign = await post({ commands: [reassigned] }, secondTill);
+    expect(reassign.status).toBe(200);
+    expect(reassign.body.results[0]).toMatchObject({ id: reassigned.id, status: 'applied' });
+    // Assigned again by ChannelService.assignToChannels under the CreateOrder-only till, and no new payment method row.
+    expect(await paymentMethods()).toEqual([{ id: method.id, channels }]);
   });
 });
