@@ -73,6 +73,33 @@ describe('order.create version 4: net discounts', () => {
     });
   }
 
+  it('records the till\'s session id on a v4 sale', async () => {
+    const command = fixture('exclusive');
+    command.id = '01a0e775-0100-7000-8000-00000000f006';
+    command.payload.clientOrderId = '01a0e775-0100-7000-8000-00000000f106';
+    command.payload.sessionId = '01a0e775-0100-7000-8000-00000000f206';
+    const result = await run(command);
+    expect(result.status).toBe('applied');
+    const order = await connection.rawConnection.getRepository(Order).findOneOrFail({ where: { id: decode(result.serverRefs!.orderId) } });
+    expect(order.customFields.tallySessionId).toBe(command.payload.sessionId);
+  });
+
+  it('v4 runs the per-rate check: a rate beyond the tolerance is applied with a tax_rate_mismatch warning', async () => {
+    const command = fixture('exclusive');
+    command.id = '01a0e775-0100-7000-8000-00000000f007';
+    command.payload.clientOrderId = '01a0e775-0100-7000-8000-00000000f107';
+    // 2 lines + 2 surcharges: tolerance 2. Move the single rate's tax by 5, keeping the payload's figures agreeing.
+    const shift = 5;
+    command.payload.taxMinor += shift;
+    command.payload.display!.taxMinor += shift;
+    command.payload.taxByRate![0].taxMinor += shift;
+    command.payload.taxByRate![0].grossMinor += shift;
+    expect(fiscalFiguresErrors(command.payload)).toEqual([]);
+    const result = await run(command);
+    expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied' });
+    expect(result.totalWarnings).toContainEqual(expect.objectContaining({ code: 'tax_rate_mismatch', ratePpm: 250000, expectedMinor: 688 + shift, serverMinor: 688 }));
+  });
+
   it('the inclusive fixtures send a net discount below the gross one, so the v4 branch is exercised', () => {
     for (const name of ['inclusive', 'mixed-inclusive', 'mixed-exclusive']) {
       const inclusive = Object.values(expected[name].lines).filter(line => line.taxInclusive);
