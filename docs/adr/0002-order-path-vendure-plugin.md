@@ -688,6 +688,27 @@ it proves each of these with a test:
    A threshold under-allocation's remainder goes to the default location even
    when that location has no physical stock, per the ruling.
    The `insufficient_stock` warning is aggregate over the channel's locations.
+
+   **Stock writes and Vendure's unlocked StockLevelService.** Vendure 3.7.3's
+   `StockLevelService.updateStockOnHandForLocation` and
+   `updateStockAllocatedForLocation` read the level unlocked and write back
+   read + change (`stock-level.service.js:117`, `:142`), so a Vendure stock
+   write racing a POS sale or another checkout can erase it (#62 finding 5,
+   reported to Paul). The seam: every order-driven write first asks
+   `StockLocationStrategy.for*` for its locations, inside the writer's own
+   transaction and before that read (`stock-movement.service.js:126`
+   allocation, `:165` sale, `:206` cancellation, `:245` release, through
+   `stock-location.service.js:238`, `:249`, `:260`, `:271`). There,
+   `TallyStockLocationStrategy` locks the `stock_level` rows of every variant
+   on the line's order, `FOR UPDATE` in variant then location order, the POS
+   sale's own order, for every line, POS and Shop; one lock over the order
+   keeps orders listing A, B and B, A from deadlocking, since Vendure calls the
+   strategy line by line. Two gaps remain: an admin's absolute stock set
+   (`updateProductVariants` with `stockOnHand`, through
+   `adjustProductVariantStock`, `stock-movement.service.js:70`, `:95`), and any
+   code calling `StockLevelService` directly; neither passes the strategy. An
+   upgrade review of `@vendure/core` must re-check these call sites; the
+   plugin's `test/stock-fulfilment-race.e2e.ts` fails if the seam moves.
 8. **Lines.** POS lines stay 1:1 with order lines, including two lines of
    the same variant.
 9. **Tenders.** Split tender and overpayment: the payments cover the order
@@ -722,7 +743,7 @@ S1's results and numbers are in `docs/spikes/s1-order-recipe.md`.
 - ~~**A real email transport.**~~ Closed by VP2b.
   `packages/vendure-plugin/test/email-smtp.e2e.ts` sends through real SMTP
   to Mailpit. A storefront order is emailed once, and a POS order is not.
-- ~~**Concurrent sales of one variant.**~~ Closed for concurrent POS sales by VP3-2. Vendure's own stock writers (storefront checkout, admin fulfilment, cancellation restocks, admin stock edits) stay unlocked read-modify-writes upstream, so a storefront or admin stock write alongside a POS sale can still lose an update, and a storefront order touching the same variants in another order can deadlock with a POS sale (a retried 503 `transient`, kind `deadlock`). Vendure's
+- ~~**Concurrent sales of one variant.**~~ Closed for concurrent POS sales by VP3-2, and for Vendure's order-driven stock writers (storefront checkout, admin fulfilment, cancellations) by the strategy's lock (Consequences 7, "Stock writes and Vendure's unlocked StockLevelService"); an admin's absolute stock set alongside a POS sale can still lose an update. Vendure's
   stock update is an unlocked read-modify-write, and VP3 measured 5 of 6
   concurrent updates lost. The recipe now locks every `stock_level` row of
   the sale's variants (`FOR UPDATE`, in variant then location order, 5 s,

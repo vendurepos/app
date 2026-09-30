@@ -1,6 +1,6 @@
 import {
   LanguageCode, PaymentMethodEligibilityChecker, PaymentMethodHandler,
-  ShippingCalculator, ShippingEligibilityChecker, StockLocationService, idsAreEqual,
+  OrderLine, ShippingCalculator, ShippingEligibilityChecker, StockLevel, StockLocationService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
 import type { Injector, Order, OrderItemPriceCalculationStrategy, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
 
@@ -35,8 +35,9 @@ export class TallyPriceStrategy implements OrderItemPriceCalculationStrategy {
 }
 
 /**
+ * Every line, POS and Shop: locks the order's stock_level rows before each stock write (below).
  * POS lines only (Front desk, 2026-09-29): cap Vendure 3.7.3's MultiChannel over-allocation
- * and fill its threshold under-allocation. Storefront plans and other methods stay unchanged.
+ * and fill its threshold under-allocation. Storefront plans are otherwise unchanged.
  */
 export class TallyStockLocationStrategy implements StockLocationStrategy {
   private injector: Injector;
@@ -47,11 +48,36 @@ export class TallyStockLocationStrategy implements StockLocationStrategy {
   }
   destroy() { return this.inner.destroy?.(); }
   getAvailableStock(...args: Parameters<StockLocationStrategy['getAvailableStock']>) { return this.inner.getAvailableStock(...args); }
-  forRelease(...args: Parameters<StockLocationStrategy['forRelease']>) { return this.inner.forRelease(...args); }
-  forSale(...args: Parameters<StockLocationStrategy['forSale']>) { return this.inner.forSale(...args); }
-  forCancellation(...args: Parameters<StockLocationStrategy['forCancellation']>) { return this.inner.forCancellation(...args); }
+  // #62 finding 5 (ADR 0002): Vendure calls the for* methods in the stock writer's transaction, just before
+  // StockLevelService's unlocked read-then-write. Lock the rows of every variant on the line's order there, in the POS
+  // sale's order (variant, then location), so the read is locked and two orders listing A, B and B, A cannot deadlock.
+  // Taken on every call, as rows already held return at once; a per-transaction marker would outlive the locks of a
+  // rolled-back savepoint, or a manual-mode transaction's commit on the same query runner.
+  private async lockOrderStock(ctx: RequestContext, orderLine: OrderLine) {
+    const levels = this.injector.get(TransactionalConnection).getRepository(ctx, StockLevel);
+    if (!levels.manager.queryRunner?.isTransactionActive) return; // TypeORM refuses a pessimistic lock outside one
+    const query = levels.createQueryBuilder('level');
+    const order = query.subQuery().select('self.orderId').from(OrderLine, 'self').where('self.id = :lineId').getQuery();
+    const variants = query.subQuery().select('line.productVariantId').from(OrderLine, 'line').where(`line.orderId = ${order}`).getQuery();
+    await query.select('level.id').where(`level.productVariantId IN ${variants}`, { lineId: orderLine.id })
+      .orWhere('level.productVariantId = :variantId', { variantId: orderLine.productVariantId })
+      .orderBy('level.productVariantId').addOrderBy('level.stockLocationId').setLock('pessimistic_write').getMany();
+  }
+  async forRelease(...args: Parameters<StockLocationStrategy['forRelease']>) {
+    await this.lockOrderStock(args[0], args[2]);
+    return this.inner.forRelease(...args);
+  }
+  async forSale(...args: Parameters<StockLocationStrategy['forSale']>) {
+    await this.lockOrderStock(args[0], args[2]);
+    return this.inner.forSale(...args);
+  }
+  async forCancellation(...args: Parameters<StockLocationStrategy['forCancellation']>) {
+    await this.lockOrderStock(args[0], args[2]);
+    return this.inner.forCancellation(...args);
+  }
   async forAllocation(...args: Parameters<StockLocationStrategy['forAllocation']>) {
     const [ctx, stockLocations, orderLine, quantity] = args;
+    await this.lockOrderStock(ctx, orderLine);
     if (!orderLine.customFields?.tallyClientLineId) return this.inner.forAllocation(...args);
     // Re-read stock levels for each POS line of the same variant while retaining the transaction.
     const plan = await this.inner.forAllocation(ctx.copy(), stockLocations, orderLine, quantity);
