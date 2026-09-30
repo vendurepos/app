@@ -98,6 +98,25 @@ TallyUI job, and later the register validators and the expected-cash
 derivation follow. Spike S1 uses a vendored copy of the medusapos files,
 marked temporary. The plugin's first PR after S1 consumes the package.
 
+**Vendored with local changes.** Vendored copies are never changed by hand
+(Front desk, 2026-09-30); a needed divergence goes through a core change
+instead. Two divergences predate that rule, and each keeps the vendored
+shape stage free of a length check that this server runs in step 4, after
+the replay read, so a stored answer always wins:
+
+- `vendored/payload-shape.ts`, `customer.customerId`: the `≤ 64` length
+  check removed from the shape check (`d7a443e`, VP2a). It was first made
+  for the VP2a ruling that an over-long id is ignored; since
+  vendurepos/app#45 the length is refused in step 4 instead
+  (`service/value-ranges.ts`), in the order the TallyUI #222 review rules.
+- `vendored/payload-shape.ts`, `sessionId`: the `≤ 36` length check removed
+  from the shape check (`21a45c5`, VP3-1, TallyUI #222 review); refused in
+  step 4 (`service/value-ranges.ts`).
+
+TallyUI/tallyui#275 asks core to expose its structure and value-range
+checks separately. Once it lands, the next vendoring restores the file
+verbatim and calls the two parts at this server's own stages.
+
 ### 2. Transactions, idempotency and error classes
 
 **One transaction per command, never per batch.** The controller has no
