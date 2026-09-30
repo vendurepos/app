@@ -1,5 +1,5 @@
 import {
-  Channel, Logger, Order, OrderLine, OrderService, Payment, PaymentMethod, RequestContextService, ShippingMethod,
+  Channel, Customer, Logger, Order, OrderLine, OrderService, Payment, PaymentMethod, RequestContextService, ShippingMethod,
   StockLocationService, StockMovement, TaxRate, TransactionalConnection,
 } from '@vendure/core';
 import { parse } from 'graphql';
@@ -14,7 +14,7 @@ import { orderCommand } from './payloads';
 
 describe('ledger: stored rejections, idempotency and transient failures', () => {
   const environment = createPluginTestEnvironment();
-  const { server, adminClient, variantIds, encode, run } = environment;
+  const { server, adminClient, variantIds, encode, decode, run } = environment;
   let connection: TransactionalConnection;
   let recipe: OrderCreateService;
   let channel: Channel;
@@ -242,13 +242,33 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await counts()).toEqual(before);
   });
 
-  it('nit: a customerId over 64 characters or unknown is ignored with a customer_ignored warning, never refused', async () => {
-    for (const [customerId, reason] of [['T_'.padEnd(80, '9'), 'too_long'], [encode(999999), 'unknown']] as const) {
-      const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { customerId });
-      const result = await run(input);
-      expect(result, reason).toMatchObject({ status: 'applied' });
-      expect(result.warnings, reason).toEqual([{ code: 'customer_ignored', customerId: customerId.slice(0, 64), reason }]);
+  it('nit: an unknown customerId, or one of a customer only in another channel, is ignored with a customer_ignored warning, never refused', async () => {
+    const { createChannel } = await adminClient.query<{ createChannel: { id: string } }>(parse(`
+      mutation Channel($input: CreateChannelInput!) { createChannel(input: $input) { ... on Channel { id } } }`), { input: {
+      code: 'ledger-other', token: 'ledger-other-token', defaultLanguageCode: 'en', pricesIncludeTax: false, defaultCurrencyCode: 'EUR',
+      availableCurrencyCodes: ['EUR'], defaultTaxZoneId: channel.defaultTaxZone.id, defaultShippingZoneId: channel.defaultTaxZone.id,
+    } });
+    const other = await connection.rawConnection.getRepository(Customer).save(new Customer({
+      emailAddress: 'ledger-other@example.com', firstName: 'Other', lastName: 'Channel',
+      channels: [await connection.rawConnection.getRepository(Channel).findOneByOrFail({ id: decode(createChannel.id) })],
+    }));
+    for (const [customerId, kind] of [[encode(999999), 'unknown'], [encode(other.id), 'other channel']] as const) {
+      // Sold with the default channel's token.
+      const result = await run(orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { customerId }));
+      expect(result, kind).toMatchObject({ status: 'applied' });
+      expect(result.warnings, kind).toEqual([{ code: 'customer_ignored', customerId, reason: 'unknown' }]);
     }
+  });
+
+  it('#43 (Front desk, 2026-09-30): a customerId over 64 characters is an unstored invalid_payload', async () => {
+    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
+      { customerId: 'T_'.padEnd(65, '9') });
+    const before = await counts();
+    expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: 'customer.customerId: a string of at most 64 characters',
+    } });
+    expect(await ledgerFor(input)).toBeNull();
+    expect(await counts()).toEqual(before);
   });
 
   it('proof 10, TallyUI #219: a default tax zone with all its rates disabled is store_configuration, not stored; the same id applies once repaired', async () => {
@@ -604,6 +624,21 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await ledgerFor(requeued)).toMatchObject({ status: 'applied', result, clientOrderId: input.payload.clientOrderId });
     expect(await run(requeued)).toEqual({ ...result, status: 'duplicate' });
     expect(await ordersFor(input)).toBe(1);
+  });
+
+  it('#43: an applied command whose customerId is now over 64 characters replays as duplicate', async () => {
+    const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined,
+      { customerId: 'T_'.padEnd(65, '9') });
+    // The command was applied before the #43 bound.
+    const values = vi.spyOn(recipe as unknown as { valueRefusal: () => unknown }, 'valueRefusal').mockReturnValue(undefined);
+    let first;
+    try {
+      first = await run(input);
+      expect(first).toMatchObject({ status: 'applied' });
+    } finally {
+      values.mockRestore();
+    }
+    expect(await run(input)).toEqual({ ...first, status: 'duplicate' });
   });
 
   it('ruling 1: an exception from outside the plugin\'s code, even a TypeError, is transient; nothing is stored; the retry applies', async () => {
