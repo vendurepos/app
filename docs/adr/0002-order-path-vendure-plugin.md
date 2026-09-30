@@ -534,7 +534,7 @@ bootstrap. They are store-wide, so every channel gets the same value.
   line one rate. Another tax line strategy may stack rates, and the till
   splits a stacked line's tax differently from Vendure (TallyUI #312), so
   such a store is `custom`.
-  - **Settled in TallyUI #312** (https://github.com/TallyUI/tallyui/issues/312#issuecomment-5907259252): with stacked rates, the till's order figures follow Vendure exactly. Only the per-rate rows differ, by up to a unit: Vendure rounds each rate's share on its own, while the till gives the last rate the remainder.
+  - **Settled in TallyUI #312** (https://github.com/TallyUI/tallyui/issues/312#issuecomment-5907259252): with stacked rates, the till's order figures follow Vendure exactly. Only the per-rate rows differ, and only under `per_line_items`, by up to a unit per stacked item: Vendure rounds each rate's share of an item on its own, while the till gives the last rate the remainder. Under `per_rate_group_items` the rows match Vendure too.
   - **This store stays `custom` anyway,** because a custom tax line strategy can do more than stack (Front desk, 2026-09-30).
 - **Known gap: inclusive lines under `per_rate_group_items`.** The till
   uses `per_order` figures for them until TallyUI #310. Until then, those
