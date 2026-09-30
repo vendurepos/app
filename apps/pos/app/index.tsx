@@ -181,16 +181,18 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, 
   const [tab, setTab] = useState<'products' | 'cart'>('products');
   // The Cart tab, or the SKU of the cart line an add just landed on.
   const [highlight, setHighlight] = useState<'tab' | { sku: string | undefined } | null>(null);
-  // A scanned code no product has, shown on either tab until the next add.
-  const [notFound, setNotFound] = useState<string | null>(null);
+  // A scanned code no product has, or a scan while this sale is being paid: shown on either tab until the next add (a
+  // payment's notice also until the tender ends).
+  const [scanNotice, setScanNotice] = useState<{ notFound: string } | 'finish-sale' | null>(null);
+  useEffect(() => { if (stage.kind !== 'tender') setScanNotice((notice) => notice === 'finish-sale' ? null : notice); }, [stage.kind]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   const onProducts = !wide && tab === 'products';
-  function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts) {
-    // Only the cart takes new lines: a tender or a receipt is for the sale as it stands.
-    if (stage.kind !== 'cart') return;
+  function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts, scanned = false) {
+    // Only the cart takes new lines: a tender or a receipt is for the sale as it stands (a scan has just left them).
+    if (stage.kind !== 'cart' && !scanned) return;
     sale.add(entry, connector.traits.product);
-    setNotFound(null);
+    setScanNotice(null);
     // Confirmed in place: on Products the Cart tab's count and total tick up and the tab lights up briefly; where the
     // cart shows, the line lights up.
     setHighlight(showLine ? { sku: entry.variant.sku } : 'tab');
@@ -200,15 +202,20 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, 
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
   // stock-overlaid entries. A scan into the search field is the field's alone (the listener leaves inputs be): one add.
   const scannable = useStockOverlaid(products) as typeof products;
-  // A scan is intent to sell (Front desk, 2026-09-30): with the Orders panel open it closes the panel, and an add shows
-  // its line on the Cart tab. Outside the cart the scan does nothing to the sale, so the panel stays as it is.
+  // A scan is intent to sell (Front desk, 2026-09-30): it closes the Orders panel, and an add shows its line on the Cart
+  // tab. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the cart
+  // (Back to the cart), then adds. A payment entered (cash typed, a card tender's own payment) or saving is this sale
+  // being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
   useWedgeScanner((code) => {
-    if (stage.kind !== 'cart') return;
     const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
+    const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0);
     if (ordersOpen) onCloseOrders();
-    if (entry && ordersOpen) setTab('cart');
-    if (entry) add(entry, ordersOpen || !onProducts);
-    else setNotFound(code);
+    if (!entry) return setScanNotice({ notFound: code });
+    if (paying) return setScanNotice('finish-sale');
+    if (stage.kind === 'receipt') sale.newSale();
+    if (stage.kind === 'tender') sale.cancelTender();
+    if (ordersOpen) setTab('cart');
+    add(entry, ordersOpen || !onProducts, true);
   });
   return (
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
@@ -225,10 +232,14 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, 
           </TabsList>
         </Tabs>
       )}
-      {notFound ? (
+      {scanNotice === 'finish-sale' ? (
+        <Text testID="scan-finish-sale" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          Finish this sale before scanning the next item.
+        </Text>
+      ) : scanNotice ? (
         // The catalogue search's own wording for a code with no product.
         <Text testID="scan-not-found" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
-          {`No products match "${notFound}".`}
+          {`No products match "${scanNotice.notFound}".`}
         </Text>
       ) : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}

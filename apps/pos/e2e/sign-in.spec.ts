@@ -494,6 +494,60 @@ test.describe('on a narrow screen', () => {
     });
   }
 
+  // Front desk, 2026-09-30: a scan at a tender with nothing entered goes back to the cart and adds; with a payment it
+  // changes nothing and says so; at the receipt it starts the next sale. An unknown code never leaves the stage.
+  test('a scan at a tender or the receipt adds to the cart, unless a payment is entered', async ({ page }) => {
+    await signInWithBarcodes(page);
+    // The store can't be reached for orders, so the completed sale stays counted as waiting.
+    await page.route('**/tally/v1/commands', (route) => route.request().method() === 'POST' ? route.abort() : route.continue());
+    const cartTab = page.getByTestId('tab-cart');
+    const cart = page.getByTestId('cart');
+    const tender = page.getByTestId('tender');
+    const receipt = page.getByTestId('receipt');
+    const lineHighlight = cart.getByTestId('cart-line-highlight-TALLY-MUG');
+    await cartTab.click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(lineHighlight).toHaveCount(0);
+    // Nothing entered: back to the cart, one more mug, its line lit up.
+    await cart.getByTestId('pay-cash').click();
+    await expect(tender).toBeVisible();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(lineHighlight).toBeVisible();
+    await expect(tender).toHaveCount(0);
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€16.00');
+    // A cash amount entered: the tender, its amount and the cart stay as they are.
+    await cart.getByTestId('pay-cash').click();
+    const cashInput = tender.getByTestId('cash-tendered').locator('input');
+    await cashInput.fill('20.00');
+    await expect(tender.getByTestId('tender-change')).toContainText('€0.96');
+    // Off the field, so the listener takes the scan.
+    await tender.getByTestId('tender-total').click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(page.getByTestId('scan-finish-sale')).toHaveText('Finish this sale before scanning the next item.');
+    await expect(tender).toBeVisible();
+    await expect(cashInput).toHaveValue('20.00');
+    await expect(tender.getByTestId('tender-total')).toHaveText('€19.04');
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await tender.getByTestId('tender-complete').click();
+    await expect(receipt).toBeVisible();
+    await expect(page.getByTestId('scan-finish-sale')).toHaveCount(0);
+    await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+    // An unknown code at the receipt only says so.
+    await wedgeScan(page, '9999999999999');
+    await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
+    await expect(receipt).toBeVisible();
+    // The mug starts the next sale, at quantity 1 and lit up; the stored order is still waiting.
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(lineHighlight).toBeVisible();
+    await expect(receipt).toHaveCount(0);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(1);
+    await expect(page.getByTestId('scan-not-found')).toHaveCount(0);
+    await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  });
+
   test('Products and Cart are tabs: the Cart tab carries the count and total, and tax reads as a breakdown', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('sign-in-url').fill(STORE_URL);
