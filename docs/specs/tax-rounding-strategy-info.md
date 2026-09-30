@@ -41,6 +41,14 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 - **`per_rate_group`:** each line's net is rounded first, which is a no-op for exclusive lines, and the tax is then rounded once per group. The group key is the tax rate's **name and value** (Vendure's `order-level-tax-calculation-strategy.js:103`).
 - Each matched real Vendure on 0 of 1,420 baskets in both price modes. So neither needs a separate inclusive-prices name.
 
+**Known gaps (keep in view; the till's side is TallyUI's):**
+- **Discounted baskets:**
+  - The 0-of-1,420 result is for **undiscounted** baskets. The plugin posts each line discount as its own `TALLY-DISCOUNT` Surcharge, and Vendure rounds each surcharge as its own item (`surcharge.entity.js:33-38`), not prorated into the line's net (see `order-create-v4.md`, "How Vendure sees a discount today").
+  - A till that applies the store's rounding to discounted line nets will therefore differ from Vendure on discounted baskets. Which side changes is the Front desk's decision (asked 2026-09-30).
+- **`per_rate_group` with all tax-inclusive lines:**
+  - Until TallyUI files and ships the contract fix, the till computes such baskets **per order** (Front desk, 2026-09-30). Once `figures_mismatch` ships, those baskets keep raising it as a **warning**, never a refusal.
+  - The ADR 0002 note that goes with `figures_mismatch` says so, and names the TallyUI issue once it exists.
+
 **Rounding mode:** Vendure advertises `half_up`.
 - Vendure's `DefaultMoneyStrategy` is `Math.round`, which rounds **half up**. It differs from `half_away_from_zero` only on exact negative halves, e.g. a −59.5 discount surcharge becomes −59, not −60 (already noted in ADR 0002). The contract gained `half_up` for exactly this (Front desk, 2026-09-30).
 - `DefaultMoneyStrategy` is Vendure's default, and `moneyStrategy` is configurable. A store with a different money strategy has unknown rounding, so it advertises `{ granularity: 'custom' }`, as a custom tax strategy does. Detect the exact class, as below.

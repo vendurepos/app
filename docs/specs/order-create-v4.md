@@ -17,6 +17,15 @@ This is the money path. A net discount applied as gross on an inclusive line und
 - **`payload.discountMinor = Σ lines[].discountMinor`** still holds exactly, and the vendored `payload-shape.ts` equality check is unchanged.
 - **The till sends 4 only to a server whose `/info` advertises 4.** A retry resends the version the order first went out with.
 
+## How Vendure sees a discount today (from the code, 2026-09-30; read before dispatch)
+
+- **Surcharges, not promotions.** The plugin posts each discounted line's discount as its own `TALLY-DISCOUNT` Surcharge carrying the line's `taxLines` (svc:654-663). No Vendure promotions run: `applyPriceAdjustments(ctx, order, [])` (svc:667). The order-level discount is never posted on its own. The till spreads it onto `lines[].discountMinor`, and `payload.discountMinor` must equal their sum (`vendored/payload-shape.ts:53-56`).
+- **Vendure rounds each surcharge as its own item.** `Surcharge.price` and `priceWithTax` are each `roundMoney(netPriceOf …)` or `roundMoney(grossPriceOf …)` (`@vendure/core` 3.7.3 `entity/surcharge/surcharge.entity.js:33-38`). The discount is not prorated into the line's `proratedLinePrice`.
+- **What that means for the rounding:**
+  - Per line (the default strategy): tax is rounded on the line and on its discount separately.
+  - Per rate group (order-level): the surcharge joins the line's group by its `taxLines`, and its net is rounded on its own when inclusive.
+- **Consequence for this PR.** Test 1's "no bridge" can fail for rounding reasons that are not v4's net-versus-gross, when TallyUI's figures round tax on the discounted line net (`round((A − D) × r)`) while Vendure rounds `round(A × r) + round(−D × r)`. That is the stop rule below: pick fixtures where the two agree, and report rather than loosen. **Whether TallyUI models each discount as its own rounded item for Vendure, or the plugin posts discounts differently, is a Front desk decision** (asked 2026-09-30). Re-read its ruling before dispatch; it may change the surcharge part of "In scope".
+
 ## In scope
 
 - `packages/vendure-plugin/src/service/constants.ts`: `ORDER_CREATE_VERSIONS` becomes `[1, 2, 3, 4]`, which also advertises it in `/info`.
