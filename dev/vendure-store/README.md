@@ -65,11 +65,11 @@ On start the plugin gives every channel the `tally-pos` payment method, the `tal
 shipping method and the walk-in customer; the seed creates none of them.
 
 `./smoke.sh` checks the catalogue, the login and the POS channel, then sells 1 × `TALLY-MUG`
-through the command route (a v3 `order.create`, 1000 cash): `applied`, the order `Delivered` at
-1000, Shop floor stock down by 1; the replay is `duplicate` with the same order; a batch
+through the command route (a v3 `order.create`, 952 cash): `applied`, the order `Delivered` at
+952, Shop floor stock down by 1; the replay is `duplicate` with the same order; a batch
 without `X-Tally-Protocol` answers 400.
 
-Channels (both EUR, prices tax-exclusive, default tax zone Denmark):
+Channels (both EUR, prices tax-exclusive, default tax zone Germany):
 
 | Channel | Code | `vendure-token` |
 |---|---|---|
@@ -80,8 +80,10 @@ The seed (`src/catalogue.ts`) is deterministic: every reset gives the same
 ids, prices, barcodes and stock. It is the small POS catalogue; the
 2,000-product sync seed is plan job VA2.
 
-- **Tax:** categories `Standard` (DK 25%, DE 19%) and `Reduced` (DK 25%,
-  as Denmark has no reduced rate; DE 7%). Zones `Denmark` and `Germany`.
+- **Tax:** categories `Standard` (DE 19%, DK 25%) and `Reduced` (DE 7%; DK 25%, as
+  Denmark has no reduced rate). Zones `Germany` (the default) and `Denmark`. The two
+  categories are separate rate groups in the default zone, so a single-rate order is
+  never bridged under the order-level strategy, and `smoke:check` proves it.
 - **Products:** 10 products, 21 variants, including `tally-fixture-mug`
   (`TALLY-MUG`, €8.00), a 6-variant T-shirt (size × colour), `PRINT-LTD`
   with 2 in stock, and an untracked gift card.
@@ -92,7 +94,7 @@ ids, prices, barcodes and stock. It is the small POS catalogue; the
   stock level per variant (`TALLY-MUG`: 100 and 50). The POS channel sees
   only `Shop floor`; the default channel sees both.
 - **Prices:** tax-exclusive, so `TALLY-MUG` is `price` 800 and
-  `priceWithTax` 1000 in the Denmark zone.
+  `priceWithTax` 952 in the Germany zone.
 
 ## Try it
 
