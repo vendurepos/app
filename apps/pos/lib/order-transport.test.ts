@@ -32,3 +32,35 @@ it("adds the channel's vendure-token when the session has one", async () => {
   const request = await sentRequest({ ...session, channelToken: 'channel-token' });
   expect(request.headers).toMatchObject({ Authorization: 'Bearer test-token', 'vendure-token': 'channel-token' });
 });
+
+it('removes an unsupported order.create version below the net-discount minimum', async () => {
+  const result = { id: 'command-1', status: 'rejected', error: {
+    code: 'unsupported_version', message: 'Too old', data: { orderCreate: 3, other: 'x' },
+  } };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ results: [result] }), { status: 200 })));
+
+  expect(await orderTransport(session).send([command])).toEqual({ kind: 'results', results: [{
+    id: 'command-1', status: 'rejected', error: {
+      code: 'unsupported_version', message: 'Too old', data: { other: 'x' },
+    },
+  }] });
+});
+
+it.each([4, 5])('keeps an advertised order.create version of %i', async (version) => {
+  const result = { id: 'command-1', status: 'rejected', error: {
+    code: 'unsupported_version', message: 'Unsupported', data: { orderCreate: version },
+  } };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ results: [result] }), { status: 200 })));
+
+  expect(await orderTransport(session).send([command])).toEqual({ kind: 'results', results: [result] });
+});
+
+it('keeps applied results and other rejection codes unchanged', async () => {
+  const results = [
+    { id: 'command-1', status: 'applied', error: { code: 'unsupported_version', message: 'Applied', data: { orderCreate: 1 } } },
+    { id: 'command-2', status: 'rejected', error: { code: 'invalid_payload', message: 'Invalid', data: { orderCreate: 1 } } },
+  ];
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ results }), { status: 200 })));
+
+  expect(await orderTransport(session).send([command])).toEqual({ kind: 'results', results });
+});
