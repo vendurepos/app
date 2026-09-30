@@ -98,6 +98,35 @@ TallyUI job, and later the register validators and the expected-cash
 derivation follow. Spike S1 uses a vendored copy of the medusapos files,
 marked temporary. The plugin's first PR after S1 consumes the package.
 
+**Vendored with local changes.** Vendored copies are never changed by hand
+(Front desk, 2026-09-30); a needed divergence goes through a core change
+instead. `vendored/payload-shape.ts` is copied from medusapos@8667f71
+(`packages/medusa-plugin/src/workflows/tally-order-create/payload-shape.ts`),
+not from TallyUI core. Apart from its one-line provenance header, it differs
+from that source in two places. Both predate the rule, and each keeps the
+vendored shape stage free of a length check that this server runs in step 4,
+after the replay read, so a stored answer always wins:
+
+- **`customer.customerId`:** the `≤ 64` length check is removed from the
+  shape check (`d7a443e`, VP2a). The removal was made for the VP2a ruling
+  that an over-long id is ignored. Since vendurepos/app#45 the length is
+  refused in step 4 instead (`service/value-ranges.ts`), in the order the
+  Front desk ruled on the TallyUI #222 review.
+  - **Stale comment:** the frozen file still says "over 64 is ignored by the
+    recipe (customer_ignored), never refused here". The first half is out of
+    date: an id over 64 characters is refused as `invalid_payload` in step 4.
+    Only "never refused here", at the shape stage, still holds.
+- **`sessionId`:** the `≤ 36` length check is removed from the shape check
+  (`21a45c5`, VP3-1), in the order the Front desk ruled on the TallyUI #222
+  review. It is refused in step 4 (`service/value-ranges.ts`).
+
+The medusapos file is the origin: core's shape check was lifted from it
+(TallyUI `898e98b`), and core now holds the canonical copy, so that is where
+the checks should split. TallyUI/tallyui#275 asks core to expose its
+structure and value-range checks separately. Once it lands, the next
+vendoring takes the file verbatim from `@tallyui/core/server` rather than
+medusapos, and calls the two parts at this server's own stages.
+
 ### 2. Transactions, idempotency and error classes
 
 **One transaction per command, never per batch.** The controller has no
