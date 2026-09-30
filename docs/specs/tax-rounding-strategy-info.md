@@ -44,7 +44,7 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 **Known gaps (keep in view; the till's side is TallyUI's):**
 - **Discounted baskets:**
   - The 0-of-1,420 result is for **undiscounted** baskets. The plugin posts each line discount as its own `TALLY-DISCOUNT` Surcharge, and Vendure rounds each surcharge as its own item (`surcharge.entity.js:33-38`), not prorated into the line's net (see `order-create-v4.md`, "How Vendure sees a discount today").
-  - A till that applies the store's rounding to discounted line nets will therefore differ from Vendure on discounted baskets. Which side changes is the Front desk's decision (asked 2026-09-30).
+  - A till that applies the store's rounding to discounted line nets will therefore differ from Vendure on discounted baskets. Measured on 4,000 discounted real-Vendure orders: only the per-item rule, each item rounded half up, matches in all four cells. The ruling on which side changes is the Front desk's.
 - **`per_rate_group` with all tax-inclusive lines:**
   - Until TallyUI files and ships the contract fix, the till computes such baskets **per order** (Front desk, 2026-09-30). Once `figures_mismatch` ships, those baskets keep raising it as a **warning**, never a refusal.
   - The ADR 0002 note that goes with `figures_mismatch` says so, and names the TallyUI issue once it exists.
