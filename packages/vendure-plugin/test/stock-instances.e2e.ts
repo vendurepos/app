@@ -8,9 +8,11 @@ import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/comman
 import { SECOND_INSTANCE, bootstrapSecondInstance, createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 import { createStorefrontMethods, guestOrder } from './shop';
+import type { ShopResult } from './shop';
 
 // #62 gap 1: POS stock writes on one database lose no update when the sales go through two Vendure instances, or race
-// Vendure's own sale path (a Shop API checkout), which does not take the plugin's stock lock (VP3-2).
+// Vendure's own sale path (a Shop API checkout), which takes the stock lock only through TallyStockLocationStrategy
+// (#62 finding 5), not the recipe's own (VP3-2).
 describe('#62: stock with two Vendure instances on one database', () => {
   const override = { paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler] } };
   const environment = createPluginTestEnvironment(override);
@@ -133,8 +135,11 @@ describe('#62: stock with two Vendure instances on one database', () => {
 
   // K POS sales, split over both instances, race the payments of M Shop API guest checkouts, split likewise. Each Shop
   // order is brought to ArrangingPayment first: its stock write is the allocation on PaymentSettled (Vendure's default
-  // flow takes on-hand only at fulfilment, which none reaches), so the payments are what race the POS sales.
-  async function race(variantId: string, id: string, unitPriceMinor: number, start: number, posSales: number, shopSales: number) {
+  // flow takes on-hand only at fulfilment, which none reaches), so the payments are what race the POS sales. `held`
+  // forces the overlap: instance 1's first POS sale is held inside its transaction, with its stock rows locked, until a
+  // Shop settlement on the second instance is seen waiting on them (crossed); then the other POS sales start and it is let go.
+  async function race(variantId: string, id: string, unitPriceMinor: number, start: number, posSales: number, shopSales: number,
+    held = false) {
     await setOnHand(variantId, start);
     const before = await level(id);
     const shops = await Promise.all(Array.from({ length: shopSales }, async (_, index) => {
@@ -144,23 +149,39 @@ describe('#62: stock with two Vendure instances on one database', () => {
       expect((await shop.arrangePayment()).state).toBe('ArrangingPayment');
       return shop;
     }));
+    const commands = Array.from({ length: posSales }, () => sale(variantId, unitPriceMinor));
+    const posting = (from: number) => commands.slice(from).map((command, index) => post((from + index) % 2, command));
+    let crossed: boolean | undefined;
+    let selling: Promise<Posted[]> | undefined;
+    let paying: Promise<ShopResult[]> | undefined;
+    if (held) {
+      const holding = hold(commands[0]);
+      const first = post(0, commands[0]);
+      await holding.reached;
+      paying = Promise.all(shops.map(shop => shop.pay(dummyPaymentCode)));
+      crossed = await crossInstanceWait(3_000);
+      selling = Promise.all([first, ...posting(1)]);
+      holding.release();
+    }
     const [results, paid] = await Promise.all([
-      Promise.all(Array.from({ length: posSales }, (_, index) => post(index % 2, sale(variantId, unitPriceMinor)))),
-      Promise.all(shops.map(shop => shop.pay(dummyPaymentCode))),
+      selling ?? Promise.all(posting(0)),
+      paying ?? Promise.all(shops.map(shop => shop.pay(dummyPaymentCode))),
     ]);
     // The Shop orders' own ALLOCATION movements (POS sales record theirs too).
     const [{ n: allocations }] = await connection.rawConnection.query(`SELECT count(*)::int AS n FROM stock_movement movement
       JOIN order_line line ON line.id = movement."orderLineId" JOIN "order" o ON o.id = line."orderId"
       WHERE movement.type = 'ALLOCATION' AND o.code = ANY($1)`, [paid.map(order => order.code)]) as Array<{ n: number }>;
-    return { statuses: results.map(result => result.status), states: paid.map(order => order.state ?? order.errorCode), before, after: await level(id), allocations };
+    return { statuses: results.map(result => result.status), states: paid.map(order => order.state ?? order.errorCode), before,
+      after: await level(id), allocations, crossed };
   }
 
-  // Measured 2026-09-30, three runs of this race as a plain it() with K = M = 6: on-hand ended exact (44), every sale
-  // applied and every checkout settled with its ALLOCATION movement, but stockAllocated ended at 1, not 6 (saleable 43,
-  // not 38). The same loss shows with no POS sale at all, on one instance or two (six concurrent Shop settlements, six
-  // movements, stockAllocated 1, four of four runs): Vendure's StockLevelService.updateStockAllocatedForLocation reads the level
-  // unlocked and writes back stockAllocated + change. It is Vendure's own lost update, so this stays it.fails (#62).
-  it.fails('B: POS sales on both instances race Shop API checkouts on both; no stock update is lost', async () => {
+  // Regression guard: measured on @vendure/core 3.7.3, three runs with K = M = 6 without the lock: on-hand ended exact (44),
+  // every sale applied and every checkout settled with its ALLOCATION movement, but stockAllocated ended at 1, not 6
+  // (saleable 43, not 38). The same loss showed with no POS sale at all, on one instance or two (six concurrent Shop
+  // settlements, stockAllocated 1, four of four runs): Vendure's StockLevelService.updateStockAllocatedForLocation reads
+  // the level unlocked and writes back stockAllocated + change. TallyStockLocationStrategy's lock now comes before that
+  // read, on every instance (#62 finding 5).
+  it('B: POS sales on both instances race Shop API checkouts on both; no stock update is lost', async () => {
     const [start, posSales, shopSales] = [50, 6, 6];
     const { statuses, states, before, after } = await race(variantIds.print[0], serviceIds.print[0], 4500, start, posSales, shopSales);
     const settled = states.filter(state => state === 'PaymentSettled').length;
@@ -169,12 +190,19 @@ describe('#62: stock with two Vendure instances on one database', () => {
         before: { onHand: start, allocated: 0 }, onHand: start - posSales, allocated: settled, saleable: start - posSales - settled });
   });
 
-  // B's POS side, which it.fails above cannot guard: in the same race, every POS unit leaves on-hand exactly. It starts
-  // below K, so the POS sales top up while the settlements race. stockAllocated is B's measurement (Vendure's own loss).
-  it('B-pos: from on-hand 3, on-hand ends at exactly 3 - K and every Shop settlement records its allocation', async () => {
+  // B's race from below K, so the POS sales top up while the settlements race, with the overlap forced: a Shop
+  // settlement is seen waiting on a held POS sale's stock rows. `crossed` stays true without the locks too (the
+  // settlement's own UPDATE would wait on the POS sale's row lock), so the value assertions are what catch a missing lock:
+  // on-hand exact, and stockAllocated equal to the settlements' ALLOCATION movements. The test store's
+  // MultiChannelStockLocationStrategy plans only available stock, so once the 3 units are taken a settlement allocates
+  // nothing; without the lock every settlement read the same unlocked level, allocated, and most of those writes were lost.
+  it('B-pos: from on-hand 3, a held POS sale blocks a Shop settlement; on-hand ends at 3 - K, allocated at its movements', async () => {
     const [start, posSales, shopSales] = [3, 6, 6];
-    const { statuses, states, before, after, allocations } = await race(variantIds.beans[0], serviceIds.beans[0], 500, start, posSales, shopSales);
-    expect({ statuses, states, before, onHand: after.onHand, allocations }).toEqual({ statuses: Array(posSales).fill('applied'),
-      states: Array(shopSales).fill('PaymentSettled'), before: { onHand: start, allocated: 0 }, onHand: start - posSales, allocations: shopSales });
+    const { statuses, states, before, after, allocations, crossed } =
+      await race(variantIds.beans[0], serviceIds.beans[0], 500, start, posSales, shopSales, true);
+    // The settlement seen waiting is queued on the rows before the other POS sales start, so at least it allocates.
+    expect({ crossed, statuses, states, before, onHand: after.onHand, allocated: after.allocated, allocating: allocations > 0 })
+      .toEqual({ crossed: true, statuses: Array(posSales).fill('applied'), states: Array(shopSales).fill('PaymentSettled'),
+        before: { onHand: start, allocated: 0 }, onHand: start - posSales, allocated: allocations, allocating: true });
   });
 });
