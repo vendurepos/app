@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { View } from 'react-native';
 import { Button, CartPanel, HStack, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
@@ -36,9 +37,11 @@ export function TaxRows({ label, amount, testID, rates }: {
 /**
  * The cart and its Pay buttons. `onPay` starts the tender (through the register's gate); `payGate`, when given, stands
  * in for the Pay buttons (the open-register card while no session is open), and `payError` says why a Pay was refused.
+ * `highlightSku` lights up that line, as an add confirms in place.
  */
-export function SaleCart({ sale, onPay, payGate, payError }: {
+export function SaleCart({ sale, onPay, payGate, payError, highlightSku }: {
   sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external'): void; payGate?: ReactNode; payError?: string;
+  highlightSku?: string;
 }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
@@ -52,6 +55,9 @@ export function SaleCart({ sale, onPay, payGate, payError }: {
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
       renderItem={(line) => (
         <HStack testID={`cart-line-${line.sku}`} space="sm" className="items-center border-b border-border px-3 py-2">
+          {highlightSku && line.sku === highlightSku ? (
+            <View testID={`cart-line-highlight-${line.sku}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
+          ) : null}
           <VStack space="none" className="flex-1">
             <Text className="text-sm font-medium" numberOfLines={2}>{line.name}</Text>
             <Text className="text-xs text-muted-foreground">{money(line.unitPriceMinor)} each</Text>

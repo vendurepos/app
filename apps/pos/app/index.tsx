@@ -6,9 +6,9 @@ import {
   Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   TabsTrigger, Text, VStack,
 } from '@tallyui/components';
-import { ConnectorProvider, type ServerCapabilities } from '@tallyui/core';
+import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  createRegisterOutbox, CurrencyProvider, registerCommandsLogger, TaxProvider, taxProviderProps,
+  catalogueEntries, createRegisterOutbox, CurrencyProvider, findEntryByCode, registerCommandsLogger, TaxProvider, taxProviderProps,
   useCurrencyFormatter, useOrderOutbox, useRegisterSession, useSale, type OutboxState, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { cartTabLabel } from '../lib/cart-totals';
@@ -26,6 +26,7 @@ import { useSession } from '../lib/session-context';
 import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-ids';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
+import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
@@ -34,7 +35,8 @@ const APP_VERSION = Constants.expoConfig?.version ?? 'unknown';
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 // From this window width the cart sits beside the catalogue; below it, Products and Cart are tabs.
 const WIDE_MIN_WIDTH = 768;
-// How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70).
+// How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70), and a cart line
+// when an add lands where the cart shows.
 const CART_HIGHLIGHT_MS = 600;
 
 export default function HomeScreen() {
@@ -183,7 +185,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
                   outbox={outbox} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} />
+                  registerReady={!!registerStore} onTender={setTenderInProgress} ordersOpen={ordersOpen}
+                  onCloseOrders={() => setOrdersOpen(false)} />
               </TaxProvider>
             </CurrencyProvider>
           ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === FORBIDDEN_TEXT ? (
@@ -221,10 +224,12 @@ function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxSt
   if (stuck) return `${countOrders(stuck.commandIds.length)} keep failing at the store. They are kept and retried.`;
 }
 
-function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender }: {
+function Sale({
+  session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, ordersOpen, onCloseOrders,
+}: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
-  boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
+  boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void; ordersOpen: boolean; onCloseOrders(): void;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   // The session knows the cashier only by the email they signed in with. Its orders go to its own store's outbox, each
@@ -247,35 +252,60 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, 
     setPayError(undefined);
     setPayError(await startTenderInSession(register, sale, method));
   }
-  const cart = (payGate?: ReactNode) => <SaleCart sale={sale} onPay={(method) => void pay(method)} payGate={payGate} payError={payError} />;
   const format = useCurrencyFormatter();
-  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it, and the Cart tab shows
-  // whatever stage the sale is at.
+  // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes the
+  // Orders panel), and the Cart tab shows whatever stage the sale is at.
   const [tab, setTab] = useState<'products' | 'cart'>('products');
-  const [highlight, setHighlight] = useState(false);
+  // The Cart tab, or the SKU of the cart line an add just landed on.
+  const [highlight, setHighlight] = useState<'tab' | { sku: string | undefined } | null>(null);
+  // A scanned code no product has, or a scan while this sale is being paid: shown on either tab until the next add (a
+  // payment's notice also until the tender ends).
+  const [scanNotice, setScanNotice] = useState<{ notFound: string } | 'finish-sale' | null>(null);
+  useEffect(() => { if (stage.kind !== 'tender') setScanNotice((notice) => notice === 'finish-sale' ? null : notice); }, [stage.kind]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   const onProducts = !wide && tab === 'products';
-  function add(entry: Parameters<typeof sale.add>[0]) {
-    // Only the cart takes new lines: a tender or a receipt is for the sale as it stands.
-    if (stage.kind !== 'cart') return;
+  function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts, scanned = false) {
+    // Only the cart takes new lines: a tender or a receipt is for the sale as it stands (a scan has just left them).
+    if (stage.kind !== 'cart' && !scanned) return;
     sale.add(entry, connector.traits.product);
-    if (!onProducts) return;
-    // Confirmed in place: the Cart tab's count and total tick up and the tab lights up briefly.
-    setHighlight(true);
+    setScanNotice(null);
+    // Confirmed in place: on Products the Cart tab's count and total tick up and the tab lights up briefly; where the
+    // cart shows, the line lights up.
+    setHighlight(showLine ? { sku: entry.variant.sku } : 'tab');
     clearTimeout(highlightTimer.current);
-    highlightTimer.current = setTimeout(() => setHighlight(false), CART_HIGHLIGHT_MS);
+    highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
+  const cart = (payGate?: ReactNode) => (
+    <SaleCart sale={sale} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
+      highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
+  );
+  // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
+  // stock-overlaid entries. A scan into the search field is the field's alone (the listener leaves inputs be): one add.
+  const scannable = useStockOverlaid(products) as typeof products;
+  // A scan is intent to sell (Front desk, 2026-09-30): it closes the Orders panel, and an add shows its line on the Cart
+  // tab. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the cart
+  // (Back to the cart), then adds. A payment entered (cash typed, a card tender's own payment) or saving is this sale
+  // being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
+  useWedgeScanner((code) => {
+    const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
+    const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0);
+    if (ordersOpen) onCloseOrders();
+    if (!entry) return setScanNotice({ notFound: code });
+    if (paying) return setScanNotice('finish-sale');
+    if (stage.kind === 'receipt') sale.newSale();
+    if (stage.kind === 'tender') sale.cancelTender();
+    if (ordersOpen) setTab('cart');
+    add(entry, ordersOpen || !onProducts, true);
+  });
   return (
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
       {wide ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
-          {/* Keyed on the tab for TallyUI #350 (on web the active fill stays on the tab it mounted with); removed once a
-              fixed @tallyui/components is pinned. */}
-          <TabsList key={tab} className="m-2 flex-row">
+          <TabsList className="m-2 flex-row">
             <TabsTrigger testID="tab-products" value="products" className="flex-1"><Text>Products</Text></TabsTrigger>
             <TabsTrigger testID="tab-cart" value="cart" className="flex-1">
-              {highlight ? (
+              {highlight === 'tab' ? (
                 <View testID="tab-cart-highlight" pointerEvents="none" className="absolute inset-0 rounded-sm border border-primary bg-primary/10" />
               ) : null}
               <Text>{cartTabLabel(sale.order, format)}</Text>
@@ -283,6 +313,16 @@ function Sale({ session, capabilities, catalogue, registerId, outbox, onSaving, 
           </TabsList>
         </Tabs>
       )}
+      {scanNotice === 'finish-sale' ? (
+        <Text testID="scan-finish-sale" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          Finish this sale before scanning the next item.
+        </Text>
+      ) : scanNotice ? (
+        // The catalogue search's own wording for a code with no product.
+        <Text testID="scan-not-found" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          {`No products match "${scanNotice.notFound}".`}
+        </Text>
+      ) : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
       <View className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
         <Catalogue

@@ -488,6 +488,170 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
 // Below WIDE_MIN_WIDTH Products and Cart are tabs (vendurepos #70): an add confirms in place and never switches tab.
 test.describe('on a narrow screen', () => {
   test.use({ viewport: { width: 360, height: 780 } });
+  // The active tab's fill, bg-background (@tallyui/theme's --color-background, #f8f9fa). Asserted after each switch for
+  // TallyUI #350: Playwright waits out the trigger's 150 ms transition.
+  const ACTIVE_TAB_FILL = 'rgb(248, 249, 250)';
+  // dev/vendure-store/README.md: TALLY-MUG is 2000000000015 in the "barcode" custom field.
+  const MUG_BARCODE = '2000000000015';
+
+  async function signInWithBarcodes(page: Page) {
+    await page.goto('/');
+    await page.getByTestId('sign-in-url').fill(STORE_URL);
+    await page.getByTestId('sign-in-email').fill(USERNAME);
+    await page.getByTestId('sign-in-password').fill(PASSWORD);
+    await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+    await page.getByTestId('sign-in-barcode_field').fill('barcode');
+    await page.getByTestId('sign-in-submit').click();
+    await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  }
+
+  /** A keyboard-wedge scan: the code's keys a few ms apart, then Enter, into whatever has the focus. */
+  async function wedgeScan(page: Page, code: string) {
+    await page.keyboard.type(code, { delay: 5 });
+    await page.keyboard.press('Enter');
+  }
+
+  test('a scan on the Cart tab adds in place and lights up the line; an unknown code says so on Cart', async ({ page }) => {
+    await signInWithBarcodes(page);
+    const cartTab = page.getByTestId('tab-cart');
+    const cart = page.getByTestId('cart');
+    const lineHighlight = cart.getByTestId('cart-line-highlight-TALLY-MUG');
+    await cartTab.click();
+    await expect(cartTab).toHaveCSS('background-color', ACTIVE_TAB_FILL);
+    await expect(cart).toBeVisible();
+    // No field has the focus: the Products search is hidden with its tab.
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(lineHighlight).toBeVisible();
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€8.00');
+    await expect(lineHighlight).toHaveCount(0);
+    // Still the Cart tab.
+    await expect(cart).toBeVisible();
+    await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeHidden();
+    await expect(page.getByTestId('tab-cart-highlight')).toHaveCount(0);
+    await wedgeScan(page, '9999999999999');
+    await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
+    await expect(cart).toBeVisible();
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await page.getByTestId('tab-products').click();
+    await expect(page.getByTestId('tab-products')).toHaveCSS('background-color', ACTIVE_TAB_FILL);
+  });
+
+  test('a scan on the Products tab adds once and lights up the Cart tab; 12 then Enter in a field adds nothing', async ({ page }) => {
+    await signInWithBarcodes(page);
+    const mug = page.getByTestId('product-tile-Tally Fixture Mug');
+    const cartTab = page.getByTestId('tab-cart');
+    const highlight = page.getByTestId('tab-cart-highlight');
+    const search = page.getByPlaceholder('Search or scan barcode / SKU');
+    // Into the focused search field the field's own Enter looks the code up; the listener leaves it be, so one add.
+    await expect(search).toBeFocused();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(highlight).toBeVisible();
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(search).toHaveValue('');
+    await expect(highlight).toHaveCount(0);
+    // The cart's quantity is a stepper with no text field, so the typist's 12 then Enter goes into the search (which a
+    // submit blurred: React Native's blurOnSubmit).
+    await search.click();
+    await page.keyboard.type('12');
+    await page.keyboard.press('Enter');
+    await expect(search).toHaveValue('12');
+    await search.fill('');
+    await mug.click();
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await expect(highlight).toHaveCount(0);
+    // Off the field, the listener takes the scan, and its Enter doesn't press the tile the click left focused.
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(highlight).toBeVisible();
+    await expect(cartTab).toHaveText('Cart (3) · €28.56');
+    await expect(mug).toBeVisible();
+    await cartTab.click();
+    await expect(cartTab).toHaveCSS('background-color', ACTIVE_TAB_FILL);
+    await expect(page.getByTestId('cart').getByTestId('cart-total')).toHaveText('€28.56');
+  });
+
+  // A scan is intent to sell (Front desk, 2026-09-30): it closes the Orders panel, adds, and shows the line lit up. The
+  // wide run overrides this describe's viewport to share its helpers.
+  for (const width of [360, 1280]) {
+    test(`a scan with the Orders panel open closes it and lights up the cart line (${width} px wide)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 780 });
+      await signInWithBarcodes(page);
+      const panel = page.getByTestId('orders-panel');
+      const cart = page.getByTestId('cart');
+      // On the Products tab when narrow: the scan switches to Cart because the cashier must see the line.
+      await page.getByTestId('orders-open').click();
+      await expect(panel).toBeVisible();
+      await wedgeScan(page, MUG_BARCODE);
+      await expect(cart.getByTestId('cart-line-highlight-TALLY-MUG')).toBeVisible();
+      await expect(panel).toHaveCount(0);
+      await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+      await expect(page.getByTestId('tab-cart-highlight')).toHaveCount(0);
+      // An unknown code closes it too, and says so.
+      await page.getByTestId('orders-open').click();
+      await expect(panel).toBeVisible();
+      await wedgeScan(page, '9999999999999');
+      await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
+      await expect(panel).toHaveCount(0);
+      await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+    });
+  }
+
+  // Front desk, 2026-09-30: a scan at a tender with nothing entered goes back to the cart and adds; with a payment it
+  // changes nothing and says so; at the receipt it starts the next sale. An unknown code never leaves the stage.
+  test('a scan at a tender or the receipt adds to the cart, unless a payment is entered', async ({ page }) => {
+    await signInWithBarcodes(page);
+    // The store can't be reached for orders, so the completed sale stays counted as waiting.
+    await page.route('**/tally/v1/commands', (route) => route.request().method() === 'POST' ? route.abort() : route.continue());
+    const cartTab = page.getByTestId('tab-cart');
+    const cart = page.getByTestId('cart');
+    const tender = page.getByTestId('tender');
+    const receipt = page.getByTestId('receipt');
+    const lineHighlight = cart.getByTestId('cart-line-highlight-TALLY-MUG');
+    await cartTab.click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(lineHighlight).toHaveCount(0);
+    // The scan above added with no session open; Pay waits for the register.
+    await openRegister(page);
+    // Nothing entered: back to the cart, one more mug, its line lit up.
+    await cart.getByTestId('pay-cash').click();
+    await expect(tender).toBeVisible();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(lineHighlight).toBeVisible();
+    await expect(tender).toHaveCount(0);
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€16.00');
+    // A cash amount entered: the tender, its amount and the cart stay as they are.
+    await cart.getByTestId('pay-cash').click();
+    const cashInput = tender.getByTestId('cash-tendered').locator('input');
+    await cashInput.fill('20.00');
+    await expect(tender.getByTestId('tender-change')).toContainText('€0.96');
+    // Off the field, so the listener takes the scan.
+    await tender.getByTestId('tender-total').click();
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(page.getByTestId('scan-finish-sale')).toHaveText('Finish this sale before scanning the next item.');
+    await expect(tender).toBeVisible();
+    await expect(cashInput).toHaveValue('20.00');
+    await expect(tender.getByTestId('tender-total')).toHaveText('€19.04');
+    await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await tender.getByTestId('tender-complete').click();
+    await expect(receipt).toBeVisible();
+    await expect(page.getByTestId('scan-finish-sale')).toHaveCount(0);
+    await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+    // An unknown code at the receipt only says so.
+    await wedgeScan(page, '9999999999999');
+    await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
+    await expect(receipt).toBeVisible();
+    // The mug starts the next sale, at quantity 1 and lit up; the stored order is still waiting.
+    await wedgeScan(page, MUG_BARCODE);
+    await expect(lineHighlight).toBeVisible();
+    await expect(receipt).toHaveCount(0);
+    await expect(cartTab).toHaveText('Cart (1) · €9.52');
+    await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(1);
+    await expect(page.getByTestId('scan-not-found')).toHaveCount(0);
+    await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  });
 
   test('Products and Cart are tabs: the Cart tab carries the count and total, and tax reads as a breakdown', async ({ page }) => {
     await page.goto('/');
@@ -519,6 +683,7 @@ test.describe('on a narrow screen', () => {
     await expect(cartTab).toHaveText('Cart (2) · €19.04');
     await expect(mug).toBeVisible();
     await cartTab.click();
+    await expect(cartTab).toHaveCSS('background-color', ACTIVE_TAB_FILL);
     await expect(mug).toBeHidden();
     await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(1);
     await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€16.00');
