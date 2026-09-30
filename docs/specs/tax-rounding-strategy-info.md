@@ -9,7 +9,11 @@
 ## The contract (Front desk ruling on TallyUI/tallyui#287, 2026-09-30)
 
 - **Shape:** core's server capabilities gain an optional
-  `taxRounding?: { granularity: 'per_order' | 'per_line' | 'per_rate_group'; mode: 'half_away_from_zero' | 'half_up' } | { granularity: 'custom' }` (`half_up` and `custom` added by the Front desk, 2026-09-30: Vendure's money strategy is `Math.round`, and a store the server cannot describe must say so).
+  `taxRounding?: { granularity: 'per_order' | 'per_line_items' | 'per_rate_group_items'; mode: 'half_away_from_zero' | 'half_up' } | { granularity: 'custom' }`
+  (Front desk rulings, 2026-09-30, after vendurepos's discount scoring; the contract page is TallyUI `docs/contract/field-kinds.md`, "Store rounding strategies (#287)", at https://github.com/TallyUI/tallyui/blob/54dba40/docs/contract/field-kinds.md). The plain `per_line` and `per_rate_group` are gone.
+  - **`_items`:** each undiscounted line and its −D `TALLY-DISCOUNT` surcharge are separate items, each rounded half up, and the surcharge joins its line's rate group.
+  - **`half_up`:** Vendure's money strategy is `Math.round`.
+  - **`custom`:** a store the server cannot describe must say so.
 - **An absent `taxRounding`** means an older server: the till assumes `per_order` / `half_away_from_zero`, its behaviour today. **`{ granularity: 'custom' }`** (no `mode`) means a store whose rounding the server cannot describe: the till uses its default figures, and that server never emits `figures_mismatch` for subtotal or tax.
 - **No flags.** Each granularity's algorithm is written out in TallyUI's contract docs from Vendure's and Medusa's real code. A variant that needs a different algorithm gets its own granularity **name**. The two `mode` values differ only on exact negative halves.
 - **A capability, not an order.create version.** The till reads it at sale time and records the strategy on the sale's own record, not in the payload. The figures are frozen at finalize.
@@ -30,24 +34,26 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 
 | Vendure configuration | `taxRounding` |
 |---|---|
-| `DefaultOrderTaxCalculationStrategy` (Vendure's default, or no `orderTaxCalculationStrategy` set) | `{ granularity: 'per_line', mode: 'half_up' }` |
-| `OrderLevelTaxCalculationStrategy` | `{ granularity: 'per_rate_group', mode: 'half_up' }` |
+| `DefaultOrderTaxCalculationStrategy` (Vendure's default, or no `orderTaxCalculationStrategy` set) | `{ granularity: 'per_line_items', mode: 'half_up' }` |
+| `OrderLevelTaxCalculationStrategy` | `{ granularity: 'per_rate_group_items', mode: 'half_up' }` |
 | Anything else (a custom tax strategy, including a subclass of either), or a money strategy other than `DefaultMoneyStrategy` | `{ granularity: 'custom' }` (no `mode`). **Never omit the field:** absence means an older server, which is the wrong assumption for exactly this store. |
 
-**Why these two names suffice** (measured, #38, told to the TallyUI queue on 2026-09-30):
-- **`per_line`:** each line's tax is rounded on its own.
-  - Exclusive: `round(net × r)`.
-  - Inclusive: `net = round(gross / (1 + r))`, and tax = gross − net.
-- **`per_rate_group`:** each line's net is rounded first, which is a no-op for exclusive lines, and the tax is then rounded once per group. The group key is the tax rate's **name and value** (Vendure's `order-level-tax-calculation-strategy.js:103`).
-- Each matched real Vendure on 0 of 1,420 baskets in both price modes. So neither needs a separate inclusive-prices name.
+**Why these names describe Vendure** (measured, vendurepos #38 and the discount scoring, 2026-09-30):
 
-**Known gaps (keep in view; the till's side is TallyUI's):**
-- **Discounted baskets:**
-  - The 0-of-1,420 result is for **undiscounted** baskets. The plugin posts each line discount as its own `TALLY-DISCOUNT` Surcharge, and Vendure rounds each surcharge as its own item (`surcharge.entity.js:33-38`), not prorated into the line's net (see `order-create-v4.md`, "How Vendure sees a discount today").
-  - A till that applies the store's rounding to discounted line nets will therefore differ from Vendure on discounted baskets. Measured on 4,000 discounted real-Vendure orders: only the per-item rule, each item rounded half up, matches in all four cells. The ruling on which side changes is the Front desk's.
-- **`per_rate_group` with all tax-inclusive lines:**
-  - Until TallyUI files and ships the contract fix, the till computes such baskets **per order** (Front desk, 2026-09-30). Once `figures_mismatch` ships, those baskets keep raising it as a **warning**, never a refusal.
-  - The ADR 0002 note that goes with `figures_mismatch` says so, and names the TallyUI issue once it exists.
+The items are each undiscounted line, plus its −D `TALLY-DISCOUNT` surcharge, since the plugin posts discounts as surcharges (svc:654-667):
+- **`per_line_items`:** each item's tax is rounded half up on its own.
+  - Exclusive items: `round(net × r)`.
+  - Inclusive items: `net = round(gross / (1 + r))`, and tax = gross − net.
+- **`per_rate_group_items`:** each item's net is rounded first, which is a no-op for exclusive items. The tax is then rounded once per group, and a surcharge is in its line's group. The group key is the tax rate's **name and value** (Vendure's `order-level-tax-calculation-strategy.js:103`).
+
+Evidence:
+- Undiscounted: 0 of 1,420 baskets differ in both price modes.
+- Discounted: 0 of 1,000 baskets differ in each of the four strategy and price-mode cells. The prorated rule, which rounds each line's discounted amount, was off on 29–39 % in three of the four.
+
+**Known gap (the till's side is TallyUI's):** inclusive lines under `per_rate_group_items`.
+- The till uses `per_order` figures for them until TallyUI #310, a display row that explains the plugin's `TALLY-ROUNDING` bridge (svc:670-678).
+- Until then, those baskets keep being bridged with a `total_mismatch` **warning**, never a refusal.
+- The ADR 0002 note that goes with this PR says so and cites TallyUI #310.
 
 **Rounding mode:** Vendure advertises `half_up`.
 - Vendure's `DefaultMoneyStrategy` is `Math.round`, which rounds **half up**. It differs from `half_away_from_zero` only on exact negative halves, e.g. a −59.5 discount surcharge becomes −59, not −60 (already noted in ADR 0002). The contract gained `half_up` for exactly this (Front desk, 2026-09-30).
@@ -72,15 +78,15 @@ Every sale's receipt against the store's books. A wrongly advertised strategy ma
 
 ## Tests
 
-1. **Default strategy:** `/info` advertises `{ granularity: 'per_line', mode: 'half_up' }`.
-2. **Order-level strategy:** `{ granularity: 'per_rate_group', mode: 'half_up' }`.
+1. **Default strategy:** `/info` advertises `{ granularity: 'per_line_items', mode: 'half_up' }`.
+2. **Order-level strategy:** `{ granularity: 'per_rate_group_items', mode: 'half_up' }`.
 3. **A subclass of `OrderLevelTaxCalculationStrategy`, an unrelated custom tax strategy, and a custom money strategy:** each advertises exactly `{ granularity: 'custom' }` with **no `mode`**, the field is present (never absent), and the rest of `/info` is unchanged.
 4. **`/info`'s existing `contracts`** are unchanged in all three.
 
 ## Mutation checks (the dispatching session reruns each)
 
-- The mapping returns `per_line` for the order-level strategy: test 2 fails.
-- Detection uses `instanceof`, so the subclass is advertised as `per_rate_group`: test 3 fails.
+- The mapping returns `per_line_items` for the order-level strategy: test 2 fails.
+- Detection uses `instanceof`, so the subclass is advertised as `per_rate_group_items`: test 3 fails.
 - A custom strategy omits `taxRounding` instead of advertising `{ granularity: 'custom' }`: test 3 fails.
 
 ## Acceptance
@@ -93,4 +99,4 @@ From `packages/vendure-plugin`, with `npm run db:up` / `db:down` around them and
 
 ## References
 
-vendurepos #38 (the measurement and the ruling), #51/#56 (the seed's rate groups); TallyUI/tallyui#287, #291, #285, #288 (per-line rate identity, which `per_rate_group` needs on the till side); ADR 0002 §5.
+vendurepos #38 (the measurement and the ruling), #51/#56 (the seed's rate groups); TallyUI/tallyui#287, #291, #285, #288 (per-line rate identity, which `per_rate_group_items` needs on the till side), #309 (the till's rounding code), #310 (the inclusive-lines display row); ADR 0002 §5.
