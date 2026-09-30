@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Button, CartPanel, HStack, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
@@ -32,7 +33,13 @@ export function TaxRows({ label, amount, testID, rates }: {
   );
 }
 
-export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
+/**
+ * The cart and its Pay buttons. `onPay` starts the tender (through the register's gate); `payGate`, when given, stands
+ * in for the Pay buttons (the open-register card while no session is open), and `payError` says why a Pay was refused.
+ */
+export function SaleCart({ sale, onPay, payGate, payError }: {
+  sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external'): void; payGate?: ReactNode; payError?: string;
+}) {
   const format = useCurrencyFormatter();
   const { order } = sale;
   const money = (amount: number) => format({ amount, currency: order.currency });
@@ -58,20 +65,22 @@ export function SaleCart({ sale }: { sale: ReturnType<typeof useSale> }) {
       )}
       footer={
         <VStack space="none" className="gap-1.5 py-1">
-          {sale.error ? <Text accessibilityRole="alert" className="text-sm text-destructive">{sale.error}</Text> : null}
+          {sale.error || payError ? <Text accessibilityRole="alert" className="text-sm text-destructive">{sale.error || payError}</Text> : null}
           {row('Subtotal', totals.subtotalMinor, 'cart-subtotal')}
           <TaxRows label={totals.taxLabel} amount={money(totals.taxMinor)} testID="cart-tax"
             rates={totals.taxRows.map((tax) => ({ key: tax.label, name: tax.name, amount: money(tax.amountMinor) }))} />
           <HStack space="none" className="mt-1 border-t border-border pt-2" />
           {row('Total', totals.totalMinor, 'cart-total', true)}
-          <HStack space="sm" className="mt-2">
-            <Button testID="pay-cash" className="flex-1" disabled={empty} onPress={() => sale.startTender('cash')}>
-              <Text>Pay cash</Text>
-            </Button>
-            <Button testID="pay-card" variant="secondary" className="flex-1" disabled={empty} onPress={() => sale.startTender('external')}>
-              <Text>Pay by card</Text>
-            </Button>
-          </HStack>
+          {payGate ?? (
+            <HStack space="sm" className="mt-2">
+              <Button testID="pay-cash" className="flex-1" disabled={empty} onPress={() => onPay('cash')}>
+                <Text>Pay cash</Text>
+              </Button>
+              <Button testID="pay-card" variant="secondary" className="flex-1" disabled={empty} onPress={() => onPay('external')}>
+                <Text>Pay by card</Text>
+              </Button>
+            </HStack>
+          )}
         </VStack>
       }
     />

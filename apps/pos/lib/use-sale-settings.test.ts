@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from './session';
 // Renamed so the hook can run outside a component here, where React's hooks are mocked.
-import { MIN_ORDER_CREATE, READ_TIMEOUT_MS, readCapabilities, retryDelayMs, useSaleSettings as saleSettingsHook, type SaleSettingsState } from './use-sale-settings';
+import { MIN_ORDER_CREATE, MIN_REGISTER, READ_TIMEOUT_MS, readCapabilities, retryDelayMs, useSaleSettings as saleSettingsHook, type SaleSettingsState } from './use-sale-settings';
 
 vi.mock('react', async (importActual) => ({
   ...await importActual<typeof import('react')>(),
@@ -17,7 +17,9 @@ const session: Session = {
   stock: { trackInventory: true, outOfStockThreshold: 2 },
 };
 // The dev store's /info (vendurepos #60), from the plugin this app ships with.
-const storeCapabilities: ServerCapabilities = { orderCreate: 4, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' } };
+const storeCapabilities: ServerCapabilities = {
+  orderCreate: 4, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
+};
 
 let states: SaleSettingsState[];
 let cleanup: (() => void) | void;
@@ -66,7 +68,10 @@ describe('useSaleSettings', () => {
 
   it.each([
     ['no plugin (a 404 /info)', { orderCreate: 1 }],
-    ['an older plugin', { orderCreate: 3, taxRounding: storeCapabilities.taxRounding }],
+    ['an older plugin', { orderCreate: 3, register: 1, taxRounding: storeCapabilities.taxRounding }],
+    // A sale needs an open register session, synced to the plugin (vendurepos #79).
+    ['a plugin without register commands', { orderCreate: 4, taxRounding: storeCapabilities.taxRounding }],
+    ['a plugin at register 0', { orderCreate: 4, register: 0, taxRounding: storeCapabilities.taxRounding }],
   ])('never readies a store with %s, and shows the plugin notice across its retries', async (_, below) => {
     const capabilities = vi.fn().mockResolvedValue(below);
     mount({ capabilities });
@@ -80,7 +85,7 @@ describe('useSaleSettings', () => {
     // Updated on the store, the plugin is picked up by the next retry.
     capabilities.mockResolvedValue(storeCapabilities);
     await vi.advanceTimersByTimeAsync(retryDelayMs(5));
-    expect(states.at(-1)).toMatchObject({ status: 'ready', capabilities: { orderCreate: MIN_ORDER_CREATE } });
+    expect(states.at(-1)).toMatchObject({ status: 'ready', capabilities: { orderCreate: MIN_ORDER_CREATE, register: MIN_REGISTER } });
   });
 
   it('gives the default rounding only to a connector that declares no capabilities read', async () => {

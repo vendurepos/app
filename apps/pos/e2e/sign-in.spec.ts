@@ -41,6 +41,16 @@ const USERNAME = 'superadmin';
 // dev/vendure-store/src/constants.ts defines SUPERADMIN_PASSWORD.
 const PASSWORD = 'superadmin';
 
+// A sale needs an open register session: opens this till's drawer with a float. On a narrow screen the open card is
+// on the Cart tab.
+async function openRegister(page: Page, float = '100.00') {
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill(float);
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+  await expect(page.getByTestId('register-open-panel')).toBeVisible();
+}
+
 test('wrong password shows an error', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in$/);
@@ -165,14 +175,15 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   expect(infoAborts).toBeGreaterThanOrEqual(1);
   await page.unroute('**/tally/v1/info');
   // The store can't be reached for orders: the sale is kept and waits, and each attempt is recorded.
-  const sent: { version: number; payload: { clientOrderId: string } }[] = [];
+  const sent: { type: string; version: number; payload: { clientOrderId: string } }[] = [];
   await page.route('**/tally/v1/commands', (route) => {
     if (route.request().method() !== 'POST') return route.continue();
-    sent.push(...route.request().postDataJSON().commands);
+    sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
     return route.abort();
   });
   await expect(cart).toBeVisible();
   await expect(page.getByTestId('sale-settings-retrying')).toHaveCount(0);
+  await openRegister(page);
   const expectTotals = async (subtotal: string, tax: string, total: string, rates: Record<string, string>) => {
     await expect(cart.getByTestId('cart-subtotal')).toHaveText(subtotal);
     await expect(cart.getByTestId('cart-tax')).toHaveText(tax);
@@ -295,11 +306,12 @@ test('a session revoked on the store stops the catalogue with a notice', async (
 
 test('a rejected sale needs attention, is retried from the Orders panel and applies; a refused batch is sent again', async ({ page }) => {
   // The store rejects every order it is sent: each stays rejected until the cashier retries it.
-  const sent: { id: string; payload: { clientOrderId: string } }[] = [];
+  const sent: { id: string; type: string; payload: { clientOrderId: string } }[] = [];
   await page.route('**/tally/v1/commands', (route) => {
     if (route.request().method() !== 'POST') return route.continue();
     const commands: typeof sent = route.request().postDataJSON().commands;
-    sent.push(...commands);
+    // The register's commands are rejected too, but only the orders are followed here.
+    sent.push(...commands.filter(({ type }) => type === 'order.create'));
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
       id, status: 'rejected', error: { code: 'invalid_payload', message: 'test refusal' },
     })) }) });
@@ -336,6 +348,7 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
     });
     expect((await found.json()).data.orders.items).toEqual([{ totalWithTax: total }]);
   };
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const first = await cashSale();
   await expect(page.getByTestId('orders-rejected')).toHaveText('1 order needs attention');
@@ -366,7 +379,7 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   // The store refuses the whole batch: the outbox keeps it and pauses until Send again flushes.
   await page.route('**/tally/v1/commands', (route) => {
     if (route.request().method() !== 'POST') return route.continue();
-    sent.push(...route.request().postDataJSON().commands);
+    sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
     return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ message: 'test refusal' }) });
   });
   const second = await cashSale();
@@ -378,6 +391,96 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 30_000 });
   await expect(page.getByTestId('orders-notice')).toHaveCount(0);
   await expectOnStore(second);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+type SentCommand = { id: string; type: string; payload: Record<string, unknown> };
+type CommandResult = { id: string; status: string; register?: { closure?: { expected?: Record<string, number>; variance?: Record<string, number> } } };
+
+test('a register day: open with a float, sell, move cash, count and close; the Z report and the plugin agree', async ({ page }) => {
+  // Every command the till sends and the store's answer to it, unchanged.
+  const commands: SentCommand[] = [];
+  const results = new Map<string, CommandResult>();
+  page.on('response', async (response) => {
+    if (response.request().method() !== 'POST' || !response.url().endsWith('/tally/v1/commands')) return;
+    commands.push(...response.request().postDataJSON().commands);
+    for (const result of ((await response.json().catch(() => ({}))).results ?? []) as CommandResult[]) results.set(result.id, result);
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  const cart = page.getByTestId('cart');
+  const tender = page.getByTestId('tender');
+  // No session: the cart builds, and the open card stands where Pay would be.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(cart.getByTestId('open-register-card')).toBeVisible();
+  await expect(cart.getByTestId('pay-cash')).toHaveCount(0);
+  await openRegister(page, '100.00');
+  // A cash sale and a card sale of the mug, €8.00 + 19 %: €9.52 each.
+  await cart.getByTestId('pay-cash').click();
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('new-sale').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await cart.getByTestId('pay-card').click();
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('new-sale').click();
+  // Paid in €10.00 and paid out €5.00 from the Register panel, then the paid in undone.
+  await page.getByTestId('register-open-panel').click();
+  const panel = page.getByTestId('register-panel');
+  for (const [type, amount, reason] of [['paid-in', '10.00', 'Change from the bank'], ['paid-out', '5.00', 'Milk']]) {
+    await panel.getByTestId(`register-panel-${type}`).click();
+    const sheet = page.getByTestId('movement-sheet');
+    await sheet.getByTestId('movement-amount').fill(amount);
+    await sheet.getByTestId('movement-reason').fill(reason);
+    await sheet.getByTestId('movement-confirm').click();
+    await expect(sheet).toHaveCount(0);
+  }
+  await panel.getByTestId('register-panel-movements').click();
+  const paidIn = panel.getByTestId(/^movement-row-/).filter({ hasText: 'Paid in' });
+  const paidInId = (await paidIn.getAttribute('data-testid'))!.replace('movement-row-', '');
+  await panel.getByTestId(`movement-void-${paidInId}`).click();
+  await expect(paidIn).toHaveCount(0);
+  await expect(panel.getByTestId('register-panel-sales-count')).toHaveText('2 sales this session');
+  // €100.00 + €9.52 − €5.00.
+  await expect(panel.getByTestId('register-panel-expected')).toContainText('€104.52');
+  await panel.getByTestId('register-panel-close').click();
+  const count = page.getByTestId('register-count');
+  await count.getByTestId('count-amount').fill('104.52');
+  await count.getByTestId('count-close').click();
+  const sheet = page.getByTestId('closure-sheet');
+  await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €104.52');
+  await expect(sheet.getByTestId('closure-counted-cash')).toHaveText('Counted €104.52');
+  // The Z report as printed: TallyUI's closure document, through the print frame.
+  await sheet.getByTestId('closure-print').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed).toEqual(expect.arrayContaining([
+    'Z report · Closure #1', 'Sales 2', 'Sales total €19.04', 'Opening float €100.00', 'Cash sales €9.52', 'Card sales €9.52',
+    'Tax 19%: net €16.00, tax €3.04, gross €19.04', 'Cash expected €104.52', 'Cash counted €104.52', 'Cash variance €0.00',
+    'Card expected €9.52',
+  ]));
+  // The plugin applied the closure, and its expected and variance, from its own ledger, are the Z's.
+  const open = commands.find(({ type }) => type === 'register.session.open')!;
+  const closure = commands.find(({ type }) => type === 'register.closure.submit');
+  expect(closure).toBeDefined();
+  await expect.poll(() => results.get(closure!.id)?.status, { timeout: 30_000 }).toBe('applied');
+  expect(results.get(closure!.id)!.register!.closure).toMatchObject({ expected: { cash: 10452, external: 952 }, variance: { cash: 0 } });
+  expect(closure!.payload).toMatchObject({ sessionId: open.payload.sessionId, tillExpected: { cash: 10452, external: 952 }, counted: { cash: 10452 } });
+  // Each sale went to the store stamped with the session, and the closure lists both.
+  const orders = commands.filter(({ type }) => type === 'order.create');
+  expect(new Set(orders.map(({ payload }) => payload.sessionId))).toEqual(new Set([open.payload.sessionId]));
+  expect((closure!.payload.orderIds as string[]).length).toBe(2);
+  await sheet.getByTestId('closure-done').click();
+  await expect(sheet).toHaveCount(0);
+  // Closed: the next sale waits for the register to open again.
+  await expect(cart.getByTestId('open-register-card')).toBeVisible();
+  await expect(cart.getByTestId('pay-cash')).toHaveCount(0);
+  await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
@@ -398,6 +501,10 @@ test.describe('on a narrow screen', () => {
     const cartTab = page.getByTestId('tab-cart');
     const highlight = page.getByTestId('tab-cart-highlight');
     await expect(mug).toBeVisible();
+    // The register opens from the Cart tab, where Pay waits for it; the header's Register button needs no tab.
+    await cartTab.click();
+    await openRegister(page);
+    await page.getByTestId('tab-products').click();
     await expect(page.getByTestId('tab-products')).toHaveText('Products');
     await expect(cartTab).toHaveText('Cart (0) · €0.00');
     await expect(cart).toBeHidden();
