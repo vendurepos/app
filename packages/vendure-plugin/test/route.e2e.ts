@@ -141,6 +141,11 @@ describe('POST /tally/v1/commands', () => {
       { ...results[0], status: 'duplicate' }, results[1], results[2], { ...results[3], status: 'duplicate' },
     ]);
     expect(await ordersFor(underpaid)).toHaveLength(0);
+    // The replay sold nothing again: one order for each valid command, two in total.
+    expect((await ordersFor(valid)).length).toBe(1);
+    expect((await ordersFor(valid2)).length).toBe(1);
+    expect(await ledgerFor(valid)).toMatchObject({ status: 'applied' });
+    expect(await ledgerFor(valid2)).toMatchObject({ status: 'applied' });
   });
 
   it('requires X-Tally-Protocol: 1, else 400 unsupported_protocol, before any write', async () => {
@@ -199,8 +204,10 @@ describe('POST /tally/v1/commands', () => {
     expect(large.body.results[0]).toMatchObject({ id: input.id, status: 'applied' });
     // The parser's limit and the answer's maxBytes are the same number: the limit itself passes, one byte more is refused.
     expect(COMMANDS_BODY_MAX_BYTES).toBe(1_048_576);
-    const atLimit = await post(sized({ commands: [mug()] }, COMMANDS_BODY_MAX_BYTES));
-    expect(atLimit.status).not.toBe(413);
+    const atLimitInput = mug();
+    const atLimit = await post(sized({ commands: [atLimitInput] }, COMMANDS_BODY_MAX_BYTES));
+    expect(atLimit.status).toBe(200);
+    expect(atLimit.body.results[0]).toMatchObject({ id: atLimitInput.id, status: 'applied' });
     const before = await ledgerCount();
     expect(await post(sized({ commands: [mug()] }, COMMANDS_BODY_MAX_BYTES + 1))).toEqual(bodyTooLarge);
     expect(await ledgerCount()).toBe(before);
@@ -281,13 +288,24 @@ describe('POST /tally/v1/commands', () => {
     const second = await post({ commands: [pre, held, post3] });
     barrier.release();
     expect(second).toEqual({ status: 409, body: { code: 'in_progress', id: held.id } });
-    expect(await ledgerFor(pre)).toMatchObject({ status: 'applied' });
+    // Request B's first attempt answered 409, so pre's applied answer is the one stored on its ledger row.
+    const preAnswer = (await ledgerFor(pre))!;
+    expect(preAnswer).toMatchObject({ status: 'applied', result: { id: pre.id, status: 'applied' } });
     expect(await ledgerFor(post3)).toBeNull();
-    expect((await first).body.results[0]).toMatchObject({ status: 'applied' });
+    const heldAnswer = (await first).body.results[0];
+    expect(heldAnswer).toMatchObject({ id: held.id, status: 'applied' });
     const retry = await post({ commands: [pre, held, post3] });
     expect(retry.status).toBe(200);
     expect(retry.body.results.map((result: { id: string; status: string }) => [result.id, result.status]))
       .toEqual([[pre.id, 'duplicate'], [held.id, 'duplicate'], [post3.id, 'applied']]);
+    // The duplicates carry the stored answers' serverRefs, and no command sold twice.
+    expect(retry.body.results[0].serverRefs).toEqual(preAnswer.result!.serverRefs);
+    expect(retry.body.results[1].serverRefs).toEqual(heldAnswer.serverRefs);
+    const preOrders = await ordersFor(pre);
+    expect(preOrders.length).toBe(1);
+    expect((await ordersFor(held)).length).toBe(1);
+    expect((await ordersFor(post3)).length).toBe(1);
+    expect(retry.body.results[0].serverRefs.orderId).toBe(encode(preOrders[0].id));
   });
 
   it('stops at a 503 transient without leaking internals; earlier commands stay committed and replay as duplicate', async () => {
