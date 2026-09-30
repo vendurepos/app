@@ -164,8 +164,9 @@ medusapos, and calls the two parts at this server's own stages.
       pure quantity checks (at or below 0, fractional, above int4), the v3
       fiscal figures, the length bounds (`customer.email` 254; refs, ids
       and names 255; `sessionId` 36), and the `createdAt` bound, which is
-      future-only (at most 24 h after the server clock, no lower bound: an
-      offline till sends old sales). `invalid_payload` keeps one meaning
+      bounded at both ends (no earlier than 2020-01-01T00:00:00Z, at most 24 h
+      after the server clock; Front desk, 2026-09-30, one rule for both
+      backends). `invalid_payload` keeps one meaning
       across the contract, as in `@tallyui/core/server`'s `precheckCommand`.
       The length bounds and the strict check sit here, not in step 1 (Front
       desk, TallyUI #222 review; #36 review), so a stored answer always
@@ -557,13 +558,13 @@ every field is checked against its version in step 4 (ruling 17).
 | `id` | instruction (identity) | the idempotency key: the replay read and the ledger claim | svc:139, svc:501 |
 | `type` | instruction | only `order.create` is accepted | svc:318 |
 | `version` | instruction | selects the shape: the strict check, v3's fiscal figures, session id and snapshot | svc:323, svc:343, svc:347, svc:593, svc:742 |
-| `createdAt` | informational | type-checked and future-bounded only; not stored | svc:320, svc:346 |
+| `createdAt` | informational | type-checked and bounded (2020-01-01 to one day ahead; Front desk, 2026-09-30, one rule for both backends); not stored | svc:320, svc:346 |
 | `deviceId` | informational | type-checked only; not stored | svc:321 |
 | `attempt` | informational | type-checked only; not stored | svc:322 |
 | `payload` | the order | the fields below | |
 | **Payload** | | | |
 | `clientOrderId` | instruction (identity) | the collision lookup and guard; stored as `tallyClientOrderId` | svc:142, svc:590 |
-| `createdAt` | instruction | the sale's time: stored as `tallySaleAt` and `orderPlacedAt` | svc:591, svc:741 |
+| `createdAt` | instruction | the sale's time, bounded like the envelope's (2020-01-01 to one day ahead): stored as `tallySaleAt` and `orderPlacedAt` | svc:591, svc:741 |
 | `currency` | instruction | the order's currency; `unsupported_currency` when the channel does not offer it | svc:150, svc:380 |
 | `pricesIncludeTax` | instruction | each line's tax mode, unless the line gives its own | svc:645, svc:659 |
 | `lines` | instruction | one Vendure order line each | svc:640-646 |

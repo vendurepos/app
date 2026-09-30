@@ -545,7 +545,7 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
     expect(await run(input)).toMatchObject({ status: 'applied' });
   });
 
-  it('ADR-038 #220: createdAt has only an upper bound (one day ahead), unstored; a very old sale applies', async () => {
+  it('ADR-038 #220: createdAt is bounded (2020-01-01 to one day ahead), unstored; an old sale from 2020 on applies', async () => {
     const day = 24 * 60 * 60 * 1000;
     const at = (ms: number) => new Date(ms).toISOString();
     const before = await counts();
@@ -561,8 +561,21 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
       expect(await ledgerFor(input)).toBeNull();
     }
     expect(await counts()).toEqual(before);
-    // No lower bound: an offline till sends old sales.
-    for (const value of ['1969-07-20T20:17:00Z', '2001-01-01T00:00:00Z', at(Date.now() + day - 60_000)]) {
+    // Front desk 2026-09-30: a time before 2020-01-01T00:00:00Z is refused, never clamped.
+    for (const value of ['1969-07-20T20:17:00Z', '1970-01-01T00:00:00Z', '2019-12-31T23:59:59Z']) {
+      for (const path of ['createdAt', 'payload.createdAt']) {
+        const input = command();
+        if (path === 'createdAt') input.createdAt = value;
+        else input.payload.createdAt = value;
+        expect(await run(input), `${path} ${value}`).toEqual({ id: input.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: `${path}: expected a time no earlier than 2020-01-01T00:00:00Z`,
+        } });
+        expect(await ledgerFor(input)).toBeNull();
+      }
+    }
+    expect(await counts()).toEqual(before);
+    // The floor itself and later apply: an offline till sends old sales.
+    for (const value of ['2020-01-01T00:00:00Z', '2021-06-01T00:00:00Z', at(Date.now() + day - 60_000)]) {
       const input = command();
       input.createdAt = value;
       input.payload.createdAt = value;
