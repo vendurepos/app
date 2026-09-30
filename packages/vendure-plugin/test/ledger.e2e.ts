@@ -69,8 +69,23 @@ describe('ledger: stored rejections, idempotency and transient failures', () => 
   }
   afterEach(() => { recipe.testObserver = undefined; });
 
-  it.each(['disabled', 'missing', 'disabled-product'] as const)('proof 10, re-ruling 4, B1: a %s variant is unknown_variant stored on the claim; the recipe never runs', async kind => {
-    const input = command(kind === 'disabled' ? variantIds.print[0] : kind === 'missing' ? encode(999999) : variantIds.beans[0]);
+  // Audit 4.3d (ADR 0002 "deleted variant, deleted product"): a spare product with one variant, soft-deleted through the
+  // Admin API. deleteProduct also soft-deletes its variants.
+  async function deletedSpare(kind: 'deleted' | 'deleted-product') {
+    const { createProduct } = await adminClient.query<{ createProduct: { id: string } }>(parse(`mutation Spare($input: CreateProductInput!) {
+      createProduct(input: $input) { id } }`), { input: { translations: [{ languageCode: 'en', name: kind, slug: `spare-${kind}`, description: '' }] } });
+    const { createProductVariants: [variant] } = await adminClient.query<{ createProductVariants: Array<{ id: string }> }>(parse(`mutation SpareVariant($input: [CreateProductVariantInput!]!) {
+      createProductVariants(input: $input) { id } }`), { input: [{ productId: createProduct.id, sku: `spare-${kind}`, price: 800, translations: [{ languageCode: 'en', name: kind }] }] });
+    const { deleted } = await adminClient.query<{ deleted: { result: string } }>(parse(kind === 'deleted'
+      ? `mutation Delete($id: ID!) { deleted: deleteProductVariant(id: $id) { result } }`
+      : `mutation Delete($id: ID!) { deleted: deleteProduct(id: $id) { result } }`), { id: kind === 'deleted' ? variant.id : createProduct.id });
+    expect(deleted.result).toBe('DELETED');
+    return variant.id;
+  }
+
+  it.each(['disabled', 'missing', 'disabled-product', 'deleted', 'deleted-product'] as const)('proof 10, re-ruling 4, B1: a %s variant is unknown_variant stored on the claim; the recipe never runs', async kind => {
+    const input = command(kind === 'deleted' || kind === 'deleted-product' ? await deletedSpare(kind)
+      : kind === 'disabled' ? variantIds.print[0] : kind === 'missing' ? encode(999999) : variantIds.beans[0]);
     // B1: an enabled variant of a disabled product, which addItemToOrder would throw on after the claim.
     const { productVariant } = await adminClient.query<{ productVariant: { product: { id: string } } }>(parse(`query Product($id: ID!) {
       productVariant(id: $id) { product { id } } }`), { id: variantIds.beans[0] });
