@@ -472,7 +472,7 @@ every field is checked against its version in step 4 (ruling 17).
 | `discountMinor` (v2+) | instruction | a negative `POS discount` surcharge carrying the line's tax lines | svc:656-661 |
 | **`payments[]`** | | | |
 | `clientPaymentId` | informational (reference) | stored in the payment's metadata and in `tallyPayments` | svc:712, svc:741 |
-| `method` | informational | type-checked; stored as above (every payment uses the POS payment method) | payload-shape.ts:34, svc:712, svc:741 |
+| `method` | instruction (honoured by recording) | recorded, never refused: each Vendure payment keeps its tender, `method` included, in its metadata, and the order keeps every tender in `tallyPayments` (a surplus tender after the covering one only there); every payment runs through the one POS payment method, so the till's method is what tells cash from external at register close (Front desk, 2026-09-30) | svc:712, strategies.ts:95, svc:741; tested at recipe.e2e.ts:161-162 |
 | `amountMinor` | instruction | the payment's amount, capped at what the total still needs; `underpaid` when the sum is below the total | svc:397, svc:711-712 |
 | `tenderedMinor`, `changeMinor`, `reference` | informational | range-checked; stored as above | value-ranges.ts:57-58, svc:712, svc:741 |
 | **`customer`** | | | |
