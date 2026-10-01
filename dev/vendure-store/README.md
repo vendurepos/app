@@ -57,7 +57,7 @@ Pass the same variables to every script in a session.
 | Shop API | `http://127.0.0.1:3000/shop-api` |
 | Superadmin | `superadmin` / `superadmin` |
 | Token methods | `bearer`, `cookie`, `api-key` |
-| CORS origins | `localhost` and `127.0.0.1` on :8081 (Expo) and :8099 (web export) |
+| CORS origins | `localhost` and `127.0.0.1` on :8081 (Expo), :8099 (web export) and :8199 (`pnpm measure:sync`) |
 | Tax strategy | `OrderLevelTaxCalculationStrategy` |
 | POS commands | `POST /tally/v1/commands` (`TallyPosPlugin`; bearer token, `vendure-token`, `X-Tally-Protocol: 1`) |
 
