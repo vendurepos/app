@@ -62,7 +62,7 @@ Pass the same variables to every script in a session.
 | Shop API | `http://127.0.0.1:3000/shop-api` |
 | Superadmin | `superadmin` / `superadmin` |
 | Token methods | `bearer`, `cookie`, `api-key` |
-| CORS origins | `localhost` and `127.0.0.1` on :8081 (Expo) and :8099 (web export) |
+| CORS origins | `localhost` and `127.0.0.1` on :8081 (Expo), :8099 (web export) and :8199 (`pnpm measure:sync`) |
 | Tax strategy | `OrderLevelTaxCalculationStrategy` |
 | POS commands | `POST /tally/v1/commands` (`TallyPosPlugin`; bearer token, `vendure-token`, `X-Tally-Protocol: 1`) |
 
@@ -81,9 +81,8 @@ Channels (both EUR, prices tax-exclusive, default tax zone Germany):
 | Default | `__default_channel__` | `vendurepos-dev-default` |
 | POS | `pos` | `vendurepos-dev-pos` |
 
-The seed (`src/catalogue.ts`) is deterministic: every reset gives the same
-ids, prices, barcodes and stock. It is the small POS catalogue; the
-2,000-product sync seed is plan job VA2.
+The default seed (`src/catalogue.ts`) is deterministic: every reset gives the same
+ids, prices, barcodes and stock. It is the small POS catalogue used by e2e tests.
 
 - **Tax:** categories `Standard` (DE 19%, DK 25%) and `Reduced` (DE 7%; DK 25%, as
   Denmark has no reduced rate). Zones `Germany` (the default) and `Denmark`. The two
@@ -100,6 +99,24 @@ ids, prices, barcodes and stock. It is the small POS catalogue; the
   only `Shop floor`; the default channel sees both.
 - **Prices:** tax-exclusive, so `TALLY-MUG` is `price` 800 and
   `priceWithTax` 952 in the Germany zone.
+
+## Large seed
+
+`VENDURE_SEED=large` selects a generated, deterministic catalogue of 2,000 products
+and 5,595 variants, with EAN-13 barcodes, generated prices, tax categories and stock.
+The first product remains `TALLY-MUG`. From `dev/vendure-store/`:
+
+```bash
+export VENDURE_PORT=3300 VENDURE_DB_PORT=5520 COMPOSE_PROJECT_NAME=vendurepos-va2
+VENDURE_SEED=large ./reset.sh
+./start.sh
+VENDURE_SEED=large npm run --silent seed:check
+./stop.sh
+```
+
+To restore the default 10-product, 21-variant seed, run `./reset.sh` with
+`VENDURE_SEED` unset, then `./start.sh` and `npm run --silent seed:check`.
+The check reads POS channel counts from the Admin API and allows a 1% difference.
 
 ## Try it
 

@@ -9,6 +9,7 @@
     "test": "vitest run",
     "smoke:web": "bash scripts/smoke-web.sh",
     "e2e": "bash scripts/e2e.sh",
+    "measure:sync": "bash scripts/measure-sync.sh",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"

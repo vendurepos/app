@@ -27,10 +27,12 @@ export const DB_NAME = process.env.VENDURE_DB_NAME ?? 'vendure';
 export const SERVER_PORT = Number(process.env.VENDURE_PORT ?? 3000);
 // Override the Postgres port; port 5432 is used by the host Postgres.
 export const DB_PORT = Number(process.env.VENDURE_DB_PORT ?? 5442);
-// Expo dev server and e2e web export origins.
+// Expo dev server, e2e web export and measure:sync web export origins.
 export const CORS_ORIGINS = [
   'http://localhost:8081',
   'http://127.0.0.1:8081',
   'http://localhost:8099',
   'http://127.0.0.1:8099',
+  'http://localhost:8199',
+  'http://127.0.0.1:8199',
 ];

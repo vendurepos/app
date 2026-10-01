@@ -1,4 +1,6 @@
-import { Button, discountLabel, HStack, Text, VStack } from '@tallyui/components';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
+import { Button, discountLabel, HStack, injectPrintStyle, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { taxRowLabel } from './cart-totals';
 import { MoneyRow, TaxRows } from './sale-cart';
@@ -8,6 +10,8 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
   sale: ReturnType<typeof useSale>; store: string; cashier: string; registerId: string;
 }) {
   const format = useCurrencyFormatter();
+  // TallyUI's print style, as its Receipt: what carries print: 'hide' stays off the page, so the receipt prints alone.
+  useEffect(injectPrintStyle, []);
   if (sale.stage.kind !== 'receipt') return null;
   const { order } = sale.stage;
   const receipt = buildReceiptData(order, { storeName: store, cashier, register: registerId });
@@ -49,9 +53,17 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
           testID={`receipt-payment-${payment.method}`} />
       ))}
       <MoneyRow label="Change" amount={money(receipt.changeDueMinor)} testID="receipt-change" strong />
-      <Button testID="new-sale" className="mt-2" onPress={sale.newSale}>
-        <Text>New sale</Text>
-      </Button>
+      <HStack dataSet={{ print: 'hide' }} space="sm" className="mt-2">
+        {/* The browser's print dialog; native has no print path yet, so no button there. */}
+        {Platform.OS === 'web' ? (
+          <Button testID="receipt-print" variant="secondary" onPress={() => window.print()}>
+            <Text>Print receipt</Text>
+          </Button>
+        ) : null}
+        <Button testID="new-sale" className="flex-1" onPress={sale.newSale}>
+          <Text>New sale</Text>
+        </Button>
+      </HStack>
     </VStack>
   );
 }
