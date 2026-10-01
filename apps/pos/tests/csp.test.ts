@@ -15,9 +15,9 @@ describe('Content-Security-Policy meta', () => {
     expect(meta).not.toBeNull();
   });
 
-  // SQLite-wasm compiles only in its worker, whose CSP comes from its own response, so the page needs no 'wasm-unsafe-eval'.
-  it('allows same-origin script only: no inline, eval or wasm', () => {
-    expect(directives.get('script-src')).toEqual(["'self'"]);
+  // The hosting header carries this policy to the SQLite worker too, which must compile its wasm.
+  it('allows same-origin script and wasm compilation only: no inline or eval', () => {
+    expect(directives.get('script-src')).toEqual(["'self'", "'wasm-unsafe-eval'"]);
   });
 
   it('blocks plugins and <base>', () => {

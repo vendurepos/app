@@ -3,9 +3,9 @@ import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 
 // pnpm e2e (scripts/e2e.sh) serves the web export as its host will: index.html's CSP meta, plus the frame-ancestors a
-// meta cannot set, as a response header on the HTML document. Only there: a worker script takes the CSP of its own
-// response, and this policy's script-src (no 'wasm-unsafe-eval') stops the SQLite worker compiling its wasm. VA8's
-// hosting config must scope the header the same way.
+// meta cannot set, as a response header on every response. A dedicated worker takes its policy from its own script
+// response, not the page, so an HTML-only header would leave the SQLite worker with no policy at all; the policy's
+// 'wasm-unsafe-eval' (never 'unsafe-eval') is what lets that worker compile its wasm. VA8's hosting does the same.
 // Usage: node scripts/serve-web.ts <dist> <port>
 const dist = resolve(process.argv[2] ?? 'dist');
 const port = Number(process.argv[3] ?? 8099);
@@ -41,7 +41,7 @@ createServer((request, response) => {
   }
   response.writeHead(200, {
     'Cache-Control': 'no-store', 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream',
-    ...(extname(file) === '.html' ? { 'Content-Security-Policy': CSP } : {}),
+    'Content-Security-Policy': CSP,
   });
   createReadStream(file).pipe(response);
 }).listen(port, '127.0.0.1', () => console.log(`serve-web: ${dist} on http://127.0.0.1:${port}`));
