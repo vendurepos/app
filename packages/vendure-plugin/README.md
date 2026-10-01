@@ -37,25 +37,37 @@ register or sales figure; the till's Retry makes the sale that counts.
 
 ## Installation
 
-1. Add the plugin to your Vendure config:
+Follow the [quick-start](../../docs/QUICKSTART.md) for migration generation, bearer
+auth, CORS, tax strategy and a first sale. Once 0.1.0 is published, install it with
+`npm install @vendurepos/plugin@0.1.0`.
+
+1. Add the plugin to your Vendure config. If using the bundled migrations instead
+   of generating a migration for your store, register all three below; do not run
+   both approaches for the same schema changes:
 
    ```ts
-   import { TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000 } from '@vendurepos/plugin';
+   import {
+     TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
+   } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
      plugins: [TallyPosPlugin /* , … */],
      dbConnectionOptions: {
        type: 'postgres',
        synchronize: false,
-       migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000 /* , your own migrations */],
+       migrations: [
+         TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
+         /* your own migrations */
+       ],
        // …
      },
    };
    ```
 
-   The migration creates the `tally_command` ledger, the read-only `Order` and `OrderLine`
+   The migrations create the `tally_command` ledger, the read-only `Order` and `OrderLine`
    custom-field columns, the unique index on `tallyClientOrderId`, and plain indexes on
-   `tallyRegisterId` and `tallySessionId`. Run it with `runMigrations(config)` as usual.
+   `tallyRegisterId` and `tallySessionId`, recovery fields, and the register tables.
+   Run them with `runMigrations(config)` before starting Vendure.
 
 2. POS orders send no order-confirmation email. If you use `@vendure/email-plugin` (an
    optional peer dependency), install `tallyOrderConfirmationHandler` from the
