@@ -1,16 +1,13 @@
 # VendurePOS release runbook
 
 **Nothing in this runbook is run until the Front desk says so.** The Vercel tester
-deploy was done on 2026-10-01, on the Front desk's ruling; npm publication and
-custom-domain DNS remain pending.
+deploy was done on 2026-10-01, on the Front desk's ruling; custom-domain DNS remains pending;
+npm publication of the plugin follows the section below.
 
-## Plugin 0.1.0
+## Plugin releases
 
-1. Paul must `npm login` (password and 2FA) and create the **`@vendurepos` npm
-   organisation**. This machine's npm is logged out and the scope does not exist yet.
-2. Done in the release PR: `"private": true` removed and `LICENSE` added; the
-   version stays `0.1.0`.
-3. From `packages/vendure-plugin`, run:
+1. **0.1.0 (manual, once).** On `main`, an npm owner of the `vendurepos` org
+   publishes by hand from `packages/vendure-plugin`:
 
    ```sh
    npm ci
@@ -18,21 +15,35 @@ custom-domain DNS remain pending.
    npm pack --dry-run
    ```
 
-   Review the file list and tarball size: compiled `dist/` JavaScript and
-   declarations, the main and `./email` entries, all three migrations, README
-   and package metadata. Expect `LICENSE` in the list (npm ships it automatically);
-   the changelog stays in the repository.
-4. After approval and the release PR merge, publish from that same directory:
+   Review the file list: `dist/`, `LICENSE`, `README.md`, `package.json`, nothing else.
+   Then publish; npm asks for a 2FA one-time password (`--otp=<code>`), so this is Paul's:
 
    ```sh
    npm publish --access public
    ```
 
-5. Tag the released commit **`plugin-v0.1.0`** and push that tag as part of the
-   authorised release. Publish before directing testers to the install command
-   in the [quick-start](QUICKSTART.md).
+   Tag that commit `plugin-v0.1.0` and push the tag. The release workflow sees
+   0.1.0 already on npm and exits green without publishing.
+2. **Trusted publisher (once, after 0.1.0 exists on npm), on npmjs.com:**
+   `@vendurepos/plugin` → Settings → Trusted Publisher → GitHub Actions:
+   Organization or user `vendurepos`, Repository `app`, Workflow filename
+   `release-plugin.yml`, Environment left empty. Save. On the same Settings page,
+   under Publishing access, choose "Require two-factor authentication and disallow tokens"
+   so only the workflow (and 2FA humans) can publish. No `NPM_TOKEN` secret exists or is needed.
+3. **Every later release:** a PR bumps `version` in `packages/vendure-plugin/package.json`
+   and moves the `CHANGELOG.md` entry from unreleased to the version with its date.
+   After it merges, tag the merge commit on `main` and push the tag:
 
-<!-- Sources: packages/vendure-plugin/package.json; packages/vendure-plugin/src/index.ts; docs/PLAN.md (VA8). -->
+   ```sh
+   git tag plugin-vX.Y.Z <merge-commit-sha>
+   git push origin plugin-vX.Y.Z
+   ```
+
+   The `Release plugin` workflow checks the tag equals `plugin-v` + the package.json
+   version and that the commit is on `main`, then typechecks, builds and publishes
+   with provenance. A tag that fails either check fails the run and publishes nothing.
+
+<!-- Sources: .github/workflows/release-plugin.yml; packages/vendure-plugin/package.json. -->
 
 ## Vercel web app
 
