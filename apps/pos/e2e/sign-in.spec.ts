@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
 declare global {
-  interface Window { cspViolations: string[] }
+  interface Window { cspViolations: string[]; printCalls: number }
 }
 
 let cspConsole: string[] = [];
@@ -393,6 +393,46 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   await expectOnStore(second);
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
+});
+
+test('Print receipt prints the receipt alone through the browser', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('10.00');
+  await tender.getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  await expect(receipt.getByTestId('receipt-total')).toHaveText('€9.52');
+  // Playwright can't drive the OS print dialog: window.print becomes a recorder.
+  await page.evaluate(() => {
+    window.printCalls = 0;
+    window.print = () => { window.printCalls++; };
+  });
+  await receipt.getByTestId('receipt-print').click();
+  await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  // What the dialog would print: the receipt's lines and figures, and none of the till around them.
+  await page.emulateMedia({ media: 'print' });
+  await expect(receipt.getByText('1 × Tally Fixture Mug')).toBeVisible();
+  for (const id of ['receipt-subtotal', 'receipt-total', 'receipt-payment-cash', 'receipt-change']) {
+    await expect(receipt.getByTestId(id)).toBeVisible();
+  }
+  await expect(page.getByText('VendurePOS', { exact: true })).toBeHidden();
+  for (const id of ['signed-in-store', 'sign-out', 'pay-cash', 'pay-card', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
+    await expect(page.getByTestId(id)).toBeHidden();
+  }
+  // On screen, all of it is back (the Pay buttons went with the cart at the tender).
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.getByText('VendurePOS', { exact: true })).toBeVisible();
+  for (const id of ['signed-in-store', 'sign-out', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
+    await expect(page.getByTestId(id)).toBeVisible();
+  }
 });
 
 type SentCommand = { id: string; type: string; payload: Record<string, unknown> };

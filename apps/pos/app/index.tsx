@@ -131,8 +131,11 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   return (
     <VStack className="flex-1 bg-background">
-      <Stack.Screen options={{ title: 'VendurePOS' }} />
-      <HStack className="items-center justify-between border-b border-border px-4 py-2" space="sm">
+      {/* A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx). */}
+      <Stack.Screen options={{ title: 'VendurePOS', headerTitle: ({ children }) => (
+        <View dataSet={{ print: 'hide' }}><Text className="text-lg font-semibold">{children}</Text></View>
+      ) }} />
+      <HStack dataSet={{ print: 'hide' }} className="items-center justify-between border-b border-border px-4 py-2" space="sm">
         <Text testID="signed-in-store" className="flex-1 text-sm text-muted-foreground">Signed in to {session.url}</Text>
         {outbox.state.pending ? (
           <Text testID="orders-waiting" className="text-sm text-muted-foreground">
@@ -168,7 +171,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </Button>
       </HStack>
       {notice ? (
-        <HStack className="items-center border-b border-border px-4 py-2" space="sm">
+        <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
           <Text testID="orders-notice" className="flex-1 text-sm text-muted-foreground">{notice}</Text>
           {/* The outbox pauses a refused batch until the next flush; a new sale's flush sends it too. */}
           {outbox.state.refused && !outbox.state.authRequired ? (
@@ -180,7 +183,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </HStack>
       ) : null}
       {registerNotice ? (
-        <HStack className="items-center border-b border-border px-4 py-2" space="sm">
+        <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
           <Text testID="register-sync-notice" className="flex-1 text-sm text-muted-foreground">{registerNotice}</Text>
         </HStack>
       ) : null}
@@ -351,7 +354,7 @@ function Sale({
     <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
       {wide ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
-          <TabsList className="m-2 flex-row">
+          <TabsList dataSet={{ print: 'hide' }} className="m-2 flex-row">
             <TabsTrigger testID="tab-products" value="products" className="flex-1"><Text>Products</Text></TabsTrigger>
             <TabsTrigger testID="tab-cart" value="cart" className="flex-1">
               {highlight === 'tab' ? (
@@ -367,9 +370,9 @@ function Sale({
         <Portal name="scan-notice">
           <View className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-md border border-border bg-background px-4 py-2">{notice}</View>
         </Portal>
-      ) : notice ? <View className="border-b border-border px-4 py-2">{notice}</View> : null}
+      ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
-      <View className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
+      <View dataSet={{ print: 'hide' }} className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
         <Catalogue
           products={products}
           traits={connector.traits.product}
