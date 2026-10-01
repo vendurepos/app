@@ -37,7 +37,7 @@ register or sales figure; the till's Retry makes the sale that counts.
 
 ## Installation
 
-Follow the [quick-start](../../docs/QUICKSTART.md) for migration generation, bearer
+Follow the [quick-start](https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md) for migration generation, bearer
 auth, CORS, tax strategy and a first sale. Once 0.1.0 is published, install it with
 `npm install @vendurepos/plugin@0.1.0`.
 

@@ -1,28 +1,27 @@
 # VendurePOS release runbook
 
-**Nothing in this runbook is run until the Front desk says so.** This is release
-preparation, not evidence of a deployment, DNS change or npm publication.
+**Nothing in this runbook is run until the Front desk says so.** The Vercel tester
+deploy was done on 2026-10-01, on the Front desk's ruling; npm publication and
+custom-domain DNS remain pending.
 
 ## Plugin 0.1.0
 
-1. Obtain publish access to the **`@vendurepos` npm organisation**.
-2. In a release PR, remove `"private": true` from
-   `packages/vendure-plugin/package.json`; retain version `0.1.0` for this release.
-   It remains private in this preparation change.
+1. Paul must `npm login` (password and 2FA) and create the **`@vendurepos` npm
+   organisation**. This machine's npm is logged out and the scope does not exist yet.
+2. Done in the release PR: `"private": true` removed and `LICENSE` added; the
+   version stays `0.1.0`.
 3. From `packages/vendure-plugin`, run:
 
    ```sh
+   npm ci
    npm run build
    npm pack --dry-run
    ```
 
    Review the file list and tarball size: compiled `dist/` JavaScript and
    declarations, the main and `./email` entries, all three migrations, README
-   and package metadata. The current `files` list is `dist` and `README.md`; the
-   changelog stays in the repository. **There is no `LICENSE` file today**:
-   `package.json` declares MIT, so the release PR adds `LICENSE` (npm ships it
-   automatically). The dry run on 2026-10-01 listed 70 files, 72.0 kB packed and
-   277.7 kB unpacked, with no licence file.
+   and package metadata. Expect `LICENSE` in the list (npm ships it automatically);
+   the changelog stays in the repository.
 4. After approval and the release PR merge, publish from that same directory:
 
    ```sh
@@ -37,41 +36,37 @@ preparation, not evidence of a deployment, DNS change or npm publication.
 
 ## Vercel web app
 
-After Front desk approval, configure Git integration for **`vendurepos/app`**
-on the **WCPOS** team, project **`vendurepos`**, production branch **`main`**.
-Allow the build to include files outside the root directory for the pnpm workspace.
+The live tester alias is **`https://vendurepos.vercel.app`**, project `vendurepos`
+in Paul's personal Hobby scope (`paul-kilmurrays-projects`), not the WCPOS team.
+It can move to WCPOS later with a `vercel project` transfer. There is no custom
+domain; `app.vendurepos.com` and its DNS are Paul's, later. Per-deployment URLs
+(`vendurepos-<hash>-…vercel.app`) are protected; testers use the alias.
 
-| Setting | Value |
-| --- | --- |
-| Framework preset | Other (static Expo export) |
-| Root directory | `apps/pos` (the PLAN's `apps/expo` path is stale) |
-| Node.js | `22.x` |
-| Package manager | `pnpm@10.28.2` |
-| Install | `bash -o pipefail -c 'pnpm install --frozen-lockfile 2>&1 \| grep -vi accessToken'` |
-| Build | `bash -o pipefail -c 'pnpm --filter @vendurepos/pos build:web 2>&1 \| grep -vi accessToken'` |
-| Output directory | `dist` (relative to `apps/pos`) |
-| Domain | `app.vendurepos.com` |
+Vercel runs no build and has no `RXDB_PREMIUM` secret. From the repo root, build
+a static export locally and upload it as is:
 
-The underlying web export command is `pnpm --filter @vendurepos/pos build:web`.
-The wrappers preserve failures and filter licence-token output as CI does.
-There are no store-specific runtime environment variables: the store URL and
-credentials are entered at sign-in. **Build/install needs the `RXDB_PREMIUM`
-secret** used in CI to decrypt the licensed dependency; set it only for approved
-builds, never as an `EXPO_PUBLIC_` variable. Leave
-`VENDUREPOS_WEB_ALLOW_LAN_HTTP` unset: this hosted build is HTTPS-only and uses
-the unmodified meta CSP, not the LAN `http:` connect/image-source expansion.
-<!-- Sources: .github/workflows/ci.yml; pnpm-workspace.yaml; package.json; apps/pos/package.json; apps/pos/app.json; apps/pos/lib/sign-in.ts; apps/pos/scripts/csp-lan-http.ts. -->
+```sh
+~/.claude/bin/rxdb-premium-install.sh "$PWD"
+env -u RXDB_PREMIUM bash -o pipefail -c 'pnpm --filter @vendurepos/pos build:web 2>&1 | grep -vi accesstoken'
+cp apps/pos/vercel.json apps/pos/dist/vercel.json
+vercel link --yes --project vendurepos --scope paul-kilmurrays-projects --cwd apps/pos/dist
+vercel deploy --prod --yes --scope paul-kilmurrays-projects --cwd apps/pos/dist
+```
 
-Add the domain in the project's Domains settings, then create a **CNAME** record
-with name **`app`** in the **`vendurepos.com`** DNS zone. Use the exact target
-Vercel displays for that project/domain; obtain it at release time, rather than
-guessing a project-specific DNS target. Wait for domain verification and HTTPS.
+The install needs the licence; alternatively use an install with its output
+filtered through `grep -vi accesstoken`. Keep `RXDB_PREMIUM` unset for the build
+so it cannot be inlined. `vercel link` writes `.env.local` (a `VERCEL_OIDC_TOKEN`)
+and `.vercel/` in `dist`; Vercel's default ignore list excludes them from the
+upload. This was checked on the live alias: `/.env.local` returns the SPA's
+`index.html`. Delete `apps/pos/dist/.env.local` after deploying.
 
 `apps/pos/vercel.json` leaves `cleanUrls` disabled. Vercel serves existing files
 and rewrites unmatched paths to `/index.html`. Its `/(.*)` header rule applies
 the meta CSP plus `frame-ancestors 'none'` to every response, including the SQLite
 worker's own response, with `nosniff` and `strict-origin-when-cross-origin`.
 The worker needs `'wasm-unsafe-eval'` in that response policy to compile SQLite.
-After deployment, check the root, a deep SPA link and a worker asset for the CSP,
-then follow the [quick-start](QUICKSTART.md) against a tester's store to a sale.
+After deploying, verify `/`, a deep link and `/tallyui-sqlite-worker.js` return
+200 with the CSP header including `'wasm-unsafe-eval'`; `sqlite3.wasm` must be
+served as `application/wasm`. Then follow the [quick-start](QUICKSTART.md)
+against a tester's store to a sale.
 <!-- Sources: docs/PLAN.md §2 and VA8; apps/pos/vercel.json; apps/pos/public/index.html; apps/pos/scripts/serve-web.ts. -->
