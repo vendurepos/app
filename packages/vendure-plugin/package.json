@@ -1,7 +1,6 @@
 {
   "name": "@vendurepos/plugin",
   "version": "0.1.0",
-  "private": true,
   "description": "VendurePOS server plugin for Vendure: TallyUI's order.create command as one Postgres transaction per command (ADR 0002).",
   "license": "MIT",
   "main": "dist/index.js",
