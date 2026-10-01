@@ -3,13 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <!-- The session token lives in localStorage (medusapos ADR 0002), so no inline or eval'd script may run.
+         script-src allows 'wasm-unsafe-eval' (WebAssembly compilation only, never 'unsafe-eval') for SQLite-wasm.
          connect-src stays open to https: for any store, and to plain HTTP on loopback only
          (Chromium ignores http://[::1]:* as an invalid source, so it is left out).
          style-src needs 'unsafe-inline' for react-native-web's injected styles.
          frame-ancestors cannot be set by a meta tag; the hosting header adds it (VA8). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />

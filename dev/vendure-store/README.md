@@ -37,6 +37,11 @@ The server log is `.run/vendure.log`, the pid `.run/vendure.pid`.
 |---|---|---|
 | Vendure (Admin and Shop API) | `127.0.0.1:3000` | `VENDURE_PORT` |
 | Postgres | `127.0.0.1:5442` | `VENDURE_DB_PORT` |
+| Postgres database | `vendure` | `VENDURE_DB_NAME` |
+
+`pnpm e2e` (`scripts/e2e.sh`, plan VA6) runs a copy of this store in a temporary directory with the plugin
+`npm pack`ed and `npm install`ed from the tarball, on :3100 with the database `vendurepos_e2e` on :5501
+(compose project `vendurepos-e2e`), and removes all of it on exit.
 
 On the Mac mini, `~/Projects/vendure-dev` (a separate local store) holds
 :3000 today, so run this one on another port until the two are

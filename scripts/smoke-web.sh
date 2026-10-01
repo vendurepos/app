@@ -21,5 +21,6 @@ dev/vendure-store/start.sh
 pnpm --filter @vendurepos/pos build:web 2>&1 | { grep -vi accesstoken || [ $? = 1 ]; }
 (
   cd apps/pos
-  E2E_STORE_URL="http://127.0.0.1:$VENDURE_PORT" pnpm exec playwright test "$@"
+  # e2e/offline.spec.ts is pnpm e2e's (scripts/e2e.sh), on its own store.
+  E2E_STORE_URL="http://127.0.0.1:$VENDURE_PORT" pnpm exec playwright test e2e/sign-in.spec.ts "$@"
 )
