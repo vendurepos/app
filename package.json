@@ -8,6 +8,7 @@
     "build": "turbo build",
     "test": "vitest run",
     "smoke:web": "bash scripts/smoke-web.sh",
+    "measure:sync": "bash scripts/measure-sync.sh",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"

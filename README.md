@@ -74,6 +74,9 @@ it ends:
 pnpm smoke:web
 ```
 
+`pnpm measure:sync` times a till's initial sync of the 2,000-product seed on
+its own ports and tears it down; the numbers are in `docs/measurements.md`.
+
 ## License
 
 MIT
