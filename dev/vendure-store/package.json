@@ -8,6 +8,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "seed": "tsx src/seed.ts",
+    "seed:check": "tsx src/seed-check.ts",
     "smoke:check": "tsx src/smoke.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -7,9 +7,20 @@ import {
   StockLocationService, TaxCategoryService, TaxRateService, TransactionalConnection, User, ZoneService,
 } from '@vendure/core';
 import { importProductsFromCsv, populateInitialData } from '@vendure/core/cli';
-import { CATALOGUE, PRODUCT_COUNT, VARIANT_COUNT, barcodeOf } from './catalogue';
+import { In } from 'typeorm';
+import { CATALOGUE, barcodeOf } from './catalogue';
+import { largeCatalogue } from './catalogue-large';
 import { DEFAULT_CHANNEL_TOKEN, POS_CHANNEL_CODE, POS_CHANNEL_TOKEN, SUPERADMIN_USERNAME } from './constants';
 import { config } from './vendure-config';
+
+// Keep the curated catalogue unless the large seed is explicitly selected.
+const catalogue = process.env.VENDURE_SEED === 'large' ? largeCatalogue() : CATALOGUE;
+// Expected CSV import count for the selected catalogue.
+const PRODUCT_COUNT = catalogue.length;
+// Expected variant count for the selected catalogue.
+const VARIANT_COUNT = catalogue.reduce((count, product) => count + product.variants.length, 0);
+// Bound SKU lookup queries while preserving the per-variant stock updates.
+const VARIANT_BATCH_SIZE = 200;
 
 async function seed() {
   const { app } = await bootstrapWorker({
@@ -70,7 +81,7 @@ async function seed() {
     'price', 'taxCategory', 'stockOnHand', 'trackInventory', 'variantAssets', 'variantFacets', 'variant:barcode',
   ]];
   let variantIndex = 0;
-  for (const product of CATALOGUE) {
+  for (const product of catalogue) {
     product.variants.forEach((variant, i) => rows.push([
       i === 0 ? product.name : '', i === 0 ? product.slug : '',
       i === 0 ? `${product.name} (VendurePOS dev seed)` : '', '', '',
@@ -101,10 +112,12 @@ async function seed() {
   ctx = await adminCtx();
   const posCtx = await adminCtx(POS_CHANNEL_TOKEN);
   const products = app.get(ProductService);
-  const { items } = await products.findAll(ctx, { take: 100 });
-  await products.assignProductsToChannel(ctx, {
-    productIds: items.map(product => product.id), channelId: posChannel.id, priceFactor: 1,
-  });
+  for (let skip = 0; skip < PRODUCT_COUNT; skip += 100) {
+    const { items } = await products.findAll(ctx, { skip, take: 100 });
+    await products.assignProductsToChannel(ctx, {
+      productIds: items.map(product => product.id), channelId: posChannel.id, priceFactor: 1,
+    });
+  }
   const shopFloor = await locations.create(posCtx, {
     name: 'Shop floor', description: 'POS stock, VendurePOS dev seed',
   });
@@ -113,10 +126,15 @@ async function seed() {
       stockLocationIds: [shopFloor.id], channelId: posChannel.id,
     });
   }
-  for (const product of CATALOGUE) {
-    if (!product.trackInventory) continue;
-    for (const variant of product.variants) {
-      const entity = await connection.rawConnection.getRepository(ProductVariant).findOneByOrFail({ sku: variant.sku });
+  const tracked = catalogue.filter(product => product.trackInventory).flatMap(product => product.variants);
+  for (let offset = 0; offset < tracked.length; offset += VARIANT_BATCH_SIZE) {
+    const batch = tracked.slice(offset, offset + VARIANT_BATCH_SIZE);
+    const entities = await connection.rawConnection.getRepository(ProductVariant).findBy({
+      sku: In(batch.map(variant => variant.sku)),
+    });
+    const bySku = new Map(entities.map(entity => [entity.sku, entity]));
+    for (const variant of batch) {
+      const entity = bySku.get(variant.sku)!;
       await app.get(ProductVariantService).update(posCtx, [{
         id: entity.id, stockLevels: [{ stockLocationId: shopFloor.id, stockOnHand: variant.shopFloorStock }],
       }]);
