@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-01)
 
 - Accept `order.create` v1–v4 at `POST /tally/v1/commands`, with one Postgres
   transaction per command and durable idempotent replay. Record POS prices,

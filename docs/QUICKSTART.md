@@ -1,18 +1,18 @@
 # VendurePOS quick-start
 
-The hosted POS is live at `https://vendurepos.vercel.app`; the plugin install
-still waits for the npm publish.
+The hosted POS is live at `https://vendurepos.vercel.app`, and the plugin is
+published on npm as `@vendurepos/plugin`.
 Start with a working Vendure 3.6+ project backed by **Postgres** (3.7.3 is the
 tested version). Run store commands from that project's root.
 <!-- Sources: docs/RELEASE-RUNBOOK.md; packages/vendure-plugin/package.json; packages/vendure-plugin/README.md (Requirements). -->
 
-1. **Install the plugin.** This step waits for the 0.1.0 npm publish:
+1. **Install the plugin:**
 
    ```sh
    npm install @vendurepos/plugin@0.1.0
    ```
 
-   <!-- Sources: packages/vendure-plugin/package.json (name, version, peers); docs/RELEASE-RUNBOOK.md (publish gate). -->
+   <!-- Sources: packages/vendure-plugin/package.json (name, version, peers); npm registry (0.1.0 published 2026-10-01). -->
 
 2. **Add `TallyPosPlugin` to your existing Vendure config.** Keep your other
    plugins and settings. This plugin has no `.init()` options:
