@@ -131,3 +131,41 @@ jobs:
       - name: Vendure log on failure
         if: failure()
         run: tail -n 150 dev/vendure-store/.run/vendure.log || true
+
+  # Plan VA6/VA7, not a required check: the plugin packed and installed into a fresh store, then 25 sales, 20 offline.
+  # The web smoke's secret and artifact rules apply; scripts/e2e.sh prints the Vendure log on failure (its store is temporary).
+  offline-e2e:
+    name: Offline e2e
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Install (licence token filtered)
+        run: '{ pnpm install --frozen-lockfile; } 2>&1 | grep -vi accessToken'
+        shell: bash
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - name: Assert the pnpm store holds no decrypted rxdb-premium
+        shell: bash
+        run: |
+          index="$(pnpm store path)/index"
+          entries=$(grep -rl '"name":"rxdb-premium"' "$index" || true)
+          [ -n "$entries" ] || { echo "rxdb-premium is missing from the store index" >&2; exit 1; }
+          if grep -l '"sideEffects"' $entries; then
+            echo "the pnpm store holds rxdb-premium's post-install build" >&2
+            exit 1
+          fi
+      - name: Install Playwright Chromium
+        run: pnpm --filter @vendurepos/pos exec playwright install --with-deps chromium
+      # Filtered like the install: the web export's build can print the licence token.
+      - name: Offline e2e
+        run: '{ pnpm e2e; } 2>&1 | grep -vi accessToken'
+        shell: bash

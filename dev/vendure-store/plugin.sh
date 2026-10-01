@@ -5,6 +5,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# pnpm e2e (scripts/e2e.sh) installs the packed tarball itself, as a tester would; an npm ci here would replace it.
+if [ "${VENDURE_PLUGIN_PACKED:-}" = 1 ]; then
+  exit 0
+fi
+
 plugin=../../packages/vendure-plugin
 if [ ! -f "$plugin/dist/index.js" ] || [ -n "$(find "$plugin/src" "$plugin/package.json" "$plugin/tsconfig.json" \
     "$plugin/tsconfig.build.json" "$plugin/package-lock.json" -newer "$plugin/dist/index.js" -print -quit)" ]; then

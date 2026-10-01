@@ -6,14 +6,14 @@ services:
     environment:
       POSTGRES_USER: vendure
       POSTGRES_PASSWORD: vendure
-      POSTGRES_DB: vendure
+      POSTGRES_DB: ${VENDURE_DB_NAME:-vendure}
       TZ: UTC
       PGTZ: UTC
     ports: ["127.0.0.1:${VENDURE_DB_PORT:-5442}:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "vendure", "-d", "vendure"]
+      test: ["CMD", "pg_isready", "-U", "vendure", "-d", "${VENDURE_DB_NAME:-vendure}"]
       interval: 2s
       timeout: 5s
       retries: 30

@@ -19,7 +19,7 @@ fi
 
 ./plugin.sh
 docker compose up -d --wait postgres
-if [ -z "$(docker compose exec -T postgres psql -U vendure -d vendure -tAc "select to_regclass('public.channel')")" ]; then
+if [ -z "$(docker compose exec -T postgres psql -U vendure -d "${VENDURE_DB_NAME:-vendure}" -tAc "select to_regclass('public.channel')")" ]; then
   echo "vendure-store: database is empty; run ./reset.sh first" >&2
   exit 1
 fi

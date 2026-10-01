@@ -21,8 +21,8 @@ export const DB_HOST = '127.0.0.1';
 export const DB_USERNAME = 'vendure';
 // Local Postgres password.
 export const DB_PASSWORD = 'vendure';
-// Local Postgres database name.
-export const DB_NAME = 'vendure';
+// Local Postgres database name; pnpm e2e (scripts/e2e.sh) uses its own, vendurepos_e2e.
+export const DB_NAME = process.env.VENDURE_DB_NAME ?? 'vendure';
 // Override the API port when another local server occupies port 3000.
 export const SERVER_PORT = Number(process.env.VENDURE_PORT ?? 3000);
 // Override the Postgres port; port 5432 is used by the host Postgres.

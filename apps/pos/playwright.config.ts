@@ -15,7 +15,8 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
-  webServer: {
+  // pnpm e2e serves the export itself, with the CSP as a response header (scripts/serve-web.ts), and stops it.
+  webServer: process.env.E2E_WEB_SERVED ? undefined : {
     command: 'pnpm exec expo serve --port 8099',
     url: 'http://127.0.0.1:8099',
     reuseExistingServer: false,
