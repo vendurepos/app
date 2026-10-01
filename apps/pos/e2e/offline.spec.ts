@@ -69,8 +69,11 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
     return offline ? route.abort('internetdisconnected') : route.continue();
   });
   // The export is served as hosting will serve it: the CSP as a response header, frame-ancestors included.
+  // On every response, scripts included: a worker takes its policy from its own script response (Front desk VA8 ruling).
+  const script = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('.js'));
   const served = await page.goto('/');
   expect(served!.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
+  expect((await script).headers()['content-security-policy']).toContain("'wasm-unsafe-eval'");
   await page.getByTestId('sign-in-url').fill(STORE_URL);
   await page.getByTestId('sign-in-email').fill(USERNAME);
   await page.getByTestId('sign-in-password').fill(PASSWORD);
