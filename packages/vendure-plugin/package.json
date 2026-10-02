@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "description": "VendurePOS server plugin for Vendure: TallyUI's order.create command as one Postgres transaction per command (ADR 0002).",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vendurepos/app.git",
+    "directory": "packages/vendure-plugin"
+  },
+  "homepage": "https://github.com/vendurepos/app/tree/main/packages/vendure-plugin#readme",
+  "bugs": "https://github.com/vendurepos/app/issues",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -19,6 +26,9 @@
   "files": ["dist", "README.md"],
   "engines": {
     "node": "^20.19 || >=22.12"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
