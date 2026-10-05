@@ -4,6 +4,7 @@ import {
   Channel, Customer, Logger, PluginCommonModule, ProcessContext, RequestContextService, TransactionalConnection, VendurePlugin,
 } from '@vendure/core';
 import type { Middleware } from '@vendure/core';
+import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
 import { TallyInfoController } from './api/info.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
@@ -63,6 +64,7 @@ function commandsBodyParser(): Middleware['handler'] {
   controllers: [TallyInfoController, TallyCommandsController],
   providers: [OrderCreateService, RegisterService, StoreSetupService],
   exports: [OrderCreateService, RegisterService],
+  adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
   // run this on arrays that setConfig shares with the caller's config.
   configuration: config => {

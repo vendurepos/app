@@ -498,7 +498,8 @@ export class OrderCreateService {
 
   // Review 2: ids cross the wire in the configured EntityIdStrategy's encoding, as the Admin API
   // gives them. An id the strategy would not have issued decodes to undefined.
-  private decodeId(id: string): ID | undefined {
+  // Public for the Admin API resolver, which hands Vendure decoded ids to encode.
+  decodeId(id: string): ID | undefined {
     const strategy = this.idStrategy();
     let decoded: unknown;
     try {
