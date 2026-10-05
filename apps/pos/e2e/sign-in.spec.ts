@@ -52,6 +52,11 @@ async function openRegister(page: Page, float = '100.00') {
 }
 
 test('a normal build has no demo', async ({ page }) => {
+  // The host rewrites every path to index.html (apps/pos/vercel.json, scripts/serve-web.ts); CI's `expo serve` 404s
+  // deep links into this single-output export, so the test does the rewrite for /demo.
+  await page.route((url) => url.pathname === '/demo', async (route) => {
+    await route.fulfill({ response: await route.fetch({ url: new URL('/', route.request().url()).href }) });
+  });
   await page.goto('/demo');
   await expect(page).toHaveURL(/\/sign-in$/);
   await expect(page.getByTestId('sign-in-url')).toBeVisible();
