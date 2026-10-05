@@ -37,7 +37,7 @@ export function DemoBanner() {
     setResetting(true);
     await resetDemo({
       store: demoStore!, storage: localStorage, removeDatabases: removeLocalDatabases,
-      reload: () => window.location.reload(),
+      reload: () => window.location.assign('/demo'),
     }).catch((error: unknown) => {
       console.warn('Demo reset failed', error);
       setResetting(false);

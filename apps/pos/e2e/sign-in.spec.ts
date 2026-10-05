@@ -51,6 +51,16 @@ async function openRegister(page: Page, float = '100.00') {
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
 }
 
+test('a normal build has no demo', async ({ page }) => {
+  await page.goto('/demo');
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.getByTestId('sign-in-url')).toBeVisible();
+  await expect(page.getByTestId('sign-in-try-demo')).toHaveCount(0);
+  await expect(page.getByTestId('demo-banner')).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('wrong password shows an error', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in$/);

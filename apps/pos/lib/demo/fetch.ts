@@ -26,8 +26,10 @@ import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, type D
 
 // Reserved, non-resolving origin: a request missed by the wrapper cannot reach a live store.
 export const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
-// Public demo credentials, accepted only by the installed in-process store.
-export const DEMO_CREDENTIALS = { email: 'demo@vendurepos.com', password: 'demo' };
+// Public demo cashier, shown on /demo and accepted only by the installed in-process store.
+export const DEMO_CREDENTIALS = { email: 'cashier@demo.vendurepos.com', password: 'demo1234' };
+// The simulated store's display name on /demo.
+export const DEMO_STORE_NAME = 'VendurePOS demo store';
 // The demo's only channel is the shop floor, so sign-in needs no channel token.
 export const DEMO_CHANNEL_TOKEN = undefined;
 // Bearer token returned in Vendure's login response header.
