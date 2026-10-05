@@ -21,12 +21,23 @@ emitted; the resend is checked again. A plugin bug before that point is a stored
 
 **Needs an admin.** A sale whose stock take-back fails, or that a plugin bug stops part-way, is
 kept as far as it got and marked `needs_admin` in the `tally_command` ledger; it answers 409
-until an admin calls `OrderCreateService.resolveNeedsAdmin`. Either resolution takes the leftover
+until an admin resolves it through the Admin API. `tallyNeedsAdminCommands` lists the waiting sales;
+`tallyResolveNeedsAdmin(commandId, resolution: applied | rejected, note)` resolves one. Both need
+SuperAdmin; a rejection must be sent with the sale's channel token (`vendure-token`). Either resolution takes the leftover
 top-up back at the stock location recorded when it was made. Rejecting also cancels the POS
 payments and the order with Vendure's own cancellation, releases its client id (kept in
 `tallyRejectedClientOrderId`) and flags it `tallyRejected`; if a step fails, it is refused and
 changes nothing. **An order flagged `tallyRejected` counts as never placed**: leave it out of any
 register or sales figure; the till's Retry makes the sale that counts.
+
+```graphql
+mutation {
+  tallyResolveNeedsAdmin(commandId: "command-id", resolution: applied, note: "checked the till") {
+    id
+    status
+  }
+}
+```
 
 ## Requirements
 
