@@ -59,6 +59,10 @@ test('a normal build has no demo', async ({ page }) => {
   });
   await page.goto('/demo');
   await expect(page).toHaveURL(/\/sign-in$/);
+  // Headings in order (Lighthouse heading-order): the header's h1, then the card's h2, and nothing deeper.
+  await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Sign in to Vendure' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3 })).toHaveCount(0);
   await expect(page.getByTestId('sign-in-url')).toBeVisible();
   await expect(page.getByTestId('sign-in-try-demo')).toHaveCount(0);
   await expect(page.getByTestId('demo-banner')).toHaveCount(0);

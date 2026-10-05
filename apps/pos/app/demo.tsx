@@ -18,7 +18,7 @@ export default function DemoScreen() {
       <Head><title>VendurePOS demo: try the point of sale for Vendure</title></Head>
       <Card className="w-full max-w-[420px]">
         <CardHeader>
-          <CardTitle accessibilityRole="header">{DEMO_STORE_NAME}</CardTitle>
+          <CardTitle accessibilityRole="header" aria-level={2}>{DEMO_STORE_NAME}</CardTitle>
         </CardHeader>
         <CardContent>
           <VStack space="lg">

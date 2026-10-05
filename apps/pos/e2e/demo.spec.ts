@@ -56,6 +56,10 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
 
   // The public credentials and one click to sign in, then the 10 seeded products.
   await expect(page).toHaveURL(/\/demo$/);
+  // Headings in order (Lighthouse heading-order): the header's h1, then the card's h2, and nothing deeper.
+  await expect(page.getByRole('heading', { level: 1, name: 'Demo' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'VendurePOS demo store' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 3 })).toHaveCount(0);
   const credentials = page.getByTestId('demo-credentials');
   await expect(credentials).toContainText(`Store URL ${DEMO_STORE_ORIGIN}`);
   await expect(credentials).toContainText('Email cashier@demo.vendurepos.com');
