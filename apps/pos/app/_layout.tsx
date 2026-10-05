@@ -1,13 +1,18 @@
+// First: the demo build's simulated store must answer before the session loads or anything fetches.
+import '../lib/demo/install';
 import '../global.css';
 import { PortalHost } from '@tallyui/primitives';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { DemoBanner } from '../lib/demo/demo-banner';
+import { DEMO_MODE } from '../lib/demo/mode';
 import { SessionProvider } from '../lib/session-context';
 
 export default function RootLayout() {
   return (
     <SessionProvider>
       <StatusBar style="dark" />
+      {DEMO_MODE ? <DemoBanner /> : null}
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: '#fff' },
