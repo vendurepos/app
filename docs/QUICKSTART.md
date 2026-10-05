@@ -1,6 +1,7 @@
 # VendurePOS quick-start
 
-The hosted POS is live at `https://vendurepos.vercel.app`, and the plugin is
+The hosted POS is live at `https://app.vendurepos.com`.
+`https://vendurepos.vercel.app` serves the same build. The plugin is
 published on npm as `@vendurepos/plugin`.
 Start with a working Vendure 3.6+ project backed by **Postgres** (3.7.3 is the
 tested version). Run store commands from that project's root.
@@ -72,7 +73,7 @@ tested version). Run store commands from that project's root.
    and settings and has `CreateOrder`; the plugin routes require that permission.
    <!-- Sources: dev/vendure-store/src/vendure-config.ts; docs/DISCOVERY.md §2.5; docs/adr/0002-order-path-vendure-plugin.md §1; apps/pos/lib/sign-in.ts. -->
 
-5. **Allow the POS origin through CORS.** Add `https://vendurepos.vercel.app`
+5. **Allow the POS origin through CORS.** Add `https://app.vendurepos.com`
    to the scaffold's `CORS_ORIGINS` allowlist. Its production default allows no
    origins. Also allow the exact local POS origin for testing, for example
    `http://localhost:8081`. If configuring the object directly, merge this into
@@ -80,10 +81,13 @@ tested version). Run store commands from that project's root.
 
    ```ts
    cors: {
-     origin: ['https://vendurepos.vercel.app', 'http://localhost:8081'],
+     origin: ['https://app.vendurepos.com', 'http://localhost:8081'],
      credentials: true,
    },
    ```
+
+   A store that already allows `https://vendurepos.vercel.app` keeps it for as
+   long as anyone still opens the POS at that address.
 
    Use an object, so Vendure exposes `vendure-auth-token` for bearer sign-in.
    Origins contain no path; `localhost` and `127.0.0.1` are different origins.
@@ -130,8 +134,7 @@ tested version). Run store commands from that project's root.
    adding a channel so it receives this setup.
    <!-- Sources: packages/vendure-plugin/src/plugin.ts; packages/vendure-plugin/src/service/order-create.service.ts (setupState, stock allocation); docs/adr/0002-order-path-vendure-plugin.md §3 and Consequences 7. -->
 
-8. **Sign in and make a sale.** Open `https://vendurepos.vercel.app` (the custom
-   domain `https://app.vendurepos.com` will follow later). Enter the
+8. **Sign in and make a sale.** Open `https://app.vendurepos.com`. Enter the
    store URL (for example `https://store.example.com`; a trailing `/admin-api`
    is accepted), your administrator email and password. Enter the optional
    channel token to select a channel; leave it blank for the default channel.
