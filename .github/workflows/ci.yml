@@ -52,6 +52,7 @@ jobs:
           fi
       - run: pnpm typecheck
       - run: pnpm test
+      - run: bash scripts/check-web-bundle.test.sh
 
   # The Vendure plugin is standalone npm with its own lockfile; it needs no secrets.
   plugin:
@@ -169,6 +170,9 @@ jobs:
       - name: Offline e2e
         run: '{ pnpm e2e; } 2>&1 | grep -vi accessToken'
         shell: bash
+        # The bundle check compares the export with the licence token; it never prints it.
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
 
   # Plan VA9, not a required check: the demo build (EXPO_PUBLIC_VENDUREPOS_DEMO=1) with its CSP and e2e/demo.spec.ts, no Vendure store.
   # The web smoke's secret and artifact rules apply.
@@ -207,3 +211,6 @@ jobs:
       - name: Demo e2e
         run: '{ pnpm e2e:demo; } 2>&1 | grep -vi accessToken'
         shell: bash
+        # The bundle check compares the export with the licence token; it never prints it.
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}

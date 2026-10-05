@@ -51,6 +51,8 @@ tarballs=("$store"/vendurepos-plugin-*.tgz)
 # The export bundles rxdb-premium, whose build can print the licence token: filter the whole output.
 # pipefail keeps a failed build failing; grep's own "nothing left" (status 1) is not a failure.
 pnpm --filter @vendurepos/pos build:web 2>&1 | { grep -vi accesstoken || [ $? = 1 ]; }
+# The export is what a host publishes, so no secret may be in it (#82 item 8).
+bash scripts/check-web-bundle.sh apps/pos/dist
 node apps/pos/scripts/serve-web.ts apps/pos/dist "$WEB_PORT" &
 web_pid=$!
 for ((elapsed = 0; elapsed < 30; elapsed++)); do
