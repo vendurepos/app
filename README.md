@@ -3,32 +3,61 @@
 Open source, modular point of sale for [Vendure](https://vendure.io). Built on
 [TallyUI](https://github.com/TallyUI/tallyui).
 
-> **Status: pre-MVP.** The app signs in to a Vendure store and shows its
-> catalogue, synced to local SQLite (web first). It does not sell yet.
+> **Status: MVP.** A web till for your Vendure store that sells offline, with a
+> [demo to try in your browser](https://demo.vendurepos.com/demo).
 
-## What it will be
+## What it does
 
-A cashier opens the hosted POS, signs in to their own Vendure store and sells
-with the network off. When the network comes back, every order lands in
-Vendure exactly once, at the POS price, paid and fulfilled. It is the
-[MedusaPOS](https://github.com/medusapos/app) MVP again, on Vendure: the
-platform-neutral pieces live in TallyUI, and this repo holds the Vendure
-sign-in, store settings, wiring and server plugin.
+A web till signed in to the merchant's own Vendure 3.6+ store (3.7.3 tested),
+with the `@vendurepos/plugin` server plugin installed. The till:
+
+- Syncs the catalogue to local SQLite in the browser.
+- Sells with the network off. Each sale waits in a local outbox. When the
+  network returns, it lands in Vendure exactly once, at the POS price, paid
+  and fulfilled.
+- Takes line and order discounts.
+- Takes cash payments with change, or card payments on a separate terminal,
+  confirmed on the till.
+- Prints the receipt.
+- Runs a register day: open with a float, cash in and out, count, close, and
+  a printed Z report.
+- Shows sales the store refused under "needs attention", with a retry.
+- Reads barcode scans from a keyboard-wedge scanner.
+
+Try it: [demo](https://demo.vendurepos.com/demo) with a simulated store,
+everything in the browser and nothing to install, or the
+[hosted app for your own store](https://app.vendurepos.com).
 
 The plan is in [docs/PLAN.md](docs/PLAN.md), and what the POS needs from
 Vendure is in [docs/DISCOVERY.md](docs/DISCOVERY.md). Both are copies; the
 canonical versions live in TallyUI under `docs/vendure/`. Decisions for this
 repo are in [docs/adr/](docs/adr/).
 
+## Install on your store
+
+Install `@vendurepos/plugin` from npm. Follow [docs/QUICKSTART.md](docs/QUICKSTART.md)
+for plugin installation, migration, CORS origin, bearer token method and tax strategy.
+See the [plugin reference](packages/vendure-plugin/README.md).
+
 ## Structure
 
-- `apps/pos` — Expo Router app (iOS, Android, Web). It depends on the
-  published `@tallyui/*` 2.0.0 packages from npm, including
+- `apps/pos` — Expo Router app (web first). It depends on the published
+  `@tallyui/*` 3.0.0 packages from npm, pinned exactly, including
   `@tallyui/connector-vendure`.
+- `packages/vendure-plugin` — the Vendure plugin `@vendurepos/plugin`. It runs
+  TallyUI's `order.create` and register commands, one Postgres transaction per
+  command, with its own npm lockfile.
 - `dev/vendure-store` — the local Vendure 3.7.3 dev store (see its README).
 
-The Vendure plugin (`packages/vendure-plugin`) arrives with a later job in
-the plan.
+## Known limitations
+
+- One payment per sale, with no split tender yet.
+- Sales take stock from the channel's default stock location. The till cannot
+  pick a location (vendurepos/app#35).
+- One browser tab per till: a second tab is told to close the first.
+- Private browser windows that give a site no storage, such as Safari's,
+  can't run the till.
+- A register close over the variance threshold needs no manager approval yet.
 
 ## Getting started
 
@@ -62,7 +91,10 @@ pnpm test
 pnpm lint
 ```
 
-CI runs install, typecheck and test on every pull request.
+CI runs typecheck and unit tests, the plugin's typecheck and Postgres e2e,
+the web smoke, the offline e2e and the demo e2e. The offline e2e (`pnpm e2e`)
+packs the plugin into a fresh store, then runs 25 sales, 20 of them offline.
+The demo e2e (`pnpm e2e:demo`) runs the demo build with no backend.
 
 The web smoke resets and starts the dev store on port 3200, exports the web
 app, serves it on 127.0.0.1:8099, signs in through the UI in Playwright
