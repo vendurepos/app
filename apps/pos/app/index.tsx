@@ -27,6 +27,7 @@ import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-ids';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
@@ -133,6 +134,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     }
   }
 
+  const signOutLocked = signOutLockReason({ saving, savesInFlight: outbox.savesInFlight, closing: register.closing });
+
   // An order store that can't open would lose the next sale at tender, so replace the sale instead of showing it.
   if (storageFailure) return <StorageFailure {...storageFailure} />;
 
@@ -172,7 +175,10 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           </Button>
         ) : null}
         {/* A record() not yet settled would be lost with the sale, and a close with its Z; the outbox closes its store at unmount. */}
-        <Button testID="sign-out" variant="secondary" disabled={pending || saving || outbox.savesInFlight > 0 || register.closing}
+        {signOutLocked && !pending ? (
+          <Text testID="sign-out-locked" className="text-sm text-muted-foreground">{signOutLocked}</Text>
+        ) : null}
+        <Button testID="sign-out" variant="secondary" disabled={pending || !!signOutLocked}
           onPress={handleSignOut}>
           <Text>Sign out</Text>
         </Button>
