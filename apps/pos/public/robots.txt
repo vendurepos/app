@@ -1,0 +1,3 @@
+# VendurePOS web app: indexing allowed (the public demo at /demo is meant to be found).
+User-agent: *
+Allow: /
