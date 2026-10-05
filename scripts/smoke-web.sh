@@ -19,6 +19,8 @@ dev/vendure-store/start.sh
 # The export bundles rxdb-premium, whose build can print the licence token: filter the whole output.
 # pipefail keeps a failed build failing; grep's own "nothing left" (status 1) is not a failure.
 pnpm --filter @vendurepos/pos build:web 2>&1 | { grep -vi accesstoken || [ $? = 1 ]; }
+# The export is what a host publishes, so no secret may be in it (#82 item 8).
+bash scripts/check-web-bundle.sh apps/pos/dist
 (
   cd apps/pos
   # e2e/offline.spec.ts is pnpm e2e's (scripts/e2e.sh), on its own store.
