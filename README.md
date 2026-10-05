@@ -52,6 +52,7 @@ See the [plugin reference](packages/vendure-plugin/README.md).
 ## Known limitations
 
 - One payment per sale, with no split tender yet.
+- An open till picks up a price change made in Vendure within about a minute, and a stock change within about five minutes (the stock reconcile interval).
 - Sales take stock from the channel's default stock location. The till cannot
   pick a location (vendurepos/app#35).
 - One browser tab per till: a second tab is told to close the first.

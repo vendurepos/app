@@ -1160,3 +1160,61 @@ test.describe('on a narrow screen', () => {
     expect(cspConsole).toEqual([]);
   });
 });
+
+test('a price change made in Vendure reaches the open till without a reload', async ({ page }) => {
+  test.setTimeout(5 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  const tile = page.getByTestId('product-tile-Tally Fixture Mug');
+  await expect(tile).toBeVisible();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const response = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers,
+    data: { query: '{ productVariants(options: { filter: { sku: { eq: "TALLY-MUG" } } }) { items { id price } } }' },
+  });
+  expect(response.ok()).toBe(true);
+  const original = await response.json();
+  expect(original.errors).toBeUndefined();
+  expect(original.data.productVariants.items).toHaveLength(1);
+  const { id, price }: {
+    id: string; price: number;
+  } = original.data.productVariants.items[0];
+  // ProductPrice uses Intl currency formatting with the browser's runtime locale.
+  const [oldPrice, newPrice] = await page.evaluate((amount) => {
+    const formatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' });
+    return [formatter.format(amount / 100), formatter.format((amount + 100) / 100)];
+  }, price);
+  await expect(tile).toContainText(oldPrice);
+  // TallyUI's price reconcile does one pass 60 s after sync starts (lib/catalogue.ts PRICE_RECONCILE_START_DELAY_MS), then waits 24 h.
+  // Changing the price after that pass leaves the 60 s re-pull as the only path, which is what a later change in the day relies on.
+  await page.waitForTimeout(75_000);
+  const query = 'mutation ($input: [UpdateProductVariantInput!]!) { updateProductVariants(input: $input) { id price } }';
+  try {
+    const updated = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, price: price + 100 }] } },
+    });
+    expect(updated.ok()).toBe(true);
+    const result = await updated.json();
+    expect(result.errors).toBeUndefined();
+    expect(result.data.updateProductVariants).toEqual([{ id, price: price + 100 }]);
+    // The catalogue re-pulls every 60 s (lib/catalogue.ts RESYNC_INTERVAL_MS), so a price change shows within about a minute.
+    await expect(tile).toContainText(newPrice, { timeout: 150_000 });
+  } finally {
+    const restored = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, price }] } },
+    });
+    expect(restored.ok()).toBe(true);
+    const result = await restored.json();
+    expect(result.errors).toBeUndefined();
+    expect(result.data.updateProductVariants).toEqual([{ id, price }]);
+  }
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
