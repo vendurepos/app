@@ -502,13 +502,12 @@ vendurepos/app#53):
       v4).
     - This plugin advertises Vendure's configured strategy as `taxRounding`
       (see "`taxRounding`" below).
-    - `figures_mismatch` (TallyUI #281's shape) may ship once tills that
-      follow the strategy are released. It is its own PR, comparing
-      exactly: `subtotalMinor` and `taxMinor`, and `discountMinor` from v4
-      on. Only v4's net `discountMinor` is comparable, because
-      from v4 the surcharge's list price is the till's net discount; a v2/v3 gross discount on an
-      inclusive line is not. It is still compared only after
-      TallyUI/tallyui#287 (see TallyUI's `tax-rounding-strategy-info.md`).
+    - `figures_mismatch` (TallyUI #281's shape) ships for v4 commands only,
+      the 3.0.0 tills that follow the advertised strategy. It compares exactly:
+      `discountMinor` (v4's net discount ↔ −Σ `TALLY-DISCOUNT` surcharges) always;
+      `subtotalMinor` (↔ `subTotal − bridge`) and `taxMinor` (↔ `subTotalWithTax − subTotal`)
+      only under `per_line_items`, or `per_rate_group_items` with no inclusive line,
+      where the till itself keeps per-order figures until TallyUI #310.
     - A store advertising `{"granularity":"custom"}` never gets a subtotal
       or tax `figures_mismatch` from this server.
 - **v4** (TallyUI #286/#291) is v3 with the same fields, except that

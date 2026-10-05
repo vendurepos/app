@@ -13,6 +13,7 @@ import {
 } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
+import type { CommandWarning as CoreCommandWarning } from '../vendored/core-commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
@@ -26,6 +27,7 @@ import {
 import { StoreSetupService } from './store-setup.service';
 import { roundHalfAwayFromZero } from './rounding';
 import { strictShapeErrors } from './strict-shape';
+import { taxRoundingFor, type TaxRounding } from './tax-rounding';
 import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
@@ -36,8 +38,11 @@ export type TotalWarning =
 /** A customerId treated as absent (the fallback chain); the till ignores the code as unknown. */
 export type CustomerIgnored = { code: 'customer_ignored'; customerId: string; reason: 'unknown' };
 
+/** Core 3.0.0's figures warning (#38), vendored in core-commands.ts; the older commands.ts predates it. */
+export type FiguresMismatch = Extract<CoreCommandWarning, { code: 'figures_mismatch' }>;
+
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
-  & { warnings?: Array<CommandWarning | CustomerIgnored>; totalWarnings?: TotalWarning[] };
+  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch>; totalWarnings?: TotalWarning[] };
 
 /** Where a sale's stock top-up was made, kept on the ledger row for an admin's take-back. */
 export type TopUp = { variantId: string; stockLocationId: string; quantity: number };
@@ -148,6 +153,15 @@ export class OrderCreateService {
     private config: ConfigService,
     private storeSetup: StoreSetupService,
   ) {}
+
+  private get taxRounding(): TaxRounding {
+    const { taxOptions, entityOptions } = this.config;
+    return taxRoundingFor({
+      orderTax: taxOptions.orderTaxCalculationStrategy,
+      taxLine: taxOptions.taxLineCalculationStrategy,
+      money: entityOptions.moneyStrategy,
+    });
+  }
 
   /**
    * Runs one order.create command in its own transaction (ADR 0002 §2). Returns the command's
@@ -733,6 +747,24 @@ export class OrderCreateService {
         }
       }
     }
+    const figureWarnings: FiguresMismatch[] = [];
+    if ((command.version as number) >= 4) {
+      // #38, Front desk ruling 2026-09-30: compare v4 figures exactly under the till's rounding strategy.
+      // TallyUI #310: per-rate rounding with any inclusive line still keeps the till's per-order figures.
+      const fields: FiguresMismatch['fields'] = [];
+      const { granularity } = this.taxRounding;
+      const compareTax = granularity === 'per_line_items'
+        || (granularity === 'per_rate_group_items' && !payload.lines.some(line => line.taxInclusive ?? payload.pricesIncludeTax));
+      const serverFigures = {
+        subtotalMinor: order.subTotal - bridgeMinor, taxMinor: order.subTotalWithTax - order.subTotal,
+        discountMinor: -order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT').reduce((sum, surcharge) => sum + surcharge.price, 0),
+      };
+      for (const field of ['subtotalMinor', 'taxMinor', 'discountMinor'] as const) {
+        const tillMinor = payload[field] ?? 0, serverMinor = serverFigures[field];
+        if ((field === 'discountMinor' || compareTax) && tillMinor !== serverMinor) fields.push({ field, tillMinor, serverMinor });
+      }
+      if (fields.length) figureWarnings.push({ code: 'figures_mismatch', fields });
+    }
     await this.connection.getRepository(ctx, Order).save(order);
     await this.connection.getRepository(ctx, OrderLine).save(order.lines);
     await this.connection.getRepository(ctx, ShippingLine).save(order.shippingLines);
@@ -800,8 +832,8 @@ export class OrderCreateService {
         compensation = { error };
       }
     }
-    const warnings: Array<CommandWarning | CustomerIgnored> = [
-      ...stockWarnings, ...ignored,
+    const warnings: Array<CommandWarning | CustomerIgnored | FiguresMismatch> = [
+      ...stockWarnings, ...ignored, ...figureWarnings,
     ];
     const result: OrderCreateResult = {
       id: command.id, status: 'applied',
