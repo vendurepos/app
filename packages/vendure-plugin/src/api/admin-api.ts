@@ -53,7 +53,8 @@ export class TallyAdminResolver {
       const result = row.result as unknown as OrderCreateResult | null;
       return {
         id: row.id, clientOrderId: row.clientOrderId, channelId: row.channelId,
-        orderId: result?.serverRefs?.orderId ?? null, orderCode: result?.serverRefs?.displayId ?? null,
+        // Stored encoded (the commands API's serverRefs); the ID type encodes again, so decode first.
+        orderId: (result?.serverRefs?.orderId && this.orderCreate.decodeId(result.serverRefs.orderId)) ?? null, orderCode: result?.serverRefs?.displayId ?? null,
         createdAt: row.createdAt,
       };
     });
