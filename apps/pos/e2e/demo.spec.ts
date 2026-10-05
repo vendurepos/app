@@ -210,3 +210,14 @@ test('the demo export serves a sitemap, a robots.txt that names it, and share ta
   await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://demo.vendurepos.com/demo');
   await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
 });
+
+test('a storage start failure replaces the sale with its notice, a Reload button and the error to report', async ({ page }) => {
+  // No SQLite wasm: the worker's storage cannot start, so the order store's open fails (lib/storage-start-failure.ts).
+  await page.route('**/sqlite3.wasm', (route) => route.abort());
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expect(page.getByTestId('storage-failure')).toHaveText("Local storage didn't start. Reload this page.", { timeout: 30_000 });
+  await expect(page.getByTestId('storage-failure-reload')).toBeVisible();
+  await expect(page.getByTestId('storage-failure-detail')).toContainText('StorageWorkerStartError');
+  await expect(page.getByTestId('signed-in-store')).toHaveCount(0);
+});
