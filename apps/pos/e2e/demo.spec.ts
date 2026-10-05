@@ -193,3 +193,20 @@ test('the sign-in screen links to the demo', async ({ page }) => {
   expect(cspConsole).toEqual([]);
   expect(consoleErrors).toEqual([]);
 });
+
+test('the demo export serves a sitemap, a robots.txt that names it, and share tags with a canonical', async ({ page, request }) => {
+  const sitemap = await request.get('/sitemap.xml');
+  expect(sitemap.status()).toBe(200);
+  expect(sitemap.headers()['content-type']).toContain('xml');
+  const xml = await sitemap.text();
+  expect(xml).toContain('<loc>https://demo.vendurepos.com/</loc>');
+  expect(xml).toContain('<loc>https://demo.vendurepos.com/demo</loc>');
+  const robots = await request.get('/robots.txt');
+  expect(robots.headers()['content-type']).toContain('text/plain');
+  expect(await robots.text()).toContain('Sitemap: https://demo.vendurepos.com/sitemap.xml');
+  await page.goto('/demo');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://demo.vendurepos.com/demo');
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', 'https://vendurepos.com/opengraph-image');
+  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://demo.vendurepos.com/demo');
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
+});
