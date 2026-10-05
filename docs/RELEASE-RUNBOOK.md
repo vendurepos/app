@@ -47,37 +47,42 @@ npm publication of the plugin follows the section below.
 
 ## Vercel web app
 
-The live tester alias is **`https://vendurepos.vercel.app`**, project `vendurepos`
-in Paul's personal Hobby scope (`paul-kilmurrays-projects`), not the WCPOS team.
-It can move to WCPOS later with a `vercel project` transfer. There is no custom
-domain; `app.vendurepos.com` and its DNS are Paul's, later. Per-deployment URLs
-(`vendurepos-<hash>-…vercel.app`) are protected; testers use the alias.
+The production address is `https://app.vendurepos.com`. The alias
+`https://vendurepos.vercel.app` serves the same production deployment.
+Project `vendurepos` is in the WCPOS team (CLI scope `wcpos`) and is
+Git-linked to `vendurepos/app`.
 
-Vercel runs no build and has no `RXDB_PREMIUM` secret. From the repo root, build
-a static export locally and upload it as is:
+Vercel builds every push to `main` and nothing else. The ignored build step is
+`if [ "$VERCEL_GIT_COMMIT_REF" = "main" ]; then exit 1; else exit 0; fi`.
+On a PR, "Canceled by Ignored Build Step" is expected.
+The root directory is `apps/pos`, Node is `22.x`, and the output directory is
+`dist`. The install and build commands are:
 
 ```sh
-~/.claude/bin/rxdb-premium-install.sh "$PWD"
-env -u RXDB_PREMIUM bash -o pipefail -c 'pnpm --filter @vendurepos/pos build:web 2>&1 | grep -vi accesstoken'
-cp apps/pos/vercel.json apps/pos/dist/vercel.json
-vercel link --yes --project vendurepos --scope paul-kilmurrays-projects --cwd apps/pos/dist
-vercel deploy --prod --yes --scope paul-kilmurrays-projects --cwd apps/pos/dist
+bash -o pipefail -c 'pnpm install --frozen-lockfile 2>&1 | grep -vi accesstoken'
+bash -o pipefail -c 'pnpm build:web 2>&1 | grep -vi accesstoken'
 ```
 
-The install needs the licence; alternatively use an install with its output
-filtered through `grep -vi accesstoken`. Keep `RXDB_PREMIUM` unset for the build
-so it cannot be inlined. `vercel link` writes `.env.local` (a `VERCEL_OIDC_TOKEN`)
-and `.vercel/` in `dist`; Vercel's default ignore list excludes them from the
-upload. This was checked on the live alias: `/.env.local` returns the SPA's
-`index.html`. Delete `apps/pos/dist/.env.local` after deploying.
+Both commands filter `accesstoken` because rxdb-premium's install and build can
+print the licence token. `RXDB_PREMIUM` is a sensitive project variable that
+supplies the licence the install needs. It never goes in a repo file.
+The project also sets `ENABLE_EXPERIMENTAL_COREPACK`.
+
+Read deploy state with `vercel ls vendurepos --scope wcpos --prod`.
+
+The future demo site at `demo.vendurepos.com` (VA9) will use a separate Vercel
+project. It must build with `pnpm build:web:demo`. That script in
+`apps/pos/package.json` gives Metro its own `TMPDIR`, because Metro's shared
+transform cache is not keyed by `EXPO_PUBLIC_VENDUREPOS_DEMO`. A normal build
+could otherwise come out as the demo.
 
 `apps/pos/vercel.json` leaves `cleanUrls` disabled. Vercel serves existing files
 and rewrites unmatched paths to `/index.html`. Its `/(.*)` header rule applies
 the meta CSP plus `frame-ancestors 'none'` to every response, including the SQLite
 worker's own response, with `nosniff` and `strict-origin-when-cross-origin`.
 The worker needs `'wasm-unsafe-eval'` in that response policy to compile SQLite.
-After deploying, verify `/`, a deep link and `/tallyui-sqlite-worker.js` return
+After a production deploy, verify `/`, a deep link and `/tallyui-sqlite-worker.js` return
 200 with the CSP header including `'wasm-unsafe-eval'`; `sqlite3.wasm` must be
 served as `application/wasm`. Then follow the [quick-start](QUICKSTART.md)
 against a tester's store to a sale.
-<!-- Sources: docs/PLAN.md §2 and VA8; apps/pos/vercel.json; apps/pos/public/index.html; apps/pos/scripts/serve-web.ts. -->
+<!-- Sources: docs/PLAN.md §2 and VA8; apps/pos/vercel.json; apps/pos/public/index.html; apps/pos/scripts/serve-web.ts; the Vercel project settings (vercel api /v9/projects/vendurepos). -->
