@@ -51,6 +51,21 @@ async function openRegister(page: Page, float = '100.00') {
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
 }
 
+test('a normal build has no demo', async ({ page }) => {
+  // The host rewrites every path to index.html (apps/pos/vercel.json, scripts/serve-web.ts); CI's `expo serve` 404s
+  // deep links into this single-output export, so the test does the rewrite for /demo.
+  await page.route((url) => url.pathname === '/demo', async (route) => {
+    await route.fulfill({ response: await route.fetch({ url: new URL('/', route.request().url()).href }) });
+  });
+  await page.goto('/demo');
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.getByTestId('sign-in-url')).toBeVisible();
+  await expect(page.getByTestId('sign-in-try-demo')).toHaveCount(0);
+  await expect(page.getByTestId('demo-banner')).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('wrong password shows an error', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in$/);

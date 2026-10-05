@@ -69,6 +69,13 @@ async function mugStock(session: Session) {
   throw new Error('Mug missing from stock query');
 }
 
+it('signs in the public demo cashier and rejects the old demo credentials', async () => {
+  expect(await signIn({ url: DEMO_STORE_ORIGIN, email: 'cashier@demo.vendurepos.com', password: 'demo1234' }))
+    .toMatchObject({ ok: true, session: { email: 'cashier@demo.vendurepos.com' } });
+  expect(await signIn({ url: DEMO_STORE_ORIGIN, email: 'demo@vendurepos.com', password: 'demo' }))
+    .toEqual({ ok: false, error: 'Email or password is incorrect.' });
+});
+
 it('signs in through the app, checks the barcode field and reads the seeded tax settings', async () => {
   const session = await signedIn();
   expect(session.token).toBeTruthy();

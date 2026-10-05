@@ -15,6 +15,7 @@ import { Portal } from '@tallyui/primitives';
 import { cartTabLabel } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
+import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
 import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
@@ -44,7 +45,7 @@ const CART_HIGHLIGHT_MS = 600;
 
 export default function HomeScreen() {
   const { session, signOut } = useSession();
-  if (!session) return <Redirect href="/sign-in" />;
+  if (!session) return <Redirect href={DEMO_MODE ? '/demo' : '/sign-in'} />;
   return <SignedInCatalogue session={session} signOut={signOut} />;
 }
 

@@ -2,6 +2,9 @@ import { expect, test, type Page } from '@playwright/test';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 
+// lib/demo/fetch.ts's DEMO_STORE_ORIGIN, copied because fetch.ts imports a value from @tallyui/core, which Playwright's CommonJS loader cannot require.
+const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
+
 // The demo build (VA9), run by pnpm e2e:demo (scripts/e2e-demo.sh) against the demo export on :8098, with no Vendure
 // store running: the simulated store answers in the page (lib/demo/install.ts).
 
@@ -34,12 +37,14 @@ async function orderEntries(page: Page) {
   return entries;
 }
 
-test('the demo signs itself in, sells, runs a register day, keeps it over a reload and resets, all in the page', async ({ page }) => {
+test('the demo signs in with one click, sells, runs a register day, keeps it over a reload and resets, all in the page', async ({ page }) => {
   test.setTimeout(3 * 60_000);
   const requests: string[] = [];
   page.on('request', (request) => requests.push(request.url()));
   const cspConsole: string[] = [];
+  const consoleErrors: string[] = [];
   page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
     if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
   });
 
@@ -49,7 +54,13 @@ test('the demo signs itself in, sells, runs a register day, keeps it over a relo
   const origin = new URL(page.url()).origin;
   expect((await script).headers()['content-security-policy']).toContain("'wasm-unsafe-eval'");
 
-  // Signed in with no typing, and the 10 seeded products.
+  // The public credentials and one click to sign in, then the 10 seeded products.
+  await expect(page).toHaveURL(/\/demo$/);
+  const credentials = page.getByTestId('demo-credentials');
+  await expect(credentials).toContainText(`Store URL ${DEMO_STORE_ORIGIN}`);
+  await expect(credentials).toContainText('Email cashier@demo.vendurepos.com');
+  await expect(credentials).toContainText('Password demo1234');
+  await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   expect(await page.getByTestId('sign-in-email').count()).toBe(0);
   for (const { name } of CATALOGUE) await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
@@ -115,8 +126,12 @@ test('the demo signs itself in, sells, runs a register day, keeps it over a relo
   await expect(page.getByTestId('open-register-card')).toBeVisible();
   await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
 
-  // Reset demo: a fresh visit, signed in again by itself, with no orders, the register closed and the seed's stock.
+  // Reset demo: a fresh visit, then one click, with no orders, the register closed and the seed's stock.
   await Promise.all([page.waitForEvent('load'), page.getByTestId('demo-reset').click()]);
+  await expect(page).toHaveURL(/\/demo$/);
+  await expect(page.getByTestId('signed-in-store')).toHaveCount(0);
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+  await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   expect(await demoState(page)).toBeNull();
   expect(await mugStock(page)).toBe(MUG_SEED_STOCK);
@@ -129,4 +144,48 @@ test('the demo signs itself in, sells, runs a register day, keeps it over a relo
   expect(requests.length).toBeGreaterThan(0);
   expect(requests.filter((url) => new URL(url).origin !== origin)).toEqual([]);
   expect(cspConsole).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
+test('one click from a fresh visit at phone width', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(request.url()));
+  const cspConsole: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/demo');
+  const origin = new URL(page.url()).origin;
+  await expect(page.getByTestId('demo-enter')).toBeInViewport();
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  expect(requests.length).toBeGreaterThan(0);
+  expect(requests.filter((url) => new URL(url).origin !== origin)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
+test('the sign-in screen links to the demo', async ({ page }) => {
+  const cspConsole: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  await page.goto('/sign-in');
+  await expect(page.getByTestId('sign-in-email')).toBeVisible();
+  await expect(page.getByTestId('sign-in-try-demo')).toBeVisible();
+  await page.getByTestId('sign-in-try-demo').click();
+  await expect(page).toHaveURL(/\/demo$/);
+  await page.goto('/sign-in');
+  await page.getByTestId('sign-in-url').fill(DEMO_STORE_ORIGIN);
+  await page.getByTestId('sign-in-email').fill('cashier@demo.vendurepos.com');
+  await page.getByTestId('sign-in-password').fill('demo1234');
+  await page.getByTestId('sign-in-submit').click();
+  await expectSignedIn(page);
+  expect(cspConsole).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
