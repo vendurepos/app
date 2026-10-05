@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { withStockOverlay, type TallyConnector } from '@tallyui/core';
 import { getStorageHealth } from '@tallyui/database';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
-import { isStorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
 import type { Session } from './session';
+import { storageStartMessage } from './storage-start-failure';
 
 // A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
 export const SESSION_ENDED_TEXT = 'Your session has ended. Sign out, then sign in again.';
@@ -94,9 +94,7 @@ export function useCatalogue(session: Session): {
       }));
     }).catch((error) => {
       if (cancelled || dead) return;
-      setError(isStorageWorkerStartError(error)
-        ? 'VendurePOS is open in another tab. Close it, then reload this page.'
-        : error.message ?? String(error));
+      setError(storageStartMessage(error) ?? error.message ?? String(error));
     });
     return () => {
       cancelled = true;

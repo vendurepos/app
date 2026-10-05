@@ -27,6 +27,7 @@ import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-ids';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
@@ -62,10 +63,12 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // ready (before the outbox opens) and by a refresh that reads them, never cleared by a failed one.
   const capabilities = useRef<ServerCapabilities | undefined>(undefined);
   useEffect(() => { if (saleSettings.status === 'ready') capabilities.current = saleSettings.capabilities; }, [saleSettings]);
+  const [storageFailure, setStorageFailure] = useState<{ message: string; detail: string } | null>(null);
   // Here rather than in the sale, so orders keep sending while the sale shows a notice.
   const outbox = useOrderOutbox({
     storeKey: outboxStoreKey(session, saleSettings), open: (name) => openOrderStore(name, Platform.OS), transport: () => orderTransport(session),
     deviceId: registerId,
+    onOpenError: (error) => setStorageFailure({ message: orderStoreFailureMessage(error), detail: errorDetail(error) }),
     getMaxOrderCreateVersion: () => capabilities.current?.orderCreate,
     refreshCapabilities: async () => {
       // Timed out like the sale's own read, so a hung /info can't hold the outbox's send.
@@ -129,6 +132,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       window.location.reload();
     }
   }
+
+  // An order store that can't open would lose the next sale at tender, so replace the sale instead of showing it.
+  if (storageFailure) return <StorageFailure {...storageFailure} />;
 
   return (
     <VStack className="flex-1 bg-background">
@@ -243,6 +249,18 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           ) : null}
         </>
       ) : null}
+    </VStack>
+  );
+}
+
+function StorageFailure({ message, detail }: { message: string; detail: string }) {
+  return (
+    <VStack className="flex-1 items-center justify-center bg-background p-6" space="md">
+      <Text testID="storage-failure" accessibilityRole="alert">{message}</Text>
+      {Platform.OS === 'web' ? (
+        <Button testID="storage-failure-reload" onPress={() => window.location.reload()}><Text>Reload</Text></Button>
+      ) : null}
+      <Text testID="storage-failure-detail" selectable className="text-sm text-muted-foreground">{detail}</Text>
     </VStack>
   );
 }
