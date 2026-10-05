@@ -1,5 +1,6 @@
 {
   "name": "vendurepos-dev-store",
+  "license": "MIT",
   "private": true,
   "description": "Vendure dev store for VendurePOS development and tests. Runs on this machine only.",
   "engines": {
