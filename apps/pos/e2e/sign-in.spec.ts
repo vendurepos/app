@@ -67,6 +67,8 @@ test('a normal build has no demo', async ({ page }) => {
   await expect(page.getByTestId('sign-in-try-demo')).toHaveCount(0);
   await expect(page.getByTestId('demo-banner')).toHaveCount(0);
   expect(await cspViolations(page)).toEqual([]);
+  // The demo's share tags and canonical are the demo build's alone (scripts/demo-share.ts).
+  await expect(page.locator('meta[property^="og:"], meta[name^="twitter:"], link[rel="canonical"]')).toHaveCount(0);
   expect(cspConsole).toEqual([]);
 });
 
