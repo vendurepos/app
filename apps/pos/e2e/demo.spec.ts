@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { CATALOGUE } from '../lib/demo/catalogue';
-import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
+
+// lib/demo/fetch.ts's DEMO_STORE_ORIGIN, copied because fetch.ts imports a value from @tallyui/core, which Playwright's CommonJS loader cannot require.
+const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
 
 // The demo build (VA9), run by pnpm e2e:demo (scripts/e2e-demo.sh) against the demo export on :8098, with no Vendure
 // store running: the simulated store answers in the page (lib/demo/install.ts).
