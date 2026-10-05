@@ -26,7 +26,7 @@ export default function SignInScreen() {
       <Stack.Screen options={{ title: 'Sign in' }} />
       <Card className="w-full max-w-[420px]">
         <CardHeader>
-          <CardTitle>Sign in to Vendure</CardTitle>
+          <CardTitle aria-level={2}>Sign in to Vendure</CardTitle>
         </CardHeader>
         <CardContent>
           <VStack space="lg">
