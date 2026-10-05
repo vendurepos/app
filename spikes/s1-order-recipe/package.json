@@ -1,5 +1,6 @@
 {
   "name": "vendurepos-s1-order-recipe",
+  "license": "MIT",
   "private": true,
   "description": "TEMPORARY spike S1: proves ADR 0002's order recipe on Vendure 3.7.3 + Postgres. Evidence, not product code.",
   "engines": {
