@@ -1,4 +1,5 @@
 import { Redirect, Stack } from 'expo-router';
+import Head from 'expo-router/head';
 import { Button, Card, CardContent, CardHeader, CardTitle, Text, VStack } from '@tallyui/components';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_NAME, DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
@@ -14,6 +15,7 @@ export default function DemoScreen() {
   return (
     <VStack className="flex-1 items-center justify-center bg-background p-6">
       <Stack.Screen options={{ title: 'Demo' }} />
+      <Head><title>VendurePOS demo: try the point of sale for Vendure</title></Head>
       <Card className="w-full max-w-[420px]">
         <CardHeader>
           <CardTitle accessibilityRole="header">{DEMO_STORE_NAME}</CardTitle>
