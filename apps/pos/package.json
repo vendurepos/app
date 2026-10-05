@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "expo start",
     "build:web": "tallyui-build-sqlite-worker public/ && expo export --platform web && node scripts/csp-lan-http.ts dist",
+    "build:web:demo": "mkdir -p node_modules/.cache/demo-build && TMPDIR=\"$PWD/node_modules/.cache/demo-build\" EXPO_PUBLIC_VENDUREPOS_DEMO=1 pnpm run build:web",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

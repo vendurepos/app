@@ -5,8 +5,10 @@ const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 8099);
 
 export default defineConfig({
   testDir: 'e2e',
+  // The demo build's spec runs alone, against the demo export (scripts/e2e-demo.sh); never against a normal build.
+  testMatch: process.env.E2E_DEMO ? ['**/demo.spec.ts'] : undefined,
   // The initial-sync measurement is not a test: only scripts/measure-sync.sh runs it.
-  testIgnore: process.env.MEASURE_SYNC ? [] : ['**/measure-sync.spec.ts'],
+  testIgnore: process.env.E2E_DEMO ? [] : process.env.MEASURE_SYNC ? ['**/demo.spec.ts'] : ['**/measure-sync.spec.ts', '**/demo.spec.ts'],
   workers: 1,
   retries: 0,
   timeout: 60_000,
