@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { useEffect } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { saveScannerMinLength, SCANNER_MIN_LENGTH_KEY } from './scanner-settings';
+import { defaultStore } from './session';
 import { useWedgeScanner, WEDGE_KEY_GAP_MS, WEDGE_MIN_LENGTH } from './use-wedge-scanner';
 
 // The hook runs outside a component here: its effects run at once, and each one's cleanup is kept for unmount().
@@ -88,6 +90,18 @@ it('leaves keys typed into an input to the input, however fast: 12 then Enter in
 it('leaves a fast burst shorter than the minimum alone', () => {
   type(CODE.slice(0, WEDGE_MIN_LENGTH - 1), WEDGE_GAP_MS);
   expect(onScan).not.toHaveBeenCalled();
+});
+
+it("reads the till's shortest scan at each Enter: with 5 stored, a fast 5-key burst is a scan", () => {
+  type('12345', WEDGE_GAP_MS);
+  expect(onScan).not.toHaveBeenCalled();
+  expect(saveScannerMinLength(5)).toBe(true);
+  try {
+    type('12345', WEDGE_GAP_MS);
+    expect(onScan.mock.calls).toEqual([['12345']]);
+  } finally {
+    defaultStore().removeItem(SCANNER_MIN_LENGTH_KEY);
+  }
 });
 
 it('stops listening once unmounted', () => {

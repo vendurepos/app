@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { loadScannerMinLength } from './scanner-settings';
 
 // The heuristic is WCPOS v2's (monorepo packages/core/src/screens/main/hooks/barcodes/use-barcode-detection.ts and the
 // @wcpos/scanner wedge detector it drives), with its scanner registration's stricter burst rule
@@ -26,7 +27,8 @@ function setValue(input: HTMLInputElement, value: string) {
 
 /**
  * Calls `onScan(code)` for a keyboard-wedge scan wherever the focus is: a burst of scanner-fast printable keys at least
- * WEDGE_MIN_LENGTH long, ended by a scanner-fast Enter. The scan's Enter goes no further, so it never presses a focused
+ * as long as the till's scanner setting (WEDGE_MIN_LENGTH by default), ended by a scanner-fast Enter.
+ * The scan's Enter goes no further, so it never presses a focused
  * button. As in WCPOS, a key typed into a text input, textarea or contenteditable belongs to the typist whatever its
  * speed, and drops any burst begun outside it: a field handles its own Enter (the catalogue's search looks the code up).
  * A money field is the exception (Front desk, 2026-09-30: a barcode in an amount is a money error): a burst into it is
@@ -77,7 +79,7 @@ export function useWedgeScanner(onScan: (code: string) => void) {
         burst = '';
         // A burst part flushed into the field anyway is typing to its end, Enter included: a scan can't restore the
         // amount, as a restore never undoes the onChangeText the flush reached, so the field shows what happened.
-        if (!fast || code.length < WEDGE_MIN_LENGTH || flushed) {
+        if (!fast || code.length < loadScannerMinLength() || flushed) {
           flush();
           return;
         }

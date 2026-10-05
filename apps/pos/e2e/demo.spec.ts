@@ -221,3 +221,23 @@ test('a storage start failure replaces the sale with its notice, a Reload button
   await expect(page.getByTestId('storage-failure-detail')).toContainText('StorageWorkerStartError');
   await expect(page.getByTestId('signed-in-store')).toHaveCount(0);
 });
+
+test("Settings keeps the scanner's shortest code for this till", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await page.getByTestId('settings-open').click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByTestId('scanner-min-length')).toHaveValue('8');
+  await page.getByTestId('scanner-min-length').fill('3');
+  await page.getByTestId('settings-save').click();
+  await expect(page.getByTestId('settings-error')).toBeVisible();
+  await page.getByTestId('scanner-min-length').fill('5');
+  await page.getByTestId('settings-save').click();
+  await expect(page.getByTestId('settings-saved')).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('scanner-min-length')).toHaveValue('5');
+  await expect(page.getByTestId('settings-barcode-field')).toContainText('Barcode custom field:');
+  await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+});

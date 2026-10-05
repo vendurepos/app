@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
-import { Redirect, Stack } from 'expo-router';
+import { Link, Redirect, Stack } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
@@ -174,6 +174,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text>Register</Text>
           </Button>
         ) : null}
+        <Link href="/settings" testID="settings-open" className="rounded-md bg-secondary px-4 py-2">
+          <Text className="text-secondary-foreground">Settings</Text>
+        </Link>
         {/* A record() not yet settled would be lost with the sale, and a close with its Z; the outbox closes its store at unmount. */}
         {signOutLocked && !pending ? (
           <Text testID="sign-out-locked" className="text-sm text-muted-foreground">{signOutLocked}</Text>
