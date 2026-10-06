@@ -42,7 +42,7 @@ See the [plugin reference](packages/vendure-plugin/README.md).
 ## Structure
 
 - `apps/pos` — Expo Router app (web first). It depends on the published
-  `@tallyui/*` 3.2.0 packages from npm, pinned exactly, including
+  `@tallyui/*` 3.2.1 packages from npm, pinned exactly, including
   `@tallyui/connector-vendure`.
 - `packages/vendure-plugin` — the Vendure plugin `@vendurepos/plugin`. It runs
   TallyUI's `order.create` and register commands, one Postgres transaction per
@@ -83,6 +83,8 @@ http on the same LAN as the store. That LAN build needs
 `VENDUREPOS_WEB_ALLOW_LAN_HTTP=1` at build time, which adds `http:` to the
 CSP's `connect-src` and `img-src`, since product images come from the same
 store. It is off by default.
+
+No public source maps on any site that bundles RxDB Premium (its licence forbids redistributing the source); `scripts/check-web-bundle.sh` fails the build if a `.map` is emitted.
 
 ## Checks
 

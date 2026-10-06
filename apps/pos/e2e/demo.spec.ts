@@ -412,3 +412,44 @@ test('a demo cashier parks a sale, sells another, then resumes the parked one', 
   await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
   await expect(page.getByTestId('parked-open')).toHaveText('Park');
 });
+
+test('the demo page says what to try and links to the site and the quick start', async ({ page }) => {
+  const cspConsole: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
+  });
+  await page.goto('/demo');
+  const demoTry = page.getByTestId('demo-try');
+  for (const text of ['What to try', 'Orders', 'price', 'Park', 'Split', 'customer', 'Register']) {
+    await expect(demoTry).toContainText(text);
+  }
+  await expect(page.getByTestId('demo-try-device-key')).toContainText('device key');
+  await expect(page.getByTestId('demo-link-site')).toHaveAttribute('href', /^https:\/\/vendurepos\.com\/?$/);
+  await expect(page.getByTestId('demo-link-quickstart')).toHaveAttribute('href', 'https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md');
+  expect(cspConsole).toEqual([]);
+});
+
+test('a demo cashier splits a sale between cash and card', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('pay-split').click();
+  await page.getByTestId('split-tender-method-cash').click();
+  await page.getByTestId('split-tender-amount').fill('5');
+  await page.getByTestId('split-tender-add-button').click();
+  await expect(page.getByTestId('split-tender-complete')).toBeDisabled();
+  await page.getByTestId('split-tender-method-card').click();
+  // SplitTender pre-fills the remaining balance after adding the cash payment.
+  await page.getByTestId('split-tender-add-button').click();
+  await expect(page.locator('[data-testid^="split-tender-row-"]')).toHaveCount(2);
+  await expect(page.getByTestId('split-tender-complete')).toBeEnabled();
+  await page.getByTestId('split-tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€5.00');
+  await expect(receipt.getByTestId('receipt-payment-external')).toBeVisible();
+  await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.00');
+});
