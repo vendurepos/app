@@ -4,11 +4,11 @@ import { getStorageHealth } from '@tallyui/database';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
-import type { Session } from './session';
+import { sessionKey, type Session } from './session';
 import { storageStartMessage } from './storage-start-failure';
 
 // A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
-export const SESSION_ENDED_TEXT = 'Your session has ended. Sign out, then sign in again.';
+export const SESSION_ENDED_TEXT = 'Your session has ended. Sign in again to keep selling.';
 // A `forbidden` notice (TallyUI #342): a 403, fixed by the store; the pull retries on its own, and signing out won't help.
 export const FORBIDDEN_TEXT = "This account isn't allowed to use the till on this store. Ask the store's admin; the till retries on its own.";
 
@@ -21,7 +21,7 @@ export function useCatalogue(session: Session): {
   stockOverlayAsOf: string | undefined;
 } {
   // One connector per store session (TallyUI #307): a shared instance would share its reconcile feeds across stores.
-  const connector = useMemo(() => catalogueConnector(session), [session]);
+  const connector = useMemo(() => catalogueConnector(session), [sessionKey(session)]);
   const [products, setProducts] = useState<any[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +30,7 @@ export function useCatalogue(session: Session): {
   const overlaidProducts = useMemo(() => products.map(doc => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay)), [products, connector, stockOverlay]);
 
   useEffect(() => {
+    setError(null);
     let cancelled = false;
     let wasActive = false;
     let failed = false;

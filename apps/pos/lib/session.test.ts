@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SESSION_KEY, clearSession, defaultStore, loadSession, saveSession, sessionContext,
+  SESSION_KEY, clearSession, defaultStore, loadSession, saveSession, sessionContext, sessionKey,
   type KeyValueStore, type Session,
 } from './session';
 
@@ -21,6 +21,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+it('sessionKey ignores the token and follows the store and its settings', () => {
+  expect(sessionKey({ ...session, token: 'new-token' })).toBe(sessionKey(session));
+  expect(sessionKey({ ...session, channelToken: 'channel-1' })).not.toBe(sessionKey(session));
+  expect(sessionKey({ ...session, barcodeField: 'barcode' })).not.toBe(sessionKey(session));
+  expect(sessionKey({ ...session, settings: { ...session.settings, pricesIncludeTax: false } })).not.toBe(sessionKey(session));
 });
 
 describe('session storage', () => {

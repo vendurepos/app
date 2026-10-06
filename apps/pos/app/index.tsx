@@ -28,6 +28,7 @@ import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
@@ -55,6 +56,8 @@ export default function HomeScreen() {
 }
 
 function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): void }) {
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const catalogue = useCatalogue(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
@@ -71,7 +74,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [storageFailure, setStorageFailure] = useState<{ message: string; detail: string } | null>(null);
   // Here rather than in the sale, so orders keep sending while the sale shows a notice.
   const outbox = useOrderOutbox({
-    storeKey: outboxStoreKey(session, saleSettings), open: (name) => openOrderStore(name, Platform.OS), transport: () => orderTransport(session),
+    storeKey: outboxStoreKey(session, saleSettings), open: (name) => openOrderStore(name, Platform.OS), transport: () => orderTransport(() => sessionRef.current),
     deviceId: registerId,
     onOpenError: (error) => setStorageFailure({ message: orderStoreFailureMessage(error), detail: errorDetail(error) }),
     getMaxOrderCreateVersion: () => capabilities.current?.orderCreate,
@@ -84,6 +87,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     },
   });
   const notice = outboxNotice(outbox.state);
+  const sessionEnded = outbox.state.authRequired || catalogue.error === SESSION_ENDED_TEXT;
   const traitContext = useMemo(() => ({ currency: session.settings.currency }), [session.settings.currency]);
   const currency = session.settings.currency;
   // The register's collections share the orders database, so they open, close and are kept with it.
@@ -94,7 +98,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // opens its next session meanwhile. The collection is set only once the orders are open, so `orders` is too.
   const registerOutbox = useRegisterOutbox({
     commands: registerStore?.commands ?? null, deviceId: registerId,
-    transport: () => holdClosuresForOrders(orderTransport(session), pendingSessionOrders(outbox.orders!)),
+    transport: () => holdClosuresForOrders(orderTransport(() => sessionRef.current), pendingSessionOrders(outbox.orders!)),
     onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
   });
   // Once orders have gone, a held closure goes at once rather than at the end of its backoff.
@@ -191,6 +195,11 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           <Text>Sign out</Text>
         </Button>
       </HStack>
+      {sessionEnded ? (
+        <View testID="sign-in-again" className="border-b border-border px-4 py-2">
+          <SignInAgain session={session} onSignedIn={(next) => { sessionRef.current = next; void outbox.flush(); void registerOutbox.flush(); }} />
+        </View>
+      ) : null}
       {notice ? (
         <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
           <Text testID="orders-notice" className="flex-1 text-sm text-muted-foreground">{notice}</Text>
@@ -285,7 +294,7 @@ function countOrders(count: number): string {
 
 /** The one outbox notice the header shows, the most pressing first; undefined when there is none. */
 function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxState): string | undefined {
-  if (authRequired) return 'The store refused this sign-in. Sign out, then sign in again.';
+  if (authRequired) return 'The store refused this sign-in. Sign in again below; orders are kept.';
   if (refused) return `The store refused the orders (${refused.reason}). They are kept; send them again once the store is fixed.`;
   if (backendMissing) return "The store's VendurePOS plugin isn't answering. Orders are kept and retried.";
   if (stuck) return `${countOrders(stuck.commandIds.length)} keep failing at the store. They are kept and retried.`;

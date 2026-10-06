@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ServerCapabilities, StoreSettings, TallyConnector } from '@tallyui/core';
-import { sessionContext, type Session } from './session';
+import { sessionContext, sessionKey, type Session } from './session';
 
 export type SaleSettings = { settings: StoreSettings; capabilities?: ServerCapabilities };
 export type SaleSettingsState =
@@ -50,7 +50,19 @@ export function readCapabilities(session: Session, connector: TallyConnector, un
  */
 export function useSaleSettings(session: Session, connector: TallyConnector): SaleSettingsState {
   const [state, setState] = useState<SaleSettingsState>({ status: 'resolving', attempt: 1 });
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  // Whether the current read reached ready: a new token then keeps the sale; while waiting, a new token retries at once.
+  const readyRef = useRef(false);
+  const lastToken = useRef(session.token);
+  const [tokenEpoch, setTokenEpoch] = useState(0);
   useEffect(() => {
+    if (lastToken.current === session.token) return;
+    lastToken.current = session.token;
+    if (!readyRef.current) setTokenEpoch((epoch) => epoch + 1);
+  }, [session.token]);
+  useEffect(() => {
+    readyRef.current = false;
     const unmount = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     setState({ status: 'resolving', attempt: 1 });
@@ -59,7 +71,7 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
       let waiting: Extract<SaleSettingsState, { attempt: number }> | undefined;
       if (connector.capabilities) {
         try {
-          capabilities = await readCapabilities(session, connector, unmount.signal);
+          capabilities = await readCapabilities(sessionRef.current, connector, unmount.signal);
           if (capabilities === undefined) throw new Error("The store's capabilities read was inconclusive");
           // Written so a missing or non-numeric orderCreate or register waits too.
           if (!(capabilities.orderCreate >= MIN_ORDER_CREATE) || !((capabilities.register ?? 0) >= MIN_REGISTER)) {
@@ -72,7 +84,8 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
       if (unmount.signal.aborted) return;
       if (!waiting) {
         const taxRounding = capabilities?.taxRounding;
-        setState({ status: 'ready', settings: taxRounding ? { ...session.settings, taxRounding } : session.settings, capabilities });
+        readyRef.current = true;
+        setState({ status: 'ready', settings: taxRounding ? { ...sessionRef.current.settings, taxRounding } : sessionRef.current.settings, capabilities });
         return;
       }
       console.warn("Could not read the store's sale settings; retrying", waiting.status === 'plugin' ? capabilities : waiting.lastError);
@@ -81,6 +94,6 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
     };
     void attempt(1);
     return () => { unmount.abort(); clearTimeout(timer); };
-  }, [session, connector]);
+  }, [sessionKey(session), connector, tokenEpoch]);
   return state;
 }

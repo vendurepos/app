@@ -310,7 +310,7 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   await page.reload();
   await pull;
   // TallyUI's notice$ (#261), never a stale catalogue that looks synced.
-  await expect(page.getByText('Your session has ended. Sign out, then sign in again.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your session has ended. Sign in again to keep selling.', { exact: true })).toBeVisible();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
   await page.getByTestId('sign-in-url').fill(STORE_URL);
@@ -319,7 +319,7 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('Your session has ended. Sign out, then sign in again.', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Your session has ended. Sign in again to keep selling.', { exact: true })).toHaveCount(0);
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
@@ -1215,6 +1215,43 @@ test('a price change made in Vendure reaches the open till without a reload', as
     expect(result.errors).toBeUndefined();
     expect(result.data.updateProductVariants).toEqual([{ id, price }]);
   }
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+test('signing in again in place keeps the cart and sells with the new session', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const logout = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { query: 'mutation { logout { success } }' },
+  });
+  expect((await logout.json()).data.logout.success).toBe(true);
+  await expect(page.getByTestId('sign-in-again')).toBeVisible({ timeout: 150_000 });
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await page.getByTestId('sign-in-again-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-again-submit').click();
+  await expect(page.getByTestId('sign-in-again')).toHaveCount(0, { timeout: 30_000 });
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await cart.getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await page.getByTestId('new-sale').click();
+  await page.getByTestId('orders-open').click();
+  await expect(page.getByTestId('orders-panel').getByTestId(/^order-row-/).first()).toHaveText(/· Synced$/, { timeout: 60_000 });
+  await page.getByTestId('orders-close').click();
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
