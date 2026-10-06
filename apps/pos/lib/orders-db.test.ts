@@ -1,10 +1,14 @@
 import type { SyncNotice } from '@tallyui/core';
 import {
-  createOrderBuilder, finalizeOrder, openSession, readRegister, reconcileRegisterCommands, recordMovement, type PosOrder,
+  createOrderBuilder, ensureRegister, finalizeOrder, openSession, readRegister, reconcileRegisterCommands, recordMovement,
+  registerSessionSchema, type PosOrder,
 } from '@tallyui/pos';
+import { createRxDatabase } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { Subject } from 'rxjs';
 import { expect, it, vi } from 'vitest';
+import { appStorage } from './app-storage';
 import { catalogueConnector, databaseName, removeCatalogueDatabaseWithin, startCatalogueSync } from './catalogue';
 import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections, type OrderStore } from './orders-db';
 import type { Session } from './session';
@@ -141,4 +145,38 @@ it("adds the register's collections to the orders database, and its records surv
   // ensureRegister keeps the register document it minted.
   expect((await readRegister(again.sessions))?.id).toBe(minted!.id);
   await reloaded.close();
+});
+
+it('migrates register sessions a till stored before register_sessions schema version 1, and keeps its register document', async () => {
+  const name = ordersDatabaseName({ url: session.url, channelToken: 'migrate-v0' });
+  const seed = await createRxDatabase({
+    name, multiInstance: false,
+    storage: wrappedValidateAjvStorage({ storage: appStorage() }),
+  });
+  await seed.addCollections({
+    register_sessions: {
+      schema: {
+        ...registerSessionSchema, version: 0,
+        properties: Object.fromEntries(Object.entries(registerSessionSchema.properties).filter(([key]) => key !== 'server_session_id')),
+      },
+      localDocuments: true,
+    },
+  });
+  await ensureRegister(seed.register_sessions, PLATFORM);
+  await seed.register_sessions.insert({
+    id: 'v0-session-1', register_id: 'drawer-1', store_key: name, status: 'open', business_day: '2026-10-01',
+    opened_at_gmt: '2026-10-01T08:00:00.000Z', opened_by: session.email, expected_float_minor: null,
+    counted_float_minor: 10000, opening_variance_minor: null,
+  });
+  const register = await readRegister(seed.register_sessions);
+  await seed.close();
+
+  const store = await openOrderStore(name, PLATFORM);
+  const sessions = registerCollections(store.orders)!.sessions;
+  expect(sessions.schema.version).toBe(1);
+  expect((await sessions.findOne('v0-session-1').exec())?.toJSON()).toMatchObject({
+    status: 'open', register_id: 'drawer-1', server_session_id: null,
+  });
+  expect(await readRegister(sessions)).toEqual(register);
+  await store.close();
 });

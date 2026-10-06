@@ -1,5 +1,5 @@
 import {
-  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, registerCommandCollection, registerSessionCollection,
+  addPosOrderCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, registerCommandCollection,
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { addRxPlugin, createRxDatabase, type RxCollection } from 'rxdb';
@@ -72,15 +72,16 @@ export async function openOrderStore(name: string, platform: string): Promise<{ 
       storage: DEV_MODE ? wrappedValidateAjvStorage({ storage }) : storage,
     });
     // A failed open closes the database here, so the next open, which retries it, starts afresh. pos_orders first, so
-    // its migrations settle before anything reads it; then the register's, in INTEGRATION.md's order.
+    // its migrations settle before anything reads it; then the other collections, then register_sessions and its register document.
     const orders = await (async () => {
       const added = await addPosOrderCollection(database);
-      const { register_sessions } = await database.addCollections({
-        register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema },
+      await database.addCollections({
+        cash_movements: { schema: cashMovementSchema },
         closures: { schema: closureSchema }, register_commands: registerCommandCollection(),
         // Parked carts, local only, never replicated.
         order_drafts: { schema: orderDraftSchema },
       });
+      const register_sessions = await addRegisterSessionCollection(database);
       await ensureRegister(register_sessions, platform);
       return added;
     })().catch(async (error: unknown) => {
