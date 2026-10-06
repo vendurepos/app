@@ -27,7 +27,7 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     expect(SUPPORTED_ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('GET /tally/v1/info still advertises order.create 1, 2, 3 and 4 only', async () => {
+  it('GET /tally/v1/info advertises order.create 1 to 5', async () => {
     const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, {
       headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` },
     });
