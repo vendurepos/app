@@ -834,7 +834,8 @@ test.describe('on a narrow screen', () => {
     await page.keyboard.type('12');
     await page.keyboard.press('Enter');
     await expect(search).toHaveValue('12');
-    await search.fill('');
+    // With 30 products, the narrow list renders only what's in view, so filter to the mug.
+    await search.fill('Tally Fixture Mug');
     await mug.click();
     await expect(cartTab).toHaveText('Cart (2) · €19.04');
     await expect(highlight).toHaveCount(0);

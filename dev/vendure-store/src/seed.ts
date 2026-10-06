@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  bootstrapWorker, Channel, ChannelService, CurrencyCode, isGraphQlErrorResult, LanguageCode,
+  bootstrapWorker, Channel, ChannelService, Collection, CollectionService, CurrencyCode, CustomerService,
+  FacetValueService, isGraphQlErrorResult, LanguageCode,
   ProductService, ProductVariant, ProductVariantService, RequestContextService, SearchService,
   StockLocationService, TaxCategoryService, TaxRateService, TransactionalConnection, User, ZoneService,
 } from '@vendure/core';
@@ -84,7 +85,7 @@ async function seed() {
   for (const product of catalogue) {
     product.variants.forEach((variant, i) => rows.push([
       i === 0 ? product.name : '', i === 0 ? product.slug : '',
-      i === 0 ? `${product.name} (VendurePOS dev seed)` : '', '', '',
+      i === 0 ? `${product.name} (VendurePOS dev seed)` : '', '', i === 0 ? `category:${product.category}` : '',
       i === 0 ? product.optionGroups.join('|') : '', variant.options.join('|'), variant.sku,
       (variant.priceMinor / 100).toFixed(2), product.taxCategory, String(variant.warehouseStock),
       String(product.trackInventory), '', '', barcodeOf(variantIndex++),
@@ -118,6 +119,35 @@ async function seed() {
       productIds: items.map(product => product.id), channelId: posChannel.id, priceFactor: 1,
     });
   }
+  const collections = app.get(CollectionService);
+  const facetValues = await app.get(FacetValueService).findAll(ctx, LanguageCode.en);
+  for (const name of ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']) {
+    const facetValue = facetValues.find(value => value.facet.code === 'category' && value.name === name)!;
+    const collection: Collection = await collections.create(ctx, {
+      translations: [{ languageCode: LanguageCode.en, name, slug: name.toLowerCase(), description: '' }],
+      filters: [{ code: 'facet-value-filter', arguments: [
+        { name: 'facetValueIds', value: JSON.stringify([facetValue.id]) },
+        { name: 'containsAny', value: 'true' },
+      ] }],
+    });
+    const skus = catalogue.filter(product => product.category === name).flatMap(product => product.variants.map(variant => variant.sku));
+    const variants = await connection.rawConnection.getRepository(ProductVariant).findBy({ sku: In(skus) });
+    // The same membership the facet filter computes; set directly because the seed's worker doesn't run the job queue.
+    // Vendure's filter job keeps it in step afterwards.
+    collection.productVariants = variants;
+    await connection.rawConnection.getRepository(Collection).save(collection);
+    await collections.assignCollectionsToChannel(ctx, { collectionIds: [collection.id], channelId: posChannel.id });
+  }
+  for (const [firstName, lastName, email] of [
+    ['Ada', 'Lovelace', 'ada'], ['Grace', 'Hopper', 'grace'], ['Alan', 'Turing', 'alan'],
+    ['Katherine', 'Johnson', 'katherine'], ['Barbara', 'Liskov', 'barbara'], ['Donald', 'Knuth', 'donald'],
+    ['Margaret', 'Mead', 'margaret'], ['Dorothy', 'Vaughan', 'dorothy'],
+  ]) {
+    const customer = await app.get(CustomerService).create(posCtx, {
+      firstName, lastName, emailAddress: `${email}@demo.vendurepos.com`,
+    });
+    if (isGraphQlErrorResult(customer)) throw new Error(customer.message);
+  }
   const shopFloor = await locations.create(posCtx, {
     name: 'Shop floor', description: 'POS stock, VendurePOS dev seed',
   });
@@ -140,6 +170,8 @@ async function seed() {
       }]);
     }
   }
+  // Historic orders are not seeded here because the plugin settles payments only through its POS route;
+  // the smoke's own sales create orders.
   await app.get(SearchService).reindex(ctx);
   await app.get(SearchService).reindex(posCtx);
   console.log(`Channels: ${defaultChannel.code} (${DEFAULT_CHANNEL_TOKEN}), ${posChannel.code} (${POS_CHANNEL_TOKEN})`);

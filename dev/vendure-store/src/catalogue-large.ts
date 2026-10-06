@@ -22,7 +22,7 @@ export function largeCatalogue(): CatalogueProduct[] {
     return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
   }
   const catalogue: CatalogueProduct[] = [{
-    name: 'Tally Fixture Mug', slug: 'tally-fixture-mug', taxCategory: 'Standard',
+    name: 'Tally Fixture Mug', slug: 'tally-fixture-mug', category: 'Drinkware', taxCategory: 'Standard',
     trackInventory: true, optionGroups: [],
     variants: [{ options: [], sku: 'TALLY-MUG', priceMinor: 800, warehouseStock: 100, shopFloorStock: 50 }],
   }];
@@ -31,6 +31,7 @@ export function largeCatalogue(): CatalogueProduct[] {
     const count = VARIANT_COUNTS[(index - 1) % VARIANT_COUNTS.length];
     catalogue.push({
       name: `Generated Product ${number}`, slug: `generated-product-${number}`,
+      category: (['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts'] as const)[(index - 1) % 5],
       taxCategory: random() < 0.25 ? 'Reduced' : 'Standard',
       trackInventory: random() < 0.9,
       optionGroups: count === 1 ? [] : count === 6 ? ['Size', 'Colour'] : ['Size'],
