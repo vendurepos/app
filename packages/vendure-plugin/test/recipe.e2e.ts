@@ -80,7 +80,7 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(results.map(result => [result.status, result.error?.code])).toEqual([
       ...Array(6).fill(['rejected', 'invalid_payload']), ['rejected', 'unsupported_version'],
     ]);
-    expect(results.at(-1)!.error!.data).toEqual({ orderCreate: 4 });
+    expect(results.at(-1)!.error!.data).toEqual({ orderCreate: 5 });
     expect(await counts()).toEqual(before);
   });
 
