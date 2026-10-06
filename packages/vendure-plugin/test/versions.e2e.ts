@@ -27,31 +27,32 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     expect(SUPPORTED_ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('GET /tally/v1/info still advertises order.create 1, 2, 3 and 4 only', async () => {
+  it('GET /tally/v1/info advertises order.create 1 to 5', async () => {
     const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, {
       headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` },
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      contracts: { 'order.create': [1, 2, 3, 4], register: [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      maxShippingLines: 1, lineTax: { none: true, classes: true },
     });
   });
 
-  it('a version 5 order.create is still rejected as unsupported_version and writes no order', async () => {
+  it('a version 6 order.create is rejected as unsupported_version and writes no order', async () => {
     const counts = async () => ({
       orders: await connection.rawConnection.getRepository(Order).count(),
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),
     });
     const before = await counts();
-    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 5 };
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 6 };
     const result = await run(command as unknown as CommandEnvelope<OrderCreatePayload>);
     expect(result.status).toBe('rejected');
     expect(result.error?.code).toBe('unsupported_version');
-    expect(result.error?.data).toEqual({ orderCreate: 4 });
+    expect(result.error?.data).toEqual({ orderCreate: 5 });
     expect(await counts()).toEqual(before);
   });
 
-  it('ORDER_CREATE_VERSIONS is [1, 2, 3, 4]', () => {
-    expect(ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4]);
+  it('ORDER_CREATE_VERSIONS is [1, 2, 3, 4, 5]', () => {
+    expect(ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5]);
   });
 });

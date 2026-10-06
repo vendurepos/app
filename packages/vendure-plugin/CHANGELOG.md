@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `GET /tally/v1/info` advertises order.create 1–5 (ADR 0005).
+- order.create v5 custom lines are real order lines on a plugin-owned, disabled 'POS custom item' variant (SKU `TALLY-CUSTOM-ITEM`, category 'POS no tax'), created per channel at bootstrap; the till's name and SKU are on the line (`tallyCustomName`, `tallyCustomSku`) (ADR 0005).
+- order.create v5 shipping: one charge per order, applied as the order's ShippingLine (`tally-in-store`, priced from the `tallyShipping` order custom field); a second entry is refused as `shipping_single` (ADR 0005).
+- `GET /tally/v1/info` returns `maxShippingLines: 1` and `lineTax: { none: true, classes: true }`.
+- Migration `TallyPosV51790900000000` adds the v5 custom fields (`order.tallyShipping`, `order_line.tallyCustomName`, `order_line.tallyCustomSku`).
+- order.create v5 fees are applied as Vendure Surcharges (`TALLY-FEE`), taxed by `taxStatus`/`taxClass`; an unknown `taxClass` is refused as `tax_class_unknown` (ADR 0005).
+
 ## 0.2.0 (2026-10-06)
 
 - The **New POS till key** dialog names the channel the key works in; Vendure's API keys are channel-aware.

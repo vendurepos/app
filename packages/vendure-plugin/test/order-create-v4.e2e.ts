@@ -133,21 +133,21 @@ describe('order.create version 4: net discounts', () => {
     expect(result.error).toMatchObject({ code: 'invalid_payload', message: 'lines[0].discountMinr: unknown field in order.create version 4' });
   });
 
-  it('the version gate: /info advertises [1, 2, 3, 4], and a v5 command is unsupported_version naming 4', async () => {
+  it('the version gate: /info advertises [1, 2, 3, 4, 5], and a v6 command is unsupported_version naming 5', async () => {
     const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, {
       headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` },
     });
     expect(response.status).toBe(200);
-    expect((await response.json()).contracts).toEqual({ 'order.create': [1, 2, 3, 4], register: [1] });
+    expect((await response.json()).contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5], register: [1] });
     const counts = async () => ({
       orders: await connection.rawConnection.getRepository(Order).count(),
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),
     });
     const before = await counts();
-    const command = { ...fixture('mixed-inclusive'), id: '01a0e775-0100-7000-8000-00000000f005', version: 5 };
+    const command = { ...fixture('mixed-inclusive'), id: '01a0e775-0100-7000-8000-00000000f005', version: 6 };
     const result = await run(command as unknown as Envelope);
     expect(result.status).toBe('rejected');
-    expect(result.error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 4 } });
+    expect(result.error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 5 } });
     expect(await counts()).toEqual(before);
   });
 });

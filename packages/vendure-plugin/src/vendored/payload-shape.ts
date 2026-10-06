@@ -31,8 +31,17 @@ export function payloadShapeErrors(payload: unknown): string[] {
       const path = `${field}[${index}]`
       check(object(item), path, 'an object')
       if (!object(item)) continue
-      for (const key of isLines ? ['clientLineId', 'variantId'] : ['clientPaymentId', 'method']) {
+      for (const key of isLines ? ['clientLineId', ...(object(item.custom) ? [] : ['variantId'])] : ['clientPaymentId', 'method']) {
         check(typeof item[key] === 'string', `${path}.${key}`, 'a string')
+      }
+      if (isLines && item.custom !== undefined) {
+        check(object(item.custom), `${path}.custom`, 'an object')
+        if (object(item.custom)) {
+          check(!Object.hasOwn(item, 'variantId'), `${path}.variantId`, 'no variantId on a custom line')
+          check(typeof item.custom.name === 'string', `${path}.custom.name`, 'a string')
+          check(item.custom.taxStatus === 'taxable' || item.custom.taxStatus === 'none', `${path}.custom.taxStatus`, "'taxable' or 'none'")
+          for (const key of ['sku', 'taxClass']) if (item.custom[key] !== undefined) check(typeof item.custom[key] === 'string', `${path}.custom.${key}`, 'a string')
+        }
       }
       const optionalString = isLines ? 'title' : 'reference'
       if (item[optionalString] !== undefined) {
@@ -48,6 +57,22 @@ export function payloadShapeErrors(payload: unknown): string[] {
         }
       }
     }
+  }
+  for (const [field, id] of [['fees', 'clientFeeId'], ['shipping', 'clientShippingId']]) {
+    const items = payload[field]
+    if (items === undefined) continue
+    check(Array.isArray(items), field, 'an array')
+    if (!Array.isArray(items)) continue
+    items.forEach((item, index) => {
+      const path = `${field}[${index}]`
+      check(object(item), path, 'an object')
+      if (!object(item)) return
+      check(typeof item[id] === 'string' && item[id].length > 0, `${path}.${id}`, 'a non-empty string')
+      check(typeof item.name === 'string', `${path}.name`, 'a string')
+      check(item.taxStatus === 'taxable' || item.taxStatus === 'none', `${path}.taxStatus`, "'taxable' or 'none'")
+      for (const key of field === 'shipping' ? ['taxClass', 'methodId'] : ['taxClass']) if (item[key] !== undefined) check(typeof item[key] === 'string', `${path}.${key}`, 'a string')
+      for (const key of ['amountMinor', 'taxMinor']) number(item[key], `${path}.${key}`)
+    })
   }
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor']) number(payload[field], field)
   const lineDiscounts = (Array.isArray(payload.lines) ? payload.lines : [])

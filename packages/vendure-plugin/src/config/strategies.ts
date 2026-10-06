@@ -158,5 +158,13 @@ export const tallyShippingCalculator = new ShippingCalculator({
   code: TALLY_SHIPPING_METHOD_CODE,
   description: [{ languageCode: LanguageCode.en, value: 'In-store collection' }],
   args: {},
-  calculate: () => ({ price: 0, priceIncludesTax: false, taxRate: 0 }),
+  calculate: (ctx, order) => {
+    try {
+      const shipping = typeof order.customFields.tallyShipping === 'string' ? JSON.parse(order.customFields.tallyShipping) : undefined;
+      if (typeof shipping?.amountMinor === 'number' && typeof shipping.includesTax === 'boolean' && typeof shipping.taxRate === 'number') {
+        return { price: shipping.amountMinor, priceIncludesTax: shipping.includesTax, taxRate: shipping.taxRate };
+      }
+    } catch { /* A malformed custom field retains the zero shipping price. */ }
+    return { price: 0, priceIncludesTax: false, taxRate: 0 };
+  },
 });

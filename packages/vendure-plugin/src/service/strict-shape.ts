@@ -9,13 +9,18 @@ const since = (version: number, names: string): Fields => Object.fromEntries(nam
 const ENVELOPE = since(1, 'id type version createdAt deviceId attempt payload');
 const PAYLOAD = {
   ...since(1, 'clientOrderId createdAt currency pricesIncludeTax lines subtotalMinor taxMinor totalMinor payments customer registerId cashierRef locationId'),
-  discountMinor: 2, ...since(3, 'display taxByRate sessionId'),
+  discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'),
 };
-const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2 };
+const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5 };
+const FEE = since(1, 'clientFeeId name amountMinor taxStatus taxClass taxMinor');
+const SHIPPING = since(1, 'clientShippingId name methodId amountMinor taxStatus taxClass taxMinor');
+const LINE_CUSTOM = since(1, 'name sku taxClass taxStatus');
 const PAYMENT = since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference');
 const CUSTOMER = { email: 1, customerId: 3 };
 // Inside v3's `display` and `taxByRate` (their parents carry the version).
-const DISPLAY = since(1, 'currency exponent taxInclusive subtotalMinor discountMinor taxMinor totalMinor orderDiscountMinor lines');
+const DISPLAY = { ...since(1, 'currency exponent taxInclusive subtotalMinor discountMinor taxMinor totalMinor orderDiscountMinor lines'), fees: 5, shipping: 5 };
+const DISPLAY_FEE = since(1, 'clientFeeId amountMinor');
+const DISPLAY_SHIPPING = since(1, 'clientShippingId amountMinor');
 const DISPLAY_LINE = since(1, 'clientLineId amountMinor discounts');
 const DISPLAY_DISCOUNT = since(1, 'discountId label amountMinor');
 const TAX_RATE = since(1, 'ratePpm code netMinor taxMinor grossMinor');
@@ -47,13 +52,20 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   // Front desk ruling 19: an instruction field, refused in every version until it is honoured: vendurepos/app#35
   // (ADR 0002 "Stock", §5).
   if (Object.hasOwn(payload, 'locationId') && !full()) errors.push('payload.locationId: not supported by this server yet');
-  each(payload.lines, LINE, 'lines');
+  each(payload.lines, LINE, 'lines', (line, at) => check(line.custom, LINE_CUSTOM, `${at}.custom`));
+  each(payload.fees, FEE, 'fees');
+  each(payload.shipping, SHIPPING, 'shipping');
   each(payload.payments, PAYMENT, 'payments');
   check(payload.customer, CUSTOMER, 'customer');
   if (check(payload.display, DISPLAY, 'display')) {
     each(payload.display.lines, DISPLAY_LINE, 'display.lines', (line, at) => each(line.discounts, DISPLAY_DISCOUNT, `${at}.discounts`));
+    each(payload.display.fees, DISPLAY_FEE, 'display.fees');
+    each(payload.display.shipping, DISPLAY_SHIPPING, 'display.shipping');
   }
   each(payload.taxByRate, TAX_RATE, 'taxByRate');
+  if (Array.isArray(payload.shipping) && payload.shipping.length > 1 && !full()) {
+    errors.push('shipping[1]: shipping_single: this store takes one shipping charge per order');
+  }
   return errors;
 }
 

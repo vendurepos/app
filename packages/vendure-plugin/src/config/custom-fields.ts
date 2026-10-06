@@ -10,6 +10,7 @@ declare module '@vendure/core/dist/entity/custom-entity-fields' {
     tallySessionId?: string | null;
     tallyCashierRef?: string | null;
     tallyPayments?: string | null;
+    tallyShipping?: string | null;
     tallySnapshot?: string | null;
     tallyRejectedClientOrderId?: string | null;
     tallyRejected?: boolean | null;
@@ -18,6 +19,8 @@ declare module '@vendure/core/dist/entity/custom-entity-fields' {
     tallyUnitPrice?: number | null;
     tallyClientLineId?: string | null;
     tallyPriceIncludesTax?: boolean | null;
+    tallyCustomName?: string | null;
+    tallyCustomSku?: string | null;
   }
 }
 
@@ -30,6 +33,8 @@ export const orderCustomFields: CustomFieldConfig[] = [
   { name: 'tallySessionId', type: 'string', readonly: true, nullable: true },
   { name: 'tallyCashierRef', type: 'string', readonly: true, nullable: true },
   { name: 'tallyPayments', type: 'text', readonly: true, nullable: true },
+  // The v5 shipping charge as JSON, read by the tally-in-store calculator (ADR 0005).
+  { name: 'tallyShipping', type: 'text', readonly: true, nullable: true },
   { name: 'tallySnapshot', type: 'text', readonly: true, nullable: true },
   // Re-rulings 1 and 2: an admin-rejected order keeps its released client id here, and counts as never placed.
   { name: 'tallyRejectedClientOrderId', type: 'string', readonly: true, nullable: true },
@@ -40,6 +45,9 @@ export const orderLineCustomFields: CustomFieldConfig[] = [
   { name: 'tallyUnitPrice', type: 'int', readonly: true, nullable: true },
   { name: 'tallyClientLineId', type: 'string', readonly: true, nullable: true },
   { name: 'tallyPriceIncludesTax', type: 'boolean', readonly: true, nullable: true },
+  // A v5 custom line's name and SKU (ADR 0005 ruling (a); used from job 4).
+  { name: 'tallyCustomName', type: 'string', length: 255, readonly: true, nullable: true },
+  { name: 'tallyCustomSku', type: 'string', length: 64, readonly: true, nullable: true },
 ];
 
 // Custom fields have no index option, so the plain indexes go on the CustomOrderFields embeddable

@@ -7,7 +7,7 @@ export interface CommandEnvelope<P = unknown> {
   id: string; // UUIDv7, the idempotency key; never reused
   type: CommandType;
   /** 3 when the order carries ADR-065's `display` and `taxByRate` (the store accepts 3), else 2 when discounted, else 1. */
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4 | 5;
   payload: P;
   createdAt: string; // ISO 8601, client clock
   deviceId: string;
@@ -23,8 +23,8 @@ export type RegisterCommandEnvelope<P = Record<string, unknown>> =
 /** Any command a transport can carry. */
 export type AnyCommandEnvelope = CommandEnvelope<unknown> | RegisterCommandEnvelope<unknown>;
 
-/** An order.create envelope: its version stays 1 | 2 | 3 (ADR-062, ADR-065). */
-export type OrderCreateEnvelope = CommandEnvelope<OrderCreatePayload> & { type: 'order.create'; version: 1 | 2 | 3 };
+/** An order.create envelope, including v5 charges and custom lines (ADR-075). */
+export type OrderCreateEnvelope = CommandEnvelope<OrderCreatePayload> & { type: 'order.create'; version: 1 | 2 | 3 | 4 | 5 };
 
 /** Outcome of processing a command. */
 export type CommandStatus = 'applied' | 'duplicate' | 'rejected';
@@ -97,7 +97,8 @@ export interface RegisterClosureSubmitPayload {
 /** Order line with client identity and price in minor units. */
 export interface OrderCreateLine {
   clientLineId: string;
-  variantId: string;
+  variantId?: string;
+  custom?: OrderCreateCustomLine;
   title?: string;
   quantity: number;
   unitPriceMinor: number;
@@ -115,6 +116,16 @@ export interface OrderCreateLine {
   discountMinor?: number;
 }
 
+export interface OrderCreateFee {
+  clientFeeId: string; name: string; amountMinor: number; taxStatus: 'taxable' | 'none'; taxClass?: string; taxMinor: number;
+}
+export interface OrderCreateShipping {
+  clientShippingId: string; name: string; methodId?: string; amountMinor: number; taxStatus: 'taxable' | 'none'; taxClass?: string; taxMinor: number;
+}
+export interface OrderCreateCustomLine {
+  name: string; sku?: string; taxClass?: string; taxStatus: 'taxable' | 'none';
+}
+
 /** Supported order payment method. */
 export type PaymentMethodKind = 'cash' | 'external';
 
@@ -130,6 +141,8 @@ export interface OrderCreatePayment {
 
 /** Version 3 (ADR-065): the receipt's display figures, integer minor units of `currency` at `exponent`. */
 export interface OrderCreateDisplay {
+  fees?: Array<{ clientFeeId: string; amountMinor: number }>;
+  shipping?: Array<{ clientShippingId: string; amountMinor: number }>;
   currency: string;
   exponent: number;
   taxInclusive: boolean;
@@ -161,6 +174,8 @@ export interface OrderCreatePayload {
   currency: string;
   pricesIncludeTax: boolean;
   lines: OrderCreateLine[];
+  fees?: OrderCreateFee[];
+  shipping?: OrderCreateShipping[];
   subtotalMinor: number;
   /** Version 2 (ADR-062): the order's total discount, equal to Σ `lines[].discountMinor`. Present only when above 0. */
   discountMinor?: number;

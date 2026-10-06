@@ -11,8 +11,9 @@ const COUNT_TOLERANCE = 0.01;
 
 async function check() {
   const catalogue = process.env.VENDURE_SEED === 'large' ? largeCatalogue() : CATALOGUE;
-  const expectedVariants = process.env.VENDURE_SEED === 'large' ? LARGE_TARGET_VARIANTS
-    : catalogue.reduce((count, product) => count + product.variants.length, 0);
+  // The plugin's bootstrap adds the disabled TALLY-CUSTOM-ITEM variant (ADR 0005).
+  const expectedVariants = (process.env.VENDURE_SEED === 'large' ? LARGE_TARGET_VARIANTS
+    : catalogue.reduce((count, product) => count + product.variants.length, 0)) + 1;
   const login = await fetch(ADMIN_API, {
     method: 'POST', headers: { 'content-type': 'application/json', 'vendure-token': POS_CHANNEL_TOKEN },
     body: JSON.stringify({

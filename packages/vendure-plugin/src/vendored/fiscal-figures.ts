@@ -9,6 +9,8 @@ export type CommandErrorWithData = CommandError & { data?: Record<string, unknow
 // @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
 // fixture __fixtures__/order-create-v3.json must still pass unchanged.
 export interface OrderCreateDisplay {
+  fees?: Array<{ clientFeeId: string; amountMinor: number }>;
+  shipping?: Array<{ clientShippingId: string; amountMinor: number }>;
   currency: string;
   exponent: number;
   taxInclusive: boolean;
@@ -58,11 +60,25 @@ export function fiscalFiguresErrors(payload: OrderCreatePayloadV3): string[] {
     for (const key of keys) check(Number.isSafeInteger(value[key]), `${path}.${key}`, 'a safe integer')
   }
   const { display, taxByRate } = payload
-  if (object(display, 'display', ['currency', 'exponent', 'taxInclusive', 'subtotalMinor', 'discountMinor', 'taxMinor', 'totalMinor', 'orderDiscountMinor', 'lines'])) {
+  if (object(display, 'display', ['currency', 'exponent', 'taxInclusive', 'subtotalMinor', 'discountMinor', 'taxMinor', 'totalMinor', 'orderDiscountMinor', 'lines', 'fees', 'shipping'])) {
     check(typeof display.currency === 'string', 'display.currency', 'a string')
     check(Number.isInteger(display.exponent) && display.exponent >= 0, 'display.exponent', 'an integer >= 0')
     check(typeof display.taxInclusive === 'boolean', 'display.taxInclusive', 'a boolean')
     money(display, 'display', ['subtotalMinor', 'discountMinor', 'taxMinor', 'totalMinor', 'orderDiscountMinor'])
+    for (const [field, id] of [['fees', 'clientFeeId'], ['shipping', 'clientShippingId']] as const) {
+      const charges = display[field]
+      if (charges === undefined) continue
+      check(Array.isArray(charges), `display.${field}`, 'an array')
+      const ids = new Set(field === 'fees' ? payload.fees?.map(item => item.clientFeeId) : payload.shipping?.map(item => item.clientShippingId))
+      if (Array.isArray(charges)) charges.forEach((charge, index) => {
+        const path = `display.${field}[${index}]`
+        if (!object(charge, path, [id, 'amountMinor'])) return
+        const value = (charge as Record<string, unknown>)[id]
+        check(typeof value === 'string', `${path}.${id}`, 'a string')
+        money(charge, path, ['amountMinor'])
+        check(ids.has(value as string), `${path}.${id}`, `a payload.${field}[].${id}`)
+      })
+    }
     check(Array.isArray(display.lines), 'display.lines', 'an array')
     if (Array.isArray(display.lines)) display.lines.forEach((line, index) => {
       const path = `display.lines[${index}]`
@@ -88,6 +104,11 @@ export function fiscalFiguresErrors(payload: OrderCreatePayloadV3): string[] {
     money(rate, path, ['netMinor', 'taxMinor', 'grossMinor'])
   })
   if (errors.length || !display || !Array.isArray(taxByRate)) return errors
+  if (display.fees !== undefined || display.shipping !== undefined) {
+    const charges = [...(display.fees ?? []), ...(display.shipping ?? [])].reduce((sum, charge) => sum + BigInt(charge.amountMinor), 0n)
+    check(BigInt(display.subtotalMinor) - BigInt(display.discountMinor) + charges + (display.taxInclusive ? 0n : BigInt(display.taxMinor)) === BigInt(display.totalMinor),
+      'display.totalMinor', 'subtotalMinor - discountMinor + fees + shipping + taxMinor when not taxInclusive')
+  }
   check(display.currency === payload.currency, 'display.currency', 'payload.currency')
   check(display.totalMinor === payload.totalMinor, 'display.totalMinor', 'payload.totalMinor')
   check(display.taxMinor === payload.taxMinor, 'display.taxMinor', 'payload.taxMinor')
