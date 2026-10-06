@@ -1,12 +1,12 @@
 # @vendurepos/plugin
 
 The VendurePOS server plugin for [Vendure](https://vendure.io). It records TallyUI's
-`order.create` command (versions 1–3) as a Vendure order, in one database transaction per
+`order.create` command (versions 1–5) as a Vendure order, in one database transaction per
 command, with an idempotency ledger. The design is ADR 0002
 (`docs/adr/0002-order-path-vendure-plugin.md`), proven by spike S1
 (`docs/spikes/s1-order-recipe.md`).
 
-Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
+The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
 commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough).
 
 **Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
@@ -53,12 +53,13 @@ auth, CORS, tax strategy and a first sale. Install it with
 `npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
-   of generating a migration for your store, register all three below; do not run
+   of generating a migration for your store, register all five below; do not run
    both approaches for the same schema changes:
 
    ```ts
    import {
      TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
+     TallyPosV51790900000000, TallyPosRegisterV21791000000000,
    } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
@@ -68,6 +69,7 @@ auth, CORS, tax strategy and a first sale. Install it with
        synchronize: false,
        migrations: [
          TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
+         TallyPosV51790900000000, TallyPosRegisterV21791000000000,
          /* your own migrations */
        ],
        // …
@@ -190,6 +192,16 @@ vendureDashboardPlugin({
 - "POS no tax" is a plugin-owned tax category for untaxed lines.
 - `taxClass` is matched to a tax category by name, then id. Without one, the store's **default** category is used. If none is marked default, the fee is refused, so mark one in Settings → Tax categories.
 - Run the bundled migration `TallyPosV51790900000000`, or generate your own, before starting 0.3.0.
+
+### Register version 2: resume, take-over and unknown sessions
+
+The plugin answers register contract versions 1 and 2 (`/tally/v1/info` lists `"register": [1, 2]`). The design is ADR 0006 (`docs/adr/0006-register-v2.md`), after TallyUI ADR-078.
+
+- Every open records the till's `deviceId`; a version 2 open also records `deviceName`.
+- **Resume.** A version 2 open from the till that holds the register's live session resumes that session instead of opening a new one. The id the till sent becomes a permanent alias: later commands and orders naming it act on the live session, and its sales count in the live figures.
+- **Take-over.** A version 2 open with `supersedes` naming the live session takes the register over, in one transaction under the register's lock. Naming anything else is refused `register_session_already_open` with the live session's details. The old session is refused every later command: `register_session_superseded` at version 2, `register_session_closed` at version 1.
+- **Unknown sessions.** An `order.create` naming a session the store does not hold is applied, with the warning `register_session_unknown`. The order keeps the id, and a session opened later under it counts the sale.
+- Run the bundled migration `TallyPosRegisterV21791000000000`, or generate your own, before a till sends register version 2. Its `down` is safe only on a store that never served a version 2 open (ADR 0006, Consequences).
 
 ## Development
 

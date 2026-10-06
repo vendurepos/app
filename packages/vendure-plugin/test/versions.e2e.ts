@@ -33,7 +33,7 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
       maxShippingLines: 1, lineTax: { none: true, classes: true },
     });
   });

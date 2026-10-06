@@ -16,7 +16,7 @@ export function orderCommand(
   inputLines: Line[],
   tenders?: Tender[],
   customer?: OrderCreatePayload['customer'],
-  options: { pricesIncludeTax?: boolean; version?: 2 | 3 } = {},
+  options: { pricesIncludeTax?: boolean; version?: 2 | 3; sessionId?: string } = {},
 ): CommandEnvelope<OrderCreatePayload> {
   const pricesIncludeTax = options.pricesIncludeTax ?? false;
   const lines = inputLines.map(({ ratePpm, ...line }) => ({ clientLineId: id(), ...line }));
@@ -62,7 +62,7 @@ export function orderCommand(
       payments: (tenders ?? [{ method: 'cash', amountMinor: totalMinor }])
         .map(tender => ({ clientPaymentId: id(), ...tender })),
       registerId: 'vp1-device', cashierRef: 'vp1-cashier',
-      ...(options.version === 2 ? {} : { sessionId: id(),
+      ...(options.version === 2 ? {} : { ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
       display: {
         currency: 'EUR', exponent: 2, taxInclusive: pricesIncludeTax,
         subtotalMinor: displaySubtotal, discountMinor: displayDiscount, taxMinor, totalMinor, orderDiscountMinor: 0,

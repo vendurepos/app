@@ -1,4 +1,4 @@
-// vendored verbatim from @tallyui/core@3.0.0-next.1 src/types/commands.ts
+// vendored verbatim from @tallyui/core@3.0.0-next.1 src/types/commands.ts, plus TallyUI#469 (register v2)
 /** Supported command operation. */
 export type CommandType = 'order.create';
 
@@ -75,7 +75,9 @@ export type CommandWarning =
   | {
       code: 'figures_mismatch';
       fields: Array<{ field: 'subtotalMinor' | 'taxMinor' | 'discountMinor' | (string & {}); tillMinor: number; serverMinor: number }>;
-    };
+    }
+  /** order.create named a register session the store does not hold (ADR-078 d7): applied, never refused. */
+  | { code: 'register_session_unknown'; sessionId: string };
 
 /** Error reported when a command is rejected. */
 export interface CommandError {
@@ -98,7 +100,17 @@ export interface CommandResult {
 /** A register command's server figures (registers c2b applies them). */
 export interface RegisterCommandResult {
   /** The session's server state after this command. `expected` is absent when the server redacts it (blind). */
-  session?: { id: string; status: 'open' | 'counting' | 'closed'; expected?: Record<string, number>; salesCount?: number };
+  session?: {
+    id: string; status: 'open' | 'counting' | 'closed' | 'superseded'; expected?: Record<string, number>; salesCount?: number;
+    /** Sent on a resume (register v2): the store session's opening time. */
+    openedAt?: string;
+    /** Sent on a resume (register v2): the store session's counted opening float. */
+    openingFloatMinor?: number;
+  };
+  /** The open was this device's own live session (register v2); the store keeps fromSessionId as a permanent alias of session.id. */
+  resumed?: { fromSessionId: string };
+  /** The session this open took over (register v2). */
+  superseded?: { sessionId: string; openedAt?: string; deviceId?: string; deviceName?: string };
   /** The register's counters: a floor for the till's own, never lowered. */
   counters?: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
   /** `register.closure.submit` only. */
@@ -108,6 +120,20 @@ export interface RegisterCommandResult {
 export interface RegisterSessionOpenPayload {
   sessionId: string; registerId: string; storeKey?: string; businessDay?: string; openedAt: string; openedBy?: string;
   expectedFloatMinor?: number; countedFloatMinor: number; openingVarianceMinor?: number;
+  /** Register v2 only (ADR-078): the till's name on another till's take-over sheet, 1 to 64 characters after trim. */
+  deviceName?: string;
+  /** Register v2 only (ADR-078): the live session this open takes over, a compare-and-set. */
+  supersedes?: string;
+}
+/** error.data for register_session_already_open. */
+export interface RegisterSessionAlreadyOpenData {
+  sessionId: string; registerId?: string; openedAt?: string; openedBy?: string;
+  deviceId?: string; deviceName?: string; status?: 'open' | 'counting';
+}
+/** error.data for register_session_superseded. */
+export interface RegisterSessionSupersededData {
+  sessionId: string; supersededAt?: string; supersededBy?: string;
+  deviceId?: string; deviceName?: string; newSessionId?: string;
 }
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;

@@ -4,6 +4,9 @@ import {
   POS_CHANNEL_CODE, POS_CHANNEL_TOKEN, SERVER_HOST, SERVER_PORT, SUPERADMIN_PASSWORD, SUPERADMIN_USERNAME,
 } from './constants';
 
+// The register session commandSmoke opens before its first sale, so no sale warns register_session_unknown.
+const SMOKE_SESSION_ID = randomUUID();
+
 async function gql(path: string, query: string, variables = {}, headers: Record<string, string> = {}) {
   const response = await fetch(`http://${SERVER_HOST}:${SERVER_PORT}${path}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...headers },
@@ -37,7 +40,7 @@ function saleCommand(lines: Array<{ variantId: string; quantity: number; unitPri
       lines: posLines,
       subtotalMinor: totalMinor - taxMinor, taxMinor, totalMinor,
       payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
-      registerId: 'dev-store-smoke', cashierRef: 'dev-store-smoke', sessionId: randomUUID(),
+      registerId: 'dev-store-smoke', cashierRef: 'dev-store-smoke', sessionId: SMOKE_SESSION_ID,
       // The display mode is the order's (tax-exclusive), so each line shows its net amount.
       display: {
         currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor: totalMinor - taxMinor, discountMinor: 0,
@@ -85,7 +88,7 @@ function v5Command(lines: Array<{
       clientOrderId: randomUUID(), createdAt, currency: 'EUR', pricesIncludeTax: false,
       lines: posLines, fees, shipping, subtotalMinor, taxMinor, totalMinor,
       payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
-      registerId: 'dev-store-smoke', cashierRef: 'dev-store-smoke', sessionId: randomUUID(),
+      registerId: 'dev-store-smoke', cashierRef: 'dev-store-smoke', sessionId: SMOKE_SESSION_ID,
       display: {
         currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor, discountMinor: 0,
         taxMinor, totalMinor, orderDiscountMinor: 0, lines: posLines.map(({ clientLineId, unitPriceMinor, quantity }) =>
@@ -119,6 +122,16 @@ async function commandSmoke(token: string) {
     });
     return { status: response.status, body: await response.json() };
   };
+  const openedAt = new Date().toISOString();
+  const opened = await post({ commands: [{
+    id: randomUUID(), type: 'register.session.open', version: 2, createdAt: openedAt,
+    deviceId: 'dev-store-smoke', attempt: 1,
+    payload: { sessionId: SMOKE_SESSION_ID, registerId: 'dev-store-smoke', openedAt, countedFloatMinor: 0 },
+  }] });
+  expectEqual(opened.status, 200, `the register session open's HTTP status (${JSON.stringify(opened.body)})`);
+  expectEqual(opened.body.results?.[0]?.status, 'applied',
+    `the register session open's result (${JSON.stringify(opened.body)})`);
+  console.log('ok - register session opened for the smoke sales');
   const before = await mug();
   const command = mugCommand(before.id);
   const sold = await post({ commands: [command] });

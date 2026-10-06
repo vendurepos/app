@@ -1,4 +1,4 @@
-// vendored verbatim from @tallyui/core@3.0.0-next.1 src/server/command-result.ts
+// vendored verbatim from @tallyui/core@3.0.0-next.1 src/server/command-result.ts, plus TallyUI#469 (register v2)
 import type { CommandResult, RegisterCommandResult } from './core-commands'
 
 /** parseCommandResult's refusal; its message names the first bad field. A plugin maps it
@@ -111,6 +111,12 @@ export function parseCommandResult(value: unknown): CommandResult {
           if (!Number.isSafeInteger(entry.serverMinor) || entry.serverMinor === entry.tillMinor) throw new CommandResultError(`Invalid ${path}.serverMinor`)
           return { field: entry.field as 'subtotalMinor' | 'taxMinor' | 'discountMinor', tillMinor: entry.tillMinor as number, serverMinor: entry.serverMinor as number }
         }) }
+      }
+      if (item.code === 'register_session_unknown') {
+        if (typeof item.sessionId !== 'string' || item.sessionId.length === 0 || item.sessionId.length > 64) {
+          throw new CommandResultError(`Invalid ${field}.sessionId`)
+        }
+        return { code: item.code, sessionId: item.sessionId }
       }
       throw new CommandResultError(`Invalid ${field}.code`)
     })

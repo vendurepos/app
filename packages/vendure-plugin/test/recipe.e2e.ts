@@ -87,6 +87,7 @@ describe('order.create recipe through OrderCreateService', () => {
   it('happy path: Mug x1 + Beans(500) x2 is Delivered, priced, backdated and records SALE movements', async () => {
     const before = [await stock(serviceIds.mug[0]), await stock(serviceIds.beans[0])];
     const command = orderCommand([mug(), { variantId: variantIds.beans[0], quantity: 2, unitPriceMinor: 500 }]);
+    command.payload.sessionId = '01a0e775-0100-7000-8000-00000000f206';
     const { order, result } = await applied(command);
     expect(order.state).toBe('Delivered');
     expect(order.currencyCode).toBe('EUR');

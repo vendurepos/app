@@ -88,9 +88,9 @@ describe('register commands', () => {
         error: { code: 'idempotency_mismatch', message: 'Command id was already used with a different payload' } });
       expect(await ledger(command)).toMatchObject({ status: 'applied', result: results[index] });
     }
-    const future = { ...open(uuid(), uuid()), version: 2 };
+    const future = { ...open(uuid(), uuid()), version: 3 };
     expect(await send(future)).toEqual({ id: future.id, status: 'rejected', error: { code: 'unsupported_version',
-      message: 'register version 2 is not supported; this server supports 1', data: { register: 1 } } });
+      message: 'register version 3 is not supported; this server supports 1, 2', data: { register: 2 } } });
   });
 
   it('register_session_already_open names the winner and is stored: its resend is rejected the same', async () => {
@@ -299,11 +299,11 @@ describe('register commands', () => {
       { counters: { lastClosureNumber: 1, perpetualSalesTotalMinor: 2000, perpetualRefundsTotalMinor: 0 } });
   });
 
-  it('/info advertises register [1], and one batch applies order.create and register.session.open in array order', async () => {
+  it('/info advertises register [1, 2], and one batch applies order.create and register.session.open in array order', async () => {
     const base = await server.app.getUrl();
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${adminClient.getAuthToken()}`, 'X-Tally-Protocol': '1' };
     const info = await (await fetch(`${base}/tally/v1/info`, { headers })).json();
-    expect(info.contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5], register: [1] });
+    expect(info.contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5], register: [1, 2] });
     const s = uuid();
     const opening = open(s, uuid());
     const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);
