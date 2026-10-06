@@ -22,6 +22,7 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
     <VStack testID="receipt" space="none" className="gap-1.5 p-3">
       <Text className="font-semibold">{receipt.header.storeName}</Text>
       <Text testID="receipt-order" className="text-xs text-muted-foreground">Order {orderReference(posOrder)} · {receipt.header.cashier}</Text>
+      {order.customer ? <Text testID="receipt-customer" className="text-xs text-muted-foreground">Customer: {order.customer.name}</Text> : null}
       {receipt.lineItems.map((line, index) => (
         <VStack key={index} space="none" className="border-b border-border py-1">
           <HStack space="sm" className="justify-between">

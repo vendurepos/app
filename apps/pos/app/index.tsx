@@ -24,6 +24,7 @@ import { printLines } from '../lib/print-lines';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
 import { SaleCart } from '../lib/sale-cart';
+import { SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, type Session } from '../lib/session';
@@ -362,8 +363,11 @@ function Sale({
     highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
   const cart = (payGate?: ReactNode) => (
-    <SaleCart sale={sale} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
-      highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
+    <>
+      <SaleCustomer sale={sale} connector={connector} session={session} />
+      <SaleCart sale={sale} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
+        highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
+    </>
   );
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
   // stock-overlaid entries. A scan into the search field is the field's alone (the listener leaves inputs be): one add.
