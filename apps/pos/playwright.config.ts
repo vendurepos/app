@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 // scripts/measure-sync.sh serves the export on its own port (8199), so it never meets the smoke or e2e server.
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 8099);
+// pnpm e2e:hosted points the specs at a hosted build (scripts/e2e-hosted.sh); nothing is served locally then.
+const BASE_URL = process.env.E2E_BASE_URL;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -17,13 +19,13 @@ export default defineConfig({
   reporter: 'list',
   use: {
     // The dev store's CORS allows the web export on ports 8099 and 8199.
-    baseURL: `http://127.0.0.1:${WEB_PORT}`,
+    baseURL: BASE_URL ?? `http://127.0.0.1:${WEB_PORT}`,
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   // pnpm e2e serves the export itself, with the CSP as a response header (scripts/serve-web.ts), and stops it.
-  webServer: process.env.E2E_WEB_SERVED ? undefined : {
+  webServer: process.env.E2E_WEB_SERVED || BASE_URL ? undefined : {
     command: `pnpm exec expo serve --port ${WEB_PORT}`,
     url: `http://127.0.0.1:${WEB_PORT}`,
     reuseExistingServer: false,
