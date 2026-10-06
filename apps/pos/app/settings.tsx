@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Redirect, Stack } from 'expo-router';
+import { Redirect, router, Stack } from 'expo-router';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
@@ -43,7 +43,10 @@ export default function SettingsScreen() {
         </CardContent>
       </Card>
       <Text testID="settings-barcode-field">Barcode custom field: {session.barcodeField ?? 'none'}. Set when signing in.</Text>
-      <Link href="/" testID="settings-back"><Text>Back to the till</Text></Link>
+      {/* Back, never a push, because a second till can't open the order store the first one holds. */}
+      <Button testID="settings-back" variant="secondary" onPress={() => router.canGoBack() ? router.back() : router.replace('/')}>
+        <Text>Back to the till</Text>
+      </Button>
     </VStack>
   );
 }
