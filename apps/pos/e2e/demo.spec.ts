@@ -420,9 +420,10 @@ test('the demo page says what to try and links to the site and the quick start',
   });
   await page.goto('/demo');
   const demoTry = page.getByTestId('demo-try');
-  for (const text of ['What to try', 'Orders', 'price', 'Park', 'customer', 'Register']) {
+  for (const text of ['What to try', 'Orders', 'price', 'Park', 'Split', 'customer', 'Register']) {
     await expect(demoTry).toContainText(text);
   }
+  await expect(page.getByTestId('demo-try-device-key')).toContainText('device key');
   await expect(page.getByTestId('demo-link-site')).toHaveAttribute('href', /^https:\/\/vendurepos\.com\/?$/);
   await expect(page.getByTestId('demo-link-quickstart')).toHaveAttribute('href', 'https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md');
   expect(cspConsole).toEqual([]);

@@ -28,8 +28,10 @@ export default function DemoScreen() {
               <Text className="text-sm">• Sell the mug for cash, then find the order under Orders.</Text>
               <Text className="text-sm">{"• Change a line's price from the cart."}</Text>
               <Text className="text-sm">• Park a sale, sell another, then resume the parked one.</Text>
+              <Text className="text-sm">• Split a payment: Split, then part cash and part card.</Text>
               <Text className="text-sm">• Add a customer to a sale; they print on the receipt.</Text>
               <Text className="text-sm">• Open the Register, count the drawer and close the day.</Text>
+              <Text className="text-sm text-muted-foreground" testID="demo-try-device-key">On your own store, each till can sign in with a device key instead of a password; the quick start shows how.</Text>
             </VStack>
             {error && (
               <Text testID="demo-error" accessibilityRole="alert" className="text-destructive">{error}</Text>
