@@ -84,6 +84,8 @@ http on the same LAN as the store. That LAN build needs
 CSP's `connect-src` and `img-src`, since product images come from the same
 store. It is off by default.
 
+No public source maps on any site that bundles RxDB Premium (its licence forbids redistributing the source); `scripts/check-web-bundle.sh` fails the build if a `.map` is emitted.
+
 ## Checks
 
 ```bash
