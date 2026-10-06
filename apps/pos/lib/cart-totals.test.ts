@@ -1,13 +1,13 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { StoreSettings } from '@tallyui/core';
 import {
-  addEntryToCart, catalogueEntries, createOrderBuilder, TaxProvider, taxFiguresForBasket, taxProviderProps, useTax, type TaxContext, type TaxProviderProps,
+  addEntryToCart, buildReceiptData, catalogueEntries, createOrderBuilder, TaxProvider, taxFiguresForBasket, taxProviderProps, useTax, type TaxContext, type TaxProviderProps,
 } from '@tallyui/pos';
 import { createElement } from 'react';
 // @ts-expect-error The app has react-dom (for the web build) but not @types/react-dom.
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { cartTabLabel, cartTotals } from './cart-totals';
+import { cartTabLabel, cartTotals, chargeTaxClasses } from './cart-totals';
 
 // The dev store (dev/vendure-store/src/seed.ts): Germany, Standard 19 % (category 1, the default) and Reduced 7 %
 // (category 2), prices excluding tax, and /info's per_rate_group_items / half_up (vendurepos #60).
@@ -42,6 +42,30 @@ const basketLine = (unitPriceMinor: number, quantity: number, tax: typeof standa
   ({ unitPriceMinor, quantity, taxInclusive: false, taxLines: [tax] });
 
 describe('the cart under the store tax settings', () => {
+  it('includes a Reduced-class fee and shipping in the tax rows, matching the receipt by rate', () => {
+    const builder = createOrderBuilder({ currency: settings.currency, taxContext: saleTaxContext() });
+    addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
+    builder.addFee({ name: 'Gift wrap', amountMinor: 200, taxClass: '2' });
+    builder.addShipping({ name: 'Courier', amountMinor: 500 });
+    const order = builder.getSnapshot();
+    const totals = cartTotals(order);
+    expect(totals.taxRows).toEqual([
+      { label: 'Standard DE 19%', name: 'Standard DE 19%', amountMinor: 247 },
+      { label: 'Reduced DE 7%', name: 'Reduced DE 7%', amountMinor: 14 },
+    ]);
+    expect(totals).toMatchObject({ subtotalMinor: 800, totalMinor: 1761 });
+    expect(totals.taxRows.map(({ name, amountMinor }) => [name, amountMinor])).toEqual(
+      buildReceiptData(order, { storeName: '' }).totals.taxLines.map(({ code, ratePpm, amountMinor }) => [`${code} ${ratePpm / 10_000}%`, amountMinor]),
+    );
+  });
+
+  it('offers category ids as tax classes in key order, excluding the default', () => {
+    expect(chargeTaxClasses({ default: 'Standard DE', '1': 'Standard DE', '2': 'Reduced DE' })).toEqual([
+      { id: '1', label: 'Standard DE' }, { id: '2', label: 'Reduced DE' },
+    ]);
+    expect(chargeTaxClasses(undefined)).toEqual([]);
+  });
+
   it('adds lines, changes a quantity and removes a line, with the figures taxFiguresForBasket gives', () => {
     const builder = createOrderBuilder({ currency: 'EUR', taxContext: saleTaxContext() });
     const mug = addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');

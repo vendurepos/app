@@ -454,3 +454,38 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(receipt.getByTestId('receipt-payment-external')).toBeVisible();
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.00');
 });
+
+test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const form = cart.getByRole('group', { name: 'Add charge' });
+  await cart.getByTestId('add-charge').click();
+  await form.getByRole('button', { name: 'Fee', exact: true }).click();
+  await form.getByLabel('Name', { exact: true }).fill('Bag');
+  await form.getByLabel('Amount', { exact: true }).fill('0.10');
+  await form.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(cart.getByTestId('cart-fee-0')).toContainText('Bag');
+  await cart.getByRole('button', { name: 'Remove Bag', exact: true }).click();
+  await expect(cart.getByTestId('cart-fee-0')).toHaveCount(0);
+  await cart.getByTestId('add-charge').click();
+  await form.getByRole('button', { name: 'Fee', exact: true }).click();
+  await form.getByLabel('Name', { exact: true }).fill('Gift wrap');
+  await form.getByLabel('Amount', { exact: true }).fill('2.00');
+  await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Reduced DE', exact: true }).click();
+  await form.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(cart.getByTestId('cart-fee-0-amount')).toHaveText('€2.00');
+  await expect(cart.getByTestId('cart-tax-Reduced DE 7%')).toHaveText('€0.14');
+  await expect(cart.getByTestId('cart-total')).toHaveText('€11.66');
+  await cart.getByTestId('pay-card').click();
+  await page.getByTestId('tender').getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  await expect(receipt.getByTestId('receipt-fee-0')).toHaveText('€2.00');
+  await expect(receipt.getByTestId('receipt-tax-Reduced DE 7%')).toHaveText('€0.14');
+  await expect(receipt.getByTestId('receipt-total')).toHaveText('€11.66');
+});

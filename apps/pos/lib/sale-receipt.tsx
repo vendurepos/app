@@ -44,6 +44,9 @@ export function SaleReceipt({ sale, store, cashier, registerId, till }: {
         ? <MoneyRow label="Order discount" amount={`−${money(receipt.orderDiscountMinor)}`} testID="receipt-order-discount" /> : null}
       <MoneyRow label="Subtotal" amount={money(totals.subtotalMinor)} testID="receipt-subtotal" />
       {totals.discountMinor > 0 ? <MoneyRow label="Discount" amount={`−${money(totals.discountMinor)}`} testID="receipt-discount" /> : null}
+      {/* The subtotal excludes charges (TallyUI ADR-075), so they sit between it and the tax. */}
+      {receipt.fees.map((charge, index) => <MoneyRow key={`fee-${index}`} label={charge.name} amount={money(charge.amountMinor)} testID={`receipt-fee-${index}`} />)}
+      {receipt.shipping.map((charge, index) => <MoneyRow key={`shipping-${index}`} label={charge.name} amount={money(charge.amountMinor)} testID={`receipt-shipping-${index}`} />)}
       <TaxRows label={taxLabel} amount={money(totals.taxMinor)} testID="receipt-tax" rates={totals.taxLines.map((tax) => ({
         key: taxRowLabel(totals.taxInclusive, tax.code, tax.ratePpm), name: taxRowLabel(false, tax.code, tax.ratePpm),
         amount: money(tax.amountMinor),

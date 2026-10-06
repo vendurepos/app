@@ -11,10 +11,19 @@ export function taxRowLabel(taxInclusive: boolean, code: string | undefined, rat
  */
 export function cartTotals(order: Order) {
   const { subtotalMinor, taxMinor, totalMinor, taxInclusive } = order.display;
-  const taxRows = taxLinesByRate(order.lineItems, order.taxMinor, undefined, order.taxRounding).map(({ code, ratePpm, amountMinor }) => ({
+  const taxedLines = [...order.lineItems, ...[...(order.fees ?? []), ...(order.shipping ?? [])].map((charge) => ({ ...charge, taxInclusive: order.pricesIncludeTax }))];
+  const taxRows = taxLinesByRate(taxedLines, order.taxMinor, undefined, order.taxRounding).map(({ code, ratePpm, amountMinor }) => ({
     label: taxRowLabel(taxInclusive, code, ratePpm), name: taxRowLabel(false, code, ratePpm), amountMinor,
   }));
   return { subtotalMinor, taxMinor, totalMinor, taxLabel: `${taxInclusive ? 'incl. ' : ''}Tax`, taxRows };
+}
+
+/**
+ * The store's tax categories, offered as ChargeForm's tax classes. The till's tax context and the plugin resolve
+ * the id (ADR 0005 point 4). Leave out `default`: "No class" already means the default category.
+ */
+export function chargeTaxClasses(taxRateCodes: Record<string, string> | undefined): { id: string; label: string }[] {
+  return Object.entries(taxRateCodes ?? {}).filter(([id]) => id !== 'default').map(([id, label]) => ({ id, label }));
 }
 
 /** The narrow layout's Cart tab: the item count (the sum of quantities) and the total, formatted as the cart formats it. */

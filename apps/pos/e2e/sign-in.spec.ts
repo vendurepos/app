@@ -1460,3 +1460,69 @@ test('a split sale, part cash and part card, is applied by the plugin with both 
   const result = (await response.json()).results.find(({ id }: { id: string }) => id === command.id);
   expect(result.status).toBe('applied');
 });
+
+test('fees, a shipping charge and a custom item, one with a tax class, are applied by the plugin with the receipt\'s totals', async ({ page }) => {
+  const sent: { type: string; version: number; payload: { clientOrderId: string } }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() === 'POST') {
+      sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
+    }
+    return route.continue();
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const form = cart.getByRole('group', { name: 'Add charge' });
+  for (const [kind, name, amount, taxClass] of [
+    ['Custom item', 'Repair', '10.00'], ['Fee', 'Gift wrap', '2.00', 'Reduced DE'], ['Shipping', 'Courier', '5.00'],
+  ]) {
+    await cart.getByTestId('add-charge').click();
+    await form.getByRole('button', { name: kind, exact: true }).click();
+    await form.getByLabel('Name', { exact: true }).fill(name);
+    await form.getByLabel('Amount', { exact: true }).fill(amount);
+    if (taxClass) await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: taxClass, exact: true }).click();
+    await form.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(form).toHaveCount(0);
+  }
+  await cart.getByTestId('add-charge').click();
+  await form.getByRole('button', { name: 'Shipping', exact: true }).click();
+  await form.getByLabel('Name', { exact: true }).fill('Courier 2');
+  await form.getByLabel('Amount', { exact: true }).fill('3.00');
+  await form.getByRole('button', { name: 'Apply', exact: true }).click();
+  // lib/sale-cart.tsx's SHIPPING_SINGLE_REFUSAL.
+  await expect(form.getByRole('alert')).toHaveText('This store takes one shipping charge per order.');
+  await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(cart.getByTestId('cart-shipping-1')).toHaveCount(0);
+  const expectFigures = async (prefix: 'cart' | 'receipt', figures: Record<string, string>) => {
+    const scope = prefix === 'cart' ? cart : page.getByTestId('receipt');
+    for (const [id, text] of Object.entries(figures)) await expect(scope.getByTestId(`${prefix}-${id}`)).toHaveText(text);
+  };
+  // Seed: excluding tax, per_rate_group_items / half_up. Standard (800 + 1000 + 500) × 19 % = 437;
+  // Reduced 200 × 7 % = 14. Subtotal excludes charges: 1800; total 1800 + 200 + 500 + 451 = 2951.
+  const figures = { subtotal: '€18.00', tax: '€4.51', 'tax-Standard DE 19%': '€4.37', 'tax-Reduced DE 7%': '€0.14', total: '€29.51' };
+  await expectFigures('cart', { ...figures, 'fee-0-amount': '€2.00', 'shipping-0-amount': '€5.00' });
+  await cart.getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('30.00');
+  await tender.getByTestId('tender-complete').click();
+  await expectFigures('receipt', { ...figures, 'fee-0': '€2.00', 'shipping-0': '€5.00', change: '€0.49' });
+  await expect.poll(() => sent.length).toBeGreaterThan(0);
+  const orderId = sent[0].payload.clientOrderId;
+  expect(sent.every((command) => command.version === 5 && command.payload.clientOrderId === orderId)).toBe(true);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const onStore = async () => (await (await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax shippingWithTax } } }',
+      variables: { id: orderId },
+    },
+  })).json()).data.orders.items;
+  // A Standard-class fee would give 2975 instead: the plugin must honour category id 2.
+  await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: 2951, shippingWithTax: 595 }]);
+});
