@@ -10,17 +10,18 @@ export function useSignIn() {
 
   useEffect(() => () => request.current?.abort(), []);
 
-  async function submit(values: Record<string, string | undefined>) {
-    if (pending) return;
+  async function submit(values: Record<string, string | undefined>): Promise<boolean> {
+    if (pending) return false;
     const controller = new AbortController();
     request.current = controller;
     setError(null);
     setPending(true);
     try {
       const result = await signIn(values, { signal: controller.signal });
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       if (result.ok) {
         setSignedIn(result.session);
+        return true;
       } else {
         setError(result.error);
       }
@@ -29,6 +30,7 @@ export function useSignIn() {
     } finally {
       if (!controller.signal.aborted) setPending(false);
     }
+    return false;
   }
 
   return { pending, error, submit };
