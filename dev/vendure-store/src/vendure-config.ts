@@ -7,7 +7,9 @@ import {
   VendureConfig,
   dummyPaymentHandler,
 } from '@vendure/core';
+import { DashboardPlugin } from '@vendure/dashboard/plugin';
 import { TallyPosPlugin } from '@vendurepos/plugin';
+import path from 'path';
 import {
   COOKIE_SECRET,
   CORS_ORIGINS,
@@ -72,5 +74,7 @@ export const config: VendureConfig = {
     // POST /tally/v1/commands. Its tables and columns come from the seed's synchronize (no migrations
     // here); on start it gives every channel the POS payment and shipping methods and the walk-in customer.
     TallyPosPlugin,
+    // npm run dashboard:build builds it; without the build, /dashboard shows Vendure's default page and nothing else changes.
+    DashboardPlugin.init({ route: 'dashboard', appDir: path.join(__dirname, '../dist/dashboard') }),
   ],
 };
