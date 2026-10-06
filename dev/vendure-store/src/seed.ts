@@ -2,13 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  bootstrapWorker, Channel, ChannelService, CollectionService, ConfigService, CurrencyCode, CustomerService,
-  FacetValueService, isGraphQlErrorResult, JobQueueService, LanguageCode, SqlJobQueueStrategy, SubscribableJob,
+  bootstrapWorker, Channel, ChannelService, Collection, CollectionService, CurrencyCode, CustomerService,
+  FacetValueService, isGraphQlErrorResult, LanguageCode,
   ProductService, ProductVariant, ProductVariantService, RequestContextService, SearchService,
   StockLocationService, TaxCategoryService, TaxRateService, TransactionalConnection, User, ZoneService,
 } from '@vendure/core';
 import { importProductsFromCsv, populateInitialData } from '@vendure/core/cli';
-import { SortOrder } from '@vendure/common/lib/generated-types';
 import { In } from 'typeorm';
 import { CATALOGUE, barcodeOf } from './catalogue';
 import { largeCatalogue } from './catalogue-large';
@@ -124,13 +123,19 @@ async function seed() {
   const facetValues = await app.get(FacetValueService).findAll(ctx, LanguageCode.en);
   for (const name of ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']) {
     const facetValue = facetValues.find(value => value.facet.code === 'category' && value.name === name)!;
-    const collection = await collections.create(ctx, {
+    const collection: Collection = await collections.create(ctx, {
       translations: [{ languageCode: LanguageCode.en, name, slug: name.toLowerCase(), description: '' }],
       filters: [{ code: 'facet-value-filter', arguments: [
         { name: 'facetValueIds', value: JSON.stringify([facetValue.id]) },
         { name: 'containsAny', value: 'true' },
       ] }],
     });
+    const skus = catalogue.filter(product => product.category === name).flatMap(product => product.variants.map(variant => variant.sku));
+    const variants = await connection.rawConnection.getRepository(ProductVariant).findBy({ sku: In(skus) });
+    // The same membership the facet filter computes; set directly because the seed's worker doesn't run the job queue.
+    // Vendure's filter job keeps it in step afterwards.
+    collection.productVariants = variants;
+    await connection.rawConnection.getRepository(Collection).save(collection);
     await collections.assignCollectionsToChannel(ctx, { collectionIds: [collection.id], channelId: posChannel.id });
   }
   for (const [firstName, lastName, email] of [
@@ -167,13 +172,6 @@ async function seed() {
   }
   // Historic orders are not seeded here because the plugin settles payments only through its POS route;
   // the smoke's own sales create orders.
-  await collections.triggerApplyFiltersJob(ctx, { applyToChangedVariantsOnly: false });
-  const jobStrategy = app.get(ConfigService).jobQueueOptions.jobQueueStrategy as SqlJobQueueStrategy;
-  const { items: [filtersJob] } = await jobStrategy.findMany({
-    filter: { queueName: { eq: 'apply-collection-filters' } }, sort: { createdAt: SortOrder.DESC }, take: 1,
-  });
-  await app.get(JobQueueService).start();
-  await new SubscribableJob(filtersJob, jobStrategy).updates().toPromise();
   await app.get(SearchService).reindex(ctx);
   await app.get(SearchService).reindex(posCtx);
   console.log(`Channels: ${defaultChannel.code} (${DEFAULT_CHANNEL_TOKEN}), ${posChannel.code} (${POS_CHANNEL_TOKEN})`);

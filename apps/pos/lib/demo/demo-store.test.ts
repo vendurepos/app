@@ -406,5 +406,6 @@ it('Reset demo removes created customers', async () => {
   expect(await connector.getCustomer!(context, customer.id)).toBeNull();
   installed.uninstall();
   installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
-  expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.id)).toEqual(['c2', 'c1', 'c3']);
+  expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.id))
+    .toEqual(['c2', 'c4', 'c6', 'c5', 'c1', 'c7', 'c3', 'c8']);
 });
