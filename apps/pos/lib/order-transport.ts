@@ -2,9 +2,10 @@ import { createHttpCommandTransport } from '@tallyui/pos';
 import { sessionContext, type Session } from './session';
 import { MIN_ORDER_CREATE } from './use-sale-settings';
 
-/** useOrderOutbox's transport: POST /tally/v1/commands on the session's store, with its Vendure auth headers. */
-export const orderTransport = (session: Session) => {
-  const transport = createHttpCommandTransport({ baseUrl: session.url, getHeaders: () => sessionContext(session).headers });
+/** Pass a getter so a re-authenticated till sends with its new token: the outboxes build their transport once per open. */
+export const orderTransport = (session: Session | (() => Session)) => {
+  const current = typeof session === 'function' ? session : () => session;
+  const transport = createHttpCommandTransport({ baseUrl: current().url, getHeaders: () => sessionContext(current()).headers });
   return {
     async send(batch: Parameters<typeof transport.send>[0]) {
       const outcome = await transport.send(batch);

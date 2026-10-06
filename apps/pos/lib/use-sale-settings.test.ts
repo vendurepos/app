@@ -1,5 +1,5 @@
 import type { ServerCapabilities, TallyConnector } from '@tallyui/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from './session';
 // Renamed so the hook can run outside a component here, where React's hooks are mocked.
@@ -7,7 +7,7 @@ import { MIN_ORDER_CREATE, MIN_REGISTER, READ_TIMEOUT_MS, readCapabilities, retr
 
 vi.mock('react', async (importActual) => ({
   ...await importActual<typeof import('react')>(),
-  useEffect: vi.fn(), useState: vi.fn(),
+  useEffect: vi.fn(), useRef: vi.fn(), useState: vi.fn(),
 }));
 
 const session: Session = {
@@ -35,6 +35,7 @@ beforeEach(() => {
   states = [];
   vi.mocked(useState).mockImplementation(((initial: SaleSettingsState) => [initial, (next: SaleSettingsState) => { states.push(next); }]) as any);
   vi.mocked(useEffect).mockImplementation((effect) => { cleanup = effect(); });
+  vi.mocked(useRef).mockImplementation(((initial: unknown) => ({ current: initial })) as any);
 });
 
 afterEach(() => {

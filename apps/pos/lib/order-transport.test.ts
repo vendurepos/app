@@ -33,6 +33,19 @@ it("adds the channel's vendure-token when the session has one", async () => {
   expect(request.headers).toMatchObject({ Authorization: 'Bearer test-token', 'vendure-token': 'channel-token' });
 });
 
+it('a session getter is read at each send, so a new token is used without a new transport', async () => {
+  const fetch = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ results: [] }), { status: 200 }));
+  vi.stubGlobal('fetch', fetch);
+  let current = session;
+  const transport = orderTransport(() => current);
+  await transport.send([command]);
+  expect(fetch.mock.calls[0][1].headers).toMatchObject({ Authorization: 'Bearer test-token' });
+  current = { ...session, token: 'new-token' };
+  await transport.send([command]);
+  expect(fetch.mock.calls[1][1].headers).toMatchObject({ Authorization: 'Bearer new-token' });
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
 it('removes an unsupported order.create version below the net-discount minimum', async () => {
   const result = { id: 'command-1', status: 'rejected', error: {
     code: 'unsupported_version', message: 'Too old', data: { orderCreate: 3, other: 'x' },

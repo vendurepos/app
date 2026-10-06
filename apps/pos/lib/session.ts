@@ -14,6 +14,11 @@ export interface Session {
   stock: { trackInventory: boolean; outOfStockThreshold: number };
 }
 
+/** What a sale depends on besides the token: the store, channel, barcode field and the settings read at sign-in. A new token for the same key keeps the sale. */
+export function sessionKey(session: Session): string {
+  return JSON.stringify([session.url, session.channelToken ?? '', session.barcodeField ?? '', session.settings, session.stock]);
+}
+
 export interface KeyValueStore {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
