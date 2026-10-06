@@ -113,6 +113,18 @@ Build device credentials on **Vendure's native API keys (3.6+)**:
    3. the Dashboard extension;
    4. the app's device-key sign-in path.
 
+**Amendment (front desk, 2026-10-06): the extension is one button.**
+- **What we found:** Vendure 3.7's own Dashboard already has an API keys page. It lists keys with `lastUsedAt`, creates and rotates them with the key shown once, and deletes them.
+- **So the extension adds only "New POS till key" to that page.** It:
+  - ensures the role (`tallyEnsurePosTillRole`);
+  - creates a named key with it;
+  - shows the key once and names the role it granted.
+- **Rotate, revoke and the device list stay Vendure's.**
+- **Packaging:**
+  - the extension ships as source in `dist/dashboard/`;
+  - with npm, the merchant's Dashboard build finds it unaided;
+  - with pnpm, the build needs Vendure's `pluginPackageScanner.nodeModulesRoot` option (plugin README).
+
 ## Consequences
 
 **Work it implies:**

@@ -31,7 +31,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-dashboard.mjs",
     "db:up": "scripts/test-stack.sh up",
     "db:down": "scripts/test-stack.sh down",
     "test": "vitest run --maxWorkers=1",
