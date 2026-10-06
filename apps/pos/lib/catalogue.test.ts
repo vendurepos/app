@@ -57,10 +57,71 @@ it('keeps the original database name when no barcode field is set', async () => 
 afterEach(async () => {
   const { removeCatalogueDatabase } = await import('./catalogue');
   await removeCatalogueDatabase();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe('catalogue sync lifecycle', () => {
+  it('re-reads stock and re-pulls when the till comes back to the foreground, not when it is hidden', async () => {
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('document', document);
+    vi.stubGlobal('window', new EventTarget());
+    const { catalogueConnector, startCatalogueSync } = await import('./catalogue');
+    const { replication } = await startCatalogueSync(session, catalogueConnector(session));
+    const stock = vi.mocked(startStockReconcile).mock.results[0].value;
+    vi.mocked(stock.reconcileStock).mockClear();
+    vi.mocked(replication.reSync).mockClear();
+    document.visibilityState = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(stock.reconcileStock).not.toHaveBeenCalled();
+    expect(replication.reSync).not.toHaveBeenCalled();
+    document.visibilityState = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(stock.reconcileStock).toHaveBeenCalledTimes(1);
+    expect(replication.reSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads stock and re-pulls when the browser comes back online', async () => {
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
+    const window = new EventTarget();
+    vi.stubGlobal('window', window);
+    const { catalogueConnector, startCatalogueSync } = await import('./catalogue');
+    const { replication } = await startCatalogueSync(session, catalogueConnector(session));
+    const stock = vi.mocked(startStockReconcile).mock.results[0].value;
+    vi.mocked(stock.reconcileStock).mockClear();
+    vi.mocked(replication.reSync).mockClear();
+    window.dispatchEvent(new Event('online'));
+    expect(stock.reconcileStock).toHaveBeenCalledTimes(1);
+    expect(replication.reSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops listening when the sync stops or restarts', async () => {
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    const window = new EventTarget();
+    vi.stubGlobal('document', document);
+    vi.stubGlobal('window', window);
+    const { catalogueConnector, startCatalogueSync, stopCatalogueSync } = await import('./catalogue');
+    const connector = catalogueConnector(session);
+    const first = await startCatalogueSync(session, connector);
+    const firstStock = vi.mocked(startStockReconcile).mock.results[0].value;
+    await stopCatalogueSync();
+    vi.mocked(firstStock.reconcileStock).mockClear();
+    vi.mocked(first.replication.reSync).mockClear();
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('online'));
+    expect(firstStock.reconcileStock).not.toHaveBeenCalled();
+    expect(first.replication.reSync).not.toHaveBeenCalled();
+    const second = await startCatalogueSync(session, connector);
+    const secondStock = vi.mocked(startStockReconcile).mock.results[1].value;
+    vi.mocked(secondStock.reconcileStock).mockClear();
+    vi.mocked(second.replication.reSync).mockClear();
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(secondStock.reconcileStock).toHaveBeenCalledTimes(1);
+    expect(second.replication.reSync).toHaveBeenCalledTimes(1);
+    expect(firstStock.reconcileStock).not.toHaveBeenCalled();
+    expect(first.replication.reSync).not.toHaveBeenCalled();
+  });
+
   it('starts each reconcile runner with the replication context and runs stock immediately', async () => {
     const { catalogueConnector, startCatalogueSync } = await import('./catalogue');
     const connector = catalogueConnector(session);
