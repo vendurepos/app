@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SESSION_KEY, clearSession, defaultStore, loadSession, saveSession, sessionContext, sessionKey,
+  SESSION_KEY, clearSession, defaultStore, loadSession, saveSession, sessionContext, sessionKey, tillIdentity,
   type KeyValueStore, type Session,
 } from './session';
 
@@ -31,6 +31,12 @@ it('sessionKey ignores the token and follows the store and its settings', () => 
 });
 
 describe('session storage', () => {
+  it('round trips a device-key session', () => {
+    const device = { ...session, kind: 'api-key' as const, apiKey: 'test-device-key', device: 'Front counter iPad', email: '', token: '' };
+    saveSession(device, store);
+    expect(loadSession(store)).toEqual(device);
+  });
+
   it('round trips the barcode field', () => {
     const withBarcode = { ...session, barcodeField: 'barcode' };
     saveSession(withBarcode, store);
@@ -51,6 +57,9 @@ describe('session storage', () => {
     '{', 'null', '[]', '{}', '"text"',
     JSON.stringify({ ...session, barcodeField: 123 }),
     JSON.stringify({ ...session, barcodeField: 'bad name' }),
+    ...[undefined, '', 123].map((apiKey) => JSON.stringify({ ...session, kind: 'api-key', apiKey })),
+    JSON.stringify({ ...session, kind: 'other' }),
+    JSON.stringify({ ...session, device: 123 }),
     ...['url', 'email', 'token'].map((key) => JSON.stringify({ ...session, [key]: 1 })),
     ...['settings', 'stock'].flatMap((key) =>
       [undefined, null, 'bad', []].map((value) => JSON.stringify({ ...session, [key]: value }))),
@@ -98,4 +107,18 @@ describe('session storage', () => {
       },
     });
   });
+});
+
+it('sends device-key and channel headers without a bearer token', () => {
+  expect(sessionContext({ ...session, kind: 'api-key', apiKey: 'test-device-key', channelToken: 'channel-1' }).headers).toEqual({
+    'vendure-api-key': 'test-device-key', 'vendure-token': 'channel-1',
+  });
+});
+
+it('uses the device name or fallback for devices and email for password sessions', () => {
+  expect(tillIdentity({ ...session, kind: 'api-key', device: 'Front counter iPad' })).toBe('Front counter iPad');
+  expect(tillIdentity({ ...session, kind: 'api-key' })).toBe('Device key');
+  expect(tillIdentity({ ...session, kind: 'api-key', device: '' })).toBe('Device key');
+  expect(tillIdentity(session)).toBe(session.email);
+  expect(tillIdentity({ ...session, kind: 'password' })).toBe(session.email);
 });

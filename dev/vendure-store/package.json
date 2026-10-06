@@ -11,6 +11,7 @@
     "seed": "tsx src/seed.ts",
     "seed:check": "tsx src/seed-check.ts",
     "smoke:check": "tsx src/smoke.ts",
+    "dashboard:build": "vite build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,7 +21,9 @@
   },
   "devDependencies": {
     "@types/node": "24.19.0",
+    "@vendure/dashboard": "3.7.3",
     "tsx": "4.23.15",
-    "typescript": "~5.8.3"
+    "typescript": "~5.8.3",
+    "vite": "7.3.6"
   }
 }

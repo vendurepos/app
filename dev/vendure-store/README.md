@@ -31,6 +31,12 @@ plugin's `dist/` is missing or older than its sources, or this store's copy diff
 `start.sh` refuses to start on an empty database; run `./reset.sh` first.
 The server log is `.run/vendure.log`, the pid `.run/vendure.pid`.
 
+## Dashboard
+
+Run `npm run dashboard:build` once, and again after changing the plugin's
+`src/dashboard/`. Open `http://localhost:<port>/dashboard` and sign in as
+superadmin. System → API keys → **New POS till key** mints a till's device key.
+
 ### Ports
 
 | What | Default | Override |

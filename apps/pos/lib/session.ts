@@ -3,6 +3,12 @@ import type { StoreSettings, SyncContext } from '@tallyui/core';
 import { isFieldName } from './barcode-field';
 
 export interface Session {
+  /** Absent means password for sessions saved before device keys. */
+  kind?: 'password' | 'api-key';
+  /** The device key when kind is api-key, stored like the token. */
+  apiKey?: string;
+  /** The key's name from /tally/v1/info. */
+  device?: string;
   /** Server root, as returned by normalizeStoreUrl. */
   url: string;
   /** vendure-token of the channel; absent means the default channel. */
@@ -53,6 +59,9 @@ export function loadSession(store: KeyValueStore = defaultStore()): Session | nu
     const session = JSON.parse(store.getItem(SESSION_KEY) ?? 'null');
     if (!session || typeof session.url !== 'string' || typeof session.email !== 'string' ||
       typeof session.token !== 'string' ||
+      (session.kind !== undefined && session.kind !== 'password' && session.kind !== 'api-key') ||
+      (session.kind === 'api-key' && (typeof session.apiKey !== 'string' || !session.apiKey)) ||
+      (session.device !== undefined && typeof session.device !== 'string') ||
       (session.barcodeField !== undefined && (typeof session.barcodeField !== 'string' || !isFieldName(session.barcodeField))) ||
       !session.settings || typeof session.settings !== 'object' || Array.isArray(session.settings) ||
       !session.stock || typeof session.stock !== 'object' || Array.isArray(session.stock)) return null;
@@ -75,10 +84,18 @@ export function sessionContext(session: Session): SyncContext {
     connectorId: 'vendure',
     baseUrl: session.url,
     headers: vendureAuth.getHeaders({
-      token: session.token,
+      ...(session.kind === 'api-key' ? { kind: 'api-key', api_key: session.apiKey ?? '' } : { kind: 'password', token: session.token }),
       ...(session.channelToken ? { channel_token: session.channelToken } : {}),
     }),
   };
+}
+
+/** The identity when the plugin predates device in /tally/v1/info. */
+export const DEVICE_KEY_FALLBACK_NAME = 'Device key';
+
+/** A device is not a person; M7 cashier switching will layer a chosen cashier on top. */
+export function tillIdentity(session: Session): string {
+  return session.kind === 'api-key' ? session.device || DEVICE_KEY_FALLBACK_NAME : session.email;
 }
 
 /** FNV-1a of a store key as 8 hex digits: a stable, filesystem-safe database name part that never holds the key. */

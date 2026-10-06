@@ -29,7 +29,7 @@ import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
-import { defaultStore, type Session } from '../lib/session';
+import { defaultStore, tillIdentity, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
@@ -112,7 +112,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const registerNotice = registerSyncNotice(registerOutbox.state, rejectedRegisterCommands);
   const [boundRegisterId] = useState(() => mintBoundRegisterId(defaultStore()));
   const [tenderInProgress, setTenderInProgress] = useState(false);
-  const actor = useMemo(() => ({ id: session.email, name: session.email }), [session.email]);
+  // A device is not a person; M7 cashier switching will set the chosen cashier here when there is one.
+  const identity = tillIdentity(session);
+  const actor = useMemo(() => ({ id: identity, name: identity }), [identity]);
   const readSettingsCapabilities = saleSettings.status === 'ready' ? saleSettings.capabilities : undefined;
   // The one register session hook for this store: the sale, the panel and the count share it.
   const register = useRegisterSession({
@@ -321,10 +323,10 @@ function Sale({
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const typedApproval = useTypedApproval();
-  // The session knows the cashier only by the email they signed in with. Its orders go to its own store's outbox, each
-  // stamped with the register session it was taken in.
+  const identity = tillIdentity(session);
+  // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
-    registerId, cashierRef: session.email, capabilities, session: register.saleSession, onSaleCompleted: outbox.record,
+    registerId, cashierRef: identity, capabilities, session: register.saleSession, onSaleCompleted: outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
   const [parkedOpen, setParkedOpen] = useState(false);
@@ -452,7 +454,7 @@ function Sale({
         {stage.kind !== 'cart' ? (
           <ScrollView>
             <SaleTender sale={sale} />
-            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={session.email} registerId={registerId} />
+            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
           </ScrollView>
         ) : register.session ? (
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
