@@ -2,7 +2,7 @@ import {
   vendureSignIn, vendureStoreSettings, vendureGlobalStockSettings,
 } from '@tallyui/connector-vendure';
 import { SignInError, StoreSettingsError } from '@tallyui/core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkBarcodeField } from './barcode-field';
 import { logout } from './logout';
 import { signIn } from './sign-in';
@@ -36,6 +36,85 @@ beforeEach(() => {
   vi.mocked(vendureStoreSettings).mockResolvedValue(settings);
   vi.mocked(vendureGlobalStockSettings).mockResolvedValue(stock);
   vi.mocked(checkBarcodeField).mockResolvedValue('ok');
+});
+
+describe('a device key', () => {
+  const keyValues = { ...values, kind: 'api-key', api_key: ' test-device-key ' };
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn()); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('signs in with the trimmed key and device name and uses key headers throughout', async () => {
+    vi.mocked(fetch).mockResolvedValue(Response.json({ device: { name: ' Front counter iPad ' } }));
+    const signal = new AbortController().signal;
+    expect(await signIn({ ...keyValues, barcode_field: ' barcode ' }, { signal })).toEqual({
+      ok: true, session: {
+        kind: 'api-key', url: 'https://shop.example.com', channelToken: 'channel-1', apiKey: 'test-device-key',
+        device: 'Front counter iPad', email: '', token: '', barcodeField: 'barcode', settings, stock,
+      },
+    });
+    const headers = { 'vendure-api-key': 'test-device-key', 'vendure-token': 'channel-1' };
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('https://shop.example.com/tally/v1/info', { headers, signal });
+    const context = { connectorId: 'vendure', baseUrl: 'https://shop.example.com', headers, signal };
+    expect(vendureStoreSettings).toHaveBeenCalledExactlyOnceWith(context);
+    expect(vendureGlobalStockSettings).toHaveBeenCalledExactlyOnceWith(context);
+    expect(checkBarcodeField).toHaveBeenCalledExactlyOnceWith(context, 'barcode');
+    expect(vendureSignIn).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { device: { name: '  ' } }, { device: { name: 123 } }])('uses the fallback identity for %j', async (body) => {
+    vi.mocked(fetch).mockResolvedValue(Response.json(body));
+    const result = await signIn(keyValues);
+    expect(result.ok && result.session.device).toBe('Device key');
+  });
+
+  it('uses the fallback identity when JSON is unreadable', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('not JSON'));
+    const result = await signIn(keyValues);
+    expect(result.ok && result.session.device).toBe('Device key');
+  });
+
+  it.each([
+    [401, 'This device key was refused. Check the key, or create a new one on the Dashboard\'s API keys page.'],
+    [403, 'This device key was refused. Check the key, or create a new one on the Dashboard\'s API keys page.'],
+    [404, 'The VendurePOS plugin was not found on this store. Install @vendurepos/plugin, then sign in again.'],
+    [500, 'The store answered HTTP 500 when checking the device key.'],
+  ])('reports HTTP %i without reading settings', async (status, error) => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status }));
+    expect(await signIn(keyValues)).toEqual({ ok: false, error });
+    expect(vendureStoreSettings).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, '', '  '])('rejects empty key %j without fetching', async (api_key) => {
+    expect(await signIn({ ...keyValues, api_key })).toEqual({ ok: false, error: 'Enter the device key.' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns a settings failure without logout', async () => {
+    vi.mocked(fetch).mockResolvedValue(Response.json({}));
+    vi.mocked(vendureStoreSettings).mockRejectedValue(new StoreSettingsError('failed', 'Settings unavailable.'));
+    expect(await signIn(keyValues)).toEqual({
+      ok: false, error: 'Could not read the store settings: Settings unavailable. Check the channel token.',
+    });
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it('reports a network error', async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error('Network unavailable.'));
+    expect(await signIn(keyValues)).toEqual({ ok: false, error: 'Could not reach Vendure at https://shop.example.com: Network unavailable.' });
+  });
+
+  it.each(['info', 'settings', 'stock', 'barcode'])('rethrows AbortError at %s without logout', async (stage) => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.mocked(fetch).mockResolvedValue(Response.json({}));
+    const operation = stage === 'info' ? fetch : stage === 'settings' ? vendureStoreSettings
+      : stage === 'stock' ? vendureGlobalStockSettings : checkBarcodeField;
+    vi.mocked(operation).mockRejectedValue(controller.signal.reason);
+    await expect(signIn({ ...keyValues, barcode_field: 'barcode' }, { signal: controller.signal })).rejects.toBe(controller.signal.reason);
+    expect(logout).not.toHaveBeenCalled();
+  });
 });
 
 describe('signIn', () => {
