@@ -84,7 +84,7 @@ export function sessionContext(session: Session): SyncContext {
     connectorId: 'vendure',
     baseUrl: session.url,
     headers: vendureAuth.getHeaders({
-      ...(session.kind === 'api-key' ? { kind: 'api-key', api_key: session.apiKey } : { kind: 'password', token: session.token }),
+      ...(session.kind === 'api-key' ? { kind: 'api-key', api_key: session.apiKey ?? '' } : { kind: 'password', token: session.token }),
       ...(session.channelToken ? { channel_token: session.channelToken } : {}),
     }),
   };
