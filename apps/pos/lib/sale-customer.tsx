@@ -16,7 +16,7 @@ export function SaleCustomer({ sale, connector, session }: {
       {customer ? (
         <View className="flex-row items-center justify-between gap-2">
           <Text testID="sale-customer" className="flex-1 text-sm">Customer: {customer.name}</Text>
-          <Button testID="customer-remove" disabled={sale.saving} onPress={() => sale.setCustomer(null)}>
+          <Button testID="customer-remove" variant="secondary" size="sm" disabled={sale.saving} onPress={() => sale.setCustomer(null)}>
             <Text>Remove</Text>
           </Button>
         </View>
