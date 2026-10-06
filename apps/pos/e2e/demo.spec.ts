@@ -342,3 +342,27 @@ test('a second tab is told the till is open in another tab, and opens after the 
   await expect(second.getByTestId('signed-in-store')).toBeVisible({ timeout: 30_000 });
   await expect(second.getByTestId('storage-failure')).toHaveCount(0);
 });
+
+test('a demo cashier changes a line\'s price and sells at it', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('line-price-TALLY-MUG').click();
+  const priceForm = page.getByTestId('price-form');
+  await priceForm.getByRole('textbox', { name: 'Price value', exact: true }).fill('5.00');
+  await priceForm.getByRole('button', { name: 'Apply', exact: true }).click();
+  const cart = page.getByTestId('cart');
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€5.00 each');
+  await expect(cart.getByTestId('cart-total')).toHaveText('€5.95');
+  await cart.getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('5.95');
+  await tender.getByTestId('tender-complete').click();
+  const receiptLine = page.getByTestId('receipt').getByText('1 × Tally Fixture Mug', { exact: true });
+  await expect(receiptLine).toBeVisible();
+  await expect(receiptLine.locator('..').getByText('€5.00', { exact: true })).toBeVisible();
+});
