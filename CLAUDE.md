@@ -28,7 +28,7 @@ this repo.
 ## TallyUI
 
 - The app consumes the **published** `@tallyui/*` packages from npm, pinned
-  to an exact version (3.7.0 today). Never `file:`, `link:` or
+  to an exact version (3.7.1 today). Never `file:`, `link:` or
   `pnpm.overrides` pointing at a local TallyUI checkout; a test enforces the
   pin. A TallyUI upgrade is a deliberate PR that bumps every `@tallyui/*`
   package together.
