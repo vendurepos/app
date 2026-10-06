@@ -93,3 +93,14 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
 - An unknown name or id is refused with `invalid_payload` and code `tax_class_unknown`. It is never silently defaulted: a mismatch between till and store must surface.
 
 **Fees** are Surcharges, as proposed.
+
+## Implementation notes (plugin 0.3.0, 2026-10-06)
+
+- **Custom lines are added through Vendure's `OrderModifier`** (`getOrCreateOrderLine` + `updateOrderLineQuantity`), not `OrderService.addItemToOrder`, which refuses a disabled product. The line's list price and tax category are set from the till, then taxed with the order calculator. `TallyPriceStrategy` re-prices them from `tallyUnitPrice` whenever Vendure re-prices.
+- **The custom item is created only in channels with a default tax zone.** Vendure prices a new variant in the channel's zone, and a channel without one can't sell anyway. When such a channel gains a zone, the first sale's setup repair creates it. The "POS no tax" category needs no zone and is always ensured.
+- **No default category means a refusal.** With `taxClass` absent and no category marked default (common in stores built from Vendure's initial data), a taxable charge or custom line is refused as `tax_class_unknown`, with a message saying to mark a default category. This is ruling (c), never a guess.
+- **Visibility:**
+  - the disabled product is hidden from the Shop API, search and the till's catalogue (connector-vendure's `isSellable`; the smoke e2e checks it);
+  - it is listed in the Admin product list, as every product is;
+  - Admin `productVariants` counts include it.
+- **`/tally/v1/info`** also carries `lineTax: { none: true, classes: true }`, from the v5 contract §1b.
