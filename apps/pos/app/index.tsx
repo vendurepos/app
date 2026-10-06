@@ -450,7 +450,10 @@ function Sale({
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
       <View dataSet={{ print: 'hide' }} className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
+        {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
+          showCategoryNav
+          showViewToggle
           loading={!lastSyncedAt && !error}
           products={products}
           traits={connector.traits.product}
