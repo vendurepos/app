@@ -360,6 +360,18 @@ describe('order.create register session warnings (ADR-078 d7)', () => {
     envelope('register.session.open', { sessionId, registerId, openedAt: AT, countedFloatMinor: 10000 });
   const mug = () => ({ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 });
 
+  it('applies an order without a sessionId without warnings', async () => {
+    // Without a session in the channel, an unguarded lookup would warn.
+    const channelId = String((await server.app.get(RequestContextService).create({ apiType: 'custom' })).channelId);
+    expect(await connection.rawConnection.getRepository(TallyRegisterSession).findBy({ channelId })).toEqual([]);
+    expect(await connection.rawConnection.getRepository(TallyRegisterSessionAlias).findBy({ channelId })).toEqual([]);
+    const command = orderCommand([mug()]);
+    expect(command.payload).not.toHaveProperty('sessionId');
+    const result = await run(command);
+    expect(result.status).toBe('applied');
+    expect(result).not.toHaveProperty('warnings');
+  });
+
   it('applies an unknown session, retaining its id and a parsed, replayable warning', async () => {
     const sessionId = uuid();
     const command = orderCommand([mug()], undefined, undefined, { sessionId });
@@ -395,14 +407,6 @@ describe('order.create register session warnings (ADR-078 d7)', () => {
       { code: 'customer_ignored', customerId, reason: 'unknown' },
       { code: 'register_session_unknown', sessionId },
     ]);
-  });
-
-  it('applies an order without a sessionId without warnings', async () => {
-    const command = orderCommand([mug()]);
-    expect(command.payload).not.toHaveProperty('sessionId');
-    const result = await run(command);
-    expect(result.status).toBe('applied');
-    expect(result).not.toHaveProperty('warnings');
   });
 
   it('counts an order with an unknown session after that session opens', async () => {
