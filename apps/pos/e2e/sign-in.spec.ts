@@ -1341,3 +1341,83 @@ test('a sale to a searched customer, and one to a new customer, land on those cu
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
+
+test('a till signs in with a device key, sells, and asks for a new key once the key is revoked', async ({ page }) => {
+  const login = await page.request.post(`${STORE_URL}/admin-api`, {
+    data: {
+      query: 'mutation ($username: String!, $password: String!) { login(username: $username, password: $password) { __typename } }',
+      variables: { username: USERNAME, password: PASSWORD },
+    },
+  });
+  expect(login.ok()).toBe(true);
+  const token = login.headers()['vendure-auth-token'];
+  expect(token).toBeTruthy();
+  const admin = async (query: string, variables: Record<string, unknown> = {}) => {
+    const response = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers: { Authorization: `Bearer ${token}` }, data: { query, variables },
+    });
+    expect(response.ok()).toBe(true);
+    const result = await response.json();
+    expect(result.errors).toBeUndefined();
+    return result.data;
+  };
+  const { tallyEnsurePosTillRole: role } = await admin('mutation { tallyEnsurePosTillRole { id } }');
+  const name = `E2E till ${Date.now()}`;
+  const createKey = 'mutation ($roleIds: [ID!]!, $name: String!) { createApiKey(input: { roleIds: $roleIds, translations: [{ languageCode: en, name: $name }] }) { apiKey entityId } }';
+  const { createApiKey: key } = await admin(createKey, { roleIds: [role.id], name });
+
+  await page.goto('/');
+  await page.getByTestId('sign-in-kind-api-key').click();
+  await expect(page.getByTestId('sign-in-email')).toHaveCount(0);
+  await expect(page.getByTestId('sign-in-api_key')).toHaveAttribute('type', 'password');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-api_key').fill(key.apiKey);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-barcode_field').fill('barcode');
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  const session = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!);
+  expect(session).toMatchObject({ kind: 'api-key', token: '', apiKey: key.apiKey, device: name });
+
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const sent = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith('/tally/v1/commands') && (response.request().postData() ?? '').includes('order.create'));
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await expect(page.getByTestId('receipt-order')).toContainText(`Till: ${name}`);
+  const response = await sent;
+  expect(response.status()).toBe(200);
+  const headers = await response.request().allHeaders();
+  expect(headers['vendure-api-key']).toBe(key.apiKey);
+  expect(headers).not.toHaveProperty('authorization');
+  const command = response.request().postDataJSON().commands.find(({ type }: { type: string }) => type === 'order.create');
+  const result = (await response.json()).results.find(({ id }: { id: string }) => id === command.id);
+  expect(result.status).toBe('applied');
+
+  await admin('mutation ($ids: [ID!]!) { deleteApiKeys(ids: $ids) { result } }', { ids: [key.entityId] });
+  const violations = await cspViolations(page);
+  await page.reload();
+  const signInAgain = page.getByTestId('sign-in-again');
+  await expect(signInAgain).toBeVisible();
+  await expect(signInAgain.getByTestId('sign-in-again-api-key')).toBeVisible();
+  await expect(signInAgain).toContainText("This till's device key was refused.");
+  const { createApiKey: replacement } = await admin(createKey, { roleIds: [role.id], name: `E2E till ${Date.now()}` });
+  await page.getByTestId('sign-in-again-api-key').fill(replacement.apiKey);
+  await page.getByTestId('sign-in-again-submit').click();
+  await expect(signInAgain).toHaveCount(0);
+
+  const logouts: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/admin-api') && (request.postData() ?? '').includes('logout')) logouts.push(request.postData()!);
+  });
+  await page.getByTestId('sign-out').click();
+  await expect(page.getByTestId('sign-in-submit')).toBeVisible();
+  expect(logouts).toEqual([]);
+  violations.push(...await cspViolations(page));
+  expect(violations).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
