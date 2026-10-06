@@ -10,7 +10,7 @@ tested version). Run store commands from that project's root.
 1. **Install the plugin:**
 
    ```sh
-   npm install @vendurepos/plugin@0.2.0
+   npm install @vendurepos/plugin@0.3.0
    ```
 
    <!-- Sources: packages/vendure-plugin/package.json (name, version, peers); packages/vendure-plugin/CHANGELOG.md (0.2.0). -->
