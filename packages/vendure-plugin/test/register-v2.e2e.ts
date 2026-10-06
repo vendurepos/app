@@ -4,10 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RegisterService, TallyCommand } from '../src';
 import type { RegisterEnvelope } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
-import { TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus } from '../src/entities/register.entities';
+import {
+  TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
+} from '../src/entities/register.entities';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
 import type { RegisterCommandType } from '../src/vendored/core-commands';
 import { createPluginTestEnvironment } from './env';
+import { orderCommand } from './payloads';
 
 const NOW = Date.parse('2026-10-01T00:00:00.000Z');
 const AT = '2026-09-30T10:00:00.000Z';
@@ -191,5 +194,145 @@ describe('register v2 open: resume and take-over (ADR-078)', () => {
       delete process.env[TEST_HOOKS_ENV];
       registers.testHooks = {};
     }
+  });
+});
+
+describe('register v2 later commands: aliases and superseded sessions (ADR-078)', () => {
+  const environment = createPluginTestEnvironment();
+  const { server, variantIds, run } = environment;
+  let registers: RegisterService;
+  let connection: TransactionalConnection;
+  let channelId: string;
+  beforeAll(async () => {
+    await environment.init();
+    registers = server.app.get(RegisterService);
+    connection = server.app.get(TransactionalConnection);
+    channelId = String((await server.app.get(RequestContextService).create({ apiType: 'custom' })).channelId);
+  });
+  afterAll(() => server.destroy());
+
+  async function send(command: RegisterEnvelope, requestTimeMs = NOW) {
+    const ctx = markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom' }));
+    return registers.apply(ctx, command, { requestTimeMs });
+  }
+  const envelope = (type: RegisterCommandType, payload: Record<string, unknown>, version = 2, deviceId = 'till-1'): RegisterEnvelope =>
+    ({ id: uuid(), type, version, createdAt: AT, deviceId, attempt: 1, payload });
+  const open = (sessionId: string, registerId: string, extra = {}, version = 2, deviceId = 'till-1') =>
+    envelope('register.session.open', { sessionId, registerId, openedAt: AT, countedFloatMinor: 10000, ...extra }, version, deviceId);
+  const transition = (sessionId: string, status: string) => envelope('register.session.transition', { sessionId, status, at: AT });
+  const session = (id: string) => connection.rawConnection.getRepository(TallyRegisterSession).findOneBy({ channelId, id });
+  const aliases = (sessionId: string) => connection.rawConnection.getRepository(TallyRegisterSessionAlias).findBy({ channelId, sessionId });
+  const movement = (sessionId: string, type = 'paid_in', amountMinor = 2000) => envelope('register.movement.record',
+    { movementId: uuid(), sessionId, type, amountMinor, reason: 'float', createdAt: AT });
+  const closure = (sessionId: string, registerId: string) => envelope('register.closure.submit', {
+    closureId: uuid(), sessionId, registerId, number: 1, openedAt: AT, closedAt: LATER,
+    tillExpected: { cash: 10000 }, counted: { cash: 10000 },
+    periodSalesTotalMinor: 0, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0,
+    unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '3.0.0-next.1', orderIds: [], movementIds: [],
+  });
+
+  it('applies alias movements, transitions and voids to the resolved session', async () => {
+    const [s1, s2, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s2, r))).toMatchObject({ status: 'applied', register: { resumed: { fromSessionId: s2 } } });
+    const record = movement(s2);
+    expect(await send(record)).toMatchObject({ status: 'applied', register: { session: { id: s1 } } });
+    expect(await connection.rawConnection.getRepository(TallyRegisterMovement).findOneBy({ channelId, commandId: record.id }))
+      .toMatchObject({ sessionId: s1 });
+    expect(await send(transition(s2, 'counting'))).toMatchObject({ status: 'applied', register: { session: { id: s1, status: 'counting' } } });
+    expect(await connection.rawConnection.getRepository(TallyRegisterSessionStatus).findOne({
+      where: { channelId, sessionId: s1 }, order: { seq: 'DESC' },
+    })).toMatchObject({ status: 'counting' });
+    const voidCommand = envelope('register.movement.void', { sessionId: s2, movementId: uuid(), voids: record.payload.movementId, createdAt: AT });
+    expect(await send(voidCommand)).toMatchObject({ status: 'applied', register: { session: { id: s1, expected: { cash: 10000 } } } });
+    expect(await connection.rawConnection.getRepository(TallyRegisterMovement).findOneBy({ channelId, commandId: voidCommand.id }))
+      .toMatchObject({ sessionId: s1, voids: record.payload.movementId });
+  });
+
+  it('stores the v2 superseded refusal for movements, closing transitions and closures without register writes', async () => {
+    const [s1, s3, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r, { openedBy: 'ann' }))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s3, r, { supersedes: s1, openedAt: LATER, openedBy: 'bob', deviceName: ' Back till ' }, 2, 'till-2')))
+      .toMatchObject({ status: 'applied' });
+    const where = { channelId, sessionId: s1 };
+    const statuses = await connection.rawConnection.getRepository(TallyRegisterSessionStatus).findBy(where);
+    const error = { code: 'register_session_superseded', message: `Session ${s1} was taken over by session ${s3}`, data: {
+      sessionId: s1, supersededAt: (await session(s3))!.openedAt, supersededBy: 'bob', deviceId: 'till-2', deviceName: 'Back till', newSessionId: s3,
+    } };
+    for (const command of [movement(s1), transition(s1, 'closed'), closure(s1, r)]) {
+      const result = { id: command.id, status: 'rejected', error };
+      expect(await send(command)).toEqual(result);
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id }))
+        .toMatchObject({ status: 'rejected', result });
+      expect(await send(command)).toEqual(result);
+    }
+    expect(await connection.rawConnection.getRepository(TallyRegisterMovement).findBy(where)).toEqual([]);
+    expect(await connection.rawConnection.getRepository(TallyRegisterSessionStatus).findBy(where)).toEqual(statuses);
+    expect(await connection.rawConnection.getRepository(TallyRegisterClosure).findBy(where)).toEqual([]);
+  });
+
+  it('refuses through an alias with the resolved id and omits null take-over fields', async () => {
+    const [s1, s2, s3, r] = [uuid(), uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s2, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s3, r, { supersedes: s1, openedAt: LATER }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
+    const command = movement(s2);
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: {
+      code: 'register_session_superseded', message: `Session ${s1} was taken over by session ${s3}`,
+      data: { sessionId: s1, supersededAt: (await session(s3))!.openedAt, deviceId: 'till-2', newSessionId: s3 },
+    } });
+  });
+
+  it('stores the v1 closed refusal for a superseded session without data', async () => {
+    const [s1, s3, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s3, r, { supersedes: s1 }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
+    const command = { ...movement(s1), version: 1 };
+    const result = { id: command.id, status: 'rejected', error: { code: 'register_session_closed', message: `Session ${s1} is closed` } };
+    expect(await send(command)).toEqual(result);
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id }))
+      .toMatchObject({ status: 'rejected', result });
+    expect(await send(command)).toEqual(result);
+  });
+
+  it('counts cash sales carrying either the session id or an alias in the live figures', async () => {
+    const [s1, s2, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s2, r))).toMatchObject({ status: 'applied' });
+    for (const [sessionId, quantity] of [[s2, 1], [s1, 2]] as const) {
+      const command = orderCommand([{ variantId: variantIds.mug[0], quantity, unitPriceMinor: 800 }],
+        [{ method: 'cash', amountMinor: quantity * 1000 }]);
+      command.payload.sessionId = sessionId;
+      expect(await run(command)).toMatchObject({ status: 'applied' });
+    }
+    const command = movement(s1, 'no_sale', 0);
+    expect(await send(command)).toEqual({ id: command.id, status: 'applied', register: {
+      session: { id: s1, status: 'open', expected: { cash: 13000 }, salesCount: 2 },
+    } });
+  });
+
+  it('refuses a same-device resume onto a session id recorded on another register and keeps the live session', async () => {
+    const [s0, s1, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s0, uuid()))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    const command = open(s0, r);
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: `sessionId: session ${s0} is already recorded`,
+    } });
+    expect(await aliases(s1)).toEqual([]);
+    expect(await send(movement(s1))).toMatchObject({ status: 'applied', register: { session: { id: s1, status: 'open' } } });
+  });
+
+  it('refuses a take-over onto a session id recorded on another register without superseding the live session', async () => {
+    const [s0, s1, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s0, uuid()))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    const command = open(s0, r, { supersedes: s1 }, 2, 'till-2');
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: `sessionId: session ${s0} is already recorded`,
+    } });
+    expect(await connection.rawConnection.getRepository(TallyRegisterSessionStatus).findBy({ channelId, sessionId: s1, status: 'superseded' }))
+      .toEqual([]);
+    expect(await send(movement(s1))).toMatchObject({ status: 'applied', register: { session: { id: s1, status: 'open' } } });
   });
 });

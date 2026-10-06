@@ -8,7 +8,7 @@ import {
 import { TallyCommand } from '../entities/tally-command.entity';
 import type {
   CommandResult, RegisterClosureSubmitPayload, RegisterCommandEnvelope, RegisterCommandResult, RegisterCommandType,
-  RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterSessionOpenPayload, RegisterSessionTransitionPayload,
+  RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterSessionOpenPayload, RegisterSessionSupersededData, RegisterSessionTransitionPayload,
 } from '../vendored/core-commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { deriveSessionFigures, deriveVariance } from '../vendored/register-figures';
@@ -78,10 +78,11 @@ export class RegisterService {
       const times = clientTimeErrors([['createdAt', command.createdAt], ...CLIENT_TIMES[type].map(
         (field): [string, unknown] => [`payload.${field}`, payload[field]])], (options.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
       if (times.length) return refuse(id, 'invalid_payload', times.slice(0, 10).join('; '));
-      // 4. The session. Sessions are write-once, so an unknown one, or a closure naming another register, is refused
+      // 4. The resolved session. Sessions and aliases are write-once, so an unknown one, or a closure naming another register, is refused
       // here, unstored and without a lock (ADR-068 d5), and a known one's register never changes.
+      // An alias names its session (ADR-078 d2).
       const session = type === 'register.session.open' ? undefined
-        : await this.connection.getRepository(ctx, TallyRegisterSession).findOneBy({ channelId: String(ctx.channelId), id: payload.sessionId }) ?? undefined;
+        : await this.resolveSession(ctx, payload.sessionId);
       if (type !== 'register.session.open' && !session) return refuse(id, 'invalid_payload', `sessionId: unknown session ${payload.sessionId}`);
       if (type === 'register.closure.submit' && session!.registerId !== payload.registerId) {
         return refuse(id, 'invalid_payload', `registerId: expected the session's register ${session!.registerId}`);
@@ -190,6 +191,18 @@ export class RegisterService {
     }
 
     const { status, closed } = await this.sessionState(tx, session!);
+    if (status === 'superseded') {
+      if (command.version === 1) return conflict('register_session_closed', `Session ${session!.id} is closed`);
+      const superseded = await repo(TallyRegisterSessionStatus).findOneByOrFail({ channelId, sessionId: session!.id, status: 'superseded' });
+      const successor = await repo(TallyRegisterSession).findOneByOrFail({ channelId, supersedes: session!.id });
+      const data = {
+        sessionId: session!.id, supersededAt: superseded.at, newSessionId: successor.id,
+        ...(successor.openedBy === null ? {} : { supersededBy: successor.openedBy }),
+        ...(successor.deviceId === null ? {} : { deviceId: successor.deviceId }),
+        ...(successor.deviceName === null ? {} : { deviceName: successor.deviceName }),
+      } satisfies RegisterSessionSupersededData;
+      return conflict('register_session_superseded', `Session ${session!.id} was taken over by session ${successor.id}`, data);
+    }
     if (command.type === 'register.session.transition') {
       const p = command.payload as unknown as RegisterSessionTransitionPayload;
       // ADR-068 d5a: a snapshot; the same status is an applied no-op, and nothing leaves closed.
@@ -256,7 +269,8 @@ export class RegisterService {
       return tablePath.split('.').map(part => repository.manager.connection.driver.escape(part)).join('.');
     };
     return await repository.createQueryBuilder('s').where(`s."channelId" = :channelId AND s."registerId" = :registerId
-      AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterSessionStatus)} t WHERE t."channelId" = s."channelId" AND t."sessionId" = s.id AND t.status IN ('closed', 'superseded'))
+      AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterSessionStatus)} t
+        WHERE t."channelId" = s."channelId" AND t."sessionId" = s.id AND t.status IN ('closed', 'superseded'))
       AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterClosure)} c WHERE c."channelId" = s."channelId" AND c."sessionId" = s.id)
       `, { channelId: String(tx.channelId), registerId }).orderBy('s.receivedAt').limit(1).getOne() ?? undefined;
   }
@@ -286,9 +300,11 @@ export class RegisterService {
     return { lastClosureNumber: last?.number ?? 0, perpetualSalesTotalMinor: last?.perpetualSalesTotalMinor ?? 0, perpetualRefundsTotalMinor: 0 };
   }
 
-  /** ADR-068 d13.1: the live figure counts every received order in the channel carrying the session's id. */
+  /** ADR-068 d13.1: the live figure counts every received order in the channel carrying the session's id.
+   * ADR-078 d2: orders carrying any of the session's aliases count too. */
   private async liveSession(tx: RequestContext, session: TallyRegisterSession, status: Status) {
-    const orders = await this.receivedOrders(tx, { tallySessionId: session.id });
+    const aliases = await this.connection.getRepository(tx, TallyRegisterSessionAlias).findBy({ channelId: session.channelId, sessionId: session.id });
+    const orders = await this.receivedOrders(tx, { tallySessionId: In([session.id, ...aliases.map(alias => alias.id)]) });
     const movements = await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId: session.channelId, sessionId: session.id });
     return { id: session.id, status, ...deriveSessionFigures({ countedFloatMinor: session.countedFloatMinor, orders, movements }) };
   }
