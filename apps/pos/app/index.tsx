@@ -13,7 +13,7 @@ import {
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
-import { cartTabLabel } from '../lib/cart-totals';
+import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
@@ -243,6 +243,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
+                  taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
                   onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
@@ -310,11 +311,12 @@ function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxSt
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing, overSheet, drafts,
+  registerClosing, overSheet, drafts, taxClasses,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
   drafts: RxCollection | null;
+  taxClasses: { id: string; label: string }[];
   boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
   /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
   panelOpen: boolean; onClosePanels(): void;
@@ -392,7 +394,7 @@ function Sale({
         </Button>
       ) : null}
       <SaleCustomer sale={sale} connector={connector} session={session} />
-      <SaleCart sale={sale} canEditPrice={loadPriceEditAllowed()} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
+      <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
         highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
     </>
   );

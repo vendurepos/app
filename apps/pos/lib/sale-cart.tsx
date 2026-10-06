@@ -1,8 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { View } from 'react-native';
-import { Button, CartPanel, DiscountChips, DiscountForm, HStack, PriceForm, QuantityStepper, Text, VStack } from '@tallyui/components';
+import { Button, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, PriceForm, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
+
+// Vendure keeps one ShippingLine per order, and the plugin refuses a second as `shipping_single` (docs/adr/0005-order-create-v5.md).
+const MAX_SHIPPING_LINES = 1;
+export const SHIPPING_SINGLE_REFUSAL = 'This store takes one shipping charge per order.';
 
 /** A label and its amount on one line, as the cart, tender and receipt show their figures. */
 export function MoneyRow({ label, amount, testID, strong = false }: { label: string; amount: string; testID: string; strong?: boolean }) {
@@ -39,9 +43,10 @@ export function TaxRows({ label, amount, testID, rates }: {
  * in for the Pay buttons (the open-register card while no session is open), and `payError` says why a Pay was refused.
  * `highlightSku` lights up that line, as an add confirms in place.
  */
-export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEditPrice }: {
+export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEditPrice, taxClasses }: {
   sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external' | 'split'): void; payGate?: ReactNode; payError?: string;
   highlightSku?: string; canEditPrice: boolean;
+  taxClasses: { id: string; label: string }[];
 }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
@@ -49,12 +54,14 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
   const totals = cartTotals(order);
   const row = (label: string, amount: number, testID: string, strong = false) =>
     <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
-  const empty = !order.lineItems.length;
+  const empty = !order.lineItems.length; // Pay stays disabled: the plugin refuses a fees-only order (ADR 0005).
+  const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= 5;
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
   // As TallyUI's own Cart: the open discount form, a line's or the order's (lineId null); useSale applies it or says
   // why not. The order discounts are one display figure, so only a single one's chip carries an amount.
-  const [form, setForm] = useState<{ lineId: string | null; kind?: 'price' } | null>(null);
-  const discountForm = (lineId: string | null, title: string) => form?.lineId === lineId && form.kind !== 'price'
+  const [form, setForm] = useState<{ lineId: string | null; kind?: 'price' | 'charge' } | null>(null);
+  const discountForm = (lineId: string | null, title: string) => form?.lineId === lineId && form.kind === undefined
     ? <DiscountForm key={lineId ?? 'order'} title={title} currency={order.currency} onClose={() => setForm(null)}
       onApply={(discount) => sale.applyDiscount(lineId, discount)} /> : null;
   const orderAmounts = order.discounts.length === 1
@@ -62,36 +69,63 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
   return (
     <CartPanel testID="cart" items={order.lineItems}
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
-      afterItems={empty ? undefined : (
+      afterItems={empty && !chargesOffered ? undefined : (
         <VStack space="none" className="gap-2 py-2">
-          {order.discounts.length ? (
-            <View testID="order-discounts">
-              <DiscountChips discounts={order.discounts} amounts={orderAmounts} currency={order.currency} onRemove={sale.removeDiscount}
-                prefix="Order discount" />
-            </View>
-          ) : null}
-          {discountForm(null, 'Order discount') ?? (
-            <Button testID="order-discount" variant="outline" size="sm" className="mx-3 self-start" onPress={() => setForm({ lineId: null })}>
-              <Text>Order discount</Text>
+          {(['fees', 'shipping'] as const).map((kind) => order[kind]?.map((charge, index) => (
+            <HStack key={charge.id} testID={`cart-${kind === 'fees' ? 'fee' : 'shipping'}-${index}`} space="sm" className="items-center px-3 py-2">
+              <Text className="flex-1 text-sm">{charge.name}</Text>
+              <Text testID={`cart-${kind === 'fees' ? 'fee' : 'shipping'}-${index}-amount`} className="text-sm">
+                {money(order.display[kind]!.find((row) => row.id === charge.id)!.amountMinor)}
+              </Text>
+              <Button variant="outline" size="sm" accessibilityLabel={`Remove ${charge.name}`} onPress={() => {
+                const refusal = kind === 'fees' ? sale.removeFee(charge.id) : sale.removeShipping(charge.id);
+                setRemoveError(typeof refusal === 'string' ? refusal : null);
+              }}><Text>Remove</Text></Button>
+            </HStack>
+          )))}
+          {!empty && <>
+            {order.discounts.length ? (
+              <View testID="order-discounts">
+                <DiscountChips discounts={order.discounts} amounts={orderAmounts} currency={order.currency} onRemove={sale.removeDiscount}
+                  prefix="Order discount" />
+              </View>
+            ) : null}
+            {discountForm(null, 'Order discount') ?? (
+              <Button testID="order-discount" variant="outline" size="sm" className="mx-3 self-start" onPress={() => setForm({ lineId: null })}>
+                <Text>Order discount</Text>
+              </Button>
+            )}
+          </>}
+          {chargesOffered && (form?.kind === 'charge' ? (
+            <ChargeForm currency={order.currency} lineTax={sale.capabilities?.lineTax} taxClasses={taxClasses} shippingTaxFromStore={false}
+              onClose={() => setForm(null)} onApply={({ kind, name, amountMinor, taxStatus, taxClass }) => {
+                if (kind === 'shipping' && (order.shipping?.length ?? 0) >= MAX_SHIPPING_LINES) return SHIPPING_SINGLE_REFUSAL;
+                const result = kind === 'custom' ? sale.addCustomLine({ name, priceMinor: amountMinor, taxStatus, taxClass })
+                  : kind === 'fee' ? sale.addFee({ name, amountMinor, taxStatus, taxClass }) : sale.addShipping({ name, amountMinor, taxStatus, taxClass });
+                return typeof result === 'string' ? result : null;
+              }} />
+          ) : (
+            <Button testID="add-charge" variant="outline" size="sm" className="mx-3 self-start" onPress={() => { setRemoveError(null); setForm({ lineId: null, kind: 'charge' }); }}>
+              <Text>Add charge</Text>
             </Button>
-          )}
+          ))}
         </VStack>
       )}
       renderItem={(line) => (
-        <VStack testID={`cart-line-${line.sku}`} space="none" className="border-b border-border">
-          {highlightSku && line.sku === highlightSku ? (
-            <View testID={`cart-line-highlight-${line.sku}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
+        <VStack testID={`cart-line-${line.sku || line.id}`} space="none" className="border-b border-border">
+          {highlightSku && line.sku && line.sku === highlightSku ? (
+            <View testID={`cart-line-highlight-${line.sku || line.id}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
           ) : null}
           <HStack space="sm" className="items-center px-3 py-2">
             <VStack space="none" className="flex-1">
               <Text className="text-sm font-medium" numberOfLines={2}>{line.name}</Text>
               <Text className="text-xs text-muted-foreground">{money(line.unitPriceMinor)} each</Text>
               <HStack space="sm">
-                <Button testID={`line-discount-${line.sku}`} variant="link" size="sm" className="h-7 self-start px-0"
+                <Button testID={`line-discount-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
                   onPress={() => setForm({ lineId: line.id })}>
                   <Text className="text-xs">Discount</Text>
                 </Button>
-                {canEditPrice && <Button testID={`line-price-${line.sku}`} variant="link" size="sm" className="h-7 self-start px-0"
+                {canEditPrice && <Button testID={`line-price-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
                   onPress={() => setForm({ lineId: line.id, kind: 'price' })}><Text className="text-xs">Price</Text></Button>}
               </HStack>
             </VStack>
@@ -101,7 +135,7 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
             <Text className="w-20 text-right text-sm font-semibold">{money(display(line.id).amountMinor)}</Text>
           </HStack>
           {line.discounts.length ? (
-            <View testID={`line-discounts-${line.sku}`} className="pb-2">
+            <View testID={`line-discounts-${line.sku || line.id}`} className="pb-2">
               <DiscountChips discounts={line.discounts} amounts={display(line.id).discounts} currency={order.currency}
                 onRemove={sale.removeDiscount} />
             </View>
@@ -116,7 +150,7 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
       )}
       footer={
         <VStack space="none" className="gap-1.5 py-1">
-          {sale.error || payError ? <Text accessibilityRole="alert" className="text-sm text-destructive">{sale.error || payError}</Text> : null}
+          {removeError || sale.error || payError ? <Text accessibilityRole="alert" className="text-sm text-destructive">{removeError || sale.error || payError}</Text> : null}
           {row('Subtotal', totals.subtotalMinor, 'cart-subtotal')}
           {/* TallyUI's display figures (ADR-063), exclusive: subtotal − discount + tax = total. */}
           {order.display.discountMinor > 0
