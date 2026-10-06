@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { Link, Redirect, Stack } from 'expo-router';
 import Head from 'expo-router/head';
 import { Button, Card, CardContent, CardHeader, CardTitle, HStack, Text, VStack } from '@tallyui/components';
+import { trackDemoEvent } from '../lib/demo/analytics';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_NAME, DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { useSession } from '../lib/session-context';
@@ -9,6 +11,9 @@ import { useSignIn } from '../lib/use-sign-in';
 export default function DemoScreen() {
   const { session } = useSession();
   const { pending, error, submit } = useSignIn();
+  // Record the card once on mount, before sign-in can change the session.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (DEMO_MODE && !session) trackDemoEvent('demo_opened'); }, []);
   if (!DEMO_MODE) return <Redirect href="/sign-in" />;
   if (session) return <Redirect href="/" />;
 
@@ -38,6 +43,8 @@ export default function DemoScreen() {
             )}
             <Button testID="demo-enter" disabled={pending} onPress={() => void submit({
               url: DEMO_STORE_ORIGIN, ...DEMO_CREDENTIALS, channel_token: DEMO_CHANNEL_TOKEN,
+            }).then((signedIn) => {
+              if (signedIn) trackDemoEvent('demo_signed_in');
             })}>
               <Text>{pending ? 'Entering…' : 'Enter the demo'}</Text>
             </Button>

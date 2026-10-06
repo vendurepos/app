@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { RxStorageSQLiteWasm } from '@tallyui/storage-sqlite/web';
 import { Button, HStack, Text } from '@tallyui/components';
 import { appStorage } from '../app-storage';
+import { trackDemoEvent } from './analytics';
 import { demoStore, resetDemo } from './install';
 
 // opfs-sahpool releases its access handles a moment after the worker ends: how often, and how long apart, to retry.
@@ -34,6 +35,7 @@ async function removeLocalDatabases(): Promise<void> {
 export function DemoBanner() {
   const [resetting, setResetting] = useState(false);
   async function reset() {
+    trackDemoEvent('demo_reset');
     setResetting(true);
     await resetDemo({
       store: demoStore!, storage: localStorage, removeDatabases: removeLocalDatabases,

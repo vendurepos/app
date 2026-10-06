@@ -16,6 +16,8 @@ import type { RxCollection } from 'rxdb';
 import { cartTabLabel } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
+import { withDemoSaleEvent } from '../lib/demo/analytics';
+import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
@@ -326,7 +328,8 @@ function Sale({
   const identity = tillIdentity(session);
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
-    registerId, cashierRef: identity, capabilities, session: register.saleSession, onSaleCompleted: outbox.record,
+    registerId, cashierRef: identity, capabilities, session: register.saleSession,
+    onSaleCompleted: session.url === DEMO_STORE_ORIGIN ? withDemoSaleEvent(outbox.record) : outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
   const [parkedOpen, setParkedOpen] = useState(false);
