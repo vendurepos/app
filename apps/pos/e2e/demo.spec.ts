@@ -323,3 +323,22 @@ test('a demo visitor attaches a customer and sees it on the receipt', async ({ p
   await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
   expect(consoleErrors).toEqual([]);
 });
+
+test('a second tab is told the till is open in another tab, and opens after the first closes and it reloads', async ({ page, context }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const second = await context.newPage();
+  await second.goto('/');
+  await expect(second.getByTestId('storage-failure')).toHaveText('VendurePOS is open in another tab. Close it, then reload this page.', { timeout: 30_000 });
+  await expect(second.getByTestId('storage-failure-reload')).toBeVisible();
+  await expect(second.getByTestId('storage-failure-detail')).toContainText('another tab holds the database');
+  await expect(second.getByTestId('signed-in-store')).toHaveCount(0);
+  // The first tab is untouched.
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  // The remedy the notice gives: close the other tab, then reload.
+  await page.close();
+  await second.getByTestId('storage-failure-reload').click();
+  await expect(second.getByTestId('signed-in-store')).toBeVisible({ timeout: 30_000 });
+  await expect(second.getByTestId('storage-failure')).toHaveCount(0);
+});
