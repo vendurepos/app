@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add the `TallyPosSell` permission. The `/tally/v1` routes accept it or `CreateOrder`, so existing installs keep working with no role change; give new tills' administrators `TallyPosSell` instead of the broader `CreateOrder`.
+- Admin API: `tallyNeedsAdminCommands` lists sales kept for an admin, and `tallyResolveNeedsAdmin(commandId, applied | rejected, note)` resolves one; both SuperAdmin only (#116).
+- order.create v4 results carry a `figures_mismatch` warning when the till's subtotal, tax or discount differs from the store's (#117).
+
 ## 0.1.0 (2026-10-01)
 
 - Accept `order.create` v1–v4 at `POST /tally/v1/commands`, with one Postgres

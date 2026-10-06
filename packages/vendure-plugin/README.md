@@ -7,7 +7,7 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/spikes/s1-order-recipe.md`).
 
 Status: VP2a. The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
-commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind `Permission.CreateOrder`.
+commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough).
 
 **Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
 so it emits no event. A command already in the ledger always replays its recorded answer first. A

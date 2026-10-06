@@ -70,7 +70,7 @@ tested version). Run store commands from that project's root.
    ```
 
    Sign in with a Vendure administrator who can read the channel's catalogue
-   and settings and has `CreateOrder`; the plugin routes require that permission.
+   and settings and has the plugin's `TallyPosSell` permission (or `CreateOrder`, which is broader); the plugin routes require one of them.
    <!-- Sources: dev/vendure-store/src/vendure-config.ts; docs/DISCOVERY.md §2.5; docs/adr/0002-order-path-vendure-plugin.md §1; apps/pos/lib/sign-in.ts. -->
 
 5. **Allow the POS origin through CORS.** Add `https://app.vendurepos.com`
