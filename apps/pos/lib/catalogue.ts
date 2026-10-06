@@ -80,11 +80,13 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     stock.reconcileStock().catch(error => { if (!controller.signal.aborted) console.warn('Stock reconcile failed:', error); });
   };
   const onVisibilityChange = () => { if (document.visibilityState === 'visible') refresh(); };
-  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibilityChange);
-  if (typeof window !== 'undefined') window.addEventListener('online', refresh);
+  const visibility = typeof document !== 'undefined' && typeof document.addEventListener === 'function' ? document : undefined;
+  const network = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : undefined;
+  visibility?.addEventListener('visibilitychange', onVisibilityChange);
+  network?.addEventListener('online', refresh);
   sync.unlisten = () => {
-    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibilityChange);
-    if (typeof window !== 'undefined') window.removeEventListener('online', refresh);
+    visibility?.removeEventListener('visibilitychange', onVisibilityChange);
+    network?.removeEventListener('online', refresh);
   };
   return { db, replication, stockLevels };
 }

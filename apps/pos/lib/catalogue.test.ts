@@ -62,6 +62,16 @@ afterEach(async () => {
 });
 
 describe('catalogue sync lifecycle', () => {
+  it('starts without listeners where window has no addEventListener (React Native)', async () => {
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('document', undefined);
+    const { catalogueConnector, startCatalogueSync, stopCatalogueSync } = await import('./catalogue');
+    await expect(startCatalogueSync(session, catalogueConnector(session))).resolves.toHaveProperty('db');
+    const stock = vi.mocked(startStockReconcile).mock.results[0].value;
+    expect(stock.reconcileStock).toHaveBeenCalledTimes(1);
+    await expect(stopCatalogueSync()).resolves.toBeUndefined();
+  });
+
   it('re-reads stock and re-pulls when the till comes back to the foreground, not when it is hidden', async () => {
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('document', document);
