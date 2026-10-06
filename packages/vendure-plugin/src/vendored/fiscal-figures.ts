@@ -73,9 +73,10 @@ export function fiscalFiguresErrors(payload: OrderCreatePayloadV3): string[] {
       if (Array.isArray(charges)) charges.forEach((charge, index) => {
         const path = `display.${field}[${index}]`
         if (!object(charge, path, [id, 'amountMinor'])) return
-        check(typeof charge[id] === 'string', `${path}.${id}`, 'a string')
+        const value = (charge as Record<string, unknown>)[id]
+        check(typeof value === 'string', `${path}.${id}`, 'a string')
         money(charge, path, ['amountMinor'])
-        check(ids.has(charge[id] as string), `${path}.${id}`, `a payload.${field}[].${id}`)
+        check(ids.has(value as string), `${path}.${id}`, `a payload.${field}[].${id}`)
       })
     }
     check(Array.isArray(display.lines), 'display.lines', 'an array')
