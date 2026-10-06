@@ -25,4 +25,18 @@ describe('Vercel Content-Security-Policy', () => {
   it('does not enable cleanUrls for the SPA export', () => {
     expect(config.cleanUrls).not.toBe(true);
   });
+
+  it('caches only the content-hashed Expo bundles as immutable', () => {
+    const immutable = config.headers.find(({ source }) => source === '/_expo/static/(.*)');
+    expect(immutable?.headers).toEqual([
+      { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+    ]);
+    expect(config.headers.filter(({ headers }) =>
+      headers.some(({ key }) => key.toLowerCase() === 'cache-control'),
+    )).toEqual([immutable]);
+    const root = html.match(/<div id="root">([\s\S]*?)<\/div>\s*<\/body>/i);
+    expect(root).not.toBeNull();
+    expect(root?.[1]).toContain('class="boot-splash"');
+    expect(root?.[1]).not.toMatch(/<script/i);
+  });
 });

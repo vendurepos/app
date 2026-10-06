@@ -33,6 +33,23 @@
         height: 100%;
         flex: 1;
       }
+      .boot-splash {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #ffffff;
+        color: #0f172a;
+      }
+      .boot-splash-name { font-size: 1.5rem; font-weight: 600; margin: 0; }
+      .boot-splash-text { font-size: 0.95rem; color: #64748b; margin: 0.5rem 0 0; }
+      @media (prefers-color-scheme: dark) {
+        .boot-splash { background: #0b1120; }
+        .boot-splash-name { color: #e2e8f0; }
+        .boot-splash-text { color: #94a3b8; }
+      }
     </style>
   </head>
 
@@ -42,6 +59,9 @@
       You need to enable JavaScript to run this app.
     </noscript>
     <!-- The root element for your Expo app. -->
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static first paint before the bundle runs; React replaces it on first render (single-page output). -->
+      <div class="boot-splash" role="status" aria-live="polite"><p class="boot-splash-name">VendurePOS</p><p class="boot-splash-text">Loading the till…</p></div>
+    </div>
   </body>
 </html>
