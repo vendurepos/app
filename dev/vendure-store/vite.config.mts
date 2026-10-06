@@ -9,7 +9,6 @@ export default defineConfig({
   build: { outDir: join(__dirname, 'dist/dashboard') },
   plugins: [vendureDashboardPlugin({
     vendureConfigPath: pathToFileURL('./src/vendure-config.ts'),
-    api: { host: 'http://localhost', port: Number(process.env.VENDURE_PORT || 3000) },
     gqlOutputPath: './src/gql',
   })],
   resolve: { alias: { '@/gql': resolve(__dirname, './src/gql/graphql.ts') } },
