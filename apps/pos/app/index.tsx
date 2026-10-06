@@ -29,6 +29,7 @@ import { defaultStore, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
+import { storeLabel } from '../lib/store-label';
 import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-ids';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
@@ -52,6 +53,7 @@ export default function HomeScreen() {
 }
 
 function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): void }) {
+  const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const catalogue = useCatalogue(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
@@ -120,7 +122,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     const closure = register.lastClosure;
     if (!closure) return;
     await printLines(`Z report #${closure.number}`,
-      zReportLines(closure, { store: session.url, currency, timezone: TIMEZONE, printedAt: new Date().toISOString() }));
+      zReportLines(closure, { store: storeLabel(session), currency, timezone: TIMEZONE, printedAt: new Date().toISOString() }));
   };
 
   async function handleSignOut() {
@@ -145,8 +147,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <Stack.Screen options={{ title: 'VendurePOS', headerTitle: ({ children }) => (
         <View dataSet={{ print: 'hide' }}><Text className="text-lg font-semibold">{children}</Text></View>
       ) }} />
-      <HStack dataSet={{ print: 'hide' }} className="items-center justify-between border-b border-border px-4 py-2" space="sm">
-        <Text testID="signed-in-store" className="flex-1 text-sm text-muted-foreground">Signed in to {session.url}</Text>
+      <HStack dataSet={{ print: 'hide' }} className="flex-wrap items-center justify-between border-b border-border px-4 py-2" space="sm">
+        <Text testID="signed-in-store" className={`${wide ? 'flex-1' : 'w-full'} text-sm text-muted-foreground`}>Signed in to {storeLabel(session)}</Text>
         {outbox.state.pending ? (
           <Text testID="orders-waiting" className="text-sm text-muted-foreground">
             {countOrders(outbox.state.pending)} waiting to send{outbox.state.sending ? ' · sending…' : ''}
@@ -415,7 +417,7 @@ function Sale({
         {stage.kind !== 'cart' ? (
           <ScrollView>
             <SaleTender sale={sale} />
-            <SaleReceipt sale={sale} store={session.url} cashier={session.email} registerId={registerId} />
+            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={session.email} registerId={registerId} />
           </ScrollView>
         ) : register.session ? (
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
