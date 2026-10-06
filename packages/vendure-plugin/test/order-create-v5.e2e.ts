@@ -122,7 +122,7 @@ describe('order.create v5 contract plumbing', () => {
     const result = await run(command);
     expect(result.status).toBe('applied');
     expect(result.serverRefs!.totalMinor).toBe(payload.totalMinor);
-    expect(result.warnings?.some(warning => warning.code === 'figures_mismatch')).not.toBe(true);
+    expect(result.warnings ?? []).toEqual([]);
     expect(result.totalWarnings ?? []).toEqual([]);
     const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
       where: { id: decode(result.serverRefs!.orderId) }, relations: ['lines', 'lines.productVariant', 'shippingLines'],
@@ -144,10 +144,12 @@ describe('order.create v5 contract plumbing', () => {
     const result = await run(command);
     expect(result.status).toBe('applied');
     expect(result.serverRefs!.totalMinor).toBe(command.payload.totalMinor);
+    expect(result.warnings ?? []).toEqual([]);
     expect(result.totalWarnings ?? []).toEqual([]);
     const { order } = await adminClient.query(parse(`query Order($id: ID!) {
       order(id: $id) { state fulfillments { state } lines {
         productVariant { sku price } linePrice linePriceWithTax customFields { tallyCustomName tallyCustomSku }
+        taxLines { taxRate }
       } }
     }`), { id: result.serverRefs!.orderId });
     expect(order.state).toBe('Delivered');
@@ -155,8 +157,10 @@ describe('order.create v5 contract plumbing', () => {
     expect(order.lines).toEqual([{
       productVariant: { sku: TALLY_CUSTOM_ITEM_SKU, price: 0 }, linePrice: 800,
       linePriceWithTax: 800 + Math.round(800 * standardRate / 100),
+      taxLines: [{ taxRate: standardRate }],
       customFields: { tallyCustomName: 'Alteration', tallyCustomSku: 'TILL-ALTER' },
     }]);
+    expect(order.lines[0].linePriceWithTax - order.lines[0].linePrice).toBe(command.payload.taxMinor);
   });
 
   it('copies a discounted custom line tax to its TALLY-DISCOUNT surcharge', async () => {
@@ -167,6 +171,7 @@ describe('order.create v5 contract plumbing', () => {
     const result = await run(command);
     expect(result.status).toBe('applied');
     expect(result.serverRefs!.totalMinor).toBe(command.payload.totalMinor);
+    expect(result.warnings ?? []).toEqual([]);
     expect(result.totalWarnings ?? []).toEqual([]);
     const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
       where: { id: decode(result.serverRefs!.orderId) }, relations: ['lines', 'surcharges'],
