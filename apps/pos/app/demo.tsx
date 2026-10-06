@@ -26,7 +26,7 @@ export default function DemoScreen() {
             <VStack testID="demo-try" space="sm">
               <Text className="font-semibold">What to try</Text>
               <Text className="text-sm">• Sell the mug for cash, then find the order under Orders.</Text>
-              <Text className="text-sm">• Change a line's price from the cart.</Text>
+              <Text className="text-sm">{"• Change a line's price from the cart."}</Text>
               <Text className="text-sm">• Park a sale, sell another, then resume the parked one.</Text>
               <Text className="text-sm">• Add a customer to a sale; they print on the receipt.</Text>
               <Text className="text-sm">• Open the Register, count the drawer and close the day.</Text>
