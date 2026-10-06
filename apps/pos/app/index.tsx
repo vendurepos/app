@@ -26,6 +26,8 @@ import { startTenderInSession } from '../lib/pay-gate';
 import { loadPriceEditAllowed } from '../lib/price-edit-setting';
 import { printLines } from '../lib/print-lines';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
+import { isClosingStatus } from '../lib/register-conflict';
+import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
@@ -37,7 +39,7 @@ import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
-import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-ids';
+import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
@@ -104,8 +106,10 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // collection (TallyUI #357: a second would send twice). No result is applied to the session yet (TallyUI's c2b
   // anchoring), so results are only logged. A closure waits for its session's orders (lib/closure-hold.ts); the till
   // opens its next session meanwhile. The collection is set only once the orders are open, so `orders` is too.
+  // The sessions let it settle a refused open (TallyUI 3.8.0).
   const registerOutbox = useRegisterOutbox({
     commands: registerStore?.commands ?? null, deviceId: registerId,
+    sessions: registerStore?.sessions ?? null,
     transport: () => holdClosuresForOrders(orderTransport(() => sessionRef.current), pendingSessionOrders(outbox.orders!)),
     onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
   });
@@ -114,7 +118,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const closingWaiting = useClosureWaiting(registerStore?.commands ?? null, outbox.orders);
   const rejectedRegisterCommands = useRejectedRegisterCommands(registerStore?.commands ?? null);
   const registerNotice = registerSyncNotice(registerOutbox.state, rejectedRegisterCommands);
-  const [boundRegisterId] = useState(() => mintBoundRegisterId(defaultStore()));
+  const [boundRegisterId, setBoundRegisterId] = useState(() => mintBoundRegisterId(defaultStore()));
   const [tenderInProgress, setTenderInProgress] = useState(false);
   // A device is not a person; M7 cashier switching will set the chosen cashier here when there is one.
   const identity = tillIdentity(session);
@@ -125,6 +129,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     sessions: registerStore?.sessions ?? null, movements: registerStore?.movements ?? null, closures: registerStore?.closures ?? null,
     commands: registerStore?.commands ?? null, orders: outbox.orders, register: registerStore?.sessions ?? null,
     capabilities: readSettingsCapabilities, storeKey: ordersDatabaseName(session), registerId: boundRegisterId,
+    deviceName: session.kind === 'api-key' ? session.device ?? null : null,
     enabled: (readSettingsCapabilities?.register ?? 0) >= 1, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
     varianceThreshold: loadVarianceLimitMinor(),
   });
@@ -132,7 +137,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
-  useEffect(() => { if (sessionId && sessionStatus !== 'open') setClosingSessionId(sessionId); }, [sessionId, sessionStatus]);
+  useEffect(() => { if (sessionId && isClosingStatus(sessionStatus)) setClosingSessionId(sessionId); }, [sessionId, sessionStatus]);
   const closureShown = !!closingSessionId && register.lastClosure?.id === closingSessionId;
   const registerPanelShown = registerOpen && sessionStatus === 'open';
   const printZ = async () => {
@@ -248,9 +253,10 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
+                  onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
                   onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
-                  registerClosing={(!!sessionStatus && sessionStatus !== 'open') || register.closing || closureShown}
+                  registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>
             </CurrencyProvider>
@@ -312,13 +318,14 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing, overSheet, drafts, taxClasses,
+  registerClosing, overSheet, drafts, taxClasses, onRebindRegister,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
   drafts: RxCollection | null;
   taxClasses: { id: string; label: string }[];
   boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
+  onRebindRegister(): void;
   /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
   panelOpen: boolean; onClosePanels(): void;
   /** The register is counting, closing or showing its Z. */
@@ -471,6 +478,8 @@ function Sale({
             {split ? <SplitTender sale={sale} /> : <SaleTender sale={sale} />}
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
           </ScrollView>
+        ) : register.session?.status === 'conflict' ? cart(
+          <RegisterConflictCard register={register} registerContract={capabilities?.register} onChoseAnother={onRebindRegister} className="mt-2 border border-border" />
         ) : register.session ? (
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
           <RegisterColumn register={register} registerId={boundRegisterId} registers={[]} onPick={() => undefined} currency={currency}
