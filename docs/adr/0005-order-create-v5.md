@@ -1,6 +1,6 @@
 # order.create version 5 in the Vendure plugin: fees, shipping and custom lines
 
-Status: Proposed
+Status: Accepted (front desk rulings, 2026-10-06: (a), (b) and (c) as recommended, with the conditions under "Rulings")
 Date: 2026-10-06
 
 ## Context
@@ -23,7 +23,7 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
 - **One ShippingLine per order** in practice: the default `ShippingLineAssignmentStrategy` gives every order line to the last ShippingLine, and `applyShipping` drops the others. The shipping calculator sees only the order, not which line it prices.
 - **`TaxCategory` has no `code`**, only `id`, `name` and `isDefault`. A category with no rate in the zone falls back to Vendure's zero `defaultTaxRate`.
 
-## Decision (proposed)
+## Decision
 
 1. **Fees become Surcharges.**
    - Each fee is a Surcharge with `sku: 'TALLY-FEE'`, `description: name`, `listPrice: amountMinor`, and `listPriceIncludesTax: payload.pricesIncludeTax`.
@@ -34,7 +34,7 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
 2. **Shipping becomes the order's real ShippingLine,** so Vendure's own shipping totals and reports are right.
    - The `tally-in-store` calculator prices the line from an order custom field (`tallyShipping`: amount, inclusive flag and resolved tax rate), written before `setShippingMethod`. Without the field it charges 0, as today.
    - `name` and `methodId` are recorded on that custom field.
-   - **More than one `shipping[]` entry is refused** with `invalid_payload`, naming `payload.shipping[1]`. The store can't keep two ShippingLines, and an instruction it can't honour is refused, never merged (ADR-070 Decision 3).
+   - **More than one `shipping[]` entry is refused** with `invalid_payload` (`shipping_single`), naming `payload.shipping[1]`; `/tally/v1/info` advertises `maxShippingLines: 1`. The store can't keep two ShippingLines, and an instruction it can't honour is refused, never merged (ADR-070 Decision 3).
    - **Alternative:** shipping as `TALLY-SHIPPING` Surcharges takes any number of entries, but Vendure would show 0 shipping on the order.
 
 3. **Custom lines become real OrderLines on a plugin-owned "POS custom item" variant.**
@@ -58,7 +58,7 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
 
 4. **`taxClass` resolves to a Vendure TaxCategory** by case-insensitive `name`, else by id.
    - Absent means the channel's default category (`isDefault`).
-   - An unknown class is refused with `invalid_payload`, naming the field.
+   - An unknown class is refused with `invalid_payload` (`tax_class_unknown`), naming the field.
    - The rate is `TaxRateService.getApplicableTaxRate(ctx, activeZone, category)`, the same zone Vendure uses for the order's lines.
 
 5. **Validation and the rest:**
@@ -76,7 +76,20 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
 - **One shipping charge per order** is a Vendure limit. TallyUI's till could cap shipping at one entry per order for Vendure stores; that is a TallyUI follow-up if the refusal ever shows.
 - **Split tender:** `payments[]` was already an array. The plugin applies several payments (`recipe.e2e.ts` proof 9), and the app's Split button relies on it.
 
-**For the front desk to rule:**
-- **(a)** custom lines on a plugin-owned variant (recommended) or as Surcharges;
-- **(b)** shipping as the real ShippingLine with more than one refused (recommended), or as Surcharges;
-- **(c)** `taxClass` matched by TaxCategory name.
+## Rulings (front desk, 2026-10-06)
+
+**(a) Custom lines: OrderLines on the plugin-owned "POS custom item" variant, in the "POS no tax" category.**
+- **Setup:** the variant and category are created idempotently, per channel, at plugin bootstrap.
+- **The storefront never sees the variant:** it is disabled and out of the shop's search.
+- **Name and price:** the till's name and price travel in OrderLine custom fields (`tallyCustomName`, `tallyCustomSku`, `tallyUnitPrice`). They are applied by a price-calculation strategy that touches only lines on that variant.
+- **Display:** the receipt shows the real description, and admin and refunds show it through the line's custom fields. Vendure's Dashboard titles an order line by its variant, so the line's heading still reads "POS custom item" unless a Dashboard extension shows the custom name. That is a follow-up.
+
+**(b) Shipping: the real ShippingLine, priced from an order custom field.**
+- A second `shipping[]` entry is refused with `invalid_payload` and code `shipping_single`, naming `payload.shipping[1]`.
+- `GET /tally/v1/info` advertises `maxShippingLines: 1`, so TallyUI can gate the UI before pushing.
+
+**(c) `taxClass`: matched by TaxCategory name, then by id.**
+- Absent means the channel's default category.
+- An unknown name or id is refused with `invalid_payload` and code `tax_class_unknown`. It is never silently defaulted: a mismatch between till and store must surface.
+
+**Fees** are Surcharges, as proposed.
