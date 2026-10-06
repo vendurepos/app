@@ -3,21 +3,22 @@ import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Link, Redirect, Stack } from 'expo-router';
 import Constants from 'expo-constants';
 import {
-  Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
+  Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   TabsTrigger, Text, VStack,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  catalogueEntries, CurrencyProvider, findEntryByCode, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
-  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type UseOrderOutboxResult,
+  catalogueEntries, CurrencyProvider, findEntryByCode, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
+  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
+import type { RxCollection } from 'rxdb';
 import { cartTabLabel } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
-import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
+import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
 import { loadPriceEditAllowed } from '../lib/price-edit-setting';
@@ -94,6 +95,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const currency = session.settings.currency;
   // The register's collections share the orders database, so they open, close and are kept with it.
   const registerStore = useMemo(() => registerCollections(outbox.orders), [outbox.orders]);
+  const drafts = useMemo(() => orderDrafts(outbox.orders), [outbox.orders]);
   // Register commands go to the same POST /tally/v1/commands as the orders, from the one register outbox over this
   // collection (TallyUI #357: a second would send twice). No result is applied to the session yet (TallyUI's c2b
   // anchoring), so results are only logged. A closure waits for its session's orders (lib/closure-hold.ts); the till
@@ -237,7 +239,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
-                  outbox={outbox} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
+                  outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
                   onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
                   registerClosing={(!!sessionStatus && sessionStatus !== 'open') || register.closing || closureShown}
@@ -304,10 +306,11 @@ function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxSt
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing, overSheet,
+  registerClosing, overSheet, drafts,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
+  drafts: RxCollection | null;
   boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
   /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
   panelOpen: boolean; onClosePanels(): void;
@@ -322,8 +325,15 @@ function Sale({
   // stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
     registerId, cashierRef: session.email, capabilities, session: register.saleSession, onSaleCompleted: outbox.record,
-    isStored: outbox.isStored,
+    isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
+  const [parkedOpen, setParkedOpen] = useState(false);
+  const [parked, setParked] = useState<ParkedOrderSummary[]>([]);
+  useEffect(() => {
+    if (!drafts) { setParked([]); return; }
+    const subscription = parkedOrderSummaries$(drafts).subscribe(setParked);
+    return () => subscription.unsubscribe();
+  }, [drafts]);
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
@@ -365,6 +375,11 @@ function Sale({
   }
   const cart = (payGate?: ReactNode) => (
     <>
+      {drafts ? (
+        <Button testID="parked-open" variant="secondary" onPress={() => setParkedOpen(true)}>
+          <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
+        </Button>
+      ) : null}
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} canEditPrice={loadPriceEditAllowed()} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
         highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
@@ -451,6 +466,9 @@ function Sale({
           : <Text className="mt-2 text-sm text-muted-foreground">Opening the register…</Text>)}
       </View>
       {typedApproval.dialog}
+      <ParkedSales sale={sale} parked={parked}
+        onDiscard={async (id) => { await drafts!.findOne(id).exec().then((doc) => doc?.remove()); }}
+        currency={session.settings.currency} open={parkedOpen} onOpenChange={setParkedOpen} />
     </View>
   );
 }
