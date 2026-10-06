@@ -13,6 +13,7 @@
  * GetProductIds — reconcile/ids.ts.
  * VariantStock — reconcile/stock.ts.
  * GetVariantPrices — reconcile/prices.ts.
+ * Search, Create, One — customers.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
  * POST /tally/v1/commands (order.create) — apps/pos/lib/order-transport.ts.
  * POST /tally/v1/commands (register.session.open) — apps/pos/app/index.tsx via order-transport.ts.
@@ -125,6 +126,9 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       }
       case 'activeAdministrator': data = { activeAdministrator: request.headers.get('Authorization') === `Bearer ${DEMO_AUTH_TOKEN}` ? { id: ADMINISTRATOR_ID } : null }; break;
       case 'logout': data = { logout: { success: true } }; break;
+      case 'Search': case 'customers': data = { customers: store.customers(variables) }; break;
+      case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
+      case 'One': case 'customer': data = { customer: store.customer(variables.id) }; break;
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
       case 'GlobalStockSettings': case 'globalSettings': data = { globalSettings: {

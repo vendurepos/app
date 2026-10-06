@@ -30,7 +30,9 @@ export type DemoStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Command = { id: string; type: string; version: number; payload: any };
 type Session = RegisterSessionOpenPayload & { status: 'open' | 'counting' | 'closed' };
 type Movement = { movementId: string; sessionId: string; type: string; amountMinor: number; voids?: string };
+type Customer = { __typename: 'Customer'; id: string; firstName: string; lastName: string; emailAddress: string; phoneNumber: string | null };
 type State = {
+  customers: Customer[];
   stock: Record<string, { quantity: number; updatedAt: string }>;
   ledger: Record<string, { fingerprint: string; result: CommandResult }>;
   orders: OrderCreatePayload[]; sessions: Record<string, Session>;
@@ -44,7 +46,14 @@ function seed(): State {
     index++;
     if (product.trackInventory) stock[String(index)] = { quantity: variant.shopFloorStock, updatedAt: SEED_TIME };
   }
-  return { stock, ledger: {}, orders: [], sessions: {}, movements: [], closures: [] };
+  const customers: Customer[] = [
+    ['Ada', 'Lovelace', 'ada@demo.vendurepos.com'],
+    ['Grace', 'Hopper', 'grace@demo.vendurepos.com'],
+    ['Alan', 'Turing', 'alan@demo.vendurepos.com'],
+  ].map(([firstName, lastName, emailAddress], index) => ({
+    __typename: 'Customer', id: `c${index + 1}`, firstName, lastName, emailAddress, phoneNumber: null,
+  }));
+  return { stock, ledger: {}, orders: [], sessions: {}, movements: [], closures: [], customers };
 }
 
 /** Canonical command content, like the plugin's fingerprint, without its Node-only SHA-256 import. */
@@ -58,12 +67,36 @@ export class DemoStore {
   private state: State;
   constructor(private storage?: DemoStorage) {
     const saved = storage?.getItem(DEMO_STORAGE_KEY);
-    this.state = saved ? JSON.parse(saved) : seed();
+    if (saved) {
+      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones.
+      this.state = { ...parsed, customers: Array.isArray(parsed.customers) ? parsed.customers : seed().customers };
+    } else this.state = seed();
   }
 
   reset(): void {
     this.state = seed();
     this.storage?.removeItem(DEMO_STORAGE_KEY);
+  }
+
+  customers({ q = '', take = 20 }: { q?: string; take?: number } = {}) {
+    const items = this.state.customers.filter(customer =>
+      [customer.emailAddress, customer.firstName, customer.lastName].some(value => value.toLowerCase().includes(q.toLowerCase())))
+      .sort((a, b) => a.lastName.localeCompare(b.lastName));
+    return { totalItems: items.length, items: items.slice(0, take) };
+  }
+
+  customer(id: string) {
+    return this.state.customers.find(customer => customer.id === id) ?? null;
+  }
+
+  createCustomer(input: { firstName: string; lastName: string; emailAddress: string; phoneNumber?: string }) {
+    if (this.state.customers.some(customer => customer.emailAddress === input.emailAddress)) return {
+      __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
+    };
+    const customer: Customer = { ...input, __typename: 'Customer', id: `c${this.state.customers.length + 1}`, phoneNumber: input.phoneNumber ?? null };
+    this.state.customers.push(customer);
+    this.storage?.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state));
+    return customer;
   }
 
   products() {
