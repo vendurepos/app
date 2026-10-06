@@ -412,3 +412,18 @@ test('a demo cashier parks a sale, sells another, then resumes the parked one', 
   await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
   await expect(page.getByTestId('parked-open')).toHaveText('Park');
 });
+
+test('the demo page says what to try and links to the site and the quick start', async ({ page }) => {
+  const cspConsole: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
+  });
+  await page.goto('/demo');
+  const demoTry = page.getByTestId('demo-try');
+  for (const text of ['What to try', 'Orders', 'price', 'Park', 'customer', 'Register']) {
+    await expect(demoTry).toContainText(text);
+  }
+  await expect(page.getByTestId('demo-link-site')).toHaveAttribute('href', /^https:\/\/vendurepos\.com\/?$/);
+  await expect(page.getByTestId('demo-link-quickstart')).toHaveAttribute('href', 'https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md');
+  expect(cspConsole).toEqual([]);
+});
