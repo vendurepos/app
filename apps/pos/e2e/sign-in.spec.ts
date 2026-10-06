@@ -109,6 +109,8 @@ test('signs in to the dev store', async ({ page }) => {
   ]) {
     await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
   }
+  // The plugin's custom-item product is disabled, so the till never offers it (connector-vendure's isSellable).
+  await expect(page.getByText('POS custom item', { exact: true })).toHaveCount(0);
   const search = page.getByPlaceholder('Search or scan barcode / SKU');
   await search.fill('2000000000015');
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();

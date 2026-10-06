@@ -49,6 +49,55 @@ function saleCommand(lines: Array<{ variantId: string; quantity: number; unitPri
   };
 }
 
+// v5 uses the same tax-exclusive figures, with fees/shipping included in each rate's net before rounding.
+function v5Command(lines: Array<{
+  variantId?: string; quantity: number; unitPriceMinor: number;
+  custom?: { name: string; taxStatus: 'taxable' | 'none'; taxClass?: string };
+}>, extras: {
+  fees?: Array<{ name: string; amountMinor: number; taxStatus: 'taxable' | 'none'; taxClass?: string }>;
+  shipping?: Array<{ name: string; methodId?: string; amountMinor: number; taxStatus: 'taxable' | 'none'; taxClass?: string }>;
+}) {
+  // The dev store's default is Standard (DE 19 %); Reduced is DE 7 %, and untaxed custom lines are 0 %.
+  const ratePpm = (tax?: { taxStatus: string; taxClass?: string }) =>
+    tax?.taxStatus === 'none' ? 0 : tax?.taxClass === 'Reduced' ? 70_000 : 190_000;
+  const posLines = lines.map(line => ({ clientLineId: randomUUID(), ...line }));
+  const fees = extras.fees?.map(fee => ({ clientFeeId: randomUUID(), ...fee,
+    taxMinor: Math.round(fee.amountMinor * ratePpm(fee) / 1_000_000) }));
+  const shipping = extras.shipping?.map(charge => ({ clientShippingId: randomUUID(), ...charge,
+    taxMinor: Math.round(charge.amountMinor * ratePpm(charge) / 1_000_000) }));
+  const figures = [
+    ...posLines.map(line => ({ netMinor: line.unitPriceMinor * line.quantity, ratePpm: ratePpm(line.custom) })),
+    ...[...(fees ?? []), ...(shipping ?? [])].map(charge => ({ netMinor: charge.amountMinor, ratePpm: ratePpm(charge) })),
+  ];
+  const taxByRate = [...new Set(figures.map(figure => figure.ratePpm))].map(ratePpm => {
+    const netMinor = figures.filter(figure => figure.ratePpm === ratePpm).reduce((sum, figure) => sum + figure.netMinor, 0);
+    const taxMinor = Math.round(netMinor * ratePpm / 1_000_000);
+    return { ratePpm, netMinor, taxMinor, grossMinor: netMinor + taxMinor };
+  });
+  // Subtotal is the lines' net; the display lists fees and shipping separately.
+  const subtotalMinor = posLines.reduce((sum, line) => sum + line.unitPriceMinor * line.quantity, 0);
+  const taxMinor = taxByRate.reduce((sum, rate) => sum + rate.taxMinor, 0);
+  const totalMinor = taxByRate.reduce((sum, rate) => sum + rate.grossMinor, 0);
+  const createdAt = new Date().toISOString();
+  return {
+    id: randomUUID(), type: 'order.create', version: 5, createdAt, deviceId: 'dev-store-smoke', attempt: 1,
+    payload: {
+      clientOrderId: randomUUID(), createdAt, currency: 'EUR', pricesIncludeTax: false,
+      lines: posLines, fees, shipping, subtotalMinor, taxMinor, totalMinor,
+      payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
+      registerId: 'dev-store-smoke', cashierRef: 'dev-store-smoke', sessionId: randomUUID(),
+      display: {
+        currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor, discountMinor: 0,
+        taxMinor, totalMinor, orderDiscountMinor: 0, lines: posLines.map(({ clientLineId, unitPriceMinor, quantity }) =>
+          ({ clientLineId, amountMinor: unitPriceMinor * quantity, discounts: [] })),
+        fees: fees?.map(({ clientFeeId, amountMinor }) => ({ clientFeeId, amountMinor })),
+        shipping: shipping?.map(({ clientShippingId, amountMinor }) => ({ clientShippingId, amountMinor })),
+      },
+      taxByRate,
+    },
+  };
+}
+
 // 1 x TALLY-MUG: 800 net, DE 19 % (152), paid 952 cash.
 const mugCommand = (variantId: string) => saleCommand([{ variantId, quantity: 1, unitPriceMinor: 800 }], 190_000);
 
@@ -111,6 +160,48 @@ async function commandSmoke(token: string) {
     console.log(`ok - a ${basket.length}-line ${category} sale at ${ratePpm / 10_000} % is applied at the till's ` +
       `${sale.payload.totalMinor} (tax ${sale.payload.taxMinor}), no warnings`);
   }
+  const mugLine = { variantId: before.id, quantity: 1, unitPriceMinor: 800 };
+  for (const [name, sale, totalMinor] of [
+    // Bag: 800 + 20 net, round(820 × 19 %) = 156 tax, total 976.
+    ['fee', v5Command([mugLine], { fees: [{ name: 'Bag', amountMinor: 20, taxStatus: 'taxable' }] }), 976],
+    // Shipping: mug 800 + 152 tax, delivery 500 + 35 tax at 7 %, total 1487.
+    ['shipping', v5Command([mugLine], { shipping: [{ name: 'Local delivery', methodId: 'flat_rate',
+      amountMinor: 500, taxStatus: 'taxable', taxClass: 'Reduced' }] }), 1487],
+    // Custom: mug 800 + 152 tax, Gift wrap 2 × 300 at 0 %, total 1552.
+    ['custom line', v5Command([mugLine, { quantity: 2, unitPriceMinor: 300,
+      custom: { name: 'Gift wrap', taxStatus: 'none' } }], {}), 1552],
+  ] as const) {
+    expectEqual(sale.payload.totalMinor, totalMinor, `the v5 ${name} till total`);
+    const response = await post({ commands: [sale] });
+    const applied = response.body.results?.[0];
+    expectEqual([response.status, applied?.status, applied?.serverRefs?.totalMinor], [200, 'applied', totalMinor],
+      `the v5 ${name} sale's result (${JSON.stringify(response.body)})`);
+    expectEqual([applied?.warnings, applied?.totalWarnings], [undefined, undefined], `the v5 ${name} sale's warnings`);
+    const { order } = (await gql('/admin-api', `query Order($id: ID!) {
+      order(id: $id) { totalWithTax shippingWithTax surcharges { sku price }
+        lines { productVariant { sku } customFields { tallyCustomName } linePrice linePriceWithTax }
+      }
+    }`, { id: applied.serverRefs.orderId }, admin)).body.data;
+    expectEqual(order.totalWithTax, totalMinor, `the v5 ${name} Admin API total`);
+    if (name === 'fee') {
+      expectEqual(order.surcharges.filter((charge: { sku: string }) => charge.sku === 'TALLY-FEE'),
+        [{ sku: 'TALLY-FEE', price: 20 }], 'the Bag surcharge net');
+    } else if (name === 'shipping') {
+      expectEqual(order.shippingWithTax, 535, 'the shipping charge with 7 % tax');
+    } else {
+      expectEqual(order.lines.find((line: { productVariant: { sku: string } }) => line.productVariant.sku === 'TALLY-CUSTOM-ITEM'),
+        { productVariant: { sku: 'TALLY-CUSTOM-ITEM' }, customFields: { tallyCustomName: 'Gift wrap' },
+          linePrice: 600, linePriceWithTax: 600 }, 'the untaxed Gift wrap line');
+    }
+    console.log(`ok - v5 ${name} applied at the till's ${totalMinor}, no warnings, checked in the Admin API`);
+  }
+  const infoResponse = await fetch(`http://${SERVER_HOST}:${SERVER_PORT}/tally/v1/info`, { headers: admin });
+  expectEqual(infoResponse.status, 200, 'the info HTTP status');
+  const info = await infoResponse.json();
+  expectEqual(info.contracts['order.create'].includes(5), true, 'info advertises order.create 5');
+  expectEqual(info.maxShippingLines, 1, 'info allows one shipping line');
+  expectEqual(info.lineTax, { none: true, classes: true }, 'info honours untaxed lines and tax classes');
+  console.log('ok - info advertises order.create 5, one shipping line, untaxed lines and tax classes');
 }
 
 async function smoke() {
@@ -169,8 +260,9 @@ async function smoke() {
     }
     const rates = taxRates.items.map((rate: { value: number; zone: { name: string }; category: { name: string } }) =>
       `${rate.category.name}/${rate.zone.name}/${rate.value}`);
+    // The plugin's bootstrap adds the disabled TALLY-CUSTOM-ITEM variant (ADR 0005).
     if (channel.code !== POS_CHANNEL_CODE || channel.currencyCode !== 'EUR' || channel.pricesIncludeTax !== false ||
-        channel.defaultTaxZone?.name !== 'Germany' || productVariants.totalItems !== VARIANT_COUNT ||
+        channel.defaultTaxZone?.name !== 'Germany' || productVariants.totalItems !== VARIANT_COUNT + 1 ||
         !['Standard/Denmark/25', 'Standard/Germany/19', 'Reduced/Denmark/25', 'Reduced/Germany/7']
           .every(rate => rates.includes(rate)) ||
         !stockLocations.items.some((location: { name: string }) => location.name === 'Shop floor')) {

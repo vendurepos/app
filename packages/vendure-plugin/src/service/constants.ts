@@ -9,9 +9,8 @@ export const TALLY_NO_TAX_CATEGORY = 'POS no tax';
 
 // The order.create versions the server accepts, independent of vendored/versions.ts.
 export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5];
-// What /tally/v1/info advertises: gains 5 when fees, shipping and custom lines are all honoured (ADR 0005),
-// so no till sends v5 to a server that would refuse its charges.
-export const ADVERTISED_ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4];
+// Fees, shipping and custom lines are honoured (ADR 0005), so /tally/v1/info advertises every accepted version.
+export const ADVERTISED_ORDER_CREATE_VERSIONS: readonly number[] = ORDER_CREATE_VERSIONS;
 
 // The register contract versions this plugin implements (ADR 0003), shared by the five register.* commands; /info
 // advertises this list and RegisterService's version gate reads it.

@@ -182,6 +182,15 @@ vendureDashboardPlugin({
 }),
 ```
 
+### order.create version 5: fees, shipping and custom lines
+
+- Fees are Vendure Surcharges (`TALLY-FEE`).
+- One shipping charge per order is recorded as the order's shipping line; a second is refused (`shipping_single`).
+- Custom lines are order lines on the plugin's disabled "POS custom item" product (SKU `TALLY-CUSTOM-ITEM`), with the till's name on the line.
+- "POS no tax" is a plugin-owned tax category for untaxed lines.
+- `taxClass` is matched to a tax category by name, then id. Without one, the store's **default** category is used. If none is marked default, the fee is refused, so mark one in Settings → Tax categories.
+- Run the bundled migration `TallyPosV51790900000000`, or generate your own, before starting 0.3.0.
+
 ## Development
 
 The package is standalone npm, not part of the pnpm workspace.
