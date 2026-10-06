@@ -28,7 +28,8 @@ async function mugStock(page: Page) {
 async function expectSignedIn(page: Page) {
   await expect(page.getByTestId('demo-banner')).toContainText('Demo: everything stays in this browser');
   await expect(page.getByTestId('signed-in-store')).toBeVisible();
-  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  // The grid renders its tiles lazily (at phone width the mug is past the first screenful), so wait for the first by name.
+  await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 }
 
 async function orderEntries(page: Page) {
