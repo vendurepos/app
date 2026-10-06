@@ -33,9 +33,10 @@ describe('plugin harness, custom fields and GET /tally/v1/info', () => {
       Order: {
         tallyClientOrderId: 'string', tallySaleAt: 'datetime', tallyRegisterId: 'string',
         tallySessionId: 'string', tallyCashierRef: 'string', tallyPayments: 'text', tallySnapshot: 'text',
-        tallyRejectedClientOrderId: 'string', tallyRejected: 'boolean',
+        tallyRejectedClientOrderId: 'string', tallyRejected: 'boolean', tallyShipping: 'text',
       },
-      OrderLine: { tallyUnitPrice: 'int', tallyClientLineId: 'string', tallyPriceIncludesTax: 'boolean' },
+      OrderLine: { tallyUnitPrice: 'int', tallyClientLineId: 'string', tallyPriceIncludesTax: 'boolean',
+        tallyCustomName: 'string', tallyCustomSku: 'string' },
     };
     for (const [entityName, fields] of Object.entries(expected)) {
       const entity = globalSettings.serverConfig.entityCustomFields.find(item => item.entityName === entityName);

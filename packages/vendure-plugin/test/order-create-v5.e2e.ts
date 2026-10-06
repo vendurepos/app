@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Order, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -126,7 +127,7 @@ describe('order.create v5 contract plumbing', () => {
 
   it('refuses duplicate clientShippingIds', async () => {
     const command = sale();
-    const shipping = { clientShippingId: 'shipping-1', name: 'Delivery', amountMinor: 100, taxStatus: 'none' as const, taxMinor: 0 };
+    const shipping = { clientShippingId: randomUUID(), name: 'Delivery', amountMinor: 100, taxStatus: 'none' as const, taxMinor: 0 };
     command.payload.shipping = [shipping, { ...shipping }];
     const result = await run(command);
     expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
@@ -140,8 +141,9 @@ describe('order.create v5 contract plumbing', () => {
       }]), version: 5 as const };
       const payload = command.payload;
       const shippingTax = mode === 'none' ? 0 : Math.round(500 * standardRate / 100);
-      payload.shipping = [{ clientShippingId: 'shipping-1', name: 'Local delivery', methodId: 'flat_rate',
-        amountMinor: 500, taxStatus: mode === 'none' ? 'none' : 'taxable' }];
+      const clientShippingId = randomUUID();
+      payload.shipping = [{ clientShippingId, name: 'Local delivery', methodId: 'flat_rate',
+        amountMinor: 500, taxStatus: mode === 'none' ? 'none' : 'taxable', taxMinor: shippingTax }];
       if (mode === 'with-fee') {
         payload.fees = [fee];
         payload.display!.fees = [{ clientFeeId: fee.clientFeeId, amountMinor: fee.amountMinor }];
@@ -150,7 +152,7 @@ describe('order.create v5 contract plumbing', () => {
       payload.taxMinor += shippingTax;
       payload.totalMinor += 500 + shippingTax + (mode === 'with-fee' ? 100 : 0);
       payload.payments[0].amountMinor = payload.totalMinor;
-      payload.display!.shipping = [{ clientShippingId: 'shipping-1', amountMinor: 500 }];
+      payload.display!.shipping = [{ clientShippingId, amountMinor: 500 }];
       payload.display!.taxMinor = payload.taxMinor;
       payload.display!.totalMinor = payload.totalMinor;
       payload.taxByRate!.push({ ratePpm: mode === 'none' ? 0 : standardRate * 10000,
@@ -173,7 +175,7 @@ describe('order.create v5 contract plumbing', () => {
         expect(order.shippingLines[0].priceWithTax).toBe(500 + shippingTax);
         expect(order.shippingLines[0].taxLines.map(line => line.taxRate)).toEqual([mode === 'none' ? 0 : standardRate]);
         expect(order.totalWithTax).toBe(payload.totalMinor);
-        expect(JSON.parse(order.customFields.tallyShipping!)).toEqual({ clientShippingId: 'shipping-1', name: 'Local delivery',
+        expect(JSON.parse(order.customFields.tallyShipping!)).toEqual({ clientShippingId, name: 'Local delivery',
           methodId: 'flat_rate', amountMinor: 500, includesTax: false, taxRate: mode === 'none' ? 0 : standardRate });
         expect(order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-FEE').map(surcharge => surcharge.price))
           .toEqual(mode === 'with-fee' ? [100] : []);
@@ -187,7 +189,8 @@ describe('order.create v5 contract plumbing', () => {
     for (const version of [1, 2, 3, 4, 5] as const) {
       const command = { ...sale(), version };
       command.payload.shipping = [
-        { name: 'Delivery', amountMinor: 500, taxStatus: 'none' }, { name: 'Second', amountMinor: 100, taxStatus: 'none' },
+        { clientShippingId: randomUUID(), name: 'Delivery', amountMinor: 500, taxStatus: 'none', taxMinor: 0 },
+        { clientShippingId: randomUUID(), name: 'Second', amountMinor: 100, taxStatus: 'none', taxMinor: 0 },
       ];
       const result = await run(command);
       expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
@@ -197,8 +200,23 @@ describe('order.create v5 contract plumbing', () => {
   });
 
   it('refuses an unknown shipping taxClass', async () => {
-    const command = sale();
-    command.payload.shipping = [{ name: 'Delivery', amountMinor: 500, taxStatus: 'taxable', taxClass: 'missing-tax-category' }];
+    const command = { ...orderCommand([{
+      variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800, ratePpm: standardRate * 10000,
+    }]), version: 5 as const };
+    const payload = command.payload;
+    const shippingTax = Math.round(500 * standardRate / 100);
+    const clientShippingId = randomUUID();
+    payload.shipping = [{ clientShippingId, name: 'Delivery', amountMinor: 500,
+      taxStatus: 'taxable', taxClass: 'missing-tax-category', taxMinor: shippingTax }];
+    payload.taxMinor += shippingTax;
+    payload.totalMinor += 500 + shippingTax;
+    payload.payments[0].amountMinor = payload.totalMinor;
+    payload.display!.shipping = [{ clientShippingId, amountMinor: 500 }];
+    payload.display!.taxMinor = payload.taxMinor;
+    payload.display!.totalMinor = payload.totalMinor;
+    payload.taxByRate![0].netMinor += 500;
+    payload.taxByRate![0].taxMinor += shippingTax;
+    payload.taxByRate![0].grossMinor += 500 + shippingTax;
     const result = await run(command);
     expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload',
       data: { reason: 'tax_class_unknown', path: 'shipping[0].taxClass' } } });
