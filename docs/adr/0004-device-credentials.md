@@ -105,6 +105,8 @@ Build device credentials on **Vendure's native API keys (3.6+)**:
 **Additions on acceptance (front desk, 2026-10-06):**
 1. **The key is a secret everywhere it appears.** The till's "Sign in with a device key" field is masked, like a password. The Dashboard extension shows a new key exactly once, at creation or rotation, and never again.
 2. **The open point in Question 4 is settled by test before the Dashboard extension ships:** whether an `ApiKey` runs as its owner or as a dedicated user, and what the audit trail records for a sale made with it. The plugin e2e test on the supported Vendure range settles it, and the answer is recorded in this ADR.
+   - **Settled (Vendure 3.7.3, `packages/vendure-plugin/test/api-key.e2e.ts`):** a key runs as its own dedicated `User` (`identifier` `apikey-user-…`, distinct from the key's `owner`), and `activeAdministrator` is `null` for it. The order's history entries for a sale made with the key name the key's **owner's** Administrator, the administrator who enrolled the device.
+   - **Consequence:** the audit trail shows who enrolled the till, not which till sold. Per-till attribution comes from the order's own POS fields (`tallyRegisterId`, `tallyCashierRef`), which the till already stamps. The Dashboard extension shows each device's name and `lastUsedAt` beside them.
 3. **Implementation order:**
    1. TallyUI `connector-vendure` gains an API-key credential (on the TallyUI lane, for 3.2.0);
    2. the plugin's "POS till" role preset and the API-key e2e test on the supported range;
