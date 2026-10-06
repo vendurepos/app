@@ -11,6 +11,8 @@ Open source, modular point of sale for [Vendure](https://vendure.io). Built on
 A web till signed in to the merchant's own Vendure 3.6+ store (3.7.3 tested),
 with the `@vendurepos/plugin` server plugin installed. The till:
 
+- Signs in with a staff account, or with a device key made for that till in
+  the Vendure Dashboard (see [docs/QUICKSTART.md](docs/QUICKSTART.md)).
 - Syncs the catalogue to local SQLite in the browser.
 - Sells with the network off. Each sale waits in a local outbox. When the
   network returns, it lands in Vendure exactly once, at the POS price, paid
@@ -18,9 +20,12 @@ with the `@vendurepos/plugin` server plugin installed. The till:
 - Takes line and order discounts.
 - Takes cash payments with change, or card payments on a separate terminal,
   confirmed on the till.
+- Splits a sale between cash and a card terminal, and the order records both
+  payments.
 - Prints the receipt.
 - Runs a register day: open with a float, cash in and out, count, close, and
-  a printed Z report.
+  a printed Z report. A count difference over the till's limit (set in
+  Settings) needs a manager's approval to close.
 - Shows sales the store refused under "needs attention", with a retry.
 - Reads barcode scans from a keyboard-wedge scanner.
 
@@ -51,14 +56,14 @@ See the [plugin reference](packages/vendure-plugin/README.md).
 
 ## Known limitations
 
-- One payment per sale, with no split tender yet.
 - An open till picks up a price change made in Vendure within about a minute, and a stock change within about five minutes (the stock reconcile interval).
 - Sales take stock from the channel's default stock location. The till cannot
   pick a location (vendurepos/app#35).
 - One browser tab per till: a second tab is told to close the first.
 - Private browser windows that give a site no storage, such as Safari's,
   can't run the till.
-- A register close over the variance threshold needs no manager approval yet.
+- The manager's approval on register close is a typed name, not a verified
+  sign-in.
 
 ## Getting started
 
