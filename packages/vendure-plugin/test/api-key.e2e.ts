@@ -96,6 +96,13 @@ describe('POS till API keys', () => {
     expect(key.apiKey).toEqual(expect.any(String));
     const info = await fetch(`${base}/tally/v1/info`, { headers: keyHeaders() });
     expect(info.status).toBe(200);
+    expect((await info.json()).device).toEqual({ name: 'POS till' });
+    const sessionInfo = await fetch(`${base}/tally/v1/info`, { headers: {
+      Authorization: `Bearer ${adminClient.getAuthToken()}`, 'vendure-token': channel.token,
+    } });
+    expect(sessionInfo.status).toBe(200);
+    const body = await sessionInfo.json();
+    expect('device' in body).toBe(false);
     const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);
     const response = await fetch(`${base}/tally/v1/commands`, {
       method: 'POST', headers: { ...keyHeaders(), 'Content-Type': 'application/json', 'X-Tally-Protocol': '1' },

@@ -1,11 +1,11 @@
 import { Controller, Get } from '@nestjs/common';
-import { Allow, ConfigService, Permission } from '@vendure/core';
+import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
 import { ORDER_CREATE_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
-export type TallyInfo = { contracts: { 'order.create': number[]; register: number[] }; taxRounding: TaxRounding };
+export type TallyInfo = { contracts: { 'order.create': number[]; register: number[] }; taxRounding: TaxRounding; device?: { name: string } };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -13,7 +13,7 @@ export class TallyInfoController {
   // Store-wide, so the same for every channel: mapped once at bootstrap.
   private readonly taxRounding: TaxRounding;
 
-  constructor(configService: ConfigService) {
+  constructor(configService: ConfigService, private readonly connection: TransactionalConnection) {
     const { taxOptions, entityOptions } = configService;
     this.taxRounding = taxRoundingFor({
       orderTax: taxOptions.orderTaxCalculationStrategy,
@@ -24,7 +24,24 @@ export class TallyInfoController {
 
   @Get('info')
   @Allow(tallyPosSell.Permission, Permission.CreateOrder)
-  info(): TallyInfo {
-    return { contracts: { 'order.create': [...ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding };
+  async info(@Ctx() ctx: RequestContext): Promise<TallyInfo> {
+    const info: TallyInfo = { contracts: { 'order.create': [...ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding };
+    const name = await this.deviceName(ctx);
+    if (name !== undefined) info.device = { name };
+    return info;
+  }
+
+  private async deviceName(ctx: RequestContext): Promise<string | undefined> {
+    if (ctx.activeUserId === undefined) return undefined;
+    // Vendure gives each API key its own user, so the active user identifies the key; @vendure/core doesn't export ApiKey.
+    const key = await this.connection.getRepository(ctx, 'ApiKey').findOne({
+      where: { user: { id: ctx.activeUserId } }, relations: ['translations'],
+    });
+    if (!key) return undefined;
+    const translations: Array<{ languageCode: string; name: string }> = key.translations;
+    const translation = translations.find(item => item.languageCode === ctx.languageCode)
+      ?? translations.find(item => item.languageCode === ctx.channel.defaultLanguageCode)
+      ?? translations[0];
+    return translation?.name.trim() || undefined;
   }
 }
