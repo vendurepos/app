@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 
@@ -13,6 +14,12 @@ const MUG_VARIANT_ID = '1';
 const MUG_SEED_STOCK = CATALOGUE[0].variants[0].shopFloorStock;
 // Order entries in the Orders panel: "<date> · <total> · <status>" (TallyUI's OrdersList).
 const ORDER_ENTRY = /· (Synced|Waiting to sync|Not accepted)$/;
+
+// On demo.vendurepos.com (pnpm e2e:hosted) the demo records events at PostHog: answer them here, so no test run
+// ever counts as a visitor.
+test.beforeEach(async ({ context }) => {
+  await context.route(DEMO_CAPTURE_URL, (route) => route.fulfill({ status: 200, body: '' }));
+});
 
 type DemoState = { stock: Record<string, { quantity: number }>; orders: unknown[]; closures: unknown[] };
 
@@ -151,7 +158,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
 
   // Nothing left the page's own origin, and nothing broke the CSP.
   expect(requests.length).toBeGreaterThan(0);
-  expect(requests.filter((url) => new URL(url).origin !== origin)).toEqual([]);
+  expect(requests.filter((url) => new URL(url).origin !== origin && url !== DEMO_CAPTURE_URL)).toEqual([]);
   expect(cspConsole).toEqual([]);
   expect(consoleErrors).toEqual([]);
 });
@@ -185,7 +192,7 @@ test('one click from a fresh visit at phone width', async ({ page }) => {
   await page.getByTestId('register-panel-dismiss').click();
   await expect(page.getByTestId('register-panel')).toHaveCount(0);
   expect(requests.length).toBeGreaterThan(0);
-  expect(requests.filter((url) => new URL(url).origin !== origin)).toEqual([]);
+  expect(requests.filter((url) => new URL(url).origin !== origin && url !== DEMO_CAPTURE_URL)).toEqual([]);
   expect(cspConsole).toEqual([]);
   expect(consoleErrors).toEqual([]);
 });
