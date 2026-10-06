@@ -25,12 +25,12 @@ it('describes the other till, opening time and cashier', () => {
 });
 
 it.each(['', '   '])('uses another till for a blank device name (%j)', (deviceName) => {
-  expect(registerConflictText({ sessionId: 'other', takingOver: false, deviceName }))
+  expect(registerConflictText({ sessionId: 'other', takingOver: false, deviceName, openedAt: undefined, openedBy: undefined }))
     .toBe('This register is open on another till.');
 });
 
 it.each([undefined, 'invalid'])('omits a missing or invalid opening time (%s) and absent cashier', (openedAt) => {
-  expect(registerConflictText({ sessionId: 'other', takingOver: false, openedAt }))
+  expect(registerConflictText({ sessionId: 'other', takingOver: false, openedAt, openedBy: undefined, deviceName: undefined }))
     .toBe('This register is open on another till.');
 });
 
