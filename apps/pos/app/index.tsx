@@ -4,7 +4,7 @@ import { Link, Redirect, Stack } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
-  TabsTrigger, Text, VStack,
+  SplitTender, TabsTrigger, Text, VStack,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
@@ -339,6 +339,10 @@ function Sale({
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
+  const [split, setSplit] = useState(false);
+  useEffect(() => {
+    if (stage.kind === 'cart') setSplit(false);
+  }, [stage.kind]);
   const currency = session.settings.currency;
   // The register refuses to count or close under a tender.
   useEffect(() => {
@@ -346,9 +350,11 @@ function Sale({
     return () => onTender(false);
   }, [stage.kind, onTender]);
   const [payError, setPayError] = useState<string>();
-  async function pay(method: 'cash' | 'external') {
+  async function pay(method: 'cash' | 'external' | 'split') {
+    setSplit(method === 'split');
     setPayError(undefined);
-    setPayError(await startTenderInSession(register, sale, method));
+    // Split starts a cash tender with no payment; SplitTender adds each one (ADR-072).
+    setPayError(await startTenderInSession(register, sale, method === 'split' ? 'cash' : method));
   }
   const format = useCurrencyFormatter();
   // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes a
@@ -453,7 +459,7 @@ function Sale({
       <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind !== 'cart' ? (
           <ScrollView>
-            <SaleTender sale={sale} />
+            {split ? <SplitTender sale={sale} /> : <SaleTender sale={sale} />}
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
           </ScrollView>
         ) : register.session ? (
