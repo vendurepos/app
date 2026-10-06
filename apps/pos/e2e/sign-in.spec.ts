@@ -1422,3 +1422,38 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
   expect(violations).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
+
+test('a split sale, part cash and part card, is applied by the plugin with both payments', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const sent = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith('/tally/v1/commands') && (response.request().postData() ?? '').includes('order.create'));
+  await page.getByTestId('pay-split').click();
+  await page.getByTestId('split-tender-method-cash').click();
+  await page.getByTestId('split-tender-amount').fill('5');
+  await page.getByTestId('split-tender-add-button').click();
+  await expect(page.getByTestId('split-tender-complete')).toBeDisabled();
+  await page.getByTestId('split-tender-method-card').click();
+  // SplitTender pre-fills the remaining balance after adding the cash payment.
+  await page.getByTestId('split-tender-add-button').click();
+  await expect(page.locator('[data-testid^="split-tender-row-"]')).toHaveCount(2);
+  await expect(page.getByTestId('split-tender-complete')).toBeEnabled();
+  await page.getByTestId('split-tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  const response = await sent;
+  expect(response.status()).toBe(200);
+  const command = response.request().postDataJSON().commands.find(({ type }: { type: string }) => type === 'order.create');
+  const payments: { method: string; amountMinor: number }[] = command.payload.payments;
+  expect(payments).toHaveLength(2);
+  expect(payments.map(({ method }) => method)).toEqual(['cash', 'external']);
+  expect(payments.reduce((sum, payment) => sum + payment.amountMinor, 0)).toBe(command.payload.totalMinor);
+  const result = (await response.json()).results.find(({ id }: { id: string }) => id === command.id);
+  expect(result.status).toBe('applied');
+});

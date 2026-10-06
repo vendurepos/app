@@ -35,12 +35,12 @@ export function TaxRows({ label, amount, testID, rates }: {
 }
 
 /**
- * The cart and its Pay buttons. `onPay` starts the tender (through the register's gate); `payGate`, when given, stands
+ * The cart and its Cash, Card and Split Pay buttons. `onPay` starts the tender (through the register's gate); `payGate`, when given, stands
  * in for the Pay buttons (the open-register card while no session is open), and `payError` says why a Pay was refused.
  * `highlightSku` lights up that line, as an add confirms in place.
  */
 export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEditPrice }: {
-  sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external'): void; payGate?: ReactNode; payError?: string;
+  sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external' | 'split'): void; payGate?: ReactNode; payError?: string;
   highlightSku?: string; canEditPrice: boolean;
 }) {
   const format = useCurrencyFormatter();
@@ -132,6 +132,9 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
               </Button>
               <Button testID="pay-card" variant="secondary" className="flex-1" disabled={empty} onPress={() => onPay('external')}>
                 <Text>Pay by card</Text>
+              </Button>
+              <Button testID="pay-split" variant="outline" disabled={empty} onPress={() => onPay('split')}>
+                <Text>Split</Text>
               </Button>
             </HStack>
           )}
