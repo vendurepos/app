@@ -10,10 +10,10 @@ tested version). Run store commands from that project's root.
 1. **Install the plugin:**
 
    ```sh
-   npm install @vendurepos/plugin@0.1.0
+   npm install @vendurepos/plugin@0.2.0
    ```
 
-   <!-- Sources: packages/vendure-plugin/package.json (name, version, peers); npm registry (0.1.0 published 2026-10-01). -->
+   <!-- Sources: packages/vendure-plugin/package.json (name, version, peers); packages/vendure-plugin/CHANGELOG.md (0.2.0). -->
 
 2. **Add `TallyPosPlugin` to your existing Vendure config.** Keep your other
    plugins and settings. This plugin has no `.init()` options:
@@ -72,6 +72,38 @@ tested version). Run store commands from that project's root.
    Sign in with a Vendure administrator who can read the channel's catalogue
    and settings and has the plugin's `TallyPosSell` permission (or `CreateOrder`, which is broader); the plugin routes require one of them.
    <!-- Sources: dev/vendure-store/src/vendure-config.ts; docs/DISCOVERY.md §2.5; docs/adr/0002-order-path-vendure-plugin.md §1; apps/pos/lib/sign-in.ts. -->
+
+   **Optional: a Vendure API key for each till (Vendure 3.6+).** Add
+   `'api-key'` to the same `tokenMethod` list:
+
+   ```ts
+   tokenMethod: ['bearer', 'cookie', 'api-key'],
+   ```
+
+   With Vendure's React Dashboard, go to **System → API keys → New POS till key**
+   and name the key after the device. First switch the Dashboard to the
+   till's channel: a key works only in the channel it was created in (Vendure's
+   API keys are channel-aware), and the dialog names that channel. The button
+   does three things:
+   - creates or extends the plugin's `vendurepos-pos-till` role, which has
+     `TallyPosSell` and the reads a till needs;
+   - creates the key with that role;
+   - shows the key once.
+
+   Rotate or delete a key on its own page.
+
+   **pnpm projects:** point the Dashboard's Vite plugin at your `node_modules`,
+   or the build will not find the button:
+
+   ```ts
+   vendureDashboardPlugin({
+     // ...your existing options
+     pluginPackageScanner: { nodeModulesRoot: path.resolve(__dirname, 'node_modules') },
+   }),
+   ```
+
+   npm projects need nothing extra.
+   <!-- Sources: docs/adr/0004-device-credentials.md; packages/vendure-plugin/README.md (Dashboard: a key for each till); packages/vendure-plugin/src/dashboard/index.tsx; packages/vendure-plugin/src/config/pos-till-role.ts; @vendure/dashboard 3.7.3 dist/vite/utils/plugin-discovery.js. -->
 
 5. **Allow the POS origin through CORS.** Add `https://app.vendurepos.com`
    to the scaffold's `CORS_ORIGINS` allowlist. Its production default allows no
