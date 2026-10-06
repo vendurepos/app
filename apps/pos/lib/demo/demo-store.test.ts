@@ -63,7 +63,7 @@ function register(type: RegisterCommandEnvelope['type'], id: string, payload: Re
 
 async function mugStock(session: Session) {
   for await (const page of createVendureConnector().reconcile!.stock!.fetchPages(sessionContext(session))) {
-    const levels = page.get(ORDER.payload.lines[0].variantId) as { stockOnHand: number }[] | undefined;
+    const levels = page.get(ORDER.payload.lines[0].variantId!) as { stockOnHand: number }[] | undefined; // The fixture's mug line always has a variant.
     if (levels) return levels.reduce((sum, level) => sum + level.stockOnHand, 0);
   }
   throw new Error('Mug missing from stock query');
