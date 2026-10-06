@@ -91,6 +91,81 @@ describe('register v2 open: resume and take-over (ADR-078)', () => {
     expect(await aliases(s1)).toEqual([]);
   });
 
+  it('stores a superseded open refusal when another session is live', async () => {
+    const [s1, s2, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r, { deviceName: 'Front till' }))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s2, r, { supersedes: s1, openedAt: LATER, deviceName: 'Back till' }, 2, 'till-2')))
+      .toMatchObject({ status: 'applied' });
+    const command = open(s1, r);
+    const result = { id: command.id, status: 'rejected', error: {
+      code: 'register_session_superseded', message: `Session ${s1} was taken over by session ${s2}`,
+      data: { sessionId: s1, supersededAt: LATER, newSessionId: s2, deviceId: 'till-2', deviceName: 'Back till' },
+    } };
+    expect(await send(command)).toEqual(result);
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id }))
+      .toMatchObject({ status: 'rejected', result });
+    expect(await send(command)).toEqual(result);
+    expect(await connection.rawConnection.getRepository(TallyRegisterSessionAlias).findOneBy({ channelId, id: s1 })).toBeNull();
+    expect(await send(open(uuid(), r, {}, 2, 'till-3'))).toMatchObject({ status: 'rejected', error: {
+      code: 'register_session_already_open', data: { sessionId: s2 },
+    } });
+  });
+
+  it('stores a superseded open refusal when no session is live', async () => {
+    const [s1, s2, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r, { deviceName: 'Front till' }))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s2, r, { supersedes: s1, openedAt: LATER, deviceName: 'Back till' }, 2, 'till-2')))
+      .toMatchObject({ status: 'applied' });
+    expect(await send(transition(s2, 'closed'))).toMatchObject({ status: 'applied' });
+    const command = open(s1, r);
+    const result = { id: command.id, status: 'rejected', error: {
+      code: 'register_session_superseded', message: `Session ${s1} was taken over by session ${s2}`,
+      data: { sessionId: s1, supersededAt: LATER, newSessionId: s2, deviceId: 'till-2', deviceName: 'Back till' },
+    } };
+    expect(await send(command)).toEqual(result);
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id }))
+      .toMatchObject({ status: 'rejected', result });
+    expect(await send(command)).toEqual(result);
+    const rows = await connection.rawConnection.getRepository(TallyRegisterSession).findBy({ channelId, registerId: r });
+    expect(rows.map(row => row.id).sort()).toEqual([s1, s2].sort());
+  });
+
+  it('refuses an open naming an alias of a superseded session with the canonical session id', async () => {
+    const [s1, s1b, s2, r] = [uuid(), uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s1b, r))).toMatchObject({ status: 'applied', register: { resumed: { fromSessionId: s1b } } });
+    expect(await aliases(s1)).toMatchObject([{ id: s1b, sessionId: s1 }]);
+    expect(await send(open(s2, r, { supersedes: s1 }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s1b, r))).toMatchObject({ status: 'rejected', error: {
+      code: 'register_session_superseded', data: { sessionId: s1 },
+    } });
+  });
+
+  it('at v1 keeps the already-open refusal for an open naming a superseded session', async () => {
+    const [s1, s2, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s2, r, { supersedes: s1 }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
+    const command = open(s1, r, {}, 1);
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: {
+      code: 'register_session_already_open', message: `Register ${r} already has session ${s2} open`, data: { sessionId: s2 },
+    } });
+  });
+
+  it('at v1 re-opens its own live id with v1 figures and refuses a different device', async () => {
+    const [s, r] = [uuid(), uuid()];
+    expect(await send(open(s, r, {}, 1))).toMatchObject({ status: 'applied' });
+    expect(await session(s)).toMatchObject({ deviceId: 'till-1', openedAt: AT });
+    const command = open(s, r, {}, 1);
+    expect(await send(command)).toEqual({ id: command.id, status: 'applied', register: {
+      session: { id: s, status: 'open', expected: { cash: 10000 }, salesCount: 0 },
+    } });
+    expect(await aliases(s)).toEqual([]);
+    const other = open(s, r, {}, 1, 'till-2');
+    expect(await send(other)).toEqual({ id: other.id, status: 'rejected', error: {
+      code: 'register_session_already_open', message: `Register ${r} already has session ${s} open`, data: { sessionId: s },
+    } });
+  });
+
   it('gives another device v2 details, omitting null openedBy and reporting the live status', async () => {
     const [s, r] = [uuid(), uuid()];
     expect(await send(open(s, r, { deviceName: 'Front till' }))).toMatchObject({ status: 'applied' });

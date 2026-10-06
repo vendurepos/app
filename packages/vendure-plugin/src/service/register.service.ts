@@ -155,6 +155,14 @@ export class RegisterService {
     if (command.type === 'register.session.open') {
       const p = command.payload as unknown as RegisterSessionOpenPayload;
       const live = await this.openSessionOf(tx, p.registerId);
+      if (command.version >= 2) {
+        const recorded = await this.resolveSession(tx, p.sessionId);
+        if (recorded && (await this.sessionState(tx, recorded)).status === 'superseded') return this.supersededRefusal(tx, commandId, recorded);
+      }
+      if (command.version === 1 && live && p.sessionId === live.id && live.deviceId === command.deviceId) {
+        const { status } = await this.sessionState(tx, live);
+        return applied({ session: await this.liveSession(tx, live, status) });
+      }
       if (command.version >= 2 && live && live.deviceId === command.deviceId) {
         const recorded = await this.resolveSession(tx, p.sessionId);
         if (recorded && recorded.id !== live.id) throw unstored(`sessionId: session ${p.sessionId} is already recorded`);
@@ -193,15 +201,7 @@ export class RegisterService {
     const { status, closed } = await this.sessionState(tx, session!);
     if (status === 'superseded') {
       if (command.version === 1) return conflict('register_session_closed', `Session ${session!.id} is closed`);
-      const superseded = await repo(TallyRegisterSessionStatus).findOneByOrFail({ channelId, sessionId: session!.id, status: 'superseded' });
-      const successor = await repo(TallyRegisterSession).findOneByOrFail({ channelId, supersedes: session!.id });
-      const data = {
-        sessionId: session!.id, supersededAt: superseded.at, newSessionId: successor.id,
-        ...(successor.openedBy === null ? {} : { supersededBy: successor.openedBy }),
-        ...(successor.deviceId === null ? {} : { deviceId: successor.deviceId }),
-        ...(successor.deviceName === null ? {} : { deviceName: successor.deviceName }),
-      } satisfies RegisterSessionSupersededData;
-      return conflict('register_session_superseded', `Session ${session!.id} was taken over by session ${successor.id}`, data);
+      return this.supersededRefusal(tx, commandId, session!);
     }
     if (command.type === 'register.session.transition') {
       const p = command.payload as unknown as RegisterSessionTransitionPayload;
@@ -259,6 +259,21 @@ export class RegisterService {
       reason: isVoid ? null : p.reason, voids: isVoid ? p.voids : null, createdAt: p.createdAt, createdBy: p.createdBy ?? null, commandId,
     });
     return applied({ session: await this.liveSession(tx, session!, status) });
+  }
+
+  private async supersededRefusal(tx: RequestContext, commandId: string, session: TallyRegisterSession): Promise<RegisterResult> {
+    const channelId = String(tx.channelId);
+    const repo = <T extends object>(entity: ObjectType<T>) => this.connection.getRepository(tx, entity);
+    const conflict = (code: RegisterConflictCode, message: string, data?: Record<string, unknown>) => refuse(commandId, code, message, data);
+    const superseded = await repo(TallyRegisterSessionStatus).findOneByOrFail({ channelId, sessionId: session.id, status: 'superseded' });
+    const successor = await repo(TallyRegisterSession).findOneByOrFail({ channelId, supersedes: session.id });
+    const data = {
+      sessionId: session.id, supersededAt: superseded.at, newSessionId: successor.id,
+      ...(successor.openedBy === null ? {} : { supersededBy: successor.openedBy }),
+      ...(successor.deviceId === null ? {} : { deviceId: successor.deviceId }),
+      ...(successor.deviceName === null ? {} : { deviceName: successor.deviceName }),
+    } satisfies RegisterSessionSupersededData;
+    return conflict('register_session_superseded', `Session ${session.id} was taken over by session ${successor.id}`, data);
   }
 
   /** The register's live session, if any: no closed or superseded status and no closure. At most one, under the lock. */
