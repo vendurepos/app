@@ -73,6 +73,8 @@ export class StoreSetupService {
     // ADR 0005 ruling (a): shared custom-item entities, assigned to each channel without changing its default tax.
     const noTax = await this.connection.getRepository(ctx, TaxCategory).findOneBy({ name: TALLY_NO_TAX_CATEGORY })
       ?? await this.taxCategories.create(ctx, { name: TALLY_NO_TAX_CATEGORY });
+    // Vendure prices a new variant in the channel's tax zone; a channel without one cannot sell either.
+    if (!ctx.channel.defaultTaxZone) return;
     const variant = await this.connection.getRepository(ctx, ProductVariant).findOne({
       where: { sku: TALLY_CUSTOM_ITEM_SKU, deletedAt: IsNull() }, relations: ['channels', 'product', 'product.channels'],
     });

@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { Order, ProductVariant, RequestContextService, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
+import { DefaultSearchPlugin, Order, ProductVariant, RequestContextService, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TallyCommand } from '../src';
+import { TallyCommand, TallyPosPlugin } from '../src';
 import { TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY } from '../src/service/constants';
 import { StoreSetupService } from '../src/service/store-setup.service';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
 describe('order.create v5 contract plumbing', () => {
-  const environment = createPluginTestEnvironment();
+  const environment = createPluginTestEnvironment({}, [TallyPosPlugin, DefaultSearchPlugin.init({})]);
   const { server, adminClient, shopClient, variantIds, decode, encode, run } = environment;
   let connection: TransactionalConnection;
   let category: TaxCategory;

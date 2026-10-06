@@ -428,7 +428,7 @@ export class OrderCreateService {
       && payment.handler.code === tallyPaymentHandler.code)) && (!shipping || shipping.checker.code === tallyShippingChecker.code)
       && this.config.shippingOptions.fulfillmentHandlers.some(handler => handler.code === manualFulfillmentHandler.code);
     if (!rates || !checkers) return 'refuse';
-    return payment && shipping && customVariant && noTax ? 'ok' : 'repairable';
+    return payment && shipping && (!zone || customVariant) && noTax ? 'ok' : 'repairable';
   }
 
   /**
@@ -696,7 +696,7 @@ export class OrderCreateService {
     }
     // Ruling 5: Vendure's stock writes are absolute values from unlocked reads, so a concurrent sale of the variant
     // lost its update (VP3 investigation Q2). Outside the order-save try, so a lock timeout here is a 503.
-    await this.lockStock(ctx, [...requested.values()].map(({ variant }) => variant.id));
+    if (requested.size) await this.lockStock(ctx, [...requested.values()].map(({ variant }) => variant.id));
     // ADR 0002 "Stock": top up a shortage before addItemToOrder, which would otherwise save the
     // line at the saleable quantity, and before ArrangingPayment, which checks saleable stock again.
     const topUps: TopUp[] = [];
