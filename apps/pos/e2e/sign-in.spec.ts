@@ -1354,7 +1354,8 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
   expect(token).toBeTruthy();
   const admin = async (query: string, variables: Record<string, unknown> = {}) => {
     const response = await page.request.post(`${STORE_URL}/admin-api`, {
-      headers: { Authorization: `Bearer ${token}` }, data: { query, variables },
+      // Vendure's API keys are channel-aware, so create the key in the till's channel.
+      headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN }, data: { query, variables },
     });
     expect(response.ok()).toBe(true);
     const result = await response.json();

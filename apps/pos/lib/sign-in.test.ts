@@ -75,8 +75,8 @@ describe('a device key', () => {
   });
 
   it.each([
-    [401, 'This device key was refused. Check the key, or create a new one on the Dashboard\'s API keys page.'],
-    [403, 'This device key was refused. Check the key, or create a new one on the Dashboard\'s API keys page.'],
+    [401, 'This device key was refused. Check the key, and that it was created in this channel: a key works only in the channel it was created in. Or create a new one on the Dashboard\'s API keys page.'],
+    [403, 'This device key was refused. Check the key, and that it was created in this channel: a key works only in the channel it was created in. Or create a new one on the Dashboard\'s API keys page.'],
     [404, 'The VendurePOS plugin was not found on this store. Install @vendurepos/plugin, then sign in again.'],
     [500, 'The store answered HTTP 500 when checking the device key.'],
   ])('reports HTTP %i without reading settings', async (status, error) => {

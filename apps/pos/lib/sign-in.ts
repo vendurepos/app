@@ -92,7 +92,7 @@ async function signInWithDeviceKey(values: Record<string, string | undefined>, i
   try {
     const response = await fetch(`${normalized.url}/tally/v1/info`, { headers: sessionContext(provisional).headers, signal: init?.signal });
     if (response.status === 401 || response.status === 403) return { ok: false,
-      error: 'This device key was refused. Check the key, or create a new one on the Dashboard\'s API keys page.' };
+      error: 'This device key was refused. Check the key, and that it was created in this channel: a key works only in the channel it was created in. Or create a new one on the Dashboard\'s API keys page.' };
     if (response.status === 404) return { ok: false, error: 'The VendurePOS plugin was not found on this store. Install @vendurepos/plugin, then sign in again.' };
     if (!response.ok) return { ok: false, error: `The store answered HTTP ${response.status} when checking the device key.` };
     const body = await response.json().catch((error: unknown) => {
