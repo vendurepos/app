@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
-import { ORDER_CREATE_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
+import { ADVERTISED_ORDER_CREATE_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
@@ -25,7 +25,7 @@ export class TallyInfoController {
   @Get('info')
   @Allow(tallyPosSell.Permission, Permission.CreateOrder)
   async info(@Ctx() ctx: RequestContext): Promise<TallyInfo> {
-    const info: TallyInfo = { contracts: { 'order.create': [...ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding };
+    const info: TallyInfo = { contracts: { 'order.create': [...ADVERTISED_ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };
     return info;

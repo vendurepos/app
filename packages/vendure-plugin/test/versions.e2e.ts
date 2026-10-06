@@ -37,21 +37,21 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     });
   });
 
-  it('a version 5 order.create is still rejected as unsupported_version and writes no order', async () => {
+  it('a version 6 order.create is rejected as unsupported_version and writes no order', async () => {
     const counts = async () => ({
       orders: await connection.rawConnection.getRepository(Order).count(),
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),
     });
     const before = await counts();
-    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 5 };
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 6 };
     const result = await run(command as unknown as CommandEnvelope<OrderCreatePayload>);
     expect(result.status).toBe('rejected');
     expect(result.error?.code).toBe('unsupported_version');
-    expect(result.error?.data).toEqual({ orderCreate: 4 });
+    expect(result.error?.data).toEqual({ orderCreate: 5 });
     expect(await counts()).toEqual(before);
   });
 
-  it('ORDER_CREATE_VERSIONS is [1, 2, 3, 4]', () => {
-    expect(ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4]);
+  it('ORDER_CREATE_VERSIONS is [1, 2, 3, 4, 5]', () => {
+    expect(ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5]);
   });
 });

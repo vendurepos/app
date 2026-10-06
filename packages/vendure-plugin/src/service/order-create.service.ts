@@ -375,6 +375,15 @@ export class OrderCreateService {
       if (seen.has(lineId)) errors.push(`lines[${index}].clientLineId: expected no duplicate clientLineId`);
       seen.add(lineId);
     });
+    for (const [field, key] of [['fees', 'clientFeeId'], ['shipping', 'clientShippingId']] as const) {
+      const ids = new Set<string>();
+      (Array.isArray(command.payload?.[field]) ? command.payload[field]! : []).forEach((item, index) => {
+        const id = (item as { clientFeeId?: unknown; clientShippingId?: unknown } | null)?.[key];
+        if (typeof id !== 'string') return;
+        if (ids.has(id)) errors.push(`${field}[${index}].${key}: expected no duplicate ${key}`);
+        ids.add(id);
+      });
+    }
     return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
   }
   // ADR-038 #220 step 4: the payload's values, after the replay read and the collision lookup and before the claim:
@@ -440,7 +449,8 @@ export class OrderCreateService {
     const paidMinor = payments.reduce((sum, payment) => sum + payment.amountMinor, 0);
     if (paidMinor < totalMinor) return rejected(command.id, 'underpaid', `Payments of ${paidMinor} are below the total of ${totalMinor}`);
     for (const line of lines) {
-      if (!await this.findVariant(ctx, line.variantId)) {
+      // payload-shape guarantees variantId on non-custom lines; custom lines are refused until job 4.
+      if (!await this.findVariant(ctx, line.variantId!)) {
         return rejected(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       }
     }
@@ -652,10 +662,10 @@ export class OrderCreateService {
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
       // A race after the pre-claim check: the variant was disabled or removed meanwhile.
-      const variant = await this.findVariant(ctx, line.variantId);
+      const variant = await this.findVariant(ctx, line.variantId!);
       if (!variant) throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
-      const entry = requested.get(line.variantId) ?? { variant, quantity: 0 };
-      requested.set(line.variantId, { variant, quantity: entry.quantity + line.quantity });
+      const entry = requested.get(line.variantId!) ?? { variant, quantity: 0 };
+      requested.set(line.variantId!, { variant, quantity: entry.quantity + line.quantity });
     }
     // Ruling 5: Vendure's stock writes are absolute values from unlocked reads, so a concurrent sale of the variant
     // lost its update (VP3 investigation Q2). Outside the order-save try, so a lock timeout here is a 503.
@@ -684,7 +694,7 @@ export class OrderCreateService {
         `Variant ${variantId} cannot be made saleable in this channel (no stock location the StockLocationStrategy sells from)`);
     }
     for (const line of payload.lines) {
-      const variantId = requested.get(line.variantId)!.variant.id;
+      const variantId = requested.get(line.variantId!)!.variant.id;
       order = unwrap(await this.orders.addItemToOrder(ctx, order.id, variantId, line.quantity, {
         tallyUnitPrice: line.unitPriceMinor,
         tallyClientLineId: line.clientLineId,

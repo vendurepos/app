@@ -48,6 +48,18 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   }
   // The bound both plugins share (RFC 5321's 254), inside Vendure's varchar(255) emailAddress.
   text(payload.customer?.email, 'customer.email', 254);
+  for (const [path, item] of [
+    ...(payload.fees ?? []).map((fee, index) => [`fees[${index}]`, fee] as const),
+    ...(payload.shipping ?? []).map((shipping, index) => [`shipping[${index}]`, shipping] as const),
+    ...payload.lines.flatMap((line, index) => line.custom ? [[`lines[${index}].custom`, line.custom] as const] : []),
+  ]) {
+    if (item.name.length < 1 || item.name.length > 255) errors.push(`${path}.name: expected 1 to 255 characters`);
+    text(item.taxClass, `${path}.taxClass`, 64);
+    if ('sku' in item) text(item.sku, `${path}.sku`, 64);
+    if ('methodId' in item) text(item.methodId, `${path}.methodId`, 64);
+    if ('amountMinor' in item) minor(item.amountMinor, `${path}.amountMinor`, maxMoney);
+    if ('taxMinor' in item) minor(item.taxMinor, `${path}.taxMinor`, maxMoney);
+  }
   payload.lines.forEach((line, index) => {
     const path = `lines[${index}]`;
     if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) errors.push(`${path}.quantity: expected a positive integer`);
