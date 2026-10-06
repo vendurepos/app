@@ -1122,6 +1122,8 @@ test.describe('on a narrow screen', () => {
     const cart = page.getByTestId('cart');
     const cartTab = page.getByTestId('tab-cart');
     const highlight = page.getByTestId('tab-cart-highlight');
+    // With 30 products, the narrow list renders only what's in view, so filter to the mug.
+    await page.getByPlaceholder('Search or scan barcode / SKU').fill('Tally Fixture Mug');
     await expect(mug).toBeVisible();
     // The register opens from the Cart tab, where Pay waits for it; the header's Register button needs no tab.
     await cartTab.click();
