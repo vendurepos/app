@@ -14,6 +14,9 @@ export const DEMO_INFO = {
 export const DEMO_CHANNEL = { defaultCurrencyCode: 'EUR', pricesIncludeTax: false, defaultTaxZone: { id: 'DE' } };
 // Category ids shared by settings, rates and variant reads.
 export const DEMO_CATEGORIES = [{ id: '1', name: 'Standard', isDefault: true }, { id: '2', name: 'Reduced', isDefault: false }];
+// Stable product collection ids, separate from tax categories.
+const DEMO_COLLECTIONS = ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']
+  .map((name, index) => ({ id: `cat${index + 1}`, name }));
 // The four rates in dev/vendure-store/src/seed.ts, before filtering to the channel's zone.
 export const DEMO_RATES = [
   { name: 'Standard DE', value: 19, category: { id: '1' }, zoneId: 'DE' },
@@ -52,10 +55,43 @@ function seed(): State {
     ['Ada', 'Lovelace', 'ada@demo.vendurepos.com'],
     ['Grace', 'Hopper', 'grace@demo.vendurepos.com'],
     ['Alan', 'Turing', 'alan@demo.vendurepos.com'],
+    ['Katherine', 'Johnson', 'katherine@demo.vendurepos.com'],
+    ['Barbara', 'Liskov', 'barbara@demo.vendurepos.com'],
+    ['Donald', 'Knuth', 'donald@demo.vendurepos.com'],
+    ['Margaret', 'Mead', 'margaret@demo.vendurepos.com'],
+    ['Dorothy', 'Vaughan', 'dorothy@demo.vendurepos.com'],
   ].map(([firstName, lastName, emailAddress], index) => ({
     __typename: 'Customer', id: `c${index + 1}`, firstName, lastName, emailAddress, phoneNumber: null,
   }));
-  return { stock, ledger: {}, orders: [], sessions: {}, movements: [], closures: [], customers };
+  const variants = CATALOGUE.flatMap(product => product.variants.map(variant => ({
+    ...variant, title: [product.name, ...variant.options].join(' '),
+  })));
+  // Server-side history predates the stock baseline; it does not decrement today's till stock.
+  const orders: OrderCreatePayload[] = [
+    { skus: ['TALLY-MUG'], ratePpm: 190_000, createdAt: '2025-12-28T10:00:00.000Z' },
+    { skus: ['ESP-250', 'FIL-500'], ratePpm: 70_000, createdAt: '2025-12-29T11:00:00.000Z' },
+    { skus: ['TOTE'], ratePpm: 190_000, createdAt: '2025-12-30T14:00:00.000Z', customer: { email: customers[0].emailAddress } },
+  ].map(({ skus, ratePpm, createdAt, customer }, orderIndex) => {
+    const clientOrderId = `seed-order-${orderIndex + 1}`;
+    const lines = skus.map((sku, lineIndex) => {
+      const variantIndex = variants.findIndex(variant => variant.sku === sku);
+      const variant = variants[variantIndex];
+      return { clientLineId: `${clientOrderId}-${lineIndex + 1}`, variantId: String(variantIndex + 1),
+        title: variant.title, quantity: 1, unitPriceMinor: variant.priceMinor };
+    });
+    const subtotalMinor = lines.reduce((sum, line) => sum + line.unitPriceMinor * line.quantity, 0);
+    const taxMinor = Math.round(subtotalMinor * ratePpm / 1_000_000);
+    const totalMinor = subtotalMinor + taxMinor;
+    return { clientOrderId, createdAt, currency: 'EUR', pricesIncludeTax: false, lines, customer,
+      subtotalMinor, taxMinor, totalMinor,
+      payments: [{ clientPaymentId: `${clientOrderId}-payment`, method: 'cash', amountMinor: totalMinor }],
+      display: { currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor, discountMinor: 0,
+        taxMinor, totalMinor, orderDiscountMinor: 0,
+        lines: lines.map(line => ({ clientLineId: line.clientLineId, amountMinor: line.unitPriceMinor * line.quantity, discounts: [] })) },
+      taxByRate: [{ ratePpm, netMinor: subtotalMinor, taxMinor, grossMinor: totalMinor }],
+    };
+  });
+  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers };
 }
 
 /** Canonical command content, like the plugin's fingerprint, without its Node-only SHA-256 import. */
@@ -106,7 +142,7 @@ export class DemoStore {
     return CATALOGUE.map((product, index) => ({
       id: String(index + 1), createdAt: SEED_TIME, updatedAt: SEED_TIME,
       name: product.name, slug: product.slug, description: `${product.name} (VendurePOS dev seed)`, enabled: true,
-      featuredAsset: null, assets: [], collections: [], facetValues: [],
+      featuredAsset: null, assets: [], collections: DEMO_COLLECTIONS.filter(collection => collection.name === product.category), facetValues: [],
       variants: product.variants.map(variant => {
         const id = String(++variantIndex);
         const category = DEMO_CATEGORIES.find(category => category.name === product.taxCategory)!;

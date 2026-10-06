@@ -8,6 +8,7 @@ import { orderTransport } from '../order-transport';
 import { readCapabilities } from '../use-sale-settings';
 import { logout } from '../logout';
 import { barcodeOf, CATALOGUE } from './catalogue';
+import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
 import { DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, type DemoStorage } from './store';
 
@@ -111,20 +112,55 @@ it('reads the plugin versions and tax rounding through the app and real connecto
   });
 });
 
+it('keeps the demo catalogue equal to the dev catalogue with five stocked categories', () => {
+  expect(CATALOGUE).toEqual(DEV_CATALOGUE);
+  expect(CATALOGUE).toHaveLength(30);
+  expect(new Set(CATALOGUE.map(product => product.slug)).size).toBe(30);
+  const variants = CATALOGUE.flatMap(product => product.variants);
+  expect(new Set(variants.map(variant => variant.sku)).size).toBe(variants.length);
+  for (const category of ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']) {
+    expect(CATALOGUE.filter(product => product.category === category).length).toBeGreaterThanOrEqual(4);
+  }
+  const added = CATALOGUE.slice(10);
+  expect(added.filter(product => product.variants.length > 1)).toHaveLength(4);
+  expect(added.filter(product => !product.trackInventory)).toHaveLength(1);
+  expect(added.filter(product => product.trackInventory && product.variants.every(variant => variant.shopFloorStock === 0))).toHaveLength(2);
+});
+
+it('seeds three historic server orders without changing the till stock baseline', () => {
+  const store = new DemoStore(storage);
+  expect(store.customers().totalItems).toBe(8);
+  // Persist the initial history without applying an order or touching stock.
+  store.createCustomer({ firstName: 'Test', lastName: 'Visitor', emailAddress: 'test@example.com' });
+  const state = JSON.parse(values.get(DEMO_STORAGE_KEY)!);
+  expect(state.orders).toHaveLength(3);
+  expect(state.orders.map((order: OrderCreatePayload) => [order.subtotalMinor, order.taxMinor, order.totalMinor]))
+    .toEqual([[800, 152, 952], [2198, 154, 2352], [1499, 285, 1784]]);
+  expect(state.orders.map((order: OrderCreatePayload) => order.lines.map(line => line.variantId)))
+    .toEqual([['1'], ['2', '4'], ['15']]);
+  expect(state.orders[2].customer).toEqual({ email: 'ada@demo.vendurepos.com' });
+  for (const product of store.products()) for (const variant of product.variants) {
+    const seeded = CATALOGUE.flatMap(product => product.variants).find(seeded => seeded.sku === variant.sku)!;
+    expect(variant.stockLevels[0].stockOnHand).toBe(seeded.shopFloorStock);
+  }
+});
+
 it('pulls the whole catalogue with paginated replication and honours its checkpoints', async () => {
   const context = sessionContext(await signedIn());
   const connector = createVendureConnector({ barcodeField: 'barcode' });
   const pull = connector.replication!.products!.pull;
   const products: any[] = [];
   let checkpoint;
-  for (let pass = 0; pass < 4; pass++) {
+  for (let pass = 0; pass < 10; pass++) {
     const result = await pull.handler(checkpoint, 3, context);
     products.push(...result.documents);
     checkpoint = result.checkpoint;
   }
-  expect(products).toHaveLength(10);
-  expect(products.flatMap(product => product.variants)).toHaveLength(21);
-  expect(new Set(products.map(product => product.id)).size).toBe(10);
+  expect(products).toHaveLength(30);
+  expect(new Set(products.flatMap(product => product.collections.map((collection: { name: string }) => collection.name))))
+    .toEqual(new Set(['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']));
+  expect(products.flatMap(product => product.variants)).toHaveLength(46);
+  expect(new Set(products.map(product => product.id)).size).toBe(30);
   expect(products[0].variants[0]).toMatchObject({ sku: 'TALLY-MUG', price: 800, priceWithTax: 952, customFields: { barcode: barcodeOf(0) } });
   expect(connector.traits.product!.getVariants!(products[0])[0].barcode).toBe(barcodeOf(0));
   expect(connector.traits.product!.getStock(products[0]).quantity).toBe(CATALOGUE[0].variants[0].shopFloorStock);
@@ -137,9 +173,9 @@ it('pulls the whole catalogue with paginated replication and honours its checkpo
     expect([...page]).toEqual(products.map(product => [product.id, connector.reconcile!.prices!.fingerprint(product)]));
   }
   const sync = connector.sync!.products!;
-  expect(await sync.fetchAllIds(context)).toHaveLength(10);
+  expect(await sync.fetchAllIds(context)).toHaveLength(30);
   expect((await sync.fetchByIds(['1', '10'], context)).map(product => product.id)).toEqual(['1', '10']);
-  expect(await sync.fetchModifiedAfter!('2000-01-01T00:00:00.000Z', context)).toHaveLength(10);
+  expect(await sync.fetchModifiedAfter!('2000-01-01T00:00:00.000Z', context)).toHaveLength(30);
   expect(await sync.fetchModifiedAfter!('2099-01-01T00:00:00.000Z', context)).toEqual([]);
 });
 
@@ -157,7 +193,9 @@ it('applies and replays v4 orders through orderTransport, persists them, and upd
   const changed = await feed.handler(checkpoint, 100, context);
   expect(changed.documents.find(product => product.id === '1').variants[0].stockLevels[0].stockOnHand).toBe(before - 2);
   expect((await feed.handler(changed.checkpoint, 100, context)).documents).toEqual([]);
-  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders).toEqual([ORDER.payload]);
+  // Three historic orders are seeded before this sale.
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders).toHaveLength(4);
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders.slice(3)).toEqual([ORDER.payload]);
   installed.uninstall();
   installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
   expect(await send(session, { ...ORDER, attempt: 2, payload: Object.fromEntries(Object.entries(ORDER.payload).reverse()) as unknown as OrderCreatePayload }))
@@ -175,7 +213,9 @@ it('applies v5 charges and custom lines once, decrementing only the mug stock', 
   expect(await send(session, V5_ORDER)).toEqual([{ ...applied, status: 'duplicate' }]);
   expect(await mugStock(session)).toBe(before - 2);
   const state = JSON.parse(values.get(DEMO_STORAGE_KEY)!);
-  expect(state.orders).toEqual([V5_ORDER.payload]);
+  // Three historic orders are seeded before this sale.
+  expect(state.orders).toHaveLength(4);
+  expect(state.orders.slice(3)).toEqual([V5_ORDER.payload]);
   expect(state.stock).not.toHaveProperty('undefined');
 });
 
@@ -189,7 +229,9 @@ it('refuses a second shipping charge before checking tax classes and records the
   expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload',
     message: 'shipping[1]: shipping_single: this store takes one shipping charge per order' } });
   expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).ledger[command.id].result).toEqual(result);
-  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders).toEqual([]);
+  // Only the three seeded historic orders remain after rejection.
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders).toHaveLength(3);
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders.slice(3)).toEqual([]);
   expect(await mugStock(session)).toBe(CATALOGUE[0].variants[0].shopFloorStock);
   expect(await send(session, command)).toEqual([result]);
 });
@@ -204,7 +246,9 @@ it.each(['fees', 'shipping', 'lines'] as const)('refuses unknown tax classes on 
   const [result] = await send(session, command);
   expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload',
     message: `${path}: tax_class_unknown: no tax category "Luxury" in this store`, data: { reason: 'tax_class_unknown', path } } });
-  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders).toEqual([]);
+  // Only the three seeded historic orders remain after rejection.
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders).toHaveLength(3);
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders.slice(3)).toEqual([]);
   expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).ledger[command.id].result).toEqual(result);
   expect(await mugStock(session)).toBe(CATALOGUE[0].variants[0].shopFloorStock);
   installed.uninstall();
@@ -308,7 +352,7 @@ it('searches demo customers by email or name, case-insensitively', async () => {
     expect(await connector.searchCustomers!(context, query)).toEqual([ada]);
   }
   expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.name))
-    .toEqual(['Grace Hopper', 'Ada Lovelace', 'Alan Turing']);
+    .toEqual(['Grace Hopper', 'Katherine Johnson', 'Donald Knuth', 'Barbara Liskov', 'Ada Lovelace', 'Margaret Mead', 'Alan Turing', 'Dorothy Vaughan']);
   expect((await connector.searchCustomers!(context, 'demo.vendurepos.com', { limit: 1 })).map(customer => customer.id)).toEqual(['c2']);
   expect(await connector.searchCustomers!(context, 'nobody')).toEqual([]);
   expect(await connector.getCustomer!(context, 'c1')).toEqual(ada);
@@ -316,10 +360,11 @@ it('searches demo customers by email or name, case-insensitively', async () => {
   const response = await fetch(`${DEMO_STORE_ORIGIN}/admin-api`, {
     method: 'POST', body: JSON.stringify({ query: 'query { customers { totalItems items { id } } }', variables: { take: 1 } }),
   });
-  expect(await response.json()).toEqual({ data: { customers: { totalItems: 3, items: [{ id: 'c2' }] } } });
+  expect(await response.json()).toEqual({ data: { customers: { totalItems: 8, items: [{ id: 'c2' }] } } });
   const payload = { ...ORDER.payload, customer: { customerId: ada.id } };
   expect((await send(session, { ...ORDER, payload }))[0].status).toBe('applied');
-  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[0].customer).toEqual(payload.customer);
+  // Three historic orders are seeded before this customer sale.
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[3].customer).toEqual(payload.customer);
 });
 
 it('creates a demo customer and refuses its email twice, as Vendure does', async () => {
@@ -328,7 +373,7 @@ it('creates a demo customer and refuses its email twice, as Vendure does', async
   const connector = createVendureConnector();
   const input = { email: 'empty-names@demo.vendurepos.com', firstName: '', lastName: '', phone: '+44 20 7946 0001' };
   const customer = await connector.createCustomer!(context, input);
-  expect(customer).toEqual({ id: 'c4', name: input.email, email: input.email, phone: input.phone });
+  expect(customer).toEqual({ id: 'c9', name: input.email, email: input.email, phone: input.phone });
   installed.uninstall();
   installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
   expect(await connector.getCustomer!(context, customer.id)).toEqual(customer);
@@ -347,7 +392,8 @@ it('creates a demo customer and refuses its email twice, as Vendure does', async
   expect(await connector.searchCustomers!(context, input.email)).toEqual([customer]);
   const payload = { ...ORDER.payload, customer: { customerId: customer.id } };
   expect((await send(session, { ...ORDER, payload }))[0].status).toBe('applied');
-  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[0].customer).toEqual(payload.customer);
+  // Three historic orders are seeded before this customer sale.
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[3].customer).toEqual(payload.customer);
 });
 
 it('Reset demo removes created customers', async () => {

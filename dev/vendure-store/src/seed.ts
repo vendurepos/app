@@ -2,11 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  bootstrapWorker, Channel, ChannelService, CurrencyCode, isGraphQlErrorResult, LanguageCode,
+  bootstrapWorker, Channel, ChannelService, CollectionService, ConfigService, CurrencyCode, CustomerService,
+  FacetValueService, isGraphQlErrorResult, JobQueueService, LanguageCode, SqlJobQueueStrategy, SubscribableJob,
   ProductService, ProductVariant, ProductVariantService, RequestContextService, SearchService,
   StockLocationService, TaxCategoryService, TaxRateService, TransactionalConnection, User, ZoneService,
 } from '@vendure/core';
 import { importProductsFromCsv, populateInitialData } from '@vendure/core/cli';
+import { SortOrder } from '@vendure/common/lib/generated-types';
 import { In } from 'typeorm';
 import { CATALOGUE, barcodeOf } from './catalogue';
 import { largeCatalogue } from './catalogue-large';
@@ -84,7 +86,7 @@ async function seed() {
   for (const product of catalogue) {
     product.variants.forEach((variant, i) => rows.push([
       i === 0 ? product.name : '', i === 0 ? product.slug : '',
-      i === 0 ? `${product.name} (VendurePOS dev seed)` : '', '', '',
+      i === 0 ? `${product.name} (VendurePOS dev seed)` : '', '', i === 0 ? `category:${product.category}` : '',
       i === 0 ? product.optionGroups.join('|') : '', variant.options.join('|'), variant.sku,
       (variant.priceMinor / 100).toFixed(2), product.taxCategory, String(variant.warehouseStock),
       String(product.trackInventory), '', '', barcodeOf(variantIndex++),
@@ -118,6 +120,29 @@ async function seed() {
       productIds: items.map(product => product.id), channelId: posChannel.id, priceFactor: 1,
     });
   }
+  const collections = app.get(CollectionService);
+  const facetValues = await app.get(FacetValueService).findAll(ctx, LanguageCode.en);
+  for (const name of ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']) {
+    const facetValue = facetValues.find(value => value.facet.code === 'category' && value.name === name)!;
+    const collection = await collections.create(ctx, {
+      translations: [{ languageCode: LanguageCode.en, name, slug: name.toLowerCase(), description: '' }],
+      filters: [{ code: 'facet-value-filter', arguments: [
+        { name: 'facetValueIds', value: JSON.stringify([facetValue.id]) },
+        { name: 'containsAny', value: 'true' },
+      ] }],
+    });
+    await collections.assignCollectionsToChannel(ctx, { collectionIds: [collection.id], channelId: posChannel.id });
+  }
+  for (const [firstName, lastName, email] of [
+    ['Ada', 'Lovelace', 'ada'], ['Grace', 'Hopper', 'grace'], ['Alan', 'Turing', 'alan'],
+    ['Katherine', 'Johnson', 'katherine'], ['Barbara', 'Liskov', 'barbara'], ['Donald', 'Knuth', 'donald'],
+    ['Margaret', 'Mead', 'margaret'], ['Dorothy', 'Vaughan', 'dorothy'],
+  ]) {
+    const customer = await app.get(CustomerService).create(posCtx, {
+      firstName, lastName, emailAddress: `${email}@demo.vendurepos.com`,
+    });
+    if (isGraphQlErrorResult(customer)) throw new Error(customer.message);
+  }
   const shopFloor = await locations.create(posCtx, {
     name: 'Shop floor', description: 'POS stock, VendurePOS dev seed',
   });
@@ -140,6 +165,15 @@ async function seed() {
       }]);
     }
   }
+  // Historic orders are not seeded here because the plugin settles payments only through its POS route;
+  // the smoke's own sales create orders.
+  await collections.triggerApplyFiltersJob(ctx, { applyToChangedVariantsOnly: false });
+  const jobStrategy = app.get(ConfigService).jobQueueOptions.jobQueueStrategy as SqlJobQueueStrategy;
+  const { items: [filtersJob] } = await jobStrategy.findMany({
+    filter: { queueName: { eq: 'apply-collection-filters' } }, sort: { createdAt: SortOrder.DESC }, take: 1,
+  });
+  await app.get(JobQueueService).start();
+  await new SubscribableJob(filtersJob, jobStrategy).updates().toPromise();
   await app.get(SearchService).reindex(ctx);
   await app.get(SearchService).reindex(posCtx);
   console.log(`Channels: ${defaultChannel.code} (${DEFAULT_CHANNEL_TOKEN}), ${posChannel.code} (${POS_CHANNEL_TOKEN})`);

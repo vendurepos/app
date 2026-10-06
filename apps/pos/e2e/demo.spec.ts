@@ -68,7 +68,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expectSignedIn(page);
   expect(await page.getByTestId('sign-in-email').count()).toBe(0);
   for (const { name } of CATALOGUE) await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
-  expect(CATALOGUE).toHaveLength(10);
+  expect(CATALOGUE).toHaveLength(30);
 
   // A sale: the register opened with €100.00, 2 × mug for cash, €8.00 × 2 + 19 % = €19.04.
   const card = page.getByTestId('open-register-card');
@@ -128,7 +128,8 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expectSignedIn(page);
   await expect(await orderEntries(page)).toHaveText([/€19\.04 · Synced$/]);
   await page.getByTestId('orders-close').click();
-  expect((await demoState(page))!.orders).toHaveLength(1);
+  // Three historic orders are seeded on the simulated server.
+  expect((await demoState(page))!.orders).toHaveLength(4);
   expect(await mugStock(page)).toBe(MUG_SEED_STOCK - 2);
   await expect(page.getByTestId('open-register-card')).toBeVisible();
   await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
