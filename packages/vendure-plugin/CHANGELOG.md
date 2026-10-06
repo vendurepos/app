@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Register contract version 2 (ADR 0006): `GET /tally/v1/info` advertises register 1–2. A v2 `register.session.open` records the till's `deviceId` and `deviceName`. The device holding the live session resumes it; a different session id becomes a permanent alias and the result carries `resumed`. Another device takes over with `supersedes` naming the live session, a compare-and-set under the register lock.
+- Register commands resolve session aliases. A command on a superseded session is refused `register_session_superseded` at v2 and `register_session_closed` at v1, and a v2 open naming a superseded session gets the same v2 refusal. The live `expected` and `salesCount` count sales carrying an alias.
+- A v1 open from the device holding the live session, naming that session's id, is applied with the current figures.
+- order.create v3 and later naming a session the store does not know is applied with a `register_session_unknown` warning.
+- Migration `TallyPosRegisterV21791000000000` adds `deviceId`, `deviceName` and `supersedes` to `tally_register_session`, the `tally_register_session_alias` table and a unique `(channelId, supersedes)` constraint. Sessions opened before the migration have no device id and can only be taken over, not resumed. Run its `down` only on a store that never served a v2 open.
+
 ## 0.3.0 (2026-10-06)
 
 - `GET /tally/v1/info` advertises order.create 1–5 (ADR 0005).
