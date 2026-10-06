@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The **New POS till key** dialog names the channel the key works in; Vendure's API keys are channel-aware.
 - `GET /tally/v1/info` returns `device: { name }` (the API key's name) when the caller signs in with an API key, and leaves it out for sessions; the till shows it as its cashier (ADR 0004).
 - Dashboard extension: **New POS till key** on Vendure's API keys page creates a named key with the POS till role and shows it once (ADR 0004).
 - Add the `TallyPosSell` permission. The `/tally/v1` routes accept it or `CreateOrder`, so existing installs keep working with no role change; give new tills' administrators `TallyPosSell` instead of the broader `CreateOrder`.

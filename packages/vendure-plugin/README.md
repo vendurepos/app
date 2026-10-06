@@ -166,6 +166,8 @@ expression index, so it neither drops nor re-adds it. On start, the server proce
 With Vendure's React Dashboard, the API keys page (Settings → API keys) gains **New POS till key**.
 It creates or extends the `vendurepos-pos-till` role, creates a named key with it, and shows the key once.
 
+The key works only in the channel the Dashboard is in when you create it (Vendure's API keys are channel-aware), so switch to the till's channel first. The dialog names it.
+
 Rotate and delete stay on Vendure's own key page. The till signs in with the key only when
 `authOptions.tokenMethod` includes `'api-key'` (ADR 0004).
 
