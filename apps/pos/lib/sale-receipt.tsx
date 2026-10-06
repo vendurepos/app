@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { Button, discountLabel, HStack, injectPrintStyle, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { taxRowLabel } from './cart-totals';
+import { orderReference } from './order-reference';
 import { MoneyRow, TaxRows } from './sale-cart';
 
 /** The completed sale's receipt, from the order as finalized and stored; New sale starts the next one. */
@@ -13,7 +14,7 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
   // TallyUI's print style, as its Receipt: what carries print: 'hide' stays off the page, so the receipt prints alone.
   useEffect(injectPrintStyle, []);
   if (sale.stage.kind !== 'receipt') return null;
-  const { order } = sale.stage;
+  const { order, posOrder } = sale.stage;
   const receipt = buildReceiptData(order, { storeName: store, cashier, register: registerId });
   const money = (amount: number) => format({ amount, currency: receipt.currency });
   const { totals } = receipt;
@@ -21,7 +22,7 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
   return (
     <VStack testID="receipt" space="none" className="gap-1.5 p-3">
       <Text className="font-semibold">{receipt.header.storeName}</Text>
-      <Text className="text-xs text-muted-foreground">Order {receipt.header.orderNumber.slice(-8)} · {receipt.header.cashier}</Text>
+      <Text testID="receipt-order" className="text-xs text-muted-foreground">Order {orderReference(posOrder)} · {receipt.header.cashier}</Text>
       {receipt.lineItems.map((line, index) => (
         <VStack key={index} space="none" className="border-b border-border py-1">
           <HStack space="sm" className="justify-between">

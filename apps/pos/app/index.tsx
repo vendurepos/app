@@ -407,7 +407,9 @@ function Sale({
       ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
       <View dataSet={{ print: 'hide' }} className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
+        {/* A failed first pull is not loading despite having no sync timestamp. */}
         <Catalogue
+          loading={!lastSyncedAt && !error}
           products={products}
           traits={connector.traits.product}
           currency={session.settings.currency}
