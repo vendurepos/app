@@ -18,6 +18,8 @@ export default defineDashboardExtension({
 
 function NewPosTillKey() {
   const { activeChannel } = useChannel();
+  // Vendure's ApiKey is channel-aware; createApiKey assigns the current channel.
+  const channelCode = activeChannel?.code ?? '';
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [pending, setPending] = useState(false);
@@ -73,6 +75,7 @@ function NewPosTillKey() {
             </DialogDescription>
           </DialogHeader>
           <p data-testid="vendurepos-till-key-role">Role granted: {result.role.description} ({result.role.code})</p>
+          <p data-testid="vendurepos-till-key-channel">{`Works in the ${channelCode} channel only.`}</p>
           <code data-testid="vendurepos-till-key-secret" className="font-mono text-xs break-all select-all">{result.secret}</code>
           <DialogFooter>
             <Button data-testid="vendurepos-till-key-copy" onClick={async () => {
@@ -90,6 +93,7 @@ function NewPosTillKey() {
             <DialogTitle>New POS till key</DialogTitle>
             <DialogDescription>Creates an API key for one till, with the VendurePOS till role. Name it after the device.</DialogDescription>
           </DialogHeader>
+          <p data-testid="vendurepos-till-key-channel">{`For the ${channelCode} channel. A key works only in the channel it is created in, so switch the Dashboard to the till's channel first.`}</p>
           <Label htmlFor="vendurepos-till-key-name">Device name</Label>
           <Input id="vendurepos-till-key-name" data-testid="vendurepos-till-key-name"
             placeholder="Front counter iPad" value={name} onChange={event => setName(event.target.value)} />
