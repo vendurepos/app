@@ -1,6 +1,6 @@
 # Device credentials: how a till authenticates to the store
 
-Status: Proposed (draft for the front desk's ruling, 2026-10-06)
+Status: Accepted (front desk ruling, 2026-10-06, as proposed, with the three additions under "Decision")
 Date: 2026-10-06
 
 ## Context
@@ -93,7 +93,7 @@ PLAN M6 lists "a `TallyPosSell` custom permission, a Dashboard extension to regi
 
 **Recommendation: option 1 for v1.** Devices are Vendure API keys with a "POS till" role. Add 3 only if a POS-specific field becomes necessary; until then, the key's name and custom fields (`ApiKey` has `customFields`) are enough.
 
-## Decision (proposed)
+## Decision
 
 Build device credentials on **Vendure's native API keys (3.6+)**:
 - **The role:** the plugin ships a "POS till" role preset: `TallyPosSell` plus the reads the till needs. A merchant applies it from our Dashboard extension.
@@ -101,6 +101,15 @@ Build device credentials on **Vendure's native API keys (3.6+)**:
 - **The till:** gains "Sign in with a device key" (a pasted key) and sends `vendure-api-key` instead of a bearer token. A refused key shows the existing "Sign in again" panel.
 - **Merchant setup:** the quick-start adds `'api-key'` to `tokenMethod`.
 - **Later:** one-time enrolment codes.
+
+**Additions on acceptance (front desk, 2026-10-06):**
+1. **The key is a secret everywhere it appears.** The till's "Sign in with a device key" field is masked, like a password. The Dashboard extension shows a new key exactly once, at creation or rotation, and never again.
+2. **The open point in Question 4 is settled by test before the Dashboard extension ships:** whether an `ApiKey` runs as its owner or as a dedicated user, and what the audit trail records for a sale made with it. The plugin e2e test on the supported Vendure range settles it, and the answer is recorded in this ADR.
+3. **Implementation order:**
+   1. TallyUI `connector-vendure` gains an API-key credential (on the TallyUI lane, for 3.2.0);
+   2. the plugin's "POS till" role preset and the API-key e2e test on the supported range;
+   3. the Dashboard extension;
+   4. the app's device-key sign-in path.
 
 ## Consequences
 
