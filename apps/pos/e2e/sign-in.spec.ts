@@ -1255,3 +1255,89 @@ test('signing in again in place keeps the cart and sells with the new session', 
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
+
+test('a sale to a searched customer, and one to a new customer, land on those customers in Vendure', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const random = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const emails = [`till-search-${random}@example.com`, `till-new-${random}@example.com`];
+  try {
+    const created = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: {
+        query: 'mutation ($input: CreateCustomerInput!) { createCustomer(input: $input) { __typename ... on Customer { id } ... on ErrorResult { message } } }',
+        variables: { input: { emailAddress: emails[0], firstName: 'Till', lastName: 'Search' } },
+      },
+    });
+    expect(created.ok()).toBe(true);
+    const customer = await created.json();
+    expect(customer.errors).toBeUndefined();
+    expect(customer.data.createCustomer.__typename).toBe('Customer');
+    for (const [index, name] of ['Till Search', 'New Guest'].entries()) {
+      await page.getByTestId('customer-add').click();
+      const picker = page.getByTestId('customer-picker');
+      if (index === 0) {
+        await picker.getByLabel('Search customers', { exact: true }).fill('till-search');
+        await picker.getByText(emails[0], { exact: true }).click();
+      } else {
+        await picker.getByRole('button', { name: 'New customer', exact: true }).click();
+        await picker.getByPlaceholder('First name', { exact: true }).fill('New');
+        await picker.getByPlaceholder('Last name', { exact: true }).fill('Guest');
+        await picker.getByPlaceholder('email@example.com', { exact: true }).fill(emails[1]);
+        await picker.getByRole('button', { name: 'Save Customer', exact: true }).click();
+      }
+      await expect(page.getByTestId('sale-customer')).toHaveText(`Customer: ${name}`);
+      await page.getByTestId('product-tile-Tally Fixture Mug').click();
+      const cart = page.getByTestId('cart');
+      await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+      await cart.getByTestId('pay-cash').click();
+      const tender = page.getByTestId('tender');
+      await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+      await tender.getByTestId('tender-complete').click();
+      await expect(page.getByTestId('receipt-customer')).toHaveText(`Customer: ${name}`);
+      await page.getByTestId('new-sale').click();
+    }
+    await page.getByTestId('orders-open').click();
+    await expect(page.getByTestId('orders-panel').getByText(/· Synced$/)).toHaveCount(2, { timeout: 60_000 });
+    const orders = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query: '{ orders(options: { sort: { createdAt: DESC }, take: 2 }) { items { customer { emailAddress } } } }' },
+    });
+    expect(orders.ok()).toBe(true);
+    const result = await orders.json();
+    expect(result.errors).toBeUndefined();
+    expect(result.data.orders.items.map((order: { customer: { emailAddress: string } }) => order.customer.emailAddress).sort())
+      .toEqual([...emails].sort());
+  } finally {
+    const customers = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: {
+        query: 'query ($emails: [String!]!) { customers(options: { filter: { emailAddress: { in: $emails } } }) { items { id } } }',
+        variables: { emails },
+      },
+    });
+    expect(customers.ok()).toBe(true);
+    const result = await customers.json();
+    expect(result.errors).toBeUndefined();
+    for (const { id } of result.data.customers.items) {
+      const deleted = await page.request.post(`${STORE_URL}/admin-api`, {
+        headers,
+        data: { query: 'mutation ($id: ID!) { deleteCustomer(id: $id) { result message } }', variables: { id } },
+      });
+      expect(deleted.ok()).toBe(true);
+      const deletion = await deleted.json();
+      expect(deletion.errors).toBeUndefined();
+      expect(deletion.data.deleteCustomer.result).toBe('DELETED');
+    }
+  }
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
