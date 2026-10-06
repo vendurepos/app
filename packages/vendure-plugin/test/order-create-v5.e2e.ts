@@ -1,11 +1,12 @@
 import { Order, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
+import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
 describe('order.create v5 contract plumbing', () => {
   const environment = createPluginTestEnvironment();
-  const { server, variantIds, decode, run } = environment;
+  const { server, adminClient, variantIds, decode, encode, run } = environment;
   let connection: TransactionalConnection;
   let category: TaxCategory;
   let standardRate: number;
@@ -20,6 +21,7 @@ describe('order.create v5 contract plumbing', () => {
   afterAll(() => server.destroy());
   const sale = () => ({ ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 5 as const });
   const fee = { clientFeeId: 'fee-1', name: 'Handling', amountMinor: 100, taxStatus: 'none' as const, taxMinor: 0 };
+  let defaultCommand: ReturnType<typeof sale>;
 
   it('applies a plain v5 sale with the same serverRefs total as v4', async () => {
     const v4 = await run({ ...sale(), version: 4 });
@@ -38,7 +40,8 @@ describe('order.create v5 contract plumbing', () => {
   });
 
   for (const taxClassMode of ['default', 'none', 'name', 'trimmed-name', 'id', 'unknown'] as const) {
-    it(`honours a v5 Bag fee with ${taxClassMode} tax class, or refuses an unknown class`, async () => {
+    it(taxClassMode === 'default' ? 'refuses a taxable fee without taxClass when no default category exists'
+      : `honours a v5 Bag fee with ${taxClassMode} tax class, or refuses an unknown class`, async () => {
       const command = { ...orderCommand([{
         variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800, ratePpm: standardRate * 10000,
       }]), version: 5 as const };
@@ -64,13 +67,18 @@ describe('order.create v5 contract plumbing', () => {
       } else {
         payload.taxByRate!.push({ ratePpm: 0, netMinor: 20, taxMinor: 0, grossMinor: 20 });
       }
+      if (taxClassMode === 'default') {
+        expect(await connection.rawConnection.getRepository(TaxCategory).countBy({ isDefault: true })).toBe(0);
+        defaultCommand = command;
+      }
       const result = await run(command);
-      if (taxClassMode === 'unknown') {
+      if (taxClassMode === 'unknown' || taxClassMode === 'default') {
         expect(result).toMatchObject({ status: 'rejected', error: {
           code: 'invalid_payload', data: { reason: 'tax_class_unknown', path: 'fees[0].taxClass' },
         } });
         expect(result.error!.message).toContain('fees[0].taxClass');
         expect(result.error!.message).toContain('tax_class_unknown');
+        if (taxClassMode === 'default') expect(result.error!.message).toContain('no default tax category');
         return;
       }
       expect(result.status).toBe('applied');
@@ -85,11 +93,6 @@ describe('order.create v5 contract plumbing', () => {
       expect(surcharges).toHaveLength(1);
       expect(surcharges[0]).toMatchObject({ listPrice: 20, description: 'Bag', listPriceIncludesTax: false });
       expect(surcharges[0].taxLines.map(line => line.taxRate)).toEqual(taxable ? [standardRate] : []);
-      if (taxClassMode === 'default') {
-        const replay = await run(command);
-        expect(replay.status).toBe('duplicate');
-        expect(replay.serverRefs).toEqual(result.serverRefs);
-      }
     });
   }
 
@@ -127,5 +130,25 @@ describe('order.create v5 contract plumbing', () => {
     const result = await run(command);
     expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
     expect(result.error!.message).toContain('shipping[1].clientShippingId: expected no duplicate clientShippingId');
+  });
+
+  it('applies and replays a taxable fee without taxClass after setting the default category', async () => {
+    const updateDefault = parse(`mutation SetDefault($id: ID!, $isDefault: Boolean!) {
+      updateTaxCategory(input: { id: $id, isDefault: $isDefault }) { id isDefault }
+    }`);
+    try {
+      await adminClient.query(updateDefault, { id: encode(category.id), isDefault: true });
+      const command = sale();
+      command.payload = { ...defaultCommand.payload, clientOrderId: command.payload.clientOrderId };
+      const result = await run(command);
+      expect(result.status).toBe('applied');
+      expect(result.serverRefs!.totalMinor).toBe(command.payload.totalMinor);
+      expect(result.warnings?.some(warning => warning.code === 'figures_mismatch')).not.toBe(true);
+      const replay = await run(command);
+      expect(replay.status).toBe('duplicate');
+      expect(replay.serverRefs).toEqual(result.serverRefs);
+    } finally {
+      await adminClient.query(updateDefault, { id: encode(category.id), isDefault: false });
+    }
   });
 });

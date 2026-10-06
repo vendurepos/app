@@ -460,7 +460,9 @@ export class OrderCreateService {
     for (const [i, fee] of (command.payload.fees ?? []).entries()) {
       if (fee.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, fee.taxClass)) {
         return rejected(command.id, 'invalid_payload',
-          `fees[${i}].taxClass: tax_class_unknown: no tax category "${fee.taxClass ?? '(default)'}" in this store`,
+          fee.taxClass === undefined
+            ? `fees[${i}].taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
+            : `fees[${i}].taxClass: tax_class_unknown: no tax category "${fee.taxClass}" in this store`,
           { reason: 'tax_class_unknown', path: `fees[${i}].taxClass` });
       }
     }

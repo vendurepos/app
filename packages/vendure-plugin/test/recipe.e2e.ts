@@ -73,7 +73,7 @@ describe('order.create recipe through OrderCreateService', () => {
       { ...command, payload: null },
       { ...command, payload: { ...command.payload, lines: [] } },
       { ...command, payload: { ...command.payload, display: { ...command.payload.display, totalMinor: 1 } } },
-      { ...command, version: 5 },
+      { ...command, version: 6 },
     ];
     const results = [];
     for (const item of invalid) results.push(await run(item as unknown as CommandEnvelope<OrderCreatePayload>));
