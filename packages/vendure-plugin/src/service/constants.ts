@@ -13,5 +13,5 @@ export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5];
 export const ADVERTISED_ORDER_CREATE_VERSIONS: readonly number[] = ORDER_CREATE_VERSIONS;
 
 // The register contract versions this plugin implements (ADR 0003), shared by the five register.* commands; /info
-// advertises this list and RegisterService's version gate reads it.
-export const REGISTER_VERSIONS: readonly number[] = [1];
+// advertises this list and RegisterService's version gate reads it. Version 2 is ADR-078's take-over and resume.
+export const REGISTER_VERSIONS: readonly number[] = [1, 2];

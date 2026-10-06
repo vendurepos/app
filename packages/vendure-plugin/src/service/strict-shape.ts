@@ -72,7 +72,7 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
 // ADR-070 d1 for the register commands (ADR 0003), until core checks fields (TallyUI #255) and map keys (#256): each
 // type's version 1 fields, and the declared maps' keys, PaymentMethodKind, both declared at version 1.
 const REGISTER_PAYLOADS: Record<string, Fields> = {
-  'register.session.open': since(1, 'sessionId registerId storeKey businessDay openedAt openedBy expectedFloatMinor countedFloatMinor openingVarianceMinor'),
+  'register.session.open': { ...since(1, 'sessionId registerId storeKey businessDay openedAt openedBy expectedFloatMinor countedFloatMinor openingVarianceMinor'), ...since(2, 'deviceName supersedes') },
   'register.session.transition': since(1, 'sessionId status at counted closedBy approvedBy'),
   'register.movement.record': since(1, 'movementId sessionId type amountMinor reason createdAt createdBy'),
   'register.movement.void': since(1, 'movementId sessionId voids createdAt createdBy'),

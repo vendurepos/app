@@ -3,7 +3,7 @@ import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
 import { In, IsNull, Not } from 'typeorm';
 import type { FindOptionsWhere, ObjectType } from 'typeorm';
 import {
-  TallyRegister, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionStatus,
+  TallyRegister, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
 } from '../entities/register.entities';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type {
@@ -37,7 +37,7 @@ export const REGISTER_TYPES = Object.keys(CLIENT_TIMES) as RegisterCommandType[]
 
 export type RegisterResult = CommandResult;
 export type RegisterEnvelope = RegisterCommandEnvelope<Record<string, unknown>>;
-type Status = 'open' | 'counting' | 'closed';
+type Status = 'open' | 'counting' | 'closed' | 'superseded';
 
 const refuse = (id: string, code: string, message: string, data?: Record<string, unknown>): RegisterResult =>
   ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
@@ -50,7 +50,7 @@ class Unstored extends Error {
 }
 
 /**
- * TallyUI's five register commands at contract version 1 (ADR-068; ADR 0003), each in its own transaction, in
+ * TallyUI's five register commands at contract versions 1 and 2 (ADR-078 adds the open's resume and take-over), each in its own transaction, in
  * order.create's step order: shape, replay read, strict fields and client time, claim, the register's lock, the
  * state checks, the writes and the stored result.
  */
@@ -153,18 +153,40 @@ export class RegisterService {
 
     if (command.type === 'register.session.open') {
       const p = command.payload as unknown as RegisterSessionOpenPayload;
-      const winner = await this.openSessionOf(tx, p.registerId);
-      if (winner) return conflict('register_session_already_open', `Register ${p.registerId} already has session ${winner} open`, { sessionId: winner });
-      if (await repo(TallyRegisterSession).existsBy({ channelId, id: p.sessionId })) throw unstored(`sessionId: session ${p.sessionId} is already recorded`);
+      const live = await this.openSessionOf(tx, p.registerId);
+      if (command.version >= 2 && live && live.deviceId === command.deviceId) {
+        const recorded = await this.resolveSession(tx, p.sessionId);
+        if (recorded && recorded.id !== live.id) throw unstored(`sessionId: session ${p.sessionId} is already recorded`);
+        if (!recorded) await repo(TallyRegisterSessionAlias).insert({ channelId, id: p.sessionId, sessionId: live.id, commandId });
+        const { status } = await this.sessionState(tx, live);
+        return applied({ session: { ...await this.liveSession(tx, live, status), openedAt: live.openedAt, openingFloatMinor: live.countedFloatMinor },
+          ...(p.sessionId === live.id ? {} : { resumed: { fromSessionId: p.sessionId } }) });
+      }
+      const takeover = command.version >= 2 && live && p.supersedes !== undefined && (await this.resolveSession(tx, p.supersedes))?.id === live.id;
+      if (live && !takeover) {
+        const data = command.version === 1 ? { sessionId: live.id } : {
+          sessionId: live.id, registerId: live.registerId, openedAt: live.openedAt, status: (await this.sessionState(tx, live)).status,
+          ...(live.openedBy === null ? {} : { openedBy: live.openedBy }),
+          ...(live.deviceId === null ? {} : { deviceId: live.deviceId }), ...(live.deviceName === null ? {} : { deviceName: live.deviceName }),
+        };
+        return conflict('register_session_already_open', `Register ${p.registerId} already has session ${live.id} open`, data);
+      }
+      if (await this.resolveSession(tx, p.sessionId)) throw unstored(`sessionId: session ${p.sessionId} is already recorded`);
+      if (takeover) await repo(TallyRegisterSessionStatus).insert({ channelId, sessionId: live.id, status: 'superseded', at: p.openedAt,
+        counted: null, closedBy: null, approvedBy: null, commandId });
       // ADR-068 d8: an unknown register id creates the register.
       await repo(TallyRegister).createQueryBuilder().insert().values({ channelId, id: p.registerId }).orIgnore().execute();
       const opened = repo(TallyRegisterSession).create({
         channelId, id: p.sessionId, registerId: p.registerId, storeKey: p.storeKey ?? null, businessDay: p.businessDay ?? null,
         openedAt: p.openedAt, openedBy: p.openedBy ?? null, expectedFloatMinor: p.expectedFloatMinor ?? null,
         countedFloatMinor: p.countedFloatMinor, openingVarianceMinor: p.openingVarianceMinor ?? null, commandId,
+        deviceId: command.deviceId, deviceName: p.deviceName?.trim() ?? null, supersedes: takeover ? live.id : null,
       });
       await repo(TallyRegisterSession).insert(opened);
-      return applied({ session: await this.liveSession(tx, opened, 'open') });
+      return applied({ session: await this.liveSession(tx, opened, 'open'), ...(takeover ? { superseded: {
+        sessionId: live.id, openedAt: live.openedAt,
+        ...(live.deviceId === null ? {} : { deviceId: live.deviceId }), ...(live.deviceName === null ? {} : { deviceName: live.deviceName }),
+      } } : {}) });
     }
 
     const { status, closed } = await this.sessionState(tx, session!);
@@ -226,18 +248,26 @@ export class RegisterService {
     return applied({ session: await this.liveSession(tx, session!, status) });
   }
 
-  /** The register's non-closed session, if any: no closing snapshot and no closure. At most one, under the lock. */
-  private async openSessionOf(tx: RequestContext, registerId: string): Promise<string | undefined> {
+  /** The register's live session, if any: no closed or superseded status and no closure. At most one, under the lock. */
+  private async openSessionOf(tx: RequestContext, registerId: string): Promise<TallyRegisterSession | undefined> {
     const repository = this.connection.getRepository(tx, TallyRegisterSession);
     const table = (entity: ObjectType<object>) => {
       const { tablePath } = this.connection.getRepository(tx, entity).metadata;
       return tablePath.split('.').map(part => repository.manager.connection.driver.escape(part)).join('.');
     };
-    const [row] = await repository.query(`SELECT s.id FROM ${table(TallyRegisterSession)} s WHERE s."channelId" = $1 AND s."registerId" = $2
-      AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterSessionStatus)} t WHERE t."channelId" = s."channelId" AND t."sessionId" = s.id AND t.status = 'closed')
+    return await repository.createQueryBuilder('s').where(`s."channelId" = :channelId AND s."registerId" = :registerId
+      AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterSessionStatus)} t WHERE t."channelId" = s."channelId" AND t."sessionId" = s.id AND t.status IN ('closed', 'superseded'))
       AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterClosure)} c WHERE c."channelId" = s."channelId" AND c."sessionId" = s.id)
-      ORDER BY s."receivedAt" LIMIT 1`, [String(tx.channelId), registerId]);
-    return row?.id;
+      `, { channelId: String(tx.channelId), registerId }).orderBy('s.receivedAt').limit(1).getOne() ?? undefined;
+  }
+
+  private async resolveSession(tx: RequestContext, id: string): Promise<TallyRegisterSession | undefined> {
+    const channelId = String(tx.channelId);
+    const sessions = this.connection.getRepository(tx, TallyRegisterSession);
+    const session = await sessions.findOneBy({ channelId, id });
+    if (session) return session;
+    const alias = await this.connection.getRepository(tx, TallyRegisterSessionAlias).findOneBy({ channelId, id });
+    return alias ? await sessions.findOneBy({ channelId, id: alias.sessionId }) ?? undefined : undefined;
   }
 
   /** The last applied status, `open` before any; `closed` also once the session's closure is submitted. */
