@@ -60,6 +60,8 @@ function commandsBodyParser(): Middleware['handler'] {
 /** VendurePOS: TallyUI's order.create (ADR 0002) and register commands (ADR 0003), one Postgres transaction per command. */
 @VendurePlugin({
   compatibility: '^3.6.0',
+  // The Dashboard's Vite plugin resolves this next to compiled dist/plugin.js, so the build copies src/dashboard/ there.
+  dashboard: './dashboard/index.tsx',
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES],
   controllers: [TallyInfoController, TallyCommandsController],

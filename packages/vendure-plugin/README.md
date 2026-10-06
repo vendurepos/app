@@ -161,6 +161,14 @@ Vendure's `generateMigration` (tested with Vendure 3.7.3 and TypeORM 0.3.31) doe
 expression index, so it neither drops nor re-adds it. On start, the server process logs one warning when `customer` holds more than
 50,000 rows (the planner's estimate) and has no `lower("emailAddress")` index.
 
+### Dashboard: a key for each till
+
+With Vendure's React Dashboard, the API keys page (Settings → API keys) gains **New POS till key**.
+It creates or extends the `vendurepos-pos-till` role, creates a named key with it, and shows the key once.
+
+Rotate and delete stay on Vendure's own key page. The till signs in with the key only when
+`authOptions.tokenMethod` includes `'api-key'` (ADR 0004).
+
 ## Development
 
 The package is standalone npm, not part of the pnpm workspace.
