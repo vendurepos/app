@@ -86,6 +86,8 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toContainText('€19.04');
+  const reference = (await page.getByTestId('receipt-order').innerText()).match(/^Order (\S+)/)![1];
+  expect(reference).toHaveLength(8);
   await page.getByTestId('new-sale').click();
 
   // Settled: synced in the Orders panel, nothing pending and nothing needing attention.
@@ -94,6 +96,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expect(page.getByTestId('orders-panel').getByText('Needs attention', { exact: true })).toHaveCount(0);
   await expect(page.getByTestId('orders-waiting')).toHaveCount(0);
   await expect(page.getByTestId('orders-rejected')).toHaveCount(0);
+  await expect(page.getByTestId('orders-panel')).toContainText(reference);
   await page.getByTestId('orders-close').click();
   expect(await mugStock(page)).toBe(MUG_SEED_STOCK - 2);
 
