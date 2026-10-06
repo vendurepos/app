@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- order.create v5 fees are applied as Vendure Surcharges (`TALLY-FEE`), taxed by `taxStatus`/`taxClass`; an unknown `taxClass` is refused as `tax_class_unknown` (ADR 0005).
+
 ## 0.2.0 (2026-10-06)
 
 - The **New POS till key** dialog names the channel the key works in; Vendure's API keys are channel-aware.

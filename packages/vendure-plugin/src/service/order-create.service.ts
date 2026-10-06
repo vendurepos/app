@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   Allocation, ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevel, StockLevelService,
-  StockLocationService, StockMovementService, Surcharge, TaxRate, TransactionalConnection,
+  StockLocationService, StockMovementService, Surcharge, TaxRate, TaxRateService, TransactionalConnection, ZoneService,
   idsAreEqual, isGraphQlErrorResult, manualFulfillmentHandler, normalizeEmailAddress,
 } from '@vendure/core';
 import type { CurrencyCode } from '@vendure/core';
@@ -27,6 +27,7 @@ import {
 import { StoreSetupService } from './store-setup.service';
 import { roundHalfAwayFromZero } from './rounding';
 import { strictShapeErrors } from './strict-shape';
+import { resolveTaxCategory } from './tax-class';
 import { taxRoundingFor, type TaxRounding } from './tax-rounding';
 import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
@@ -152,6 +153,8 @@ export class OrderCreateService {
     private stockMovements: StockMovementService,
     private config: ConfigService,
     private storeSetup: StoreSetupService,
+    private taxRateService: TaxRateService,
+    private zoneService: ZoneService,
   ) {}
 
   private get taxRounding(): TaxRounding {
@@ -454,6 +457,13 @@ export class OrderCreateService {
         return rejected(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       }
     }
+    for (const [i, fee] of (command.payload.fees ?? []).entries()) {
+      if (fee.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, fee.taxClass)) {
+        return rejected(command.id, 'invalid_payload',
+          `fees[${i}].taxClass: tax_class_unknown: no tax category "${fee.taxClass ?? '(default)'}" in this store`,
+          { reason: 'tax_class_unknown', path: `fees[${i}].taxClass` });
+      }
+    }
     return undefined;
   }
 
@@ -722,6 +732,25 @@ export class OrderCreateService {
       order.surcharges.push(surcharge);
       await this.testObserver?.('surchargeSave', ctx, order);
     }
+    // ADR 0005: fees are Surcharges and never discounted.
+    if (payload.fees?.length) {
+      const zones = await this.zoneService.getAllWithMembers(ctx);
+      const zone = await this.config.taxOptions.taxZoneStrategy.determineTaxZone(ctx, zones, ctx.channel, order);
+      for (const fee of payload.fees) {
+        let taxLines: Surcharge['taxLines'] = [];
+        if (fee.taxStatus === 'taxable') {
+          const category = await resolveTaxCategory(ctx, this.connection, fee.taxClass);
+          const rate = await this.taxRateService.getApplicableTaxRate(ctx, zone!, category!);
+          taxLines = [{ taxRate: rate.value, description: rate.name }];
+        }
+        const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
+          order, description: fee.name, sku: 'TALLY-FEE', listPrice: fee.amountMinor,
+          listPriceIncludesTax: payload.pricesIncludeTax, taxLines,
+        }));
+        order.surcharges.push(surcharge);
+        await this.testObserver?.('surchargeSave', ctx, order);
+      }
+    }
     // calculateOrderTotals reads surcharge.price/priceWithTax; these getters compute tax
     // from taxLines. applyTaxes only visits product lines, so attach surcharges above.
     order = await this.calculator.applyPriceAdjustments(ctx, order, []);
@@ -766,7 +795,9 @@ export class OrderCreateService {
       const compareTax = granularity === 'per_line_items'
         || (granularity === 'per_rate_group_items' && !payload.lines.some(line => line.taxInclusive ?? payload.pricesIncludeTax));
       const serverFigures = {
-        subtotalMinor: order.subTotal - bridgeMinor, taxMinor: order.subTotalWithTax - order.subTotal,
+        subtotalMinor: order.subTotal - bridgeMinor
+          - order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-FEE').reduce((sum, surcharge) => sum + surcharge.price, 0),
+        taxMinor: order.subTotalWithTax - order.subTotal,
         discountMinor: -order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT').reduce((sum, surcharge) => sum + surcharge.price, 0),
       };
       for (const field of ['subtotalMinor', 'taxMinor', 'discountMinor'] as const) {

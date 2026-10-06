@@ -64,7 +64,7 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   }
   each(payload.taxByRate, TAX_RATE, 'taxByRate');
   // ADR 0005: later jobs remove each refusal as its kind is honoured.
-  for (const field of ['fees', 'shipping']) {
+  for (const field of ['shipping']) {
     if (Array.isArray(payload[field]) && payload[field].length && !full()) errors.push(`payload.${field}: not supported by this server yet`);
   }
   (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
