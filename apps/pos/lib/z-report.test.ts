@@ -46,3 +46,9 @@ it('prints the mixed tax rounding note when the sales used more than one roundin
     .toBe("This register's sales used more than one tax rounding method. Each sale's tax is as its receipt showed.");
   expect(zReportLines(closure, context)).not.toContain(TAX_ROUNDING_MIXED_NOTE);
 });
+
+it('prints a typed approver when the closure carries one', () => {
+  const approved = { ...closure, breakdowns: { ...closure.breakdowns, approved_by_name: 'Sam (typed)' } };
+  expect(zReportLines(approved, context)).toContain('Approved by Sam (typed)');
+  expect(zReportLines(closure, context).some((line) => line.startsWith('Approved by '))).toBe(false);
+});

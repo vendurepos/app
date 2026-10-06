@@ -4,12 +4,18 @@ import {
   Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
 import { loadScannerMinLength, saveScannerMinLength } from '../lib/scanner-settings';
+import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { useSession } from '../lib/session-context';
 
 export default function SettingsScreen() {
   const { session } = useSession();
   const [text, setText] = useState(() => String(loadScannerMinLength()));
   const [saved, setSaved] = useState<boolean | null>(null);
+  const [varianceText, setVarianceText] = useState(() => {
+    const minor = loadVarianceLimitMinor();
+    return minor === undefined ? '' : (minor / 100).toFixed(2);
+  });
+  const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
 
   if (!session) return <Redirect href="/sign-in" />;
 
@@ -39,6 +45,24 @@ export default function SettingsScreen() {
             </Button>
             {saved === true && <Text testID="settings-saved">Saved.</Text>}
             {saved === false && <Text testID="settings-error">Enter a whole number from 4 to 32.</Text>}
+          </VStack>
+        </CardContent>
+      </Card>
+      <Card className="w-full max-w-[420px]">
+        <CardHeader><CardTitle aria-level={2}>Register</CardTitle></CardHeader>
+        <CardContent>
+          <VStack space="lg">
+            <Label nativeID="variance-limit-label">{"Count difference that needs a manager's approval"}</Label>
+            <Input><InputField testID="variance-limit" keyboardType="decimal-pad" value={varianceText} onChangeText={setVarianceText}
+              accessibilityLabel="Count difference that needs a manager's approval" accessibilityLabelledBy="variance-limit-label" /></Input>
+            <Text>{"Leave empty for no approval. The approver's name is typed, not verified."}</Text>
+            <Button testID="variance-save" onPress={() => {
+              const result = parseVarianceLimit(varianceText);
+              if (result.ok) saveVarianceLimitMinor(result.minor);
+              setVarianceSaved(result.ok);
+            }}><Text>Save</Text></Button>
+            {varianceSaved === true && <Text testID="variance-saved">Saved.</Text>}
+            {varianceSaved === false && <Text testID="variance-error">Enter an amount such as 5.00, or leave it empty.</Text>}
           </VStack>
         </CardContent>
       </Card>

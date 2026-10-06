@@ -262,3 +262,39 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await expect(page.getByTestId('signed-in-store')).toHaveCount(1);
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
 });
+
+test("over the till's limit, a close needs a typed approver, recorded as typed", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('variance-limit').fill('1.00');
+  await page.getByTestId('variance-save').click();
+  await expect(page.getByTestId('variance-saved')).toBeVisible();
+  await page.getByTestId('settings-back').click();
+
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel-close').click();
+  await page.getByTestId('count-amount').fill('90.00');
+  await page.getByTestId('count-close').click();
+  await expect(page.getByTestId('approver-name')).toBeVisible();
+  await expect(page.getByTestId('approver-confirm')).toBeDisabled();
+  await page.getByTestId('approver-cancel').click();
+  await expect(page.getByText('Approval was not granted. The count is unchanged.')).toBeVisible();
+  await expect(page.getByTestId('count-amount')).toHaveValue('90.00');
+  await page.getByTestId('count-close').click();
+  await page.getByTestId('approver-name').fill('Sam');
+  await page.getByTestId('approver-confirm').click();
+  const sheet = page.getByTestId('closure-sheet');
+  await expect(sheet.getByTestId('closure-approved-by')).toHaveText('Approved by Sam (typed)');
+  await sheet.getByTestId('closure-done').click();
+
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('variance-limit').fill('');
+  await page.getByTestId('variance-save').click();
+  await expect(page.getByTestId('variance-saved')).toBeVisible();
+  await page.getByTestId('settings-back').click();
+});
