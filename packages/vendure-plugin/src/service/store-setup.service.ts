@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  ChannelService, Customer, CustomerService, GlobalFlag, LanguageCode, PaymentMethod, PaymentMethodService, RequestContext,
+  ChannelService, Customer, CustomerService, LanguageCode, PaymentMethod, PaymentMethodService, RequestContext,
   Product, ProductService, ProductVariant, ProductVariantService, TaxCategory, TaxCategoryService,
   ShippingMethod, ShippingMethodService, TransactionalConnection, idsAreEqual, manualFulfillmentHandler,
 } from '@vendure/core';
@@ -84,7 +84,8 @@ export class StoreSetupService {
       });
       await this.variants.create(ctx, [{
         productId: product.id, sku: TALLY_CUSTOM_ITEM_SKU, enabled: true, price: 0,
-        taxCategoryId: noTax.id, trackInventory: GlobalFlag.FALSE, translations: [{ languageCode, name: 'POS custom item' }],
+        // GlobalFlag.FALSE's value, from @vendure/common, which the plugin does not depend on.
+        taxCategoryId: noTax.id, trackInventory: 'FALSE' as never, translations: [{ languageCode, name: 'POS custom item' }],
       }]);
     } else if (!variant.channels.some(channel => idsAreEqual(channel.id, ctx.channelId))) {
       await this.channels.assignToChannels(ctx, Product, variant.product.id, [ctx.channelId]);
