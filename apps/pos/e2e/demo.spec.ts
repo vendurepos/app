@@ -248,9 +248,17 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await page.getByTestId('scanner-min-length').fill('5');
   await page.getByTestId('settings-save').click();
   await expect(page.getByTestId('settings-saved')).toBeVisible();
+  // Back while the stack is till → Settings: one till, whose register still opens (a pushed second till couldn't).
+  await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('signed-in-store')).toHaveCount(1);
+  await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
+  await page.getByTestId('settings-open').click();
+  await expect(page).toHaveURL(/\/settings$/);
   await page.reload();
   await expect(page.getByTestId('scanner-min-length')).toHaveValue('5');
   await expect(page.getByTestId('settings-barcode-field')).toContainText('Barcode custom field:');
   await page.getByTestId('settings-back').click();
   await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await expect(page.getByTestId('signed-in-store')).toHaveCount(1);
+  await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
 });
