@@ -50,7 +50,7 @@ mutation {
 
 Follow the [quick-start](https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md) for migration generation, bearer
 auth, CORS, tax strategy and a first sale. Install it with
-`npm install @vendurepos/plugin@0.2.0`.
+`npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
    of generating a migration for your store, register all three below; do not run
