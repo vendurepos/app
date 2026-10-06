@@ -2,6 +2,7 @@
 // requires the optional @vendure/email-plugin.
 export { TallyPosPlugin } from './plugin';
 export { tallyPosSell } from './config/permissions';
+export { POS_TILL_ROLE_CODE, POS_TILL_PERMISSIONS } from './config/pos-till-role';
 export { TallyPriceStrategy } from './config/strategies';
 export { TallyCommand } from './entities/tally-command.entity';
 export { OrderCreateService } from './service/order-create.service';
