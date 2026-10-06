@@ -4,7 +4,7 @@ import { Link, Redirect, Stack } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
-  SplitTender, TabsTrigger, Text, VStack,
+  SplitTender, SyncStatus, TabsTrigger, Text, VStack,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
@@ -46,6 +46,8 @@ import { unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
 const APP_VERSION = Constants.expoConfig?.version ?? 'unknown';
+// The merchant-facing name SyncStatus puts in its "couldn't find …" detail.
+const PLUGIN_NAME = 'the VendurePOS plugin';
 // The business day a session opens on is the device's.
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 // From this window width the cart sits beside the catalogue; below it, Products and Cart are tabs.
@@ -164,11 +166,6 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) }} />
       <HStack dataSet={{ print: 'hide' }} className="flex-wrap items-center justify-between border-b border-border px-4 py-2" space="sm">
         <Text testID="signed-in-store" className={`${wide ? 'flex-1' : 'w-full'} text-sm text-muted-foreground`}>Signed in to {storeLabel(session)}</Text>
-        {outbox.state.pending ? (
-          <Text testID="orders-waiting" className="text-sm text-muted-foreground">
-            {countOrders(outbox.state.pending)} waiting to send{outbox.state.sending ? ' · sending…' : ''}
-          </Text>
-        ) : null}
         {closingWaiting ? (
           <Text testID="register-closing-pending" className="text-sm text-muted-foreground">
             Closing — waiting for {countOrders(closingWaiting)}
@@ -203,6 +200,12 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           <Text>Sign out</Text>
         </Button>
       </HStack>
+      {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
+      {outbox.state.pending || outbox.state.backendMissing ? (
+        <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
+          <SyncStatus state={outbox.state} pluginName={PLUGIN_NAME} />
+        </View>
+      ) : null}
       {sessionEnded ? (
         <View testID="sign-in-again" className="border-b border-border px-4 py-2">
           <SignInAgain session={session} onSignedIn={(next) => { sessionRef.current = next; void outbox.flush(); void registerOutbox.flush(); }} />
@@ -302,11 +305,9 @@ function countOrders(count: number): string {
 }
 
 /** The one outbox notice the header shows, the most pressing first; undefined when there is none. */
-function outboxNotice({ authRequired, refused, backendMissing, stuck }: OutboxState): string | undefined {
+function outboxNotice({ authRequired, refused }: OutboxState): string | undefined {
   if (authRequired) return 'The store refused this sign-in. Sign in again below; orders are kept.';
   if (refused) return `The store refused the orders (${refused.reason}). They are kept; send them again once the store is fixed.`;
-  if (backendMissing) return "The store's VendurePOS plugin isn't answering. Orders are kept and retried.";
-  if (stuck) return `${countOrders(stuck.commandIds.length)} keep failing at the store. They are kept and retried.`;
 }
 
 function Sale({

@@ -119,15 +119,15 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
 
   const onlineStart = Date.now();
   for (let i = 0; i < 5; i++) await sell(i);
-  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 30_000 });
   const offlineStart = Date.now();
   offline = true;
   for (let i = 5; i < 25; i++) await sell(i);
-  await expect(page.getByTestId('orders-waiting')).toHaveText('20 orders waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('20 sales waiting to sync');
   const reconnectedAt = Date.now();
   offline = false;
   // At most the outbox's 60 s backoff cap after the reconnect, then the sends.
-  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 120_000 });
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 120_000 });
   const drainedAt = Date.now();
   const timings = { onlineSalesMs: offlineStart - onlineStart, offlineSalesMs: reconnectedAt - offlineStart, drainMs: drainedAt - reconnectedAt };
   console.log(`offline e2e timings: ${JSON.stringify(timings)}`);
