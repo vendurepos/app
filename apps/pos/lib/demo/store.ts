@@ -3,9 +3,11 @@ import { barcodeOf, CATALOGUE } from './catalogue';
 
 // All mutable demo data is saved together, including the command ledger.
 export const DEMO_STORAGE_KEY = 'vendurepos.demo-store.v1';
-// Matches info.controller.ts with the dev store's OrderLevelTaxCalculationStrategy.
+// Matches plugin 0.3.0's info.controller.ts with the dev store's OrderLevelTaxCalculationStrategy.
 export const DEMO_INFO = {
-  contracts: { 'order.create': [1, 2, 3, 4], register: [1] },
+  contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1] },
+  maxShippingLines: 1,
+  lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
 };
 // The demo exposes the seed's tax-exclusive EUR shop-floor channel.
@@ -140,9 +142,24 @@ export class DemoStore {
       ? refuse('idempotency_mismatch', 'Command id was already used with a different payload')
       : { ...previous.result, status: previous.result.status === 'rejected' ? 'rejected' : 'duplicate' };
     let result: CommandResult = { id, status: 'applied' };
-    if (isOrder) {
+    if (isOrder && p.shipping?.length > 1) result = refuse('invalid_payload', 'shipping[1]: shipping_single: this store takes one shipping charge per order');
+    if (isOrder && result.status !== 'rejected') {
+      for (const field of ['fees', 'shipping', 'lines'] as const) {
+        for (const [i, entry] of (p[field] ?? []).entries()) {
+          const taxClass = field === 'lines' ? entry.custom?.taxClass : entry.taxClass;
+          if (taxClass !== undefined && !DEMO_CATEGORIES.some(category => category.id === taxClass || category.name.toLowerCase() === taxClass.trim().toLowerCase())) {
+            const path = `${field}[${i}]${field === 'lines' ? '.custom' : ''}.taxClass`;
+            result = refuse('invalid_payload', `${path}: tax_class_unknown: no tax category "${taxClass}" in this store`, { reason: 'tax_class_unknown', path });
+            break;
+          }
+        }
+        if (result.status === 'rejected') break;
+      }
+    }
+    if (isOrder && result.status === 'applied') {
       this.state.orders.push(p);
       for (const line of p.lines) {
+        if (!line.variantId) continue;
         const stock = this.state.stock[line.variantId];
         if (stock) {
           stock.quantity -= line.quantity;
@@ -173,7 +190,7 @@ export class DemoStore {
           counters: { ...counters, lastClosureNumber: p.number, perpetualSalesTotalMinor: p.perpetualSalesTotalMinor },
         };
       }
-    } else {
+    } else if (!isOrder) {
       if (type === 'register.session.transition') this.state.sessions[p.sessionId].status = p.status;
       else this.state.movements.push({ ...p, ...(type === 'register.movement.void' ? { type: 'void', amountMinor: 0 } : {}) });
       result.register = { session: this.liveSession(p.sessionId) };
