@@ -17,7 +17,7 @@ export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 export const SIGN_OUT_WAIT_MS = 5_000;
 
 let database: Promise<TallyDatabase> | undefined;
-let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[] } | undefined;
+let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[]; unlisten: () => void } | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -66,7 +66,7 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     live: true,
   });
   const stockLevels = db[STOCK_LEVELS_COLLECTION];
-  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS) };
+  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS), unlisten: () => {} };
   const stock = startStockReconcile({ collection: stockLevels, adapter: connector.reconcile!.stock!, context });
   sync.runners.push({ stop: stock.stop, runNow: stock.reconcileStock });
   const ids = startIdReconcile({ collection: db.products, adapter: connector.reconcile!.ids!, context, reSync: () => replication.reSync() });
@@ -74,6 +74,20 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
   const prices = startFingerprintReconcile({ collection: db.products, adapter: connector.reconcile!.prices!, context, reSync: () => replication.reSync(), startDelayMs: PRICE_RECONCILE_START_DELAY_MS });
   sync.runners.push({ stop: prices.stop, runNow: prices.reconcile });
   stock.reconcileStock().catch(error => { if (!controller.signal.aborted) console.warn('Stock reconcile failed:', error); });
+  // TallyUI calls for a stock reconcile "on foreground or resume", shortcutting the 5-minute interval.
+  const refresh = () => {
+    replication.reSync();
+    stock.reconcileStock().catch(error => { if (!controller.signal.aborted) console.warn('Stock reconcile failed:', error); });
+  };
+  const onVisibilityChange = () => { if (document.visibilityState === 'visible') refresh(); };
+  const visibility = typeof document !== 'undefined' && typeof document.addEventListener === 'function' ? document : undefined;
+  const network = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : undefined;
+  visibility?.addEventListener('visibilitychange', onVisibilityChange);
+  network?.addEventListener('online', refresh);
+  sync.unlisten = () => {
+    visibility?.removeEventListener('visibilitychange', onVisibilityChange);
+    network?.removeEventListener('online', refresh);
+  };
   return { db, replication, stockLevels };
 }
 
@@ -84,6 +98,7 @@ export async function stopCatalogueSync(): Promise<void> {
 async function stopUnqueued(): Promise<void> {
   if (!sync) return;
   const current = sync;
+  current.unlisten();
   clearInterval(current.timer);
   current.runners.forEach(({ stop }) => stop());
   current.controller.abort();

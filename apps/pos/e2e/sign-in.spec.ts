@@ -1222,6 +1222,76 @@ test('a price change made in Vendure reaches the open till without a reload', as
   expect(cspConsole).toEqual([]);
 });
 
+test('a stock change made in Vendure shows on the open till when it comes back to the foreground or online', async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  const stockResponse = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith('/admin-api') && (response.request().postData() ?? '').includes('VariantStock'));
+  await page.getByTestId('sign-in-submit').click();
+  const tile = page.getByTestId('product-tile-Travel Tumbler');
+  await expect(tile).toContainText('In Stock');
+  const initialStock = await stockResponse;
+  expect(initialStock.ok()).toBe(true);
+  expect((await initialStock.json()).errors).toBeUndefined();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const response = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers,
+    data: { query: '{ productVariants(options: { filter: { sku: { eq: "DRK-TUMBLER" } } }) { items { id stockLevels { stockLocationId stockOnHand } } } }' },
+  });
+  expect(response.ok()).toBe(true);
+  const original = await response.json();
+  expect(original.errors).toBeUndefined();
+  expect(original.data.productVariants.items).toHaveLength(1);
+  const { id, stockLevels }: {
+    id: string; stockLevels: { stockLocationId: string; stockOnHand: number }[];
+  } = original.data.productVariants.items[0];
+  const query = 'mutation ($input: [UpdateProductVariantInput!]!) { updateProductVariants(input: $input) { id } }';
+  try {
+    const updated = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, stockLevels: stockLevels.map((level) => ({ ...level, stockOnHand: 0 })) }] } },
+    });
+    expect(updated.ok()).toBe(true);
+    expect((await updated.json()).errors).toBeUndefined();
+    await page.waitForTimeout(5_000);
+    await expect(tile).toContainText('In Stock');
+    await page.evaluate(() => {
+      let state = 'hidden';
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      document.dispatchEvent(new Event('visibilitychange'));
+      state = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(tile).toContainText('Out of Stock', { timeout: 20_000 });
+    const restored = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, stockLevels }] } },
+    });
+    expect(restored.ok()).toBe(true);
+    expect((await restored.json()).errors).toBeUndefined();
+    await page.waitForTimeout(5_000);
+    await expect(tile).toContainText('Out of Stock');
+    await page.context().setOffline(true);
+    await page.context().setOffline(false);
+    await expect(tile).toContainText('In Stock', { timeout: 20_000 });
+  } finally {
+    await page.context().setOffline(false);
+    const restored = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, stockLevels }] } },
+    });
+    expect(restored.ok()).toBe(true);
+    expect((await restored.json()).errors).toBeUndefined();
+  }
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('signing in again in place keeps the cart and sells with the new session', async ({ page }) => {
   test.setTimeout(4 * 60_000);
   await page.goto('/');
