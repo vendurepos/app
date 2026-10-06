@@ -104,6 +104,8 @@ CI runs typecheck and unit tests, the plugin's typecheck and Postgres e2e,
 the web smoke, the offline e2e and the demo e2e. The offline e2e (`pnpm e2e`)
 packs the plugin into a fresh store, then runs 25 sales, 20 of them offline.
 The demo e2e (`pnpm e2e:demo`) runs the demo build with no backend.
+`pnpm e2e:hosted` runs the same spec against the hosted demo
+(demo.vendurepos.com), with the host's own CSP headers.
 
 The web smoke resets and starts the dev store on port 3200, exports the web
 app, serves it on 127.0.0.1:8099, signs in through the UI in Playwright
