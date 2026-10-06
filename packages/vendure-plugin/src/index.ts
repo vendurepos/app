@@ -20,3 +20,4 @@ export { CLASSIFICATION, MAPPED_ERROR_RESULTS, PERMANENT_ERROR_RESULTS } from '.
 export { TallyPos1790648006022 } from './migrations/1790648006022-TallyPos';
 export { TallyPosVp2a1790720000000 } from './migrations/1790720000000-TallyPosVp2a';
 export { TallyPosRegister1790800000000 } from './migrations/1790800000000-TallyPosRegister';
+export { TallyPosV51790900000000 } from './migrations/1790900000000-TallyPosV5';

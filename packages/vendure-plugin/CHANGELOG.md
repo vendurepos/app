@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- order.create v5 shipping: one charge per order, applied as the order's ShippingLine (`tally-in-store`, priced from the `tallyShipping` order custom field); a second entry is refused as `shipping_single` (ADR 0005).
+- `GET /tally/v1/info` returns `maxShippingLines: 1` and `lineTax: { none: true, classes: true }`.
+- Migration `TallyPosV51790900000000` adds the v5 custom fields (`order.tallyShipping`, `order_line.tallyCustomName`, `order_line.tallyCustomSku`).
 - order.create v5 fees are applied as Vendure Surcharges (`TALLY-FEE`), taxed by `taxStatus`/`taxClass`; an unknown `taxClass` is refused as `tax_class_unknown` (ADR 0005).
 
 ## 0.2.0 (2026-10-06)

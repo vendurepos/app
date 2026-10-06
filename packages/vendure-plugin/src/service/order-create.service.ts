@@ -457,13 +457,13 @@ export class OrderCreateService {
         return rejected(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       }
     }
-    for (const [i, fee] of (command.payload.fees ?? []).entries()) {
-      if (fee.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, fee.taxClass)) {
+    for (const field of ['fees', 'shipping'] as const) for (const [i, charge] of (command.payload[field] ?? []).entries()) {
+      if (charge.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, charge.taxClass)) {
         return rejected(command.id, 'invalid_payload',
-          fee.taxClass === undefined
-            ? `fees[${i}].taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
-            : `fees[${i}].taxClass: tax_class_unknown: no tax category "${fee.taxClass}" in this store`,
-          { reason: 'tax_class_unknown', path: `fees[${i}].taxClass` });
+          charge.taxClass === undefined
+            ? `${field}[${i}].taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
+            : `${field}[${i}].taxClass: tax_class_unknown: no tax category "${charge.taxClass}" in this store`,
+          { reason: 'tax_class_unknown', path: `${field}[${i}].taxClass` });
       }
     }
     return undefined;
@@ -717,6 +717,19 @@ export class OrderCreateService {
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOneOrFail({
       where: { code: TALLY_SHIPPING_METHOD_CODE, deletedAt: IsNull(), channels: { id: ctx.channelId } },
     });
+    // ADR 0005 ruling (b): one charge prices the real ShippingLine through tally-in-store.
+    if (payload.shipping?.length === 1) {
+      const { clientShippingId, name, methodId, amountMinor, taxStatus, taxClass } = payload.shipping[0];
+      let taxRate = 0;
+      if (taxStatus === 'taxable') {
+        const zones = await this.zoneService.getAllWithMembers(ctx);
+        const zone = await this.config.taxOptions.taxZoneStrategy.determineTaxZone(ctx, zones, ctx.channel, order);
+        const category = await resolveTaxCategory(ctx, this.connection, taxClass);
+        taxRate = (await this.taxRateService.getApplicableTaxRate(ctx, zone!, category!)).value;
+      }
+      order.customFields.tallyShipping = JSON.stringify({ clientShippingId, name, methodId, amountMinor, includesTax: payload.pricesIncludeTax, taxRate });
+      await this.connection.getRepository(ctx, Order).save(order);
+    }
     order = unwrap(await this.orders.setShippingMethod(ctx, order.id, [shipping.id]));
     await this.testObserver?.('setShippingMethod', ctx, order);
     // TallyUI #286: from v4 every discountMinor is tax-exclusive, so the surcharge is net whatever the line's mode, and
@@ -770,7 +783,7 @@ export class OrderCreateService {
     }
     if (command.version >= 3) {
       // For an integer count, half-away rounding of count/2 equals ceil(count/2).
-      const T = Number(roundHalfAwayFromZero(BigInt(order.lines.length + order.surcharges.length), 2n));
+      const T = Number(roundHalfAwayFromZero(BigInt(order.lines.length + order.surcharges.length + order.shippingLines.length), 2n));
       const pos = new Map<number, number>();
       const vendure = new Map<number, number>();
       for (const rate of payload.taxByRate!) {
@@ -799,7 +812,7 @@ export class OrderCreateService {
       const serverFigures = {
         subtotalMinor: order.subTotal - bridgeMinor
           - order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-FEE').reduce((sum, surcharge) => sum + surcharge.price, 0),
-        taxMinor: order.subTotalWithTax - order.subTotal,
+        taxMinor: (order.subTotalWithTax - order.subTotal) + (order.shippingWithTax - order.shipping),
         discountMinor: -order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT').reduce((sum, surcharge) => sum + surcharge.price, 0),
       };
       for (const field of ['subtotalMinor', 'taxMinor', 'discountMinor'] as const) {

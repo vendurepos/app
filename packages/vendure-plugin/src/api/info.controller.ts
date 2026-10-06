@@ -5,7 +5,8 @@ import { ADVERTISED_ORDER_CREATE_VERSIONS, REGISTER_VERSIONS } from '../service/
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
-export type TallyInfo = { contracts: { 'order.create': number[]; register: number[] }; taxRounding: TaxRounding; device?: { name: string } };
+export type TallyInfo = { contracts: { 'order.create': number[]; register: number[] }; taxRounding: TaxRounding;
+  maxShippingLines: number; lineTax: { none: boolean; classes: boolean }; device?: { name: string } };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -25,7 +26,10 @@ export class TallyInfoController {
   @Get('info')
   @Allow(tallyPosSell.Permission, Permission.CreateOrder)
   async info(@Ctx() ctx: RequestContext): Promise<TallyInfo> {
-    const info: TallyInfo = { contracts: { 'order.create': [...ADVERTISED_ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding };
+    const info: TallyInfo = { contracts: { 'order.create': [...ADVERTISED_ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS] }, taxRounding: this.taxRounding,
+      maxShippingLines: 1, // ADR 0005 ruling (b): one shipping charge per order.
+      lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
+    };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };
     return info;

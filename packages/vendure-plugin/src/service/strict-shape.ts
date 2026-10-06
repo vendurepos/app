@@ -63,10 +63,10 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
     each(payload.display.shipping, DISPLAY_SHIPPING, 'display.shipping');
   }
   each(payload.taxByRate, TAX_RATE, 'taxByRate');
-  // ADR 0005: later jobs remove each refusal as its kind is honoured.
-  for (const field of ['shipping']) {
-    if (Array.isArray(payload[field]) && payload[field].length && !full()) errors.push(`payload.${field}: not supported by this server yet`);
+  if (Array.isArray(payload.shipping) && payload.shipping.length > 1 && !full()) {
+    errors.push('shipping[1]: shipping_single: this store takes one shipping charge per order');
   }
+  // ADR 0005: custom lines remain refused until job 4.
   (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
     if (line && Object.hasOwn(line, 'custom') && !full()) errors.push(`lines[${index}].custom: not supported by this server yet`);
   });

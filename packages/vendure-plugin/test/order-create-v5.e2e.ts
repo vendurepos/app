@@ -1,6 +1,7 @@
 import { Order, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TallyCommand } from '../src';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
@@ -130,6 +131,78 @@ describe('order.create v5 contract plumbing', () => {
     const result = await run(command);
     expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
     expect(result.error!.message).toContain('shipping[1].clientShippingId: expected no duplicate clientShippingId');
+  });
+
+  for (const mode of ['taxable', 'none', 'with-fee'] as const) {
+    it(`applies one ${mode} shipping charge as the order's ShippingLine`, async () => {
+      const command = { ...orderCommand([{
+        variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800, ratePpm: standardRate * 10000,
+      }]), version: 5 as const };
+      const payload = command.payload;
+      const shippingTax = mode === 'none' ? 0 : Math.round(500 * standardRate / 100);
+      payload.shipping = [{ clientShippingId: 'shipping-1', name: 'Local delivery', methodId: 'flat_rate',
+        amountMinor: 500, taxStatus: mode === 'none' ? 'none' : 'taxable' }];
+      if (mode === 'with-fee') {
+        payload.fees = [fee];
+        payload.display!.fees = [{ clientFeeId: fee.clientFeeId, amountMinor: fee.amountMinor }];
+        payload.taxByRate!.push({ ratePpm: 0, netMinor: 100, taxMinor: 0, grossMinor: 100 });
+      }
+      payload.taxMinor += shippingTax;
+      payload.totalMinor += 500 + shippingTax + (mode === 'with-fee' ? 100 : 0);
+      payload.payments[0].amountMinor = payload.totalMinor;
+      payload.display!.shipping = [{ clientShippingId: 'shipping-1', amountMinor: 500 }];
+      payload.display!.taxMinor = payload.taxMinor;
+      payload.display!.totalMinor = payload.totalMinor;
+      payload.taxByRate!.push({ ratePpm: mode === 'none' ? 0 : standardRate * 10000,
+        netMinor: 500, taxMinor: shippingTax, grossMinor: 500 + shippingTax });
+      const updateDefault = parse(`mutation SetDefault($id: ID!, $isDefault: Boolean!) {
+        updateTaxCategory(input: { id: $id, isDefault: $isDefault }) { id isDefault }
+      }`);
+      try {
+        await adminClient.query(updateDefault, { id: encode(category.id), isDefault: true });
+        const result = await run(command);
+        expect(result.status).toBe('applied');
+        expect(result.serverRefs!.totalMinor).toBe(payload.totalMinor);
+        expect(result.warnings?.some(warning => warning.code === 'figures_mismatch')).not.toBe(true);
+        expect(result.totalWarnings ?? []).toEqual([]);
+        const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
+          where: { id: decode(result.serverRefs!.orderId) }, relations: ['shippingLines', 'surcharges'],
+        });
+        expect(order.shippingLines).toHaveLength(1);
+        expect(order.shippingLines[0].price).toBe(500);
+        expect(order.shippingLines[0].priceWithTax).toBe(500 + shippingTax);
+        expect(order.shippingLines[0].taxLines.map(line => line.taxRate)).toEqual([mode === 'none' ? 0 : standardRate]);
+        expect(order.totalWithTax).toBe(payload.totalMinor);
+        expect(JSON.parse(order.customFields.tallyShipping!)).toEqual({ clientShippingId: 'shipping-1', name: 'Local delivery',
+          methodId: 'flat_rate', amountMinor: 500, includesTax: false, taxRate: mode === 'none' ? 0 : standardRate });
+        expect(order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-FEE').map(surcharge => surcharge.price))
+          .toEqual(mode === 'with-fee' ? [100] : []);
+      } finally {
+        await adminClient.query(updateDefault, { id: encode(category.id), isDefault: false });
+      }
+    });
+  }
+
+  it('refuses two shipping entries, unstored in every version', async () => {
+    for (const version of [1, 2, 3, 4, 5] as const) {
+      const command = { ...sale(), version };
+      command.payload.shipping = [
+        { name: 'Delivery', amountMinor: 500, taxStatus: 'none' }, { name: 'Second', amountMinor: 100, taxStatus: 'none' },
+      ];
+      const result = await run(command);
+      expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
+      expect(result.error!.message).toContain('shipping[1]: shipping_single: this store takes one shipping charge per order');
+      expect(await connection.rawConnection.getRepository(TallyCommand).countBy({ id: command.id })).toBe(0);
+    }
+  });
+
+  it('refuses an unknown shipping taxClass', async () => {
+    const command = sale();
+    command.payload.shipping = [{ name: 'Delivery', amountMinor: 500, taxStatus: 'taxable', taxClass: 'missing-tax-category' }];
+    const result = await run(command);
+    expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload',
+      data: { reason: 'tax_class_unknown', path: 'shipping[0].taxClass' } } });
+    expect(result.error!.message).toContain('shipping[0].taxClass: tax_class_unknown');
   });
 
   it('applies and replays a taxable fee without taxClass after setting the default category', async () => {
