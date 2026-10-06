@@ -21,6 +21,7 @@ import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
 import { printLines } from '../lib/print-lines';
+import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleReceipt } from '../lib/sale-receipt';
@@ -31,6 +32,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { boundRegisterId as mintBoundRegisterId, deviceId } from '../lib/till-ids';
+import { useTypedApproval } from '../lib/typed-approval';
 import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
@@ -110,6 +112,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     commands: registerStore?.commands ?? null, orders: outbox.orders, register: registerStore?.sessions ?? null,
     capabilities: readSettingsCapabilities, storeKey: ordersDatabaseName(session), registerId: boundRegisterId,
     enabled: (readSettingsCapabilities?.register ?? 0) >= 1, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
+    varianceThreshold: loadVarianceLimitMinor(),
   });
   const [registerOpen, setRegisterOpen] = useState(false);
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
@@ -303,6 +306,7 @@ function Sale({
   overSheet: boolean;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
+  const typedApproval = useTypedApproval();
   // The session knows the cashier only by the email they signed in with. Its orders go to its own store's outbox, each
   // stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
@@ -422,7 +426,7 @@ function Sale({
         ) : register.session ? (
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
           <RegisterColumn register={register} registerId={boundRegisterId} registers={[]} onPick={() => undefined} currency={currency}
-            countSlot={<RegisterCount register={register} currency={currency} />} cartEmpty={!sale.order.lineItems.length}>
+            countSlot={<RegisterCount register={register} currency={currency} approve={typedApproval.approve} />} cartEmpty={!sale.order.lineItems.length}>
             {cart()}
           </RegisterColumn>
         ) : cart(registerReady
@@ -430,6 +434,7 @@ function Sale({
           ? <OpenRegisterCard register={register} currency={currency} className="mt-2 border border-border" />
           : <Text className="mt-2 text-sm text-muted-foreground">Opening the register…</Text>)}
       </View>
+      {typedApproval.dialog}
     </View>
   );
 }

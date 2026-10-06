@@ -39,6 +39,8 @@ export function zReportLines(closure: Closure, { store, currency, timezone, prin
       ...(tender.counted === '' ? [] : [`${tenderName(tender.name)} counted ${tender.counted_display}`,
         `${tenderName(tender.name)} variance ${tender.variance_display}`]),
     ]),
+    ...(typeof breakdowns.approved_by_name === 'string' && breakdowns.approved_by_name !== ''
+      ? [`Approved by ${breakdowns.approved_by_name}`] : []),
     ...(closure.unsynced_count > 0 ? [unsyncedNote(closure.unsynced_count)] : []),
     ...(z.tax_rounding_note ? [z.tax_rounding_note] : []),
   ];
