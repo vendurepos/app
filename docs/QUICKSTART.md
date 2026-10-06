@@ -81,7 +81,10 @@ tested version). Run store commands from that project's root.
    ```
 
    With Vendure's React Dashboard, go to **System → API keys → New POS till key**
-   and name the key after the device. The button does three things:
+   and name the key after the device. First switch the Dashboard to the
+   till's channel: a key works only in the channel it was created in (Vendure's
+   API keys are channel-aware), and the dialog names that channel. The button
+   does three things:
    - creates or extends the plugin's `vendurepos-pos-till` role, which has
      `TallyPosSell` and the reads a till needs;
    - creates the key with that role;
