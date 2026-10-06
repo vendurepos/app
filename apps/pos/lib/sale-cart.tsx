@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { View } from 'react-native';
-import { Button, CartPanel, DiscountChips, DiscountForm, HStack, QuantityStepper, Text, VStack } from '@tallyui/components';
+import { Button, CartPanel, DiscountChips, DiscountForm, HStack, PriceForm, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
 
@@ -39,9 +39,9 @@ export function TaxRows({ label, amount, testID, rates }: {
  * in for the Pay buttons (the open-register card while no session is open), and `payError` says why a Pay was refused.
  * `highlightSku` lights up that line, as an add confirms in place.
  */
-export function SaleCart({ sale, onPay, payGate, payError, highlightSku }: {
+export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEditPrice }: {
   sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external'): void; payGate?: ReactNode; payError?: string;
-  highlightSku?: string;
+  highlightSku?: string; canEditPrice: boolean;
 }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
@@ -53,8 +53,8 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku }: {
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
   // As TallyUI's own Cart: the open discount form, a line's or the order's (lineId null); useSale applies it or says
   // why not. The order discounts are one display figure, so only a single one's chip carries an amount.
-  const [form, setForm] = useState<{ lineId: string | null } | null>(null);
-  const discountForm = (lineId: string | null, title: string) => form?.lineId === lineId
+  const [form, setForm] = useState<{ lineId: string | null; kind?: 'price' } | null>(null);
+  const discountForm = (lineId: string | null, title: string) => form?.lineId === lineId && form.kind !== 'price'
     ? <DiscountForm key={lineId ?? 'order'} title={title} currency={order.currency} onClose={() => setForm(null)}
       onApply={(discount) => sale.applyDiscount(lineId, discount)} /> : null;
   const orderAmounts = order.discounts.length === 1
@@ -86,10 +86,14 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku }: {
             <VStack space="none" className="flex-1">
               <Text className="text-sm font-medium" numberOfLines={2}>{line.name}</Text>
               <Text className="text-xs text-muted-foreground">{money(line.unitPriceMinor)} each</Text>
-              <Button testID={`line-discount-${line.sku}`} variant="link" size="sm" className="h-7 self-start px-0"
-                onPress={() => setForm({ lineId: line.id })}>
-                <Text className="text-xs">Discount</Text>
-              </Button>
+              <HStack space="sm">
+                <Button testID={`line-discount-${line.sku}`} variant="link" size="sm" className="h-7 self-start px-0"
+                  onPress={() => setForm({ lineId: line.id })}>
+                  <Text className="text-xs">Discount</Text>
+                </Button>
+                {canEditPrice && <Button testID={`line-price-${line.sku}`} variant="link" size="sm" className="h-7 self-start px-0"
+                  onPress={() => setForm({ lineId: line.id, kind: 'price' })}><Text className="text-xs">Price</Text></Button>}
+              </HStack>
             </VStack>
             {/* − at 1 takes the line off: TallyUI's updateQuantity removes a line set to 0. */}
             <QuantityStepper quantity={line.quantity} min={0} onChangeQuantity={(quantity) => sale.setQuantity(line.id, quantity)} />
@@ -103,6 +107,11 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku }: {
             </View>
           ) : null}
           {discountForm(line.id, `Discount on ${line.name}`)}
+          {canEditPrice && form?.lineId === line.id && form.kind === 'price' && (
+            <PriceForm lineName={line.name} currency={order.currency} currentMinor={line.unitPriceMinor}
+              onApply={(minor) => { const refusal = sale.setUnitPrice(line.id, minor); if (!refusal) setForm(null); return refusal; }}
+              onClose={() => setForm(null)} />
+          )}
         </VStack>
       )}
       footer={

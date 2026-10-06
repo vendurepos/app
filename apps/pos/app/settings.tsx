@@ -4,6 +4,7 @@ import {
   Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
 import { loadScannerMinLength, saveScannerMinLength } from '../lib/scanner-settings';
+import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
 import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { useSession } from '../lib/session-context';
 
@@ -16,6 +17,7 @@ export default function SettingsScreen() {
     return minor === undefined ? '' : (minor / 100).toFixed(2);
   });
   const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
+  const [canEditPrice, setCanEditPrice] = useState(() => loadPriceEditAllowed());
 
   if (!session) return <Redirect href="/sign-in" />;
 
@@ -63,6 +65,18 @@ export default function SettingsScreen() {
             }}><Text>Save</Text></Button>
             {varianceSaved === true && <Text testID="variance-saved">Saved.</Text>}
             {varianceSaved === false && <Text testID="variance-error">Enter an amount such as 5.00, or leave it empty.</Text>}
+          </VStack>
+        </CardContent>
+      </Card>
+      <Card className="w-full max-w-[420px]">
+        <CardHeader><CardTitle aria-level={2}>Prices</CardTitle></CardHeader>
+        <CardContent>
+          <VStack space="lg">
+            <Text>{"Let cashiers change a line's price in the cart."}</Text>
+            <Button testID="price-edit-toggle" onPress={() => {
+              savePriceEditAllowed(!canEditPrice);
+              setCanEditPrice(!canEditPrice);
+            }}><Text>Price changes: {canEditPrice ? 'On' : 'Off'}</Text></Button>
           </VStack>
         </CardContent>
       </Card>

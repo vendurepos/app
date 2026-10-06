@@ -20,6 +20,7 @@ import { logout } from '../lib/logout';
 import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
+import { loadPriceEditAllowed } from '../lib/price-edit-setting';
 import { printLines } from '../lib/print-lines';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
@@ -365,7 +366,7 @@ function Sale({
   const cart = (payGate?: ReactNode) => (
     <>
       <SaleCustomer sale={sale} connector={connector} session={session} />
-      <SaleCart sale={sale} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
+      <SaleCart sale={sale} canEditPrice={loadPriceEditAllowed()} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
         highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
     </>
   );
