@@ -246,7 +246,7 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await expect(receipt.getByTestId('receipt-tax-Reduced DE 7%')).toHaveText('€1.89');
   await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€50.00');
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€6.88');
-  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
   // Sent at the plugin's order.create 4 (its /info was read before the outbox opened), one order under one id.
   await expect.poll(() => sent.length).toBeGreaterThan(0);
   const orderId = sent[0].payload.clientOrderId;
@@ -263,15 +263,15 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
-  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
   const violations = await cspViolations(page);
   // And after a reload, read back from storage rather than any handle the page still held.
   await page.reload();
-  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
   // The reload's outbox retries from a 1 s backoff, doubling, so its next attempt after the un-route comes within
   // seconds: no second reload to flush.
   await page.unroute('**/tally/v1/commands');
-  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 30_000 });
   const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
   const created = await page.request.post(`${STORE_URL}/admin-api`, {
     headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
@@ -408,10 +408,10 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   const second = await cashSale();
   await expect(page.getByTestId('orders-notice')).toContainText('The store refused the orders (test refusal)');
   await expect(page.getByTestId('orders-send-again')).toBeVisible();
-  await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
   await page.unroute('**/tally/v1/commands');
   await page.getByTestId('orders-send-again').click();
-  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 30_000 });
   await expect(page.getByTestId('orders-notice')).toHaveCount(0);
   await expectOnStore(second);
   expect(await cspViolations(page)).toEqual([]);
@@ -675,7 +675,7 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   await openRegister(page, '100.00');
   await cashSale();
   await cashSale();
-  await expect(page.getByTestId('orders-waiting')).toHaveText('2 orders waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('2 sales waiting to sync');
   // Counted exactly: €100.00 + 2 × €9.52.
   await page.getByTestId('register-open-panel').click();
   await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
@@ -692,7 +692,7 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   // The till opens its next session and sells at once, while the closure waits.
   await openRegister(page, '50.00');
   await cashSale();
-  await expect(page.getByTestId('orders-waiting')).toHaveText('3 orders waiting to send');
+  await expect(page.getByTestId('sync-status')).toContainText('3 sales waiting to sync');
   await expect(page.getByTestId('register-closing-pending')).toHaveText('Closing — waiting for 2 orders');
   const firstSession = attempted.find(({ type }) => type === 'register.session.open')!.sessionId;
   expect(attempted.filter(({ type, sessionId }) => type === 'order.create' && sessionId === firstSession).length).toBeGreaterThan(0);
@@ -700,7 +700,7 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   expect(attempted.filter(({ type }) => type === 'register.closure.submit')).toEqual([]);
   await page.unroute('**/tally/v1/commands');
   const applied = () => answers.flat();
-  await expect(page.getByTestId('orders-waiting')).toHaveCount(0, { timeout: 120_000 });
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 120_000 });
   // Flushed as the orders drain, not at the end of the register outbox's backoff (by then 8 s or more).
   await expect.poll(() => applied().some(({ type }) => type === 'register.closure.submit'), { timeout: 3_000 }).toBe(true);
   const order = applied().map(({ type, payload }) => `${type}:${payload.sessionId === firstSession ? 1 : 2}`);
@@ -734,6 +734,50 @@ test('a till update the store rejects shows in the header', async ({ page }) => 
   await openRegister(page);
   await expect(page.getByTestId('register-sync-notice')).toHaveText('1 till update needs attention · The online store refused it, '
     + "and later till updates wait behind it. Ask the store owner to look at the till's sync log.");
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+test('the sync status shows a sale waiting and retrying, then a store without the plugin, and clears once sent', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await openRegister(page);
+  const cashSale = async () => {
+    await page.getByTestId('product-tile-Tally Fixture Mug').click();
+    await page.getByTestId('cart').getByTestId('pay-cash').click();
+    const tender = page.getByTestId('tender');
+    await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+    await tender.getByTestId('tender-complete').click();
+    await page.getByTestId('new-sale').click();
+  };
+  await page.route('**/tally/v1/commands', (route) => {
+    const commands: SentCommand[] = route.request().method() === 'POST' ? route.request().postDataJSON().commands : [];
+    if (!commands.some(({ type }) => type === 'order.create')) return route.continue();
+    return route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+  });
+  await cashSale();
+  await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
+  await expect(page.getByTestId('sync-status')).toContainText('Retrying in');
+  await expect(page.getByTestId('orders-notice')).toHaveCount(0);
+  await page.unroute('**/tally/v1/commands');
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 30_000 });
+  await page.route('**/tally/v1/commands', (route) => {
+    const commands: SentCommand[] = route.request().method() === 'POST' ? route.request().postDataJSON().commands : [];
+    if (!commands.some(({ type }) => type === 'order.create')) return route.continue();
+    return route.fulfill({ status: 404, body: 'Not Found' });
+  });
+  await cashSale();
+  await expect(page.getByTestId('sync-status')).toContainText("1 sale waiting to sync · Sales aren't reaching the online store.", { timeout: 30_000 });
+  await expect(page.getByTestId('sync-status')).toContainText("This till couldn't find the VendurePOS plugin on the online store.");
+  await expect(page.getByTestId('orders-notice')).toHaveCount(0);
+  await page.unroute('**/tally/v1/commands');
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 60_000 });
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
@@ -1096,7 +1140,7 @@ test.describe('on a narrow screen', () => {
     await tender.getByTestId('tender-complete').click();
     await expect(receipt).toBeVisible();
     await expect(page.getByTestId('scan-finish-sale')).toHaveCount(0);
-    await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+    await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
     // An unknown code at the receipt only says so.
     await wedgeScan(page, '9999999999999');
     await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "9999999999999".');
@@ -1108,7 +1152,7 @@ test.describe('on a narrow screen', () => {
     await expect(cartTab).toHaveText('Cart (1) · €9.52');
     await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(1);
     await expect(page.getByTestId('scan-not-found')).toHaveCount(0);
-    await expect(page.getByTestId('orders-waiting')).toHaveText('1 order waiting to send');
+    await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
   });
 
   test('Products and Cart are tabs: the Cart tab carries the count and total, and tax reads as a breakdown', async ({ page }) => {

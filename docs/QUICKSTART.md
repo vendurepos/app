@@ -206,8 +206,8 @@ tested version). Run store commands from that project's root.
    - **Missing / old plugin:** “This store's VendurePOS plugin is missing or out
      of date. Install or update it, then this till continues.” means the store
      must advertise `order.create` v4 and register v1. Install/update the plugin,
-     apply its schema changes and restart Vendure; the till retries. For “The
-     store's VendurePOS plugin isn't answering. Orders are kept and retried.”,
+     apply its schema changes and restart Vendure; the till retries. For “Sales
+     aren't reaching the online store. Keep selling: they're saved on this till and will send by themselves.”,
      check that `/tally/v1/info` and `/tally/v1/commands` reach the plugin through
      the store's proxy. Keep queued orders while fixing the store.
      <!-- Sources: apps/pos/app/index.tsx; apps/pos/lib/use-sale-settings.ts; packages/vendure-plugin/src/api/info.controller.ts; packages/vendure-plugin/src/plugin.ts. -->

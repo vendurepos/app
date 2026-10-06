@@ -95,7 +95,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   const entries = await orderEntries(page);
   await expect(entries).toHaveText([/€19\.04 · Synced$/]);
   await expect(page.getByTestId('orders-panel').getByText('Needs attention', { exact: true })).toHaveCount(0);
-  await expect(page.getByTestId('orders-waiting')).toHaveCount(0);
+  await expect(page.getByTestId('sync-status')).toHaveCount(0);
   await expect(page.getByTestId('orders-rejected')).toHaveCount(0);
   await expect(page.getByTestId('orders-panel')).toContainText(reference);
   await page.getByTestId('orders-close').click();
