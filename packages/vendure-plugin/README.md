@@ -169,6 +169,17 @@ It creates or extends the `vendurepos-pos-till` role, creates a named key with i
 Rotate and delete stay on Vendure's own key page. The till signs in with the key only when
 `authOptions.tokenMethod` includes `'api-key'` (ADR 0004).
 
+With npm, the Dashboard build finds the button by itself. With pnpm, the Dashboard looks for
+plugins inside `node_modules/.pnpm` and misses it, so point `vendureDashboardPlugin` at the
+project's `node_modules` (tested with Vendure 3.7.3):
+
+```ts
+vendureDashboardPlugin({
+  // ...
+  pluginPackageScanner: { nodeModulesRoot: path.resolve(__dirname, 'node_modules') },
+}),
+```
+
 ## Development
 
 The package is standalone npm, not part of the pnpm workspace.
