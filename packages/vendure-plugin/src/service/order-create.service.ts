@@ -12,6 +12,7 @@ import {
   tallyShippingChecker,
 } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
+import { TallyRegisterSession, TallyRegisterSessionAlias } from '../entities/register.entities';
 import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
 import type { CommandWarning as CoreCommandWarning } from '../vendored/core-commands';
 import { commandFingerprint } from '../vendored/fingerprint';
@@ -42,8 +43,11 @@ export type CustomerIgnored = { code: 'customer_ignored'; customerId: string; re
 /** Core 3.0.0's figures warning (#38), vendored in core-commands.ts; the older commands.ts predates it. */
 export type FiguresMismatch = Extract<CoreCommandWarning, { code: 'figures_mismatch' }>;
 
+/** ADR-078 d7: an unknown register session warns without refusing the sale. */
+type SessionUnknown = Extract<CoreCommandWarning, { code: 'register_session_unknown' }>;
+
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
-  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch>; totalWarnings?: TotalWarning[] };
+  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown>; totalWarnings?: TotalWarning[] };
 
 /** Where a sale's stock top-up was made, kept on the ledger row for an admin's take-back. */
 export type TopUp = { variantId: string; stockLocationId: string; quantity: number };
@@ -934,9 +938,16 @@ export class OrderCreateService {
         compensation = { error };
       }
     }
-    const warnings: Array<CommandWarning | CustomerIgnored | FiguresMismatch> = [
+    const warnings: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown> = [
       ...stockWarnings, ...ignored, ...figureWarnings,
     ];
+    if (command.version >= 3 && payload.sessionId !== undefined) {
+      const where = { channelId: String(ctx.channelId), id: payload.sessionId };
+      if (!await this.connection.getRepository(ctx, TallyRegisterSession).existsBy(where)
+        && !await this.connection.getRepository(ctx, TallyRegisterSessionAlias).existsBy(where)) {
+        warnings.push({ code: 'register_session_unknown', sessionId: payload.sessionId });
+      }
+    }
     const result: OrderCreateResult = {
       id: command.id, status: 'applied',
       serverRefs: { orderId: this.encodeId(order.id), displayId: order.code, totalMinor: order.totalWithTax },

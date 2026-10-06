@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { RequestContextService, TransactionalConnection } from '@vendure/core';
+import { Order, RequestContextService, TransactionalConnection } from '@vendure/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RegisterService, TallyCommand } from '../src';
 import type { RegisterEnvelope } from '../src';
@@ -8,6 +8,7 @@ import {
   TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
 } from '../src/entities/register.entities';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
+import { parseCommandResult } from '../src/vendored/command-result';
 import type { RegisterCommandType } from '../src/vendored/core-commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -334,5 +335,83 @@ describe('register v2 later commands: aliases and superseded sessions (ADR-078)'
     expect(await connection.rawConnection.getRepository(TallyRegisterSessionStatus).findBy({ channelId, sessionId: s1, status: 'superseded' }))
       .toEqual([]);
     expect(await send(movement(s1))).toMatchObject({ status: 'applied', register: { session: { id: s1, status: 'open' } } });
+  });
+});
+
+describe('order.create register session warnings (ADR-078 d7)', () => {
+  const environment = createPluginTestEnvironment();
+  const { server, variantIds, decode, encode, run } = environment;
+  let registers: RegisterService;
+  let connection: TransactionalConnection;
+  beforeAll(async () => {
+    await environment.init();
+    registers = server.app.get(RegisterService);
+    connection = server.app.get(TransactionalConnection);
+  });
+  afterAll(() => server.destroy());
+
+  async function send(command: RegisterEnvelope) {
+    const ctx = markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom' }));
+    return registers.apply(ctx, command, { requestTimeMs: NOW });
+  }
+  const envelope = (type: RegisterCommandType, payload: Record<string, unknown>): RegisterEnvelope =>
+    ({ id: uuid(), type, version: 2, createdAt: AT, deviceId: 'till-1', attempt: 1, payload });
+  const open = (sessionId: string, registerId: string) =>
+    envelope('register.session.open', { sessionId, registerId, openedAt: AT, countedFloatMinor: 10000 });
+  const mug = () => ({ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 });
+
+  it('applies an unknown session, retaining its id and a parsed, replayable warning', async () => {
+    const sessionId = uuid();
+    const command = orderCommand([mug()], undefined, undefined, { sessionId });
+    const result = await run(command);
+    const warnings = [{ code: 'register_session_unknown', sessionId }];
+    expect(result.status).toBe('applied');
+    expect(result.warnings).toEqual(warnings);
+    const order = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: decode(result.serverRefs!.orderId) });
+    expect(order.customFields.tallySessionId).toBe(sessionId);
+    expect(parseCommandResult(result).warnings).toEqual(warnings);
+    expect(await run(command)).toEqual({ ...result, status: 'duplicate' });
+  });
+
+  it('applies known sessions and same-device resume aliases without warnings', async () => {
+    const [sessionId, alias, registerId] = [uuid(), uuid(), uuid()];
+    expect(await send(open(sessionId, registerId))).toMatchObject({ status: 'applied' });
+    expect(await send(open(alias, registerId))).toMatchObject({ status: 'applied', register: {
+      session: { id: sessionId }, resumed: { fromSessionId: alias },
+    } });
+    for (const id of [sessionId, alias]) {
+      const result = await run(orderCommand([mug()], undefined, undefined, { sessionId: id }));
+      expect(result.status).toBe('applied');
+      expect(result).not.toHaveProperty('warnings');
+    }
+  });
+
+  it('appends the unknown session warning after customer_ignored', async () => {
+    const sessionId = uuid();
+    const customerId = encode(999999);
+    const result = await run(orderCommand([mug()], undefined, { customerId }, { sessionId }));
+    expect(result.status).toBe('applied');
+    expect(result.warnings).toEqual([
+      { code: 'customer_ignored', customerId, reason: 'unknown' },
+      { code: 'register_session_unknown', sessionId },
+    ]);
+  });
+
+  it('applies an order without a sessionId without warnings', async () => {
+    const command = orderCommand([mug()]);
+    expect(command.payload).not.toHaveProperty('sessionId');
+    const result = await run(command);
+    expect(result.status).toBe('applied');
+    expect(result).not.toHaveProperty('warnings');
+  });
+
+  it('counts an order with an unknown session after that session opens', async () => {
+    const sessionId = uuid();
+    const result = await run(orderCommand([mug()], undefined, undefined, { sessionId }));
+    expect(result.status).toBe('applied');
+    expect(result.warnings).toEqual([{ code: 'register_session_unknown', sessionId }]);
+    expect(await send(open(sessionId, uuid()))).toMatchObject({ status: 'applied' });
+    const next = await send(envelope('register.session.transition', { sessionId, status: 'counting', at: LATER }));
+    expect(next).toMatchObject({ status: 'applied', register: { session: { id: sessionId, salesCount: 1 } } });
   });
 });

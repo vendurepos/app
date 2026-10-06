@@ -75,7 +75,9 @@ export type CommandWarning =
   | {
       code: 'figures_mismatch';
       fields: Array<{ field: 'subtotalMinor' | 'taxMinor' | 'discountMinor' | (string & {}); tillMinor: number; serverMinor: number }>;
-    };
+    }
+  /** order.create named a register session the store does not hold (ADR-078 d7): applied, never refused. */
+  | { code: 'register_session_unknown'; sessionId: string };
 
 /** Error reported when a command is rejected. */
 export interface CommandError {
