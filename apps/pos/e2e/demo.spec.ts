@@ -366,3 +366,49 @@ test('a demo cashier changes a line\'s price and sells at it', async ({ page }) 
   await expect(receiptLine).toBeVisible();
   await expect(receiptLine.locator('..').getByText('€5.00', { exact: true })).toBeVisible();
 });
+
+test('a demo cashier parks a sale, sells another, then resumes the parked one', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('parked-open').click();
+  await page.getByTestId('parked-sales-park').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await page.getByTestId('parked-sales-dismiss').click();
+  await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+
+  await page.getByTestId('product-tile-Filter Coffee').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('20.00');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt').getByText('1 × Filter Coffee', { exact: true })).toBeVisible();
+  await page.getByTestId('new-sale').click();
+
+  await page.getByTestId('parked-open').click();
+  const resume = page.locator('[data-testid^="parked-resume-"]');
+  await expect(resume).toHaveCount(1);
+  await resume.click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(page.getByTestId('cart-line-FIL-500')).toHaveCount(0);
+  await expect(page.getByTestId('parked-open')).toHaveText('Park');
+
+  // Park the resumed mug again, then recover it from the local collection after a reload.
+  await page.getByTestId('parked-open').click();
+  await page.getByTestId('parked-sales-park').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await expect(resume).toHaveCount(1);
+  await page.reload();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+  await page.getByTestId('parked-open').click();
+  await expect(resume).toHaveCount(1);
+  await resume.click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(page.getByTestId('parked-open')).toHaveText('Park');
+});

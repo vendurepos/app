@@ -1,5 +1,5 @@
 import {
-  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, registerCommandCollection, registerSessionCollection,
+  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, registerCommandCollection, registerSessionCollection,
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { addRxPlugin, createRxDatabase, type RxCollection } from 'rxdb';
@@ -50,6 +50,10 @@ export function registerCollections(orders: RxCollection<PosOrder> | null): Regi
   return { sessions: register_sessions, movements: cash_movements, closures, commands: register_commands };
 }
 
+export function orderDrafts(orders: RxCollection<PosOrder> | null): RxCollection | null {
+  return orders?.database.collections.order_drafts ?? null;
+}
+
 /**
  * useOrderOutbox's open. close() closes the database and never removes it: unsent orders, and the register's sessions,
  * movements and closures, wait for the next sign-in. `platform` is ensureRegister's, stamped on the register document.
@@ -74,6 +78,8 @@ export async function openOrderStore(name: string, platform: string): Promise<{ 
       const { register_sessions } = await database.addCollections({
         register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema },
         closures: { schema: closureSchema }, register_commands: registerCommandCollection(),
+        // Parked carts, local only, never replicated.
+        order_drafts: { schema: orderDraftSchema },
       });
       await ensureRegister(register_sessions, platform);
       return added;
