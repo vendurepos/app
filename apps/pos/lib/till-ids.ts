@@ -11,3 +11,9 @@ export const BOUND_REGISTER_ID_KEY = 'vendurepos.bound_register_id';
 
 export const deviceId = (storage: IdStorage) => getDeviceId(storage, DEVICE_ID_KEY);
 export const boundRegisterId = (storage: IdStorage) => getDeviceId(storage, BOUND_REGISTER_ID_KEY);
+
+/** Binds this till to a fresh register: after its conflict session is abandoned, the old id would only meet the same open session again. */
+export const rebindRegister = (storage: IdStorage & { removeItem(key: string): void }) => {
+  storage.removeItem(BOUND_REGISTER_ID_KEY);
+  return boundRegisterId(storage);
+};
