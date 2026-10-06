@@ -301,3 +301,25 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await expect(page.getByTestId('variance-saved')).toBeVisible();
   await page.getByTestId('settings-back').click();
 });
+
+test('a demo visitor attaches a customer and sees it on the receipt', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('customer-add').click();
+  await page.getByLabel('Search customers').fill('ada');
+  await page.getByTestId('customer-picker').getByText('Ada Lovelace', { exact: true }).click();
+  await expect(page.getByTestId('sale-customer')).toContainText('Ada Lovelace');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
+  expect(consoleErrors).toEqual([]);
+});

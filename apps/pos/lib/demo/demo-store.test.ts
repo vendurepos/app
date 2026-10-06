@@ -9,7 +9,7 @@ import { readCapabilities } from '../use-sale-settings';
 import { logout } from '../logout';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
-import { DEMO_STORAGE_KEY, type DemoStorage } from './store';
+import { DEMO_STORAGE_KEY, DemoStore, type DemoStorage } from './store';
 
 // A valid client timestamp shared by the test's order and register commands.
 const TIME = '2026-10-01T10:00:00.000Z';
@@ -224,4 +224,74 @@ it('names an unknown GraphQL operation in a status-200 error', async () => {
   expect(response).toBeInstanceOf(Response);
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ errors: [{ message: 'Unknown operation: MissingDemoOperation' }] });
+});
+
+it('a saved demo state from before customers still searches the seeded customers', () => {
+  storage.setItem(DEMO_STORAGE_KEY, JSON.stringify({ stock: {}, ledger: {}, orders: [], sessions: {}, movements: [], closures: [] }));
+  const store = new DemoStore(storage);
+  expect(store.customers({ q: 'ada' }).items[0].emailAddress).toBe('ada@demo.vendurepos.com');
+});
+
+it('searches demo customers by email or name, case-insensitively', async () => {
+  const session = await signedIn();
+  const context = sessionContext(session);
+  const connector = createVendureConnector();
+  const ada = { id: 'c1', name: 'Ada Lovelace', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@demo.vendurepos.com' };
+  for (const query of ['ADA@DEMO.VENDUREPOS.COM', 'aDa', 'LOVElaCE']) {
+    expect(await connector.searchCustomers!(context, query)).toEqual([ada]);
+  }
+  expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.name))
+    .toEqual(['Grace Hopper', 'Ada Lovelace', 'Alan Turing']);
+  expect((await connector.searchCustomers!(context, 'demo.vendurepos.com', { limit: 1 })).map(customer => customer.id)).toEqual(['c2']);
+  expect(await connector.searchCustomers!(context, 'nobody')).toEqual([]);
+  expect(await connector.getCustomer!(context, 'c1')).toEqual(ada);
+  expect(await connector.getCustomer!(context, 'unknown')).toBeNull();
+  const response = await fetch(`${DEMO_STORE_ORIGIN}/admin-api`, {
+    method: 'POST', body: JSON.stringify({ query: 'query { customers { totalItems items { id } } }', variables: { take: 1 } }),
+  });
+  expect(await response.json()).toEqual({ data: { customers: { totalItems: 3, items: [{ id: 'c2' }] } } });
+  const payload = { ...ORDER.payload, customer: { customerId: ada.id } };
+  expect((await send(session, { ...ORDER, payload }))[0].status).toBe('applied');
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[0].customer).toEqual(payload.customer);
+});
+
+it('creates a demo customer and refuses its email twice, as Vendure does', async () => {
+  const session = await signedIn();
+  const context = sessionContext(session);
+  const connector = createVendureConnector();
+  const input = { email: 'empty-names@demo.vendurepos.com', firstName: '', lastName: '', phone: '+44 20 7946 0001' };
+  const customer = await connector.createCustomer!(context, input);
+  expect(customer).toEqual({ id: 'c4', name: input.email, email: input.email, phone: input.phone });
+  installed.uninstall();
+  installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
+  expect(await connector.getCustomer!(context, customer.id)).toEqual(customer);
+  expect(await connector.searchCustomers!(context, input.email)).toEqual([customer]);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(`${DEMO_STORE_ORIGIN}/admin-api`, {
+      method: 'POST', body: JSON.stringify({
+        query: 'mutation($input: CreateCustomerInput!) { createCustomer(input: $input) { __typename ... on Customer { id } ... on ErrorResult { errorCode message } } }',
+        variables: { input: { emailAddress: input.email, firstName: '', lastName: '' } },
+      }),
+    });
+    expect(await response.json()).toEqual({ data: { createCustomer: {
+      __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
+    } } });
+  }
+  expect(await connector.searchCustomers!(context, input.email)).toEqual([customer]);
+  const payload = { ...ORDER.payload, customer: { customerId: customer.id } };
+  expect((await send(session, { ...ORDER, payload }))[0].status).toBe('applied');
+  expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[0].customer).toEqual(payload.customer);
+});
+
+it('Reset demo removes created customers', async () => {
+  const context = sessionContext(await signedIn());
+  const connector = createVendureConnector();
+  const customer = await connector.createCustomer!(context, { email: 'new@demo.vendurepos.com', firstName: 'New', lastName: 'Visitor' });
+  installed.reset();
+  expect(values.has(DEMO_STORAGE_KEY)).toBe(false);
+  expect(await connector.searchCustomers!(context, customer.email!)).toEqual([]);
+  expect(await connector.getCustomer!(context, customer.id)).toBeNull();
+  installed.uninstall();
+  installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
+  expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.id)).toEqual(['c2', 'c1', 'c3']);
 });
