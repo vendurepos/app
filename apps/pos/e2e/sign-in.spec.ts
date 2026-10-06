@@ -755,7 +755,8 @@ test.describe('on a narrow screen', () => {
     await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
     await page.getByTestId('sign-in-barcode_field').fill('barcode');
     await page.getByTestId('sign-in-submit').click();
-    await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+    // The narrow grid renders only what's in view, so wait for the first tile by name rather than the mug.
+    await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
   }
 
   /**
