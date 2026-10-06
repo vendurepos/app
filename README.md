@@ -42,7 +42,7 @@ See the [plugin reference](packages/vendure-plugin/README.md).
 ## Structure
 
 - `apps/pos` — Expo Router app (web first). It depends on the published
-  `@tallyui/*` 3.0.2 packages from npm, pinned exactly, including
+  `@tallyui/*` 3.0.3 packages from npm, pinned exactly, including
   `@tallyui/connector-vendure`.
 - `packages/vendure-plugin` — the Vendure plugin `@vendurepos/plugin`. It runs
   TallyUI's `order.create` and register commands, one Postgres transaction per

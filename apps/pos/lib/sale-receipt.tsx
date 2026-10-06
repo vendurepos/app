@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
-import { Button, discountLabel, HStack, injectPrintStyle, Text, VStack } from '@tallyui/components';
+import { Button, discountLabel, HStack, injectPrintStyle, orderReference, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { taxRowLabel } from './cart-totals';
-import { orderReference } from './order-reference';
 import { MoneyRow, TaxRows } from './sale-cart';
 
 /** The completed sale's receipt, from the order as finalized and stored; New sale starts the next one. */
