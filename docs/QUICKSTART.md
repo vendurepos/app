@@ -92,6 +92,11 @@ tested version). Run store commands from that project's root.
 
    Rotate or delete a key on its own page.
 
+   On the POS sign-in screen, choose **Device key**, then paste the key and the
+   till's channel token. The POS shows the key's name as the till on its
+   receipts. Signing out forgets the key on that device; it does not revoke it.
+   A till whose key is revoked asks for a new one and keeps its cart.
+
    **pnpm projects:** point the Dashboard's Vite plugin at your `node_modules`,
    or the build will not find the button:
 

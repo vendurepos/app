@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link, Redirect, Stack } from 'expo-router';
-import { vendureAuth } from '@tallyui/connector-vendure';
+import { vendureAuth, type VendureCredentialKind } from '@tallyui/connector-vendure';
 import type { AuthField } from '@tallyui/core';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, HStack, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { useSession } from '../lib/session-context';
@@ -16,6 +16,7 @@ const BARCODE_FIELD: AuthField = {
 
 export default function SignInScreen() {
   const { session } = useSession();
+  const [kind, setKind] = useState<VendureCredentialKind>('password');
   const [values, setValues] = useState<Record<string, string>>({});
   const { pending, error, submit } = useSignIn();
 
@@ -30,7 +31,17 @@ export default function SignInScreen() {
         </CardHeader>
         <CardContent>
           <VStack space="lg">
-            {[...vendureAuth.fields, BARCODE_FIELD].map((field) => (
+            <HStack space="sm">
+              <Button testID="sign-in-kind-password" variant={kind === 'password' ? undefined : 'secondary'}
+                accessibilityState={{ selected: kind === 'password' }} onPress={() => setKind('password')}>
+                <Text>Email and password</Text>
+              </Button>
+              <Button testID="sign-in-kind-api-key" variant={kind === 'api-key' ? undefined : 'secondary'}
+                accessibilityState={{ selected: kind === 'api-key' }} onPress={() => setKind('api-key')}>
+                <Text>Device key</Text>
+              </Button>
+            </HStack>
+            {[...vendureAuth.fieldSets[kind], BARCODE_FIELD].map((field) => (
               <VStack key={field.key} space="sm">
                 <Label nativeID={`sign-in-${field.key}-label`}>{field.label}</Label>
                 <Input>
@@ -44,9 +55,9 @@ export default function SignInScreen() {
                     secureTextEntry={field.type === 'password'}
                     keyboardType={field.type === 'url' ? 'url' : field.key === 'email' ? 'email-address' : 'default'}
                     autoComplete={field.key === 'email' ? 'email' : undefined}
-                    autoCapitalize={['url', 'email', 'channel_token', 'barcode_field'].includes(field.key) ? 'none' : undefined}
-                    autoCorrect={['url', 'email', 'channel_token', 'barcode_field'].includes(field.key) ? false : undefined}
-                    onSubmitEditing={() => void submit(values)}
+                    autoCapitalize={['url', 'email', 'api_key', 'channel_token', 'barcode_field'].includes(field.key) ? 'none' : undefined}
+                    autoCorrect={['url', 'email', 'api_key', 'channel_token', 'barcode_field'].includes(field.key) ? false : undefined}
+                    onSubmitEditing={() => void submit({ ...values, kind })}
                   />
                 </Input>
               </VStack>
@@ -56,7 +67,7 @@ export default function SignInScreen() {
                 {error}
               </Text>
             )}
-            <Button testID="sign-in-submit" disabled={pending} onPress={() => void submit(values)}>
+            <Button testID="sign-in-submit" disabled={pending} onPress={() => void submit({ ...values, kind })}>
               <Text>{pending ? 'Signing in…' : 'Sign in'}</Text>
             </Button>
             {DEMO_MODE && (

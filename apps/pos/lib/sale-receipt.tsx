@@ -6,8 +6,8 @@ import { taxRowLabel } from './cart-totals';
 import { MoneyRow, TaxRows } from './sale-cart';
 
 /** The completed sale's receipt, from the order as finalized and stored; New sale starts the next one. */
-export function SaleReceipt({ sale, store, cashier, registerId }: {
-  sale: ReturnType<typeof useSale>; store: string; cashier: string; registerId: string;
+export function SaleReceipt({ sale, store, cashier, registerId, till }: {
+  sale: ReturnType<typeof useSale>; store: string; cashier: string; registerId: string; till?: boolean;
 }) {
   const format = useCurrencyFormatter();
   // TallyUI's print style, as its Receipt: what carries print: 'hide' stays off the page, so the receipt prints alone.
@@ -21,7 +21,7 @@ export function SaleReceipt({ sale, store, cashier, registerId }: {
   return (
     <VStack testID="receipt" space="none" className="gap-1.5 p-3">
       <Text className="font-semibold">{receipt.header.storeName}</Text>
-      <Text testID="receipt-order" className="text-xs text-muted-foreground">Order {orderReference(posOrder)} · {receipt.header.cashier}</Text>
+      <Text testID="receipt-order" className="text-xs text-muted-foreground">Order {orderReference(posOrder)} · {till ? `Till: ${receipt.header.cashier}` : receipt.header.cashier}</Text>
       {order.customer ? <Text testID="receipt-customer" className="text-xs text-muted-foreground">Customer: {order.customer.name}</Text> : null}
       {receipt.lineItems.map((line, index) => (
         <VStack key={index} space="none" className="border-b border-border py-1">

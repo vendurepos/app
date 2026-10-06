@@ -19,6 +19,11 @@ afterEach(() => {
 });
 
 describe('logout', () => {
+  it('forgets a device-key session without a logout request', async () => {
+    expect(await logout({ ...session, kind: 'api-key', token: '' })).toBe('ok');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('posts the mutation without a channel header even when the session has a channel token', async () => {
     fetchMock.mockResolvedValue(Response.json({ data: { logout: { success: true } } }));
     expect(await logout(session)).toBe('ok');

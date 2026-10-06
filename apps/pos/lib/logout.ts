@@ -4,7 +4,9 @@ import type { Session } from './session';
 export const LOGOUT_WAIT_MS = 3_000;
 
 /** Best-effort Vendure logout. Never rejects. */
-export async function logout(session: Pick<Session, 'url' | 'token'>, waitMs = LOGOUT_WAIT_MS): Promise<'ok' | 'failed'> {
+export async function logout(session: Pick<Session, 'url' | 'token' | 'kind'>, waitMs = LOGOUT_WAIT_MS): Promise<'ok' | 'failed'> {
+  // Sign-out forgets the device; the key stays valid until revoked on the Dashboard (ADR 0004).
+  if (session.kind === 'api-key') return 'ok';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), waitMs);
   try {
