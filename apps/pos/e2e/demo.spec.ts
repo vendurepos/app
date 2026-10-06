@@ -527,7 +527,8 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await tableToggle.click();
   await expect(tableToggle).toHaveAttribute('aria-checked', 'true');
   await expect(tiles).toHaveCount(0);
-  await expect(page.locator('[data-testid^="product-row-"]').filter({ hasText: 'Tally Fixture Mug' })).toBeVisible();
+  // The table renders its rows lazily, so check the first row by name rather than one further down.
+  await expect(page.locator('[data-testid^="product-row-"]').filter({ hasText: 'Canvas Apron' })).toBeVisible();
   await page.getByTestId('view-toggle-grid').click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
