@@ -66,10 +66,6 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   if (Array.isArray(payload.shipping) && payload.shipping.length > 1 && !full()) {
     errors.push('shipping[1]: shipping_single: this store takes one shipping charge per order');
   }
-  // ADR 0005: custom lines remain refused until job 4.
-  (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
-    if (line && Object.hasOwn(line, 'custom') && !full()) errors.push(`lines[${index}].custom: not supported by this server yet`);
-  });
   return errors;
 }
 

@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import {
-  Allocation, ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderService, PaymentMethod, PaymentService,
+  Allocation, ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderModifier, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevel, StockLevelService,
-  StockLocationService, StockMovementService, Surcharge, TaxRate, TaxRateService, TransactionalConnection, ZoneService,
+  StockLocationService, StockMovementService, Surcharge, TaxCategory, TaxRate, TaxRateService, TransactionalConnection, ZoneService,
   idsAreEqual, isGraphQlErrorResult, manualFulfillmentHandler, normalizeEmailAddress,
 } from '@vendure/core';
 import type { CurrencyCode } from '@vendure/core';
@@ -18,7 +18,7 @@ import { commandFingerprint } from '../vendored/fingerprint';
 import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
-import { ORDER_CREATE_VERSIONS, WALK_IN_EMAIL } from './constants';
+import { ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY, WALK_IN_EMAIL } from './constants';
 import { classify } from './classification';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
@@ -145,6 +145,7 @@ export class OrderCreateService {
     private connection: TransactionalConnection,
     private customers: CustomerService,
     private orders: OrderService,
+    private orderModifier: OrderModifier,
     private calculator: OrderCalculator,
     private payments: PaymentService,
     private variants: ProductVariantService,
@@ -253,7 +254,7 @@ export class OrderCreateService {
     try {
       return await this.recipe(ctx, command, progress);
     } catch (error) {
-      if (error instanceof TransientCommandError) throw error;
+      if (error instanceof TransientCommandError || error instanceof RepairStoreSetup) throw error;
       const verdict = classify(error, this.clientOrderIdIndex());
       if (verdict.outcome === 'notStored') throw error;
       if (verdict.outcome === 'collision') throw new Rerun();
@@ -413,6 +414,10 @@ export class OrderCreateService {
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOne({
       where: { code: TALLY_SHIPPING_METHOD_CODE, deletedAt: IsNull(), channels: { id: ctx.channelId } },
     });
+    const customVariant = await this.connection.getRepository(ctx, ProductVariant).findOne({
+      where: { sku: TALLY_CUSTOM_ITEM_SKU, deletedAt: IsNull(), channels: { id: ctx.channelId } },
+    });
+    const noTax = await this.connection.getRepository(ctx, TaxCategory).findOneBy({ name: TALLY_NO_TAX_CATEGORY });
     const zone = ctx.channel.defaultTaxZone;
     const rates = zone && await this.connection.getRepository(ctx, TaxRate).count({
       where: { zoneId: zone.id, enabled: true, customerGroup: IsNull() },
@@ -423,7 +428,7 @@ export class OrderCreateService {
       && payment.handler.code === tallyPaymentHandler.code)) && (!shipping || shipping.checker.code === tallyShippingChecker.code)
       && this.config.shippingOptions.fulfillmentHandlers.some(handler => handler.code === manualFulfillmentHandler.code);
     if (!rates || !checkers) return 'refuse';
-    return payment && shipping ? 'ok' : 'repairable';
+    return payment && shipping && customVariant && noTax ? 'ok' : 'repairable';
   }
 
   /**
@@ -451,8 +456,17 @@ export class OrderCreateService {
     // The bridge makes Vendure's total equal totalMinor, so the payload alone decides underpaid.
     const paidMinor = payments.reduce((sum, payment) => sum + payment.amountMinor, 0);
     if (paidMinor < totalMinor) return rejected(command.id, 'underpaid', `Payments of ${paidMinor} are below the total of ${totalMinor}`);
-    for (const line of lines) {
-      // payload-shape guarantees variantId on non-custom lines; custom lines are refused until job 4.
+    for (const [i, line] of lines.entries()) {
+      if (line.custom) {
+        if (line.custom.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, line.custom.taxClass)) {
+          return rejected(command.id, 'invalid_payload', line.custom.taxClass === undefined
+            ? `lines[${i}].custom.taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
+            : `lines[${i}].custom.taxClass: tax_class_unknown: no tax category "${line.custom.taxClass}" in this store`,
+          { reason: 'tax_class_unknown', path: `lines[${i}].custom.taxClass` });
+        }
+        continue;
+      }
+      // payload-shape guarantees variantId on non-custom lines.
       if (!await this.findVariant(ctx, line.variantId!)) {
         return rejected(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       }
@@ -673,6 +687,7 @@ export class OrderCreateService {
     await orderRepository.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
+      if (line.custom) continue;
       // A race after the pre-claim check: the variant was disabled or removed meanwhile.
       const variant = await this.findVariant(ctx, line.variantId!);
       if (!variant) throw new BusinessRejection('unknown_variant', `Variant ${line.variantId} is missing or disabled`);
@@ -705,7 +720,32 @@ export class OrderCreateService {
       if (await this.variants.getSaleableStockLevel(ctx, variant) < quantity) throw new StoreConfigurationRefusal(
         `Variant ${variantId} cannot be made saleable in this channel (no stock location the StockLocationStrategy sells from)`);
     }
+    const customLines: OrderLine[] = [];
     for (const line of payload.lines) {
+      if (line.custom) {
+        const variant = await this.connection.getRepository(ctx, ProductVariant).findOne({
+          where: { sku: TALLY_CUSTOM_ITEM_SKU, deletedAt: IsNull(), channels: { id: ctx.channelId } },
+        });
+        if (!variant) throw new RepairStoreSetup();
+        // ADR 0005 ruling (a): OrderModifier, because addItemToOrder refuses the disabled product;
+        // Vendure re-prices these lines through TallyPriceStrategy.
+        const orderLine = await this.orderModifier.getOrCreateOrderLine(ctx, order, variant.id, {
+          tallyUnitPrice: line.unitPriceMinor, tallyClientLineId: line.clientLineId,
+          tallyPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
+          tallyCustomName: line.custom.name, tallyCustomSku: line.custom.sku ?? null,
+        });
+        await this.orderModifier.updateOrderLineQuantity(ctx, orderLine, line.quantity, order);
+        orderLine.listPrice = line.unitPriceMinor;
+        orderLine.listPriceIncludesTax = line.taxInclusive ?? payload.pricesIncludeTax;
+        orderLine.initialListPrice ??= line.unitPriceMinor;
+        const category = line.custom.taxStatus === 'none'
+          ? await this.connection.getRepository(ctx, TaxCategory).findOneByOrFail({ name: TALLY_NO_TAX_CATEGORY })
+          : (await resolveTaxCategory(ctx, this.connection, line.custom.taxClass))!;
+        orderLine.taxCategory = category;
+        orderLine.taxCategoryId = category.id;
+        customLines.push(orderLine);
+        continue;
+      }
       const variantId = requested.get(line.variantId!)!.variant.id;
       order = unwrap(await this.orders.addItemToOrder(ctx, order.id, variantId, line.quantity, {
         tallyUnitPrice: line.unitPriceMinor,
@@ -713,6 +753,12 @@ export class OrderCreateService {
         tallyPriceIncludesTax: line.taxInclusive ?? payload.pricesIncludeTax,
       }));
       await this.testObserver?.('addItemToOrder', ctx, order);
+    }
+    if (customLines.length) {
+      // Product additions reload the order; retain the custom lines' prices and tax categories for this pass.
+      order.lines = order.lines.map(line => customLines.find(custom => idsAreEqual(custom.id, line.id)) ?? line);
+      await this.calculator.applyPriceAdjustments(ctx, order, [], customLines);
+      await this.connection.getRepository(ctx, OrderLine).save(customLines);
     }
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOneOrFail({
       where: { code: TALLY_SHIPPING_METHOD_CODE, deletedAt: IsNull(), channels: { id: ctx.channelId } },

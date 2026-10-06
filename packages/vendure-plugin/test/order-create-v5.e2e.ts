@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { Order, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
+import { Order, ProductVariant, RequestContextService, TaxCategory, TaxRate, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
+import { TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY } from '../src/service/constants';
+import { StoreSetupService } from '../src/service/store-setup.service';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
 describe('order.create v5 contract plumbing', () => {
   const environment = createPluginTestEnvironment();
-  const { server, adminClient, variantIds, decode, encode, run } = environment;
+  const { server, adminClient, shopClient, variantIds, decode, encode, run } = environment;
   let connection: TransactionalConnection;
   let category: TaxCategory;
   let standardRate: number;
@@ -98,13 +100,128 @@ describe('order.create v5 contract plumbing', () => {
     });
   }
 
-  it('refuses a v5 custom line without a variantId until the server honours it', async () => {
-    const command = sale();
-    command.payload.lines.push({ clientLineId: 'custom-1', quantity: 1, unitPriceMinor: 100, custom: { name: 'Custom', taxStatus: 'none' } });
+  it('honours golden pair §3.2: product, untaxed Gift wrap and taxable shipping', async () => {
+    const command = { ...orderCommand([
+      { variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800, ratePpm: standardRate * 10000 },
+      { custom: { name: 'Gift wrap', taxStatus: 'none' }, quantity: 1, unitPriceMinor: 300, ratePpm: 0 },
+    ]), version: 5 as const };
+    const payload = command.payload;
+    const shippingTax = Math.round(500 * standardRate / 100);
+    payload.shipping = [{ clientShippingId: 'shipping-1', name: 'Delivery', amountMinor: 500,
+      taxStatus: 'taxable', taxClass: category.name, taxMinor: shippingTax }];
+    payload.taxMinor += shippingTax;
+    payload.totalMinor += 500 + shippingTax;
+    payload.payments[0].amountMinor = payload.totalMinor;
+    payload.display!.shipping = [{ clientShippingId: 'shipping-1', amountMinor: 500 }];
+    payload.display!.taxMinor = payload.taxMinor;
+    payload.display!.totalMinor = payload.totalMinor;
+    const taxed = payload.taxByRate!.find(rate => rate.ratePpm === standardRate * 10000)!;
+    taxed.netMinor += 500;
+    taxed.taxMinor += shippingTax;
+    taxed.grossMinor += 500 + shippingTax;
+    const result = await run(command);
+    expect(result.status).toBe('applied');
+    expect(result.serverRefs!.totalMinor).toBe(payload.totalMinor);
+    expect(result.warnings?.some(warning => warning.code === 'figures_mismatch')).not.toBe(true);
+    expect(result.totalWarnings ?? []).toEqual([]);
+    const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
+      where: { id: decode(result.serverRefs!.orderId) }, relations: ['lines', 'lines.productVariant', 'shippingLines'],
+    });
+    expect(order.lines).toHaveLength(2);
+    const custom = order.lines.find(line => line.productVariant.sku === TALLY_CUSTOM_ITEM_SKU)!;
+    expect(custom.customFields).toMatchObject({ tallyCustomName: 'Gift wrap', tallyCustomSku: null });
+    expect(custom.linePrice).toBe(300);
+    expect(custom.linePriceWithTax).toBe(300);
+    expect(custom.taxLines.every(line => line.taxRate === 0)).toBe(true);
+    expect(order.shippingLines[0].priceWithTax).toBe(500 + shippingTax);
+  });
+
+  it('applies and fulfils a taxable custom-only order', async () => {
+    const command = { ...orderCommand([{
+      custom: { name: 'Alteration', sku: 'TILL-ALTER', taxStatus: 'taxable', taxClass: category.name },
+      quantity: 1, unitPriceMinor: 800, ratePpm: standardRate * 10000,
+    }]), version: 5 as const };
+    const result = await run(command);
+    expect(result.status).toBe('applied');
+    expect(result.serverRefs!.totalMinor).toBe(command.payload.totalMinor);
+    expect(result.totalWarnings ?? []).toEqual([]);
+    const { order } = await adminClient.query(parse(`query Order($id: ID!) {
+      order(id: $id) { state fulfillments { state } lines {
+        productVariant { sku price } linePrice linePriceWithTax customFields { tallyCustomName tallyCustomSku }
+      } }
+    }`), { id: result.serverRefs!.orderId });
+    expect(order.state).toBe('Delivered');
+    expect(order.fulfillments.map((item: { state: string }) => item.state)).toEqual(['Delivered']);
+    expect(order.lines).toEqual([{
+      productVariant: { sku: TALLY_CUSTOM_ITEM_SKU, price: 0 }, linePrice: 800,
+      linePriceWithTax: 800 + Math.round(800 * standardRate / 100),
+      customFields: { tallyCustomName: 'Alteration', tallyCustomSku: 'TILL-ALTER' },
+    }]);
+  });
+
+  it('copies a discounted custom line tax to its TALLY-DISCOUNT surcharge', async () => {
+    const command = { ...orderCommand([{
+      custom: { name: 'Alteration', taxStatus: 'taxable', taxClass: category.name },
+      quantity: 1, unitPriceMinor: 800, discountMinor: 100, ratePpm: standardRate * 10000,
+    }]), version: 5 as const };
+    const result = await run(command);
+    expect(result.status).toBe('applied');
+    expect(result.serverRefs!.totalMinor).toBe(command.payload.totalMinor);
+    expect(result.totalWarnings ?? []).toEqual([]);
+    const order = await connection.rawConnection.getRepository(Order).findOneOrFail({
+      where: { id: decode(result.serverRefs!.orderId) }, relations: ['lines', 'surcharges'],
+    });
+    const discounts = order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT');
+    expect(discounts).toHaveLength(1);
+    expect(discounts[0].listPrice).toBe(-100);
+    expect(order.lines[0].taxLines.map(line => line.taxRate)).toEqual([standardRate]);
+    expect(discounts[0].taxLines).toEqual(order.lines[0].taxLines.map(({ taxRate, description }) => ({ taxRate, description })));
+  });
+
+  it('refuses an unknown custom taxClass, naming its path', async () => {
+    const command = { ...orderCommand([{
+      custom: { name: 'Alteration', taxStatus: 'taxable', taxClass: 'missing-tax-category' },
+      quantity: 1, unitPriceMinor: 800, ratePpm: standardRate * 10000,
+    }]), version: 5 as const };
     const result = await run(command);
     expect(result).toMatchObject({ status: 'rejected', error: {
-      code: 'invalid_payload', message: 'lines[1].custom: not supported by this server yet',
+      code: 'invalid_payload', data: { reason: 'tax_class_unknown', path: 'lines[0].custom.taxClass' },
     } });
+    expect(result.error!.message).toContain('lines[0].custom.taxClass: tax_class_unknown');
+  });
+
+  it('bootstraps the disabled custom product, channel price and non-default category idempotently', async () => {
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    const variants = connection.rawConnection.getRepository(ProductVariant);
+    const categories = connection.rawConnection.getRepository(TaxCategory);
+    const variant = await variants.findOneOrFail({
+      where: { sku: TALLY_CUSTOM_ITEM_SKU }, relations: ['product', 'channels', 'productVariantPrices'],
+    });
+    expect(variant.product.enabled).toBe(false);
+    expect(variant.enabled).toBe(true);
+    expect(variant.channels.map(channel => String(channel.id))).toContain(String(ctx.channelId));
+    expect(variant.productVariantPrices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ channelId: ctx.channelId, price: 0 }),
+    ]));
+    expect(await categories.findOneByOrFail({ name: TALLY_NO_TAX_CATEGORY })).toMatchObject({ isDefault: false });
+    expect(await variants.countBy({ sku: TALLY_CUSTOM_ITEM_SKU })).toBe(1);
+    expect(await categories.countBy({ name: TALLY_NO_TAX_CATEGORY })).toBe(1);
+    await connection.withTransaction(ctx, tx => server.app.get(StoreSetupService).ensureChannelSetup(tx));
+    expect(await variants.countBy({ sku: TALLY_CUSTOM_ITEM_SKU })).toBe(1);
+    expect(await categories.countBy({ name: TALLY_NO_TAX_CATEGORY })).toBe(1);
+    expect((await variants.findOneByOrFail({ sku: TALLY_CUSTOM_ITEM_SKU })).id).toBe(variant.id);
+  });
+
+  it('hides the custom product from Shop API products and search', async () => {
+    const variant = await connection.rawConnection.getRepository(ProductVariant).findOneByOrFail({ sku: TALLY_CUSTOM_ITEM_SKU });
+    const { products, search } = await shopClient.query(parse(`query {
+      products { items { id variants { sku } } }
+      search(input: { term: "POS custom item", groupByProduct: true }) { items { productId } }
+    }`));
+    expect(products.items.map((item: { id: string }) => item.id)).not.toContain(encode(variant.productId));
+    expect(products.items.flatMap((item: { variants: Array<{ sku: string }> }) => item.variants.map(value => value.sku)))
+      .not.toContain(TALLY_CUSTOM_ITEM_SKU);
+    expect(search.items.map((item: { productId: string }) => item.productId)).not.toContain(encode(variant.productId));
   });
 
   it('refuses a custom line that also has a variantId', async () => {
