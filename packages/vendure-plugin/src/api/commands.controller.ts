@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, HttpCode, Post, Res } from '@nestjs/common';
 import { Allow, Ctx, Logger, Permission, RequestContext } from '@vendure/core';
+import { tallyPosSell } from '../config/permissions';
 import { markTallyRoute } from '../config/strategies';
 import { TransientCommandError, loggerCtx } from '../service/errors';
 import { OrderCreateService } from '../service/order-create.service';
@@ -50,7 +51,7 @@ export class TallyCommandsController {
 
   @Post('commands')
   @HttpCode(200)
-  @Allow(Permission.CreateOrder)
+  @Allow(tallyPosSell.Permission, Permission.CreateOrder)
   async commands(
     @Ctx() ctx: RequestContext,
     @Headers('x-tally-protocol') protocol: string | undefined,

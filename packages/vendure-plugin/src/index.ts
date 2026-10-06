@@ -1,6 +1,7 @@
 // The email handler is the `@vendurepos/plugin/email` entry (src/email.ts), so this entry never
 // requires the optional @vendure/email-plugin.
 export { TallyPosPlugin } from './plugin';
+export { tallyPosSell } from './config/permissions';
 export { TallyPriceStrategy } from './config/strategies';
 export { TallyCommand } from './entities/tally-command.entity';
 export { OrderCreateService } from './service/order-create.service';
