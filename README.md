@@ -14,6 +14,7 @@ with the `@vendurepos/plugin` server plugin installed. The till:
 - Signs in with a staff account, or with a device key made for that till in
   the Vendure Dashboard (see [docs/QUICKSTART.md](docs/QUICKSTART.md)).
 - Syncs the catalogue to local SQLite in the browser.
+- Browses products by category (the store's collections) and as a grid or a table.
 - Sells with the network off. Each sale waits in a local outbox. When the
   network returns, it lands in Vendure exactly once, at the POS price, paid
   and fulfilled.

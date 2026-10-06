@@ -28,7 +28,8 @@ async function mugStock(page: Page) {
 async function expectSignedIn(page: Page) {
   await expect(page.getByTestId('demo-banner')).toContainText('Demo: everything stays in this browser');
   await expect(page.getByTestId('signed-in-store')).toBeVisible();
-  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  // The grid renders its tiles lazily (at phone width the mug is past the first screenful), so wait for the first by name.
+  await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 }
 
 async function orderEntries(page: Page) {
@@ -488,4 +489,48 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await expect(receipt.getByTestId('receipt-fee-0')).toHaveText('€2.00');
   await expect(receipt.getByTestId('receipt-tax-Reduced DE 7%')).toHaveText('€0.14');
   await expect(receipt.getByTestId('receipt-total')).toHaveText('€11.66');
+});
+
+test('a demo cashier picks a category, still scans a product from another, and switches the products to a table', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+
+  const categories = page.getByRole('radiogroup', { name: 'Categories' });
+  const allProducts = categories.getByRole('radio', { name: 'All products', exact: true });
+  const coffee = categories.getByRole('radio', { name: 'Coffee', exact: true });
+  await expect(allProducts).toHaveAttribute('aria-checked', 'true');
+  await expect(categories.getByRole('radio')).toHaveCount(new Set(CATALOGUE.map(p => p.category)).size + 1);
+
+  await coffee.click();
+  await expect(coffee).toHaveAttribute('aria-checked', 'true');
+  await expect(allProducts).toHaveAttribute('aria-checked', 'false');
+  const tiles = page.locator('[data-testid^="product-tile-"]');
+  const mugTile = page.getByTestId('product-tile-Tally Fixture Mug');
+  await expect(tiles).toHaveCount(CATALOGUE.filter(p => p.category === 'Coffee').length);
+  await expect(page.getByTestId('product-tile-Espresso Beans')).toBeVisible();
+  await expect(mugTile).toHaveCount(0);
+
+  const search = page.getByPlaceholder('Search or scan barcode / SKU');
+  await search.fill('TALLY-MUG');
+  await search.press('Enter');
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+  await expect(search).toHaveValue('');
+  await expect(coffee).toHaveAttribute('aria-checked', 'true');
+  await expect(mugTile).toHaveCount(0);
+
+  await allProducts.click();
+  await expect(mugTile).toBeVisible();
+
+  const tableToggle = page.getByTestId('view-toggle-table');
+  await tableToggle.click();
+  await expect(tableToggle).toHaveAttribute('aria-checked', 'true');
+  await expect(tiles).toHaveCount(0);
+  // The table renders its rows lazily, so check the first row by name rather than one further down.
+  await expect(page.locator('[data-testid^="product-row-"]').filter({ hasText: 'Canvas Apron' })).toBeVisible();
+  await page.getByTestId('view-toggle-grid').click();
+  await expect(mugTile).toBeVisible();
+  expect(consoleErrors).toEqual([]);
 });
