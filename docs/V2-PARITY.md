@@ -51,7 +51,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Variations: one tile, then pick the variant | Free (RS) | Partial | Each variant is its own item. TallyUI ships `VariantPicker`, but neither `Catalogue` nor the app uses it | TallyUI, then app |
 | Browse by tag or brand; filter chips | Free (RS) | Missing | — | TallyUI |
 | Stock, price and cost editing | Pro (PRO) | Missing | `stock.adjust` is in PLAN's "M6 proper" | TallyUI + plugin |
-| Per-store pricing | Pro (PRO) | Missing | Vendure channels would carry it | plugin |
+| Per-store pricing | Pro (PRO) | Has | A store is a Vendure channel, and a variant's price is per channel in Vendure core. The till reads the signed-in channel's price, and the plugin records the as-sold price with no overrides: `packages/vendure-plugin/test/store-pricing.e2e.ts`. WCPOS Pro's per-store *sale* price has no Vendure field; Vendure does that with promotions | — |
 
 ## Customers
 
