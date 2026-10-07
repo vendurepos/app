@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Order, TransactionalConnection } from '@vendure/core';
+import { Order, Refund, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
@@ -9,7 +9,7 @@ import { orderCommand } from './payloads';
 
 type ReadOrder = {
   id: string; shippingWithTax: number;
-  lines: Array<{ id: string; quantity: number; proratedUnitPriceWithTax: number; productVariant: { id: string; stockOnHand: number } }>;
+  lines: Array<{ id: string; quantity: number; proratedUnitPriceWithTax: number; proratedLinePriceWithTax: number; productVariant: { id: string; stockOnHand: number } }>;
   payments: Array<{ id: string; method: string; amount: number; refunds: Array<{
     id: string; total: number; state: string; shipping: number; metadata: Record<string, unknown>;
     lines: Array<{ orderLineId: string; quantity: number }>;
@@ -74,13 +74,13 @@ describe('order.refund v1', () => {
   }
   async function readOrder(id: string): Promise<ReadOrder> {
     const { order } = await adminClient.query<{ order: ReadOrder }>(parse(`query Order($id: ID!) { order(id: $id) {
-      id shippingWithTax lines { id quantity proratedUnitPriceWithTax productVariant { id stockOnHand } }
+      id shippingWithTax lines { id quantity proratedUnitPriceWithTax proratedLinePriceWithTax productVariant { id stockOnHand } }
       payments { id method amount refunds { id total state shipping metadata lines { orderLineId quantity } } }
     } }`), { id });
     return order;
   }
-  async function sell(quantity: number, method: 'cash' | 'external' | 'split' = 'cash') {
-    const command = orderCommand([{ variantId: variantIds.mug[0], quantity, unitPriceMinor: 800 }]);
+  async function sell(quantity: number, method: 'cash' | 'external' | 'split' = 'cash', unitPriceMinor = 800) {
+    const command = orderCommand([{ variantId: variantIds.mug[0], quantity, unitPriceMinor }]);
     command.payload.payments = method === 'split'
       ? [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 500 },
         { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', amountMinor: command.payload.totalMinor - 500 }]
@@ -90,7 +90,7 @@ describe('order.refund v1', () => {
     expect(result).toMatchObject({ status: 'applied' });
     return { order: await readOrder(result.serverRefs!.orderId), clientOrderId: command.payload.clientOrderId };
   }
-  function refundFor(order: ReadOrder, session: { registerId: string; sessionId: string }, overrides: Partial<OrderRefundPayload> = {}): RefundCommand {
+  function refundFor(order: ReadOrder, session: { registerId: string; sessionId: string }, overrides: Partial<OrderRefundPayload> = {}, refunded: Record<string, number> = {}): RefundCommand {
     const createdAt = new Date().toISOString();
     const payload = {
       clientRefundId: randomUUID(), orderId: order.id, ...session, cashierRef: 'refund-cashier', createdAt,
@@ -99,8 +99,13 @@ describe('order.refund v1', () => {
       ...overrides,
     };
     return { id: randomUUID(), type: 'order.refund', version: 1, createdAt, deviceId: 'refund-till', attempt: 1,
-      payload: { ...payload, totalMinor: overrides.totalMinor ?? payload.lines.reduce((sum, line) => sum
-        + line.quantity * order.lines.find(item => item.id === line.orderLineId)!.proratedUnitPriceWithTax, 0)
+      payload: { ...payload, totalMinor: overrides.totalMinor ?? payload.lines.reduce((sum, line) => {
+        const item = order.lines.find(item => item.id === line.orderLineId)!;
+        if (item.quantity === 0) return sum;
+        const before = refunded[line.orderLineId] ?? 0;
+        return sum + Math.round((before + line.quantity) * item.proratedLinePriceWithTax / item.quantity)
+          - Math.round(before * item.proratedLinePriceWithTax / item.quantity);
+      }, 0)
         + payload.shippingMinor + payload.adjustmentMinor } };
   }
   async function refused(command: RefundCommand, orderId: string, code: string, message: string, data?: Record<string, unknown>, token = refunder) {
@@ -121,10 +126,14 @@ describe('order.refund v1', () => {
       refunds: [{ id: expect.any(String), paymentId: order.payments[0].id, totalMinor: line.proratedUnitPriceWithTax, state: 'Settled' }],
     } });
     const after = await readOrder(order.id);
+    // The Admin API encodes orderLineId inside metadata; the stored value is the raw id (checked below).
     expect(after.payments[0].refunds[0].metadata).toEqual({
       tallyClientRefundId: command.payload.clientRefundId, tallyRegisterId: session.registerId, tallySessionId: session.sessionId,
       tallyCashierRef: command.payload.cashierRef, tallyDestination: 'original_method', tallyMethod: 'cash',
+      tallyLines: [{ orderLineId: line.id, quantity: 1 }],
     });
+    const stored = await connection.rawConnection.getRepository(Refund).findOneByOrFail({ id: environment.decode(after.payments[0].refunds[0].id) });
+    expect(stored.metadata.tallyLines).toEqual([{ orderLineId: String(environment.decode(line.id)), quantity: 1 }]);
     expect(after.lines[0].productVariant.stockOnHand).toBe(line.productVariant.stockOnHand + 1);
     expect(await post(command)).toEqual({ ...result, status: 'duplicate' });
     expect(await readOrder(order.id)).toEqual(after);
@@ -158,10 +167,11 @@ describe('order.refund v1', () => {
     const after = await readOrder(order.id);
     expect(after.payments.find(payment => payment.id === payments[0].id)!.refunds).toEqual([expect.objectContaining({
       total: 500, shipping: order.shippingWithTax, lines: [{ orderLineId: order.lines[0].id, quantity: 2 }],
+      metadata: expect.objectContaining({ tallyLines: [{ orderLineId: order.lines[0].id, quantity: 2 }] }),
     })]);
     expect(after.payments.find(payment => payment.id === payments[1].id)!.refunds).toEqual([expect.objectContaining({
       total: command.payload.totalMinor - 500, shipping: 0, lines: [],
-      metadata: expect.objectContaining({ tallyMethod: 'external' }),
+      metadata: expect.objectContaining({ tallyMethod: 'external', tallyLines: [] }),
     })]);
   });
 
@@ -173,6 +183,30 @@ describe('order.refund v1', () => {
     expect(await post(refundFor(order, session, { lines }))).toMatchObject({ status: 'applied' });
     await refused(refundFor(order, session, { lines }), order.id, 'quantity_exceeds',
       'A refunded quantity is more than the line has left to refund', { lines: [{ orderLineId: lines[0].orderLineId, quantity: 1, refundableQuantity: 0 }] });
+  });
+
+  it('a whole line refunds its line total exactly, and partial refunds add up to it', async () => {
+    const session = await openSession();
+    const whole = (await sell(3, 'cash', 333)).order;
+    const parts = (await sell(3, 'cash', 333)).order;
+    expect(whole.lines[0].proratedLinePriceWithTax).not.toBe(3 * whole.lines[0].proratedUnitPriceWithTax);
+    const T = whole.lines[0].proratedLinePriceWithTax;
+    const old = 3 * whole.lines[0].proratedUnitPriceWithTax + whole.shippingWithTax;
+    const server = T + whole.shippingWithTax;
+    await refused(refundFor(whole, session, { totalMinor: old }), whole.id, 'amount_mismatch',
+      `Refund total ${old} does not match the server's ${server}`, { expectedMinor: old, serverMinor: server });
+    expect(await post(refundFor(whole, session))).toMatchObject({ status: 'applied', refund: { totalMinor: T + whole.shippingWithTax } });
+    const P = parts.lines[0].proratedLinePriceWithTax;
+    const lineId = parts.lines[0].id;
+    const third = (refunded: number) => refundFor(parts, session, {
+      lines: [{ orderLineId: lineId, quantity: 1, restock: true }], shippingMinor: 0,
+    }, { [lineId]: refunded });
+    expect(await post(third(0))).toMatchObject({ status: 'applied', refund: { totalMinor: Math.round(P / 3) } });
+    expect(await post(third(1))).toMatchObject({ status: 'applied', refund: { totalMinor: Math.round(2 * P / 3) - Math.round(P / 3) } });
+    expect(await post(third(2))).toMatchObject({ status: 'applied', refund: { totalMinor: P - Math.round(2 * P / 3) } });
+    expect(Math.round(2 * P / 3) - Math.round(P / 3)).not.toBe(Math.round(P / 3));
+    const after = await readOrder(parts.id);
+    expect(after.payments.flatMap(payment => payment.refunds).reduce((sum, refund) => sum + refund.total, 0)).toBe(P);
   });
 
   it('refusals are unstored and name the contract code', async () => {

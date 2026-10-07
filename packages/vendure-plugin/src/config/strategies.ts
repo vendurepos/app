@@ -128,9 +128,12 @@ export function isTallyRoute(ctx: RequestContext): boolean {
   return (ctx as unknown as Record<symbol, boolean>)[TALLY_ROUTE] === true;
 }
 
-/** ADR 0007 decision 6: the till refund RefundService is applying, read by the tally-pos handler's createRefund. */
+/** ADR 0007 decision 6: the till refund RefundService is applying, read by the tally-pos handler's createRefund.
+ * lines are the line quantities on the Refund being created ([] after the command's first Refund); kept as metadata in case Vendure drops RefundOrderInput.lines.
+ */
 export type TallyRefundContext = {
   clientRefundId: string; registerId: string; sessionId: string; cashierRef?: string; destination: 'original_method' | 'cash';
+  lines: Array<{ orderLineId: string; quantity: number }>;
 };
 const TALLY_REFUND = Symbol('vendurepos.tallyRefund');
 
@@ -164,11 +167,12 @@ export const tallyPaymentHandler = new PaymentMethodHandler({
   createRefund: (ctx, input, amount, order, payment) => {
     const refund = tallyRefundOf(ctx);
     if (isTallyRoute(ctx) && refund) {
-      const { clientRefundId, registerId, sessionId, cashierRef, destination } = refund;
+      const { clientRefundId, registerId, sessionId, cashierRef, destination, lines } = refund;
       return { state: 'Settled', metadata: {
         tallyClientRefundId: clientRefundId, tallyRegisterId: registerId, tallySessionId: sessionId,
         ...(cashierRef ? { tallyCashierRef: cashierRef } : {}),
         tallyDestination: destination, tallyMethod: tallyRefundMethod(destination, payment),
+        tallyLines: lines,
       } };
     }
     return { state: 'Settled' };

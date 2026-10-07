@@ -1,6 +1,6 @@
 # order.refund in the Vendure plugin: Vendure's own refund, a stock cancellation, figures from the Refund
 
-Status: Proposed (one-way: money, a plugin API change and register figures; merges on Paul's word)
+Status: Proposed (one-way: money, a plugin API change and register figures; merged on the front desk's approval)
 Date: 2026-10-07
 
 ## Context
@@ -37,7 +37,7 @@ TallyUI's `vendureRefundable` counts a line's refundable quantity as its current
    7. `quantity_exceeds`, with `data.lines` listing every line over its refundable quantity. A line's refundable quantity is its `quantity` less its refund lines over refunds not `Failed`, as in `vendureRefundable`.
    8. `nothing_to_refund` when there are no lines and `shippingMinor` and `adjustmentMinor` are both 0.
    9. `amount_mismatch` (`data: { expectedMinor: totalMinor, serverMinor }`) when `shippingMinor` is over the refundable shipping, when the raw amount is outside 0 to the money remainder, or when the server amount differs from `totalMinor`.
-      - The raw amount is Σ quantity × `proratedUnitPriceWithTax` + `shippingMinor` + `adjustmentMinor`.
+      - The raw amount is Σ line share + `shippingMinor` + `adjustmentMinor`. A line's share is its part of the line total, as in WCPOS (Front desk, 2026-10-07): with `N` the line's `quantity`, `T` its `proratedLinePriceWithTax`, `r` the quantity already refunded (refund lines over refunds not `Failed`) and `q` the quantity refunded now, the share is `round((r + q) × T / N) − round(r × T / N)` (half up, as Vendure's `DefaultMoneyStrategy`). So a whole line refunds exactly `T`, and partial refunds of a line add up to `T`. Vendure rounds `proratedUnitPriceWithTax` per unit, so `quantity × proratedUnitPriceWithTax` can miss the line total by cents.
       - The server amount is the raw amount clamped to that range.
       - The money remainder is the sum, over the order's `Settled` `tally-pos` payments, of each payment's amount less its refunds not `Failed`.
    10. `nothing_to_refund` again if the server amount is 0.
@@ -45,7 +45,7 @@ TallyUI's `vendureRefundable` counts a line's refundable quantity as its current
    - Only the first call carries `lines` (`orderLineId`, `quantity`) and `shipping: shippingMinor`. The later calls send `lines: []` and `shipping: 0`, so `RefundLine`s and `Refund.shipping` are recorded once and `vendureRefundable` stays right.
    - `adjustment` is never sent; it only feeds the deprecated `Refund.adjustment` field.
 6. **createRefund.** The `tally-pos` handler gains `createRefund`, which always returns `Settled`, because the till records the money itself and no provider is called.
-   - On the command route, the handler reads a refund context that `RefundService` puts on the RequestContext, the same way as the route mark (a symbol property, which survives `ctx.copy()`). It writes `metadata: { tallyRegisterId, tallySessionId, tallyCashierRef?, tallyDestination, tallyMethod, tallyClientRefundId }`.
+   - On the command route, the handler reads a refund context that `RefundService` puts on the RequestContext, the same way as the route mark (a symbol property, which survives `ctx.copy()`). It writes `metadata: { tallyRegisterId, tallySessionId, tallyCashierRef?, tallyDestination, tallyMethod, tallyClientRefundId, tallyLines }`. `tallyLines` is `[{ orderLineId, quantity }]` (the raw Vendure line id) on the first Refund of a command and `[]` on the rest, the same lines `refundOrder` records as `RefundLine`s; it keeps the refunded quantities on the Refund in case Vendure drops `RefundOrderInput.lines` and `shipping`, both deprecated.
    - `tallyMethod` is `cash` for a cash refund. For `original_method` it is the payment's own tender method (`payment.metadata.tender.method`).
    - Elsewhere (an admin refund of a POS order) the handler returns `Settled` with no till metadata. Before this change such a refund stayed `Pending` until an admin settled it by hand; it now settles at once, as with Vendure's other manual handlers, and it counts in no register session.
 7. **Restock.** A line with `restock: true` is restocked by `StockMovementService.createCancellationsForOrderLines`, for at most its fulfilled quantity less its existing cancellations (Vendure's own cap in `cancelOrderByOrderLines`). This is the `Cancellation` movement `cancelOrder` makes. The plugin does not call `cancelOrder`: that would lower the line's `quantity`, and `vendureRefundable` would then count those units twice. The sale's stock top-ups were taken back inside the sale's own transaction (ADR 0002 "Stock"), so a restock returns sold units only and double-counts nothing.
@@ -58,3 +58,4 @@ TallyUI's `vendureRefundable` counts a line's refundable quantity as its current
 - Refunds made from the admin, or by any other client, carry no session and never touch a register's figures.
 - Storefront orders stay out until a ruling brings them in. Their payment handler, not the till, owns their refund.
 - No migration: the session attribution lives in `Refund.metadata`.
+- The till must compute `totalMinor` by the same line-share rule. TallyUI's `vendureRefundable` (`@tallyui/connector-vendure` 3.9.x) offers a per-unit `unitRefundWithTax`, and ADR-080 has the till sum `proratedUnitPriceWithTax`, so the till side changes in TallyUI before the app's refund flow ships; until then a whole-line refund of a line whose total is not a whole multiple of its unit price is refused `amount_mismatch`.

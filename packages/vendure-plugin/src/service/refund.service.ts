@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  Cancellation, FulfillmentLine, Order, OrderService, Payment, RequestContext, StockMovementService, TransactionalConnection, idsAreEqual,
+  Cancellation, FulfillmentLine, Order, OrderLine, OrderService, Payment, RequestContext, StockMovementService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { tallyPosRefund } from '../config/permissions';
@@ -67,10 +67,12 @@ export class RefundService {
         const session = await this.registers.openSessionFor(tx, payload.sessionId, payload.registerId);
         if (!session) throw new Unstored(refuse(id, 'no_open_session',
           `Session ${payload.sessionId} is not open on register ${payload.registerId}`, { sessionId: payload.sessionId }));
-        withTallyRefund(tx, {
+        const tallyRefund = {
           clientRefundId: payload.clientRefundId, registerId: payload.registerId, sessionId: session.id,
           ...(payload.cashierRef === undefined ? {} : { cashierRef: payload.cashierRef }), destination: payload.destination,
-        });
+          lines: [],
+        };
+        withTallyRefund(tx, tallyRefund);
 
         const orderId = this.orders.decodeId(payload.orderId);
         const locked = orderId === undefined ? undefined : await this.connection.getRepository(tx, Order)
@@ -97,10 +99,18 @@ export class RefundService {
             `lines[${index}].orderLineId: no line ${input.orderLineId} on order ${payload.orderId}`));
           return { input, line };
         });
+        const refundedOf = (line: OrderLine) => previous.flatMap(refund => refund.lines)
+          .filter(refundLine => idsAreEqual(refundLine.orderLineId, line.id)).reduce((sum, refundLine) => sum + refundLine.quantity, 0);
+        // ADR 0007: a line's share of its total, so a whole line is the line total and partial refunds add up to it.
+        const shareOf = (line: OrderLine, quantity: number) => {
+          if (line.quantity === 0) return 0;
+          const before = refundedOf(line);
+          return Math.round((before + quantity) * line.proratedLinePriceWithTax / line.quantity)
+            - Math.round(before * line.proratedLinePriceWithTax / line.quantity);
+        };
         const over = lines.map(({ input, line }) => ({
           orderLineId: input.orderLineId, quantity: input.quantity,
-          refundableQuantity: line.quantity - previous.flatMap(refund => refund.lines)
-            .filter(refundLine => idsAreEqual(refundLine.orderLineId, line.id)).reduce((sum, refundLine) => sum + refundLine.quantity, 0),
+          refundableQuantity: line.quantity - refundedOf(line),
         })).filter(line => line.quantity > line.refundableQuantity);
         if (over.length) throw new Unstored(refuse(id, 'quantity_exceeds',
           'A refunded quantity is more than the line has left to refund', { lines: over }));
@@ -110,7 +120,7 @@ export class RefundService {
           .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0));
         const tenders = payments.filter(payment => payment.method === TALLY_PAYMENT_METHOD_CODE && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
-        const raw = lines.reduce((sum, { input, line }) => sum + input.quantity * line.proratedUnitPriceWithTax, 0) + shippingMinor + adjustmentMinor;
+        const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
         if (shippingMinor > refundableShipping || raw !== server || server !== totalMinor) {
           throw new Unstored(refuse(id, 'amount_mismatch', `Refund total ${totalMinor} does not match the server's ${server}`,
@@ -124,6 +134,9 @@ export class RefundService {
         for (const payment of tenders) {
           const share = Math.min(left, remainderOf(payment));
           if (share === 0) continue;
+          withTallyRefund(tx, { ...tallyRefund,
+            lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: String(line.id), quantity: input.quantity })),
+          });
           const refund = unwrap(await this.orderService.refundOrder(tx, {
             paymentId: payment.id, amount: share, reason: payload.reason,
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: line.id, quantity: input.quantity })),

@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 const refund: TallyRefundContext = {
   clientRefundId: 'r-1', registerId: 'reg-1', sessionId: 's-1', cashierRef: 'c-1', destination: 'original_method',
+  lines: [{ orderLineId: '7', quantity: 1 }],
 };
 const payment = Object.assign(new Payment({ id: 'p-1' }), { metadata: { tender: { method: 'card', amountMinor: 500 } } });
 const input = { paymentId: 'p-1', lines: [], shipping: 0, adjustment: 0, amount: 500, reason: 'Returned item' };
@@ -26,7 +27,7 @@ it('createRefund settles a till refund with its metadata', async () => {
   withTallyRefund(markTallyRoute(ctx), refund);
   const expected = { state: 'Settled', metadata: {
     tallyClientRefundId: 'r-1', tallyRegisterId: 'reg-1', tallySessionId: 's-1', tallyCashierRef: 'c-1',
-    tallyDestination: 'original_method', tallyMethod: 'card',
+    tallyDestination: 'original_method', tallyMethod: 'card', tallyLines: [{ orderLineId: '7', quantity: 1 }],
   } };
   expect(await tallyPaymentHandler.createRefund(ctx, input, 500, order, payment, [], method)).toEqual(expected);
   expect(await tallyPaymentHandler.createRefund(ctx.copy(), input, 500, order, payment, [], method)).toEqual(expected);
@@ -34,16 +35,17 @@ it('createRefund settles a till refund with its metadata', async () => {
 
 it('a cash refund leaves as cash, and no cashier key without a cashierRef', async () => {
   withTallyRefund(markTallyRoute(ctx), {
-    clientRefundId: 'r-1', registerId: 'reg-1', sessionId: 's-1', destination: 'cash',
+    clientRefundId: 'r-1', registerId: 'reg-1', sessionId: 's-1', destination: 'cash', lines: [],
   });
   const result = await tallyPaymentHandler.createRefund(ctx, input, 500, order, payment, [], method);
   assert(result && result.metadata);
   expect(result.metadata.tallyMethod).toBe('cash');
+  expect(result.metadata.tallyLines).toEqual([]);
   expect('tallyCashierRef' in result.metadata).toBe(false);
 });
 
 it('outside a till refund, createRefund settles without metadata', async () => {
-  const refundOnly = withTallyRefund(ctx.copy(), refund);
+  const refundOnly = withTallyRefund(ctx.copy(), { ...refund, lines: [] });
   const routeOnly = markTallyRoute(ctx.copy());
   for (const context of [refundOnly, routeOnly, ctx]) {
     expect(await tallyPaymentHandler.createRefund(context, input, 500, order, payment, [], method))
