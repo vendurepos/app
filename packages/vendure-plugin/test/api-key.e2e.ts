@@ -53,7 +53,7 @@ describe('POS till API keys', () => {
     expect(first.channels).toEqual(channels.items);
 
     await adminClient.query(parse(`mutation Update($input: UpdateRoleInput!) { updateRole(input: $input) { id } }`), {
-      input: { id: roleId, permissions: [...POS_TILL_PERMISSIONS, 'ReadOrder'] },
+      input: { id: roleId, permissions: [...POS_TILL_PERMISSIONS, 'ReadPromotion'] },
     });
     const { createChannel } = await adminClient.query(parse(`mutation Channel($input: CreateChannelInput!) {
       createChannel(input: $input) { ... on Channel { id } ... on ErrorResult { message } }
@@ -65,7 +65,7 @@ describe('POS till API keys', () => {
     expect(createChannel.id).toEqual(expect.any(String));
     const extended = (await adminClient.query<{ tallyEnsurePosTillRole: Role }>(ensureRole)).tallyEnsurePosTillRole;
     expect(extended.id).toBe(roleId);
-    expect(new Set(extended.permissions)).toEqual(new Set([...POS_TILL_PERMISSIONS, 'Authenticated', 'ReadOrder']));
+    expect(new Set(extended.permissions)).toEqual(new Set([...POS_TILL_PERMISSIONS, 'Authenticated', 'ReadPromotion']));
     expect(extended.channels.map(item => item.id).sort())
       .toEqual([...first.channels.map(item => item.id), createChannel.id].sort());
 

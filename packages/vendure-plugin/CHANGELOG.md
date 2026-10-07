@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The till role preset (`tallyEnsurePosTillRole`) gains `ReadOrder`, so a till can list the store's order history. An existing `vendurepos-pos-till` role gains it the next time **New POS till key** runs, and keeps the merchant's own additions.
 - A third custom permission, `TallyPosRefund` (`tallyPosRefund`): it may refund a sale at a till once the `order.refund` command lands. The SuperAdmin role holds it, and the till role preset (`tallyEnsurePosTillRole`) does not. Nothing checks it yet, and it never opens the `/tally/v1` routes.
 - A second custom permission, `ApproveTallyPosVariance` (`tallyPosApproveVariance`): it may approve a register close over the variance threshold. The SuperAdmin role holds it. Nothing checks it yet, and it never opens the `/tally/v1` routes, which still need `TallyPosSell` or `CreateOrder`.
 - A command on a superseded session is refused `register_session_superseded` when the command or the session's own open is version 2, so a till that sends later register commands at version 1 (TallyUI 3.8.0) still learns it was taken over; `register_session_closed` stays for a v1 command on a session opened at v1. Migration `TallyPosRegisterOpenVersion1791100000000` adds `openVersion` to `tally_register_session`.

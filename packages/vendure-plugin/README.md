@@ -166,7 +166,7 @@ expression index, so it neither drops nor re-adds it. On start, the server proce
 ### Dashboard: a key for each till
 
 With Vendure's React Dashboard, the API keys page (Settings → API keys) gains **New POS till key**.
-It creates or extends the `vendurepos-pos-till` role, creates a named key with it, and shows the key once.
+It creates or extends the `vendurepos-pos-till` role, creates a named key with it, and shows the key once. The role sells through the plugin, reads the catalogue, the store settings, customers and orders, and creates customers; extending an existing role adds what it lacks and keeps the merchant's own additions.
 
 The key works only in the channel the Dashboard is in when you create it (Vendure's API keys are channel-aware), so switch to the till's channel first. The dialog names it.
 
