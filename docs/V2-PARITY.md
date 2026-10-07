@@ -3,7 +3,7 @@
 This file lists the features of WCPOS v2 and says how far the VendurePOS app has each one, so that choosing the next item never needs a ruling. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
 
 Read on 2026-10-06:
-- **The app:** `main` at `76ca317`, `@tallyui/*` 3.5.1 (3.5.3 in vendurepos/app#168), plugin 0.3.0 with register v2 in vendurepos/app#167.
+- **The app:** `main` at `650ad9f`, `@tallyui/*` 3.8.0, plugin 0.3.0 with register v2 in vendurepos/app#167.
 - **WCPOS:** the WCPOS wiki (`~/Projects/wiki`), i.e. the shipped 1.10 line plus the merged but unreleased 2.0 features.
 
 Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a row names another file.
@@ -95,7 +95,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Open with float, cash in/out, count, close, Z report | 2.0 (RG, CMP) | Has | Register commands v1 (ADR 0003); `apps/pos/e2e/sign-in.spec.ts` "a register day" | — |
-| Resume after a lost till; take-over by another till | 2.0 (RG) | Partial | Store side in vendurepos/app#167 (ADR 0006); the till side comes with the next `@tallyui/*` release | app (a bump) |
+| Resume after a lost till; take-over by another till | 2.0 (RG) | Has | vendurepos/app#167 (ADR 0006) and `@tallyui/*` 3.8.0 (vendurepos/app#175); `apps/pos/e2e/sign-in.spec.ts` "a till that lost its local state resumes its own open session" and "another till takes the register over; …" | — |
 | Approval of an over-variance close | 2.0 (RG) | Partial | The approver is typed and recorded, but the server does not check it (ADR 0003 "Not built: c2c") | TallyUI contract + plugin |
 | Reports: sales, closure history | Free/Pro, still moving (RC) | Missing | Only the Z print (`apps/pos/lib/z-report.ts`); no `GET /tally/v1/registers/{id}` | plugin + TallyUI |
 
@@ -133,8 +133,8 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 
 The next item is the first row here that is not done. Rows marked TallyUI start as a note to the front desk, which dispatches the TV job; this repo then takes the bump.
 
-1. Register v2 store side: vendurepos/app#167 (in review).
-2. The till side of register v2: bump `@tallyui/*` to the release that carries TallyUI#469 and the outbox (#472); prove resume and take-over in an e2e.
+1. Register v2 store side: vendurepos/app#167 (merged). Done.
+2. The till side of register v2: bump `@tallyui/*` to the release that carries TallyUI#469 and the outbox (#472); prove resume and take-over in an e2e. Done.
 3. Order history from the store, not just the outbox. It comes before refunds, which start from an order.
 4. Refunds: a TallyUI contract, then a plugin command, with refunds counted in the register figures.
 5. Email receipt: Vendure's email plugin already sends mail, so this is mostly plugin work behind a TallyUI action.

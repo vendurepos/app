@@ -40,6 +40,9 @@ const CHANNEL_TOKEN = 'vendurepos-dev-pos';
 const USERNAME = 'superadmin';
 // dev/vendure-store/src/constants.ts defines SUPERADMIN_PASSWORD.
 const PASSWORD = 'superadmin';
+// apps/pos/lib/till-ids.ts owns these localStorage keys; keep app code out of the e2e.
+const DEVICE_ID_KEY = 'vendurepos.register_id';
+const BOUND_REGISTER_ID_KEY = 'vendurepos.bound_register_id';
 
 // A sale needs an open register session: opens this till's drawer with a float. On a narrow screen the open card is
 // on the Cart tab.
@@ -49,6 +52,22 @@ async function openRegister(page: Page, float = '100.00') {
   await card.getByTestId('open-register-button').click();
   await expect(card).toHaveCount(0);
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
+}
+
+async function signIn(page: Page) {
+  // Extra contexts do not get the page fixture's CSP observer.
+  await page.addInitScript(() => {
+    window.cspViolations = [];
+    window.addEventListener('securitypolicyviolation', (event) => {
+      window.cspViolations.push(`${event.effectiveDirective} blocked ${event.blockedURI}`);
+    });
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
 }
 
 test('a normal build has no demo', async ({ page }) => {
@@ -1642,4 +1661,149 @@ test('fees, a shipping charge and a custom item, one with a tax class, are appli
   })).json()).data.orders.items;
   // A Standard-class fee would give 2975 instead: the plugin must honour category id 2.
   await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: 2951, shippingWithTax: 595 }]);
+});
+
+test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
+  type RegisterResult = {
+    id: string; status: string;
+    register?: {
+      session?: { id: string; status: string; openingFloatMinor: number };
+      resumed?: { fromSessionId: string }; superseded?: { sessionId: string };
+    };
+    error?: { code: string; data?: { sessionId: string } };
+  };
+  function captureCommands(page: Page) {
+    const commands: SentCommand[] = [];
+    const results = new Map<string, RegisterResult>();
+    page.on('response', async (response) => {
+      if (response.request().method() !== 'POST' || !response.url().endsWith('/tally/v1/commands')) return;
+      commands.push(...response.request().postDataJSON().commands);
+      for (const result of ((await response.json().catch(() => ({}))).results ?? []) as RegisterResult[]) results.set(result.id, result);
+    });
+    return { commands, results };
+  }
+
+  test('a till that lost its local state resumes its own open session', async ({ browser, page: a }) => {
+    test.setTimeout(180_000);
+    const contextC = await browser.newContext();
+    try {
+      const aCapture = captureCommands(a);
+      await signIn(a);
+      await a.getByTestId('product-tile-Tally Fixture Mug').click();
+      await openRegister(a, '100.00');
+      await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
+      const liveId = aCapture.commands.find(({ type }) => type === 'register.session.open')!.payload.sessionId;
+      const ids = await a.evaluate(([deviceKey, registerKey]) => ({
+        [deviceKey]: localStorage.getItem(deviceKey)!, [registerKey]: localStorage.getItem(registerKey)!,
+      }), [DEVICE_ID_KEY, BOUND_REGISTER_ID_KEY]);
+      await contextC.addInitScript((ids) => {
+        for (const [key, value] of Object.entries(ids)) {
+          if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+        }
+      }, ids);
+      const c = await contextC.newPage();
+      const cCapture = captureCommands(c);
+      await signIn(c);
+      await c.getByTestId('product-tile-Tally Fixture Mug').click();
+      await expect(c.getByTestId('open-register-card')).toBeVisible();
+      await openRegister(c, '50.00');
+      await expect.poll(() => cCapture.results.get(cCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
+      const resumedOpen = cCapture.commands.find(({ type }) => type === 'register.session.open')!;
+      expect(cCapture.results.get(resumedOpen.id)?.register).toMatchObject({
+        session: { id: liveId, status: 'open', openingFloatMinor: 10000 },
+        resumed: { fromSessionId: resumedOpen.payload.sessionId },
+      });
+      await expect(c.getByTestId('register-conflict')).toHaveCount(0);
+      await c.getByTestId('register-open-panel').click();
+      await c.getByTestId('register-panel').getByTestId('register-panel-paid-in').click();
+      const sheet = c.getByTestId('movement-sheet');
+      await sheet.getByTestId('movement-amount').fill('5.00');
+      await sheet.getByTestId('movement-reason').fill('Resume check');
+      await sheet.getByTestId('movement-confirm').click();
+      await expect(sheet).toHaveCount(0);
+      await expect.poll(() => cCapture.results.get(cCapture.commands.find(({ type, payload }) => type === 'register.movement.record' && payload.reason === 'Resume check')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
+      expect(await cspViolations(a)).toEqual([]);
+      expect(await cspViolations(c)).toEqual([]);
+    } finally {
+      await contextC.close();
+    }
+  });
+
+  test('another till takes the register over; the first till is told; a third chooses another register', async ({ browser, page: a }) => {
+    test.setTimeout(180_000);
+    const contextB = await browser.newContext();
+    try {
+      const aCapture = captureCommands(a);
+      await signIn(a);
+      await a.getByTestId('product-tile-Tally Fixture Mug').click();
+      await openRegister(a, '100.00');
+      await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
+      const liveId = aCapture.commands.find(({ type }) => type === 'register.session.open')!.payload.sessionId;
+      const boundId = await a.evaluate((key) => localStorage.getItem(key)!, BOUND_REGISTER_ID_KEY);
+      await contextB.addInitScript(({ key, value }) => {
+        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+      }, { key: BOUND_REGISTER_ID_KEY, value: boundId });
+      const b = await contextB.newPage();
+      const bCapture = captureCommands(b);
+      await signIn(b);
+      await b.getByTestId('product-tile-Tally Fixture Mug').click();
+      await b.getByTestId('open-register-amount').fill('20.00');
+      await b.getByTestId('open-register-button').click();
+      await expect(b.getByTestId('register-conflict')).toBeVisible();
+      await expect(b.getByTestId('register-conflict')).toContainText('This register is open on another till');
+      await expect(b.getByTestId('register-take-over')).toBeVisible();
+      await expect.poll(() => bCapture.results.get(bCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? ''), { timeout: 30_000 }).toMatchObject({
+        status: 'rejected', error: { code: 'register_session_already_open', data: { sessionId: liveId } },
+      });
+      await b.getByTestId('register-take-over').click();
+      await expect(b.getByTestId('register-conflict')).toHaveCount(0);
+      await expect(b.getByTestId('register-open-panel')).toBeVisible();
+      const takenOpen = () => bCapture.commands.filter(({ type }) => type === 'register.session.open')
+        .map(({ id }) => bCapture.results.get(id)).find((result) => result?.status === 'applied' && result.register?.superseded?.sessionId === liveId);
+      await expect.poll(takenOpen, { timeout: 30_000 }).toBeDefined();
+      const takenId = takenOpen()!.register!.session!.id;
+      expect(takenId).not.toBe(liveId);
+      await a.getByTestId('register-open-panel').click();
+      await a.getByTestId('register-panel').getByTestId('register-panel-paid-in').click();
+      const sheet = a.getByTestId('movement-sheet');
+      await sheet.getByTestId('movement-amount').fill('5.00');
+      await sheet.getByTestId('movement-reason').fill('After take-over');
+      await sheet.getByTestId('movement-confirm').click();
+      await expect(sheet).toHaveCount(0);
+      await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type, payload }) => type === 'register.movement.record' && payload.reason === 'After take-over')?.id ?? ''), { timeout: 30_000 }).toMatchObject({
+        status: 'rejected', error: { code: 'register_session_superseded' },
+      });
+      await expect(a.getByTestId('open-register-card')).toBeVisible();
+      await expect(a.getByTestId('register-open-panel')).toHaveCount(0);
+      const contextD = await browser.newContext();
+      try {
+        await contextD.addInitScript(({ key, value }) => {
+          if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+        }, { key: BOUND_REGISTER_ID_KEY, value: boundId });
+        const d = await contextD.newPage();
+        const dCapture = captureCommands(d);
+        await signIn(d);
+        await d.getByTestId('product-tile-Tally Fixture Mug').click();
+        await d.getByTestId('open-register-amount').fill('30.00');
+        await d.getByTestId('open-register-button').click();
+        await expect(d.getByTestId('register-conflict')).toBeVisible();
+        await d.getByTestId('register-choose-another').click();
+        await expect(d.getByTestId('register-conflict')).toHaveCount(0);
+        await expect(d.getByTestId('open-register-card')).toBeVisible();
+        await expect.poll(() => d.evaluate((key) => localStorage.getItem(key), BOUND_REGISTER_ID_KEY)).not.toBe(boundId);
+        await openRegister(d, '30.00');
+        const latestOpen = () => dCapture.results.get(dCapture.commands.filter(({ type }) => type === 'register.session.open').at(-1)?.id ?? '');
+        await expect.poll(() => latestOpen()?.status, { timeout: 30_000 }).toBe('applied');
+        expect(latestOpen()?.register?.superseded).toBeUndefined();
+        expect(latestOpen()?.register?.resumed).toBeUndefined();
+        expect(await cspViolations(a)).toEqual([]);
+        expect(await cspViolations(b)).toEqual([]);
+        expect(await cspViolations(d)).toEqual([]);
+      } finally {
+        await contextD.close();
+      }
+    } finally {
+      await contextB.close();
+    }
+  });
 });
