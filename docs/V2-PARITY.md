@@ -114,7 +114,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 |---|---|---|---|---|
 | Connect and sign in | Free (FS) | Has | `apps/pos/app/sign-in.tsx`, password or till key (ADR 0004) | — |
 | Sign in again after a 401; session list | Free (FS) | Partial | `apps/pos/lib/sign-in-again.tsx`; no session list | TallyUI |
-| Roles and permissions | Free (PERM) | Has | Two Vendure custom permissions, assigned to Vendure roles (medusapos ADR 0023, "What vendurepos can copy"). `TallyPosSell` (or `CreateOrder`) gates every `/tally/v1` route, and a 403 is refused at sign-in. `ApproveTallyPosVariance` marks a manager and never opens those routes: `packages/vendure-plugin/test/permissions.e2e.ts`. The till role preset is `tallyEnsurePosTillRole`. The approval check itself is the approval row | — |
+| Roles and permissions | Free (PERM) | Partial | Two Vendure custom permissions, assigned to Vendure roles (medusapos ADR 0023, "What vendurepos can copy"). `TallyPosSell` (or `CreateOrder`) gates every `/tally/v1` route, and a 403 is refused at sign-in. `ApproveTallyPosVariance` marks a manager and never opens those routes: `packages/vendure-plugin/test/permissions.e2e.ts`. The till role preset is `tallyEnsurePosTillRole`. Missing: nothing checks `ApproveTallyPosVariance` until the approval route (`POST /tally/v1/register-approvals`, the approval row) lands | TallyUI contract + plugin |
 | Switching cashiers | — (WCPOS lacks it too) | Missing | M7 | TallyUI |
 | Settings screen | Free (FS, MS) | Partial | Setting by setting in **Settings, one by one** below; what is left there belongs to TallyUI or to other rows | TallyUI |
 
