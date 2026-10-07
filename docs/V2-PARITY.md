@@ -87,7 +87,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Order history | Pro (MS) | Partial | `OrdersList` shows only this till's outbox (VA5), not the store's orders | TallyUI + app |
-| Refunds | Pro (CR, PRO) | Missing | No refund command; refunds stay out of every register figure (ADR 0003). The store side is Vendure's own refund (`refundOrder`) | TallyUI contract, then plugin |
+| Refunds | Pro (CR, PRO) | Missing | No refund command; refunds stay out of every register figure (ADR 0003). The store side is Vendure's own refund (`refundOrder`). The plugin declares `TallyPosRefund`, which the command will check (Front desk, 2026-10-07: online only, POS orders only in v1, refused with no open session). TallyUI's `order.refund` v1 contract comes first | TallyUI contract, then plugin |
 | Promotions and coupon codes | 2.0 (CMP, PRO) | Missing | Vendure promotions, with or without a coupon code, are off on POS orders (ADR 0002) | TallyUI contract, then plugin |
 
 ## Registers, cash and reports
@@ -114,7 +114,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 |---|---|---|---|---|
 | Connect and sign in | Free (FS) | Has | `apps/pos/app/sign-in.tsx`, password or till key (ADR 0004) | — |
 | Sign in again after a 401; session list | Free (FS) | Partial | `apps/pos/lib/sign-in-again.tsx`; no session list | TallyUI |
-| Roles and permissions | Free (PERM) | Partial | Two Vendure custom permissions, assigned to Vendure roles (medusapos ADR 0023, "What vendurepos can copy"). `TallyPosSell` (or `CreateOrder`) gates every `/tally/v1` route, and a 403 is refused at sign-in. `ApproveTallyPosVariance` marks a manager and never opens those routes: `packages/vendure-plugin/test/permissions.e2e.ts`. The till role preset is `tallyEnsurePosTillRole`. Missing: nothing checks `ApproveTallyPosVariance` until the approval route (`POST /tally/v1/register-approvals`, the approval row) lands | TallyUI contract + plugin |
+| Roles and permissions | Free (PERM) | Partial | Three Vendure custom permissions, assigned to Vendure roles (medusapos ADR 0023, "What vendurepos can copy"). `TallyPosSell` (or `CreateOrder`) gates every `/tally/v1` route, and a 403 is refused at sign-in. `ApproveTallyPosVariance` marks a manager and `TallyPosRefund` a till that may refund; neither opens those routes: `packages/vendure-plugin/test/permissions.e2e.ts`. The till role preset is `tallyEnsurePosTillRole`. Missing: nothing checks `ApproveTallyPosVariance` until the approval route (`POST /tally/v1/register-approvals`, the approval row) lands, nor `TallyPosRefund` until the refund command (the Refunds row) does | TallyUI contract + plugin |
 | Switching cashiers | — (WCPOS lacks it too) | Missing | M7 | TallyUI |
 | Settings screen | Free (FS, MS) | Partial | Setting by setting in **Settings, one by one** below; what is left there belongs to TallyUI or to other rows | TallyUI |
 
