@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { OrderHistoryRow } from '@tallyui/components';
 import { ConnectorUnauthorizedError } from '@tallyui/core';
 import { listVendureOrders, type VendureOrderSummary } from '@tallyui/connector-vendure';
 import { sessionContext, type Session } from './session';
@@ -9,6 +10,22 @@ export const ORDER_HISTORY_TAKE = 25;
 export const ORDER_HISTORY_FORBIDDEN_TEXT = "This till can't read the store's orders: its role lacks the Read order permission. Ask the store's admin to add it.";
 export const ORDER_HISTORY_FAILED_TEXT = "Can't load the store's orders.";
 export type OrderHistoryNotice = { text: string; retry: boolean };
+
+/** Vendure's order state code as words: PaymentSettled → "Payment settled". Custom states use the same PascalCase form. */
+export function orderStateLabel(state: string): string {
+  const words = state.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  return words.slice(0, 1) + words.slice(1).toLowerCase();
+}
+
+/** One store order as an OrdersList history row; a POS sale keeps its client id so the till's own row replaces it. */
+export function toOrderHistoryRow(order: VendureOrderSummary): OrderHistoryRow {
+  return {
+    id: order.id, reference: order.code, placedAt: order.orderPlacedAt ?? order.updatedAt,
+    totalMinor: order.totalWithTax, currency: order.currencyCode, itemCount: order.totalQuantity,
+    stateLabel: orderStateLabel(order.state),
+    ...(order.customFields?.tallyClientOrderId ? { clientOrderId: order.customFields.tallyClientOrderId } : {}),
+  };
+}
 
 export function orderHistoryNotice(error: unknown): OrderHistoryNotice {
   if (error instanceof ConnectorUnauthorizedError) {

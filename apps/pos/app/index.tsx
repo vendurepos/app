@@ -22,7 +22,7 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
-import { useOrderHistory } from '../lib/order-history';
+import { toOrderHistoryRow, useOrderHistory } from '../lib/order-history';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
@@ -78,6 +78,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const history = useOrderHistory(session, ordersOpen);
+  const historyRows = useMemo(() => history.orders.map(toOrderHistoryRow), [history.orders]);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
   const [registerId] = useState(() => deviceId(defaultStore()));
@@ -256,7 +257,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               ) : null}
             </HStack>
           ) : null}
-          <OrdersList orders={outbox.recent} onRetry={outbox.requeue} stuck={outbox.state.stuck}
+          <OrdersList orders={outbox.recent} onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows}
             formatDate={(iso) => new Date(iso).toLocaleString()} />
         </VStack>
       ) : null}
