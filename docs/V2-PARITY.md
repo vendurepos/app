@@ -1,6 +1,6 @@
-# WCPOS v2 parity: what the Vendure app has
+# Core POS features for Vendure: what the app has
 
-This file lists the features of WCPOS v2 and says how far the VendurePOS app has each one, so that choosing the next item never needs a ruling. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
+This file lists the core POS features a Vendure merchant expects and says how far the VendurePOS app has each one, so that choosing the next item never needs a ruling. WCPOS v2 is the reference for which features a POS needs, and for taste. It is not a spec for how they work. Each row is built Vendure's own way: its roles and permissions, channels, channel prices, promotions and auth (Paul, 2026-10-07: "We're not trying to force Medusa to act like WooCommerce. We're playing to the strengths of each different platform."). Where WCPOS's mechanism is WooCommerce's own, the row names Vendure's equivalent, or says N/A when Vendure has none and a merchant would not miss it. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
 
 Read on 2026-10-06:
 - **The app:** `main` at `650ad9f`, `@tallyui/*` 3.8.0, plugin 0.3.0 with register v2 in vendurepos/app#167.
@@ -9,7 +9,7 @@ Read on 2026-10-06:
 Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a row names another file.
 
 **Key**
-- **WCPOS tier:** Free, Pro, or 2.0 (merged, not yet released).
+- **WCPOS tier:** where WCPOS has the feature: Free, Pro, or 2.0 (merged, not yet released). It says the feature exists, not how Vendure must do it.
 - **Status:** Has, Partial, Missing, or N/A (no Vendure meaning).
 - **Owner:** where the missing part belongs.
   - **TallyUI:** platform-neutral; a TV job there, then a version bump here.
@@ -49,9 +49,9 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 |---|---|---|---|---|
 | Grid/table toggle, category navigation, search | Free (FS, RS) | Has | TallyUI `Catalogue`; e2e "switches the products to a table" | — |
 | Variations: one tile, then pick the variant | Free (RS) | Partial | Each variant is its own item. TallyUI ships `VariantPicker`, but neither `Catalogue` nor the app uses it | TallyUI, then app |
-| Browse by tag or brand; filter chips | Free (RS) | Missing | — | TallyUI |
-| Stock, price and cost editing | Pro (PRO) | Missing | `stock.adjust` is in PLAN's "M6 proper" | TallyUI + plugin |
-| Per-store pricing | Pro (PRO) | Has | A store is a Vendure channel, and a variant's price is per channel in Vendure core. The till reads the signed-in channel's price, and the plugin records the as-sold price with no overrides: `packages/vendure-plugin/test/store-pricing.e2e.ts`. WCPOS Pro's per-store *sale* price has no Vendure field; Vendure does that with promotions | — |
+| Browse by facet (Vendure's tags and brands); filter chips | Free (RS) | Missing | Categories are Vendure collections (`getCategories`). The connector syncs each variant's `facetValues`, but nothing browses or filters by them | TallyUI |
+| Stock and price editing at the till | Pro (PRO) | Missing | In Vendure's terms: stock per stock location, and the price in the signed-in channel. `stock.adjust` is in PLAN's "M6 proper". A cost price is not a Vendure core field | TallyUI + plugin |
+| Per-store pricing | Pro (PRO) | Has | A store is a Vendure channel, and a variant's price is per channel in Vendure core. The till reads the signed-in channel's price, and the plugin records the as-sold price with no overrides: `packages/vendure-plugin/test/store-pricing.e2e.ts`. A sale price in one store is a Vendure promotion in that channel (the promotions row) | — |
 
 ## Customers
 
@@ -70,7 +70,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Split payment | 2.0 (CMP) | Has | TallyUI `SplitTender`; e2e "splits a sale" | — |
 | Offline checkout | 2.0 (CMP) | Has | VA5/VA7; `apps/pos/e2e/offline.spec.ts` | — |
 | Gateways and terminals (Stripe, SumUp, Mollie), Tap to Pay | Pro (PRO, PC) | Missing | Only the plugin's `tally-pos` handler | TallyUI + plugin |
-| Tips; order status per gateway | Free (FS, PC) | Missing | Every sale settles as PaymentSettled | TallyUI + plugin |
+| Tips; a payment that is authorized before it settles | Free (FS, PC) | Missing | Every sale settles as PaymentSettled. WCPOS sets a WooCommerce order status per gateway; in Vendure the payment method's handler decides each payment's state | TallyUI + plugin |
 | Customer-facing display | Pro (CMP) | Missing | — | TallyUI |
 
 ## Receipts and printing
@@ -87,8 +87,8 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Order history | Pro (MS) | Partial | `OrdersList` shows only this till's outbox (VA5), not the store's orders | TallyUI + app |
-| Refunds | Pro (CR, PRO) | Missing | No refund command; refunds stay out of every register figure (ADR 0003) | TallyUI contract, then plugin |
-| Coupons | 2.0 (CMP, PRO) | Missing | Vendure promotions are off on POS orders (ADR 0002) | TallyUI contract, then plugin |
+| Refunds | Pro (CR, PRO) | Missing | No refund command; refunds stay out of every register figure (ADR 0003). The store side is Vendure's own refund (`refundOrder`) | TallyUI contract, then plugin |
+| Promotions and coupon codes | 2.0 (CMP, PRO) | Missing | Vendure promotions, with or without a coupon code, are off on POS orders (ADR 0002) | TallyUI contract, then plugin |
 
 ## Registers, cash and reports
 
@@ -120,7 +120,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 
 ## Settings, one by one
 
-WCPOS v2's Settings groups (`architecture/client/navigation-and-settings.md`, `architecture/client/store-settings.md`) against `apps/pos/app/settings.tsx`. A setting that needs the plugin gets its own row in the tables above; none does today beyond the rows already named.
+The settings a Vendure merchant expects on a till, checked against `apps/pos/app/settings.tsx`. WCPOS v2's Settings groups (`architecture/client/navigation-and-settings.md`, `architecture/client/store-settings.md`) are the checklist. Where Vendure keeps a setting on the channel, the till reads it from there and has no local copy. A setting that needs the plugin gets its own row in the tables above; none does today beyond the rows already named.
 
 | Setting | WCPOS group (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
@@ -129,15 +129,15 @@ WCPOS v2's Settings groups (`architecture/client/navigation-and-settings.md`, `a
 | Register | General (RG) | Has | Bound at the first open; "Choose another register" rebinds it (ADR 0006) | — |
 | Language, locale | General (INT) | Missing | The "Translations, RTL, store locale" row | TallyUI |
 | Currency | General (store-settings) | Has | The channel's currency, read at sign-in; Vendure owns it | — |
-| Currency position, separators, decimals | General (store-settings, app-editable in WCPOS) | Missing | TallyUI's `formatMoney` takes only a locale and its components pass none; decimals follow ISO 4217 (`minorUnitDigits`) | TallyUI |
+| Money formatted for the store (symbol position, separators) | General (store-settings) | Missing | WooCommerce stores the format as settings; Vendure has none, so the format follows the channel's language and currency through `Intl`. TallyUI's `formatMoney` takes only a locale and its components pass none; decimals follow ISO 4217 (`minorUnitDigits`) | TallyUI |
 | Default customer for new sales | General (`default_customer`) | Has | Settings › Customers; `apps/pos/e2e/demo.spec.ts` "a default customer starts each new sale and can be removed from one" | — |
 | Cashier as the default customer | General (`default_customer_is_cashier`) | N/A | A Vendure administrator is not a customer | — |
-| Order status per gateway | Checkout (FS) | Missing | The "Tips; order status per gateway" row | TallyUI + plugin |
+| Order status per gateway | Checkout (FS) | N/A | WooCommerce order statuses. In Vendure the payment method's handler decides the payment's state, so there is no till setting (the "Tips; a payment that is authorized before it settles" row) | — |
 | Customer required | — | N/A | WCPOS has no such setting (FS "Guest orders") | — |
 | Prevent overselling | Checkout (FS) | Partial | Its own row under Selling and cart | TallyUI, then app |
 | Print the receipt after each sale | Printing (printer profile auto-print) | Has | Settings › Printing, web only (native has no print path); `apps/pos/e2e/demo.spec.ts` "with printing after each sale on, the receipt prints once by itself" | — |
 | Prices entered with tax | Tax: Calculation (store-settings) | Has | The channel's `pricesIncludeTax`, read at sign-in | — |
-| Prices shown with or without tax | Tax: Display (store-settings) | Missing | WCPOS mirrors WooCommerce's display flags. Vendure has no separate display flag, and TallyUI's catalogue and cart show prices as entered | TallyUI |
+| Prices shown with or without tax | Tax: Display (store-settings) | N/A | WooCommerce's separate display flags. Vendure's answer is the channel's `pricesIncludeTax` (the row above), and TallyUI's catalogue and cart show prices that way | — |
 | Tax rates | Tax: Tax Rates | Partial | The cart and receipt show tax per rate (`TaxRows`); no screen lists the rates | TallyUI |
 | Receipt template | Printing (FR) | Missing | The "Receipt templates, gallery, fiscal mode" row | TallyUI |
 | Printers | Printing (FR) | Missing | The "Thermal ESC/POS, cloud printing" row | TallyUI |
@@ -157,7 +157,7 @@ WCPOS v2's Settings groups (`architecture/client/navigation-and-settings.md`, `a
 | Keyboard-wedge scan, minimum length, barcode field | Free (BS) | Has | `apps/pos/lib/use-wedge-scanner.ts`, `docs/scan-policy.md` | — |
 | Camera scan; scan sounds | Free (BS) | Missing | — | TallyUI |
 | Store tax settings; tax per rate | Free (FS) | Has | TallyUI `TaxProvider`, `TaxRows` | — |
-| Multi-store | Pro (PRO) | Missing | One channel per sign-in | TallyUI + plugin |
+| Multi-store | Pro (PRO) | Missing | A Vendure store is a channel, and each channel has its own prices (the per-store pricing row). A till signs in to one channel; moving to another means signing in again | TallyUI + plugin |
 | Translations, RTL, store locale | Free (INT) | Missing | English only | TallyUI |
 | Extension directory, add-ons, Pro upsell | Free/Pro (FS, PRO) | N/A | — | — |
 
@@ -173,5 +173,5 @@ The next item is the first row here that is not done. Rows marked TallyUI start 
 6. Reports and closure history: `GET /tally/v1/registers/{id}` in the plugin.
 7. The variant picker in the catalogue (TallyUI's `VariantPicker` exists).
 8. Camera scan.
-9. Coupons (Vendure promotions on POS orders: a contract question first).
+9. Promotions and coupon codes (Vendure promotions on POS orders: a contract question first).
 10. Everything else, in table order.
