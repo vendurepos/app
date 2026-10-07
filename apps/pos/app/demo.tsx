@@ -55,7 +55,7 @@ export default function DemoScreen() {
             </VStack>
             <HStack space="md">
               <Link href="https://vendurepos.com" target="_blank" rel="noopener" testID="demo-link-site" className="text-sm text-primary">VendurePOS</Link>
-              <Link href="https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md" target="_blank" rel="noopener" testID="demo-link-quickstart" className="text-sm text-primary">Quick start for your store</Link>
+              <Link href="https://vendurepos.com/docs/quick-start" target="_blank" rel="noopener" testID="demo-link-quickstart" className="text-sm text-primary">Quick start for your store</Link>
             </HStack>
           </VStack>
         </CardContent>

@@ -519,7 +519,30 @@ test('the demo page says what to try and links to the site and the quick start',
   }
   await expect(page.getByTestId('demo-try-device-key')).toContainText('device key');
   await expect(page.getByTestId('demo-link-site')).toHaveAttribute('href', /^https:\/\/vendurepos\.com\/?$/);
-  await expect(page.getByTestId('demo-link-quickstart')).toHaveAttribute('href', 'https://github.com/vendurepos/app/blob/main/docs/QUICKSTART.md');
+  await expect(page.getByTestId('demo-link-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
+  await expect(page.getByTestId('demo-links')).toHaveCount(0);
+  expect(cspConsole).toEqual([]);
+});
+
+test('signed in, the demo banner links to the site, the quick start and GitHub, and hides them without touching Reset demo', async ({ page }) => {
+  const cspConsole: string[] = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('demo-links')).toBeVisible();
+  await expect(page.getByTestId('demo-links-site')).toHaveAttribute('href', 'https://vendurepos.com');
+  await expect(page.getByTestId('demo-links-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
+  await expect(page.getByTestId('demo-links-github')).toHaveAttribute('href', 'https://github.com/vendurepos/app');
+  await page.getByTestId('demo-links-dismiss').click();
+  await expect(page.getByTestId('demo-links')).toHaveCount(0);
+  await expect(page.getByTestId('demo-banner')).toContainText('Demo: everything stays in this browser');
+  await expect(page.getByTestId('demo-reset')).toBeVisible();
+  await expect(page.getByTestId('demo-reset')).toBeEnabled();
+  await Promise.all([page.waitForEvent('load'), page.getByTestId('demo-reset').click()]);
+  await expect(page).toHaveURL(/\/demo$/);
   expect(cspConsole).toEqual([]);
 });
 
