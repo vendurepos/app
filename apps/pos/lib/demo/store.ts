@@ -101,6 +101,10 @@ function fingerprint({ type, version, payload }: Command): string {
       ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 }
 
+function demoOrderCode(id: string): string {
+  return `DEMO-${id.padStart(6, '0')}`;
+}
+
 export class DemoStore {
   private state: State;
   constructor(private storage?: DemoStorage) {
@@ -163,6 +167,26 @@ export class DemoStore {
     }));
   }
 
+  /** The store's orders in the connector's VendureOrderSummary shape (TallyUI 3.9.0 listVendureOrders). */
+  orderSummaries(): Record<string, unknown>[] {
+    return this.state.orders.map((order, index) => {
+      const id = String(index + 1);
+      const customer = this.state.customers.find(customer =>
+        customer.id === order.customer?.customerId || customer.emailAddress === order.customer?.email);
+      return {
+        id, code: demoOrderCode(id), state: 'PaymentSettled', orderPlacedAt: order.createdAt, updatedAt: order.createdAt,
+        currencyCode: order.currency, totalQuantity: order.lines.reduce((sum, line) => sum + line.quantity, 0),
+        total: order.totalMinor - order.taxMinor, totalWithTax: order.totalMinor,
+        customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, emailAddress: customer.emailAddress } : null,
+        customFields: {
+          tallyClientOrderId: order.clientOrderId, tallySaleAt: order.createdAt,
+          tallyRegisterId: order.registerId ?? null, tallySessionId: order.sessionId ?? null, tallyCashierRef: order.cashierRef ?? null,
+          tallyRejected: false, tallyRejectedClientOrderId: null,
+        },
+      };
+    });
+  }
+
   apply(command: Command): CommandResult {
     const { id, type, version, payload: p } = command;
     const refuse = (code: string, message: string, data?: Record<string, unknown>): CommandResult =>
@@ -203,7 +227,7 @@ export class DemoStore {
         }
       }
       const orderId = String(this.state.orders.length);
-      result.serverRefs = { orderId, displayId: `DEMO-${orderId.padStart(6, '0')}`, totalMinor: p.totalMinor };
+      result.serverRefs = { orderId, displayId: demoOrderCode(orderId), totalMinor: p.totalMinor };
     } else if (type === 'register.session.open') {
       const winner = Object.values(this.state.sessions).find(session => session.registerId === p.registerId && session.status !== 'closed');
       if (winner) result = refuse('register_session_already_open', `Register ${p.registerId} already has session ${winner.sessionId} open`, { sessionId: winner.sessionId });

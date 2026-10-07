@@ -3,7 +3,7 @@
 This file lists the core POS features a Vendure merchant expects and says how far the VendurePOS app has each one, so that choosing the next item never needs a ruling. WCPOS v2 is the reference for which features a POS needs, and for taste. It is not a spec for how they work. Each row is built Vendure's own way: its roles and permissions, channels, channel prices, promotions and auth (Paul, 2026-10-07: "We're not trying to force Medusa to act like WooCommerce. We're playing to the strengths of each different platform."). Where WCPOS's mechanism is WooCommerce's own, the row names Vendure's equivalent, or says N/A when Vendure has none and a merchant would not miss it. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
 
 Read on 2026-10-06:
-- **The app:** `main` at `650ad9f`, `@tallyui/*` 3.8.0, plugin 0.3.0 with register v2 in vendurepos/app#167.
+- **The app:** `main` at `650ad9f`, `@tallyui/*` 3.9.0, plugin 0.3.0 with register v2 in vendurepos/app#167.
 - **WCPOS:** the WCPOS wiki (`~/Projects/wiki`), i.e. the shipped 1.10 line plus the merged but unreleased 2.0 features.
 
 Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a row names another file.
@@ -86,7 +86,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
-| Order history | Pro (MS) | Partial | `OrdersList` shows only this till's outbox (VA5), not the store's orders | TallyUI + app |
+| Order history | Pro (MS) | Partial | The Orders panel fetches the store's 25 newest placed orders (`listVendureOrders`; the till role preset has `ReadOrder`, and a role without it gets a panel notice: `apps/pos/e2e/sign-in.spec.ts` "a role without Read order sees a notice in the Orders panel …"); the demo answers the same query. `OrdersList` still shows only this till's outbox (VA5) until TallyUI 3.9.1 renders history rows | TallyUI 3.9.1, then app |
 | Refunds | Pro (CR, PRO) | Missing | No refund command; refunds stay out of every register figure (ADR 0003). The store side is Vendure's own refund (`refundOrder`). The plugin declares `TallyPosRefund`, which the command will check (Front desk, 2026-10-07: online only, POS orders only in v1, refused with no open session). TallyUI's `order.refund` v1 contract comes first | TallyUI contract, then plugin |
 | Promotions and coupon codes | 2.0 (CMP, PRO) | Missing | Vendure promotions, with or without a coupon code, are off on POS orders (ADR 0002) | TallyUI contract, then plugin |
 

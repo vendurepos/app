@@ -1591,6 +1591,19 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
   const result = (await response.json()).results.find(({ id }: { id: string }) => id === command.id);
   expect(result.status).toBe('applied');
 
+  const history = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith('/admin-api') && (response.request().postData() ?? '').includes('query Orders'));
+  await page.getByTestId('orders-open').click();
+  const historyResponse = await history;
+  expect(historyResponse.status()).toBe(200);
+  const historyBody = await historyResponse.json();
+  // Vendure refuses a missing ReadOrder with status 200 and errors, so the body is what proves the till role reads orders.
+  expect(historyBody.errors).toBeUndefined();
+  expect(historyBody.data.orders.items.map((order: { customFields: { tallyClientOrderId: string | null } }) => order.customFields.tallyClientOrderId))
+    .toContain(command.payload.clientOrderId);
+  await expect(page.getByTestId('orders-history-notice')).toHaveCount(0);
+  await page.getByTestId('orders-close').click();
+
   await admin('mutation ($ids: [ID!]!) { deleteApiKeys(ids: $ids) { result } }', { ids: [key.entityId] });
   const violations = await cspViolations(page);
   await page.reload();
@@ -1903,6 +1916,56 @@ test('a password account without POS access is refused at sign-in and keeps no s
   await expect(page.getByTestId('sign-in-error')).toHaveText("This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).");
   await expect(page).toHaveURL(/\/sign-in$/);
   expect(await page.evaluate(() => localStorage.getItem('vendurepos.session'))).toBeNull();
+  await expectCspMeta(page);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+test('a role without Read order sees a notice in the Orders panel and is not asked to sign in again', async ({ page }) => {
+  const login = await page.request.post(`${STORE_URL}/admin-api`, {
+    data: {
+      query: 'mutation ($username: String!, $password: String!) { login(username: $username, password: $password) { __typename } }',
+      variables: { username: USERNAME, password: PASSWORD },
+    },
+  });
+  expect(login.ok()).toBe(true);
+  const token = login.headers()['vendure-auth-token'];
+  expect(token).toBeTruthy();
+  const admin = async (query: string, variables: Record<string, unknown> = {}) => {
+    const response = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN }, data: { query, variables },
+    });
+    expect(response.ok()).toBe(true);
+    const result = await response.json();
+    expect(result.errors).toBeUndefined();
+    return result.data;
+  };
+  const { activeChannel } = await admin('query { activeChannel { id } }');
+  const suffix = Date.now();
+  const { createRole: role } = await admin('mutation ($input: CreateRoleInput!) { createRole(input: $input) { id } }', {
+    input: {
+      code: `e2e-no-orders-${suffix}`, description: 'E2E without Read order',
+      permissions: ['TallyPosSell', 'ReadCatalog', 'ReadSettings', 'ReadCustomer'], channelIds: [activeChannel.id],
+    },
+  });
+  const email = `no-orders-${suffix}@e2e.example`;
+  const password = 'no-orders-password';
+  await admin('mutation ($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }', {
+    input: { firstName: 'No', lastName: 'Orders', emailAddress: email, password, roleIds: [role.id] },
+  });
+
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(email);
+  await page.getByTestId('sign-in-password').fill(password);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await page.getByTestId('orders-open').click();
+  await expect(page.getByTestId('orders-history-notice')).toHaveText("This till can't read the store's orders: its role lacks the Read order permission. Ask the store's admin to add it.");
+  await expect(page.getByTestId('orders-history-retry')).toHaveCount(0);
+  await expect(page.getByTestId('sign-in-again')).toHaveCount(0);
+  await expect(page.getByTestId('orders-notice')).toHaveCount(0);
   await expectCspMeta(page);
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);

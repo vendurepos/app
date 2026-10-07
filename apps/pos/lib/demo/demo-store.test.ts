@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createVendureConnector, createVendureVariantFeedReplication } from '@tallyui/connector-vendure';
+import { createVendureConnector, createVendureVariantFeedReplication, listVendureOrders } from '@tallyui/connector-vendure';
 import { isCommandBatchResponse, type AnyCommandEnvelope, type CommandEnvelope, type OrderCreatePayload, type RegisterCommandEnvelope } from '@tallyui/core';
 import { parseCommandResult } from '@tallyui/core/server';
 import { signIn } from '../sign-in';
 import { sessionContext, type Session } from '../session';
 import { orderTransport } from '../order-transport';
+import { loadOrderHistory } from '../order-history';
 import { readCapabilities } from '../use-sale-settings';
 import { logout } from '../logout';
 import { barcodeOf, CATALOGUE } from './catalogue';
@@ -143,6 +144,35 @@ it('seeds three historic server orders without changing the till stock baseline'
     const seeded = CATALOGUE.flatMap(product => product.variants).find(seeded => seeded.sku === variant.sku)!;
     expect(variant.stockLevels[0].stockOnHand).toBe(seeded.shopFloorStock);
   }
+});
+
+it('lists the seeded orders newest first through the real connector, then a sale, and the seeds again after Reset demo', async () => {
+  const session = await signedIn();
+  const seeded = await loadOrderHistory(session);
+  expect(seeded).toHaveProperty('orders');
+  if (!('orders' in seeded)) throw new Error(seeded.notice.text);
+  expect(seeded.orders.map(order => order.id)).toEqual(['3', '2', '1']);
+  expect(seeded.orders[0]).toMatchObject({
+    code: 'DEMO-000003', state: 'PaymentSettled', orderPlacedAt: '2025-12-30T14:00:00.000Z',
+    currencyCode: 'EUR', totalQuantity: 1,
+    customer: { id: 'c1', firstName: 'Ada', lastName: 'Lovelace', emailAddress: 'ada@demo.vendurepos.com' },
+    customFields: { tallyClientOrderId: 'seed-order-3' },
+  });
+  const limited = await listVendureOrders(sessionContext(session), { take: 2 });
+  expect(limited.items).toHaveLength(2);
+  expect(limited.totalItems).toBe(3);
+  expect((await send(session, ORDER))[0].status).toBe('applied');
+  expect(seeded.orders[0].totalWithTax).toBe(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[2].totalMinor);
+  const sold = await loadOrderHistory(session);
+  expect(sold).toHaveProperty('orders');
+  if (!('orders' in sold)) throw new Error(sold.notice.text);
+  expect(sold.orders[0]).toMatchObject({
+    id: '4', code: 'DEMO-000004', totalWithTax: 1904, total: 1600, totalQuantity: 2,
+    customFields: { tallyClientOrderId: 'order' },
+  });
+  installed.reset();
+  expect(await loadOrderHistory(session)).toEqual(seeded);
+  expect(original).not.toHaveBeenCalled();
 });
 
 it('pulls the whole catalogue with paginated replication and honours its checkpoints', async () => {
