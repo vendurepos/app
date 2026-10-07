@@ -18,6 +18,12 @@ const MUG_VARIANT_ID = '1';
 const MUG_SEED_STOCK = CATALOGUE[0].variants[0].shopFloorStock;
 // Order entries in the Orders panel: "<date> · <total> · <status>" (TallyUI's OrdersList).
 const ORDER_ENTRY = /· (Synced|Waiting to sync|Not accepted)$/;
+// The simulated store's 3 seeded orders as Orders panel history rows, newest first.
+const SEEDED_HISTORY = [
+  /^Order DEMO-000003 · 1 item.*€17\.84 · Payment settled$/,
+  /^Order DEMO-000002 · 2 items.*€23\.52 · Payment settled$/,
+  /^Order DEMO-000001 · 1 item.*€9\.52 · Payment settled$/,
+];
 
 // On demo.vendurepos.com (pnpm e2e:hosted) the demo records events at PostHog: answer them here, so no test run
 // ever counts as a visitor.
@@ -47,6 +53,10 @@ async function orderEntries(page: Page) {
   await page.getByTestId('orders-open').click();
   const entries = page.getByTestId('orders-panel').getByText(ORDER_ENTRY);
   return entries;
+}
+
+function historyRows(page: Page) {
+  return page.getByTestId('orders-panel').locator('[data-testid^="history-row-"]');
 }
 
 test('the demo signs in with one click, sells, runs a register day, keeps it over a reload and resets, all in the page', async ({ page }) => {
@@ -109,6 +119,8 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expect(page.getByTestId('sync-status')).toHaveCount(0);
   await expect(page.getByTestId('orders-rejected')).toHaveCount(0);
   await expect(page.getByTestId('orders-panel')).toContainText(reference);
+  // The store's history merges in; the sale itself (store order 4) shows once, as the till's own row.
+  await expect(historyRows(page)).toHaveText(SEEDED_HISTORY);
   await page.getByTestId('orders-close').click();
   expect(await mugStock(page)).toBe(MUG_SEED_STOCK - 2);
 
@@ -159,6 +171,9 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
   await expect(page.getByTestId('orders-open')).toBeVisible();
   await expect(await orderEntries(page)).toHaveCount(0);
+  // No sales on this till, and the store's 3 seeded orders.
+  await expect(historyRows(page)).toHaveText(SEEDED_HISTORY);
+  await expect(page.getByTestId('orders-empty')).toHaveCount(0);
 
   // Nothing left the page's own origin, and nothing broke the CSP.
   expect(requests.length).toBeGreaterThan(0);
