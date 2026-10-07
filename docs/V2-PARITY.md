@@ -116,7 +116,39 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Sign in again after a 401; session list | Free (FS) | Partial | `apps/pos/lib/sign-in-again.tsx`; no session list | TallyUI |
 | Roles and capabilities | Free (PERM) | Partial | One permission, `TallyPosSell` | plugin |
 | Switching cashiers | — (WCPOS lacks it too) | Missing | M7 | TallyUI |
-| Settings screen | Free (FS) | Partial | Three settings: shortest barcode, variance limit, price editing | app |
+| Settings screen | Free (FS, MS) | Partial | Setting by setting in **Settings, one by one** below; what is left there belongs to TallyUI or to other rows | TallyUI |
+
+## Settings, one by one
+
+WCPOS v2's Settings groups (`architecture/client/navigation-and-settings.md`, `architecture/client/store-settings.md`) against `apps/pos/app/settings.tsx`. A setting that needs the plugin gets its own row in the tables above; none does today beyond the rows already named.
+
+| Setting | WCPOS group (source) | Status | Evidence / what is left | Owner of the rest |
+|---|---|---|---|---|
+| Store name | General (store-settings) | Has | Read from the Vendure channel at sign-in and shown in the header (`apps/pos/lib/store-label.ts`). Vendure owns it, so there is no local override | — |
+| Store address, outlet | General (store-settings) | N/A | A Vendure channel has no address; several stores is the "Multi-store" row | — |
+| Register | General (RG) | Has | Bound at the first open; "Choose another register" rebinds it (ADR 0006) | — |
+| Language, locale | General (INT) | Missing | The "Translations, RTL, store locale" row | TallyUI |
+| Currency | General (store-settings) | Has | The channel's currency, read at sign-in; Vendure owns it | — |
+| Currency position, separators, decimals | General (store-settings, app-editable in WCPOS) | Missing | TallyUI's `formatMoney` takes only a locale and its components pass none; decimals follow ISO 4217 (`minorUnitDigits`) | TallyUI |
+| Default customer for new sales | General (`default_customer`) | Has | Settings › Customers; `apps/pos/e2e/demo.spec.ts` "a default customer starts each new sale and can be removed from one" | — |
+| Cashier as the default customer | General (`default_customer_is_cashier`) | N/A | A Vendure administrator is not a customer | — |
+| Order status per gateway | Checkout (FS) | Missing | The "Tips; order status per gateway" row | TallyUI + plugin |
+| Customer required | — | N/A | WCPOS has no such setting (FS "Guest orders") | — |
+| Prevent overselling | Checkout (FS) | Partial | Its own row under Selling and cart | TallyUI, then app |
+| Print the receipt after each sale | Printing (printer profile auto-print) | Has | Settings › Printing, web only (native has no print path); `apps/pos/e2e/demo.spec.ts` "with printing after each sale on, the receipt prints once by itself" | — |
+| Prices entered with tax | Tax: Calculation (store-settings) | Has | The channel's `pricesIncludeTax`, read at sign-in | — |
+| Prices shown with or without tax | Tax: Display (store-settings) | Missing | WCPOS mirrors WooCommerce's display flags. Vendure has no separate display flag, and TallyUI's catalogue and cart show prices as entered | TallyUI |
+| Tax rates | Tax: Tax Rates | Partial | The cart and receipt show tax per rate (`TaxRows`); no screen lists the rates | TallyUI |
+| Receipt template | Printing (FR) | Missing | The "Receipt templates, gallery, fiscal mode" row | TallyUI |
+| Printers | Printing (FR) | Missing | The "Thermal ESC/POS, cloud printing" row | TallyUI |
+| Shortest barcode | Barcode scanning (BS) | Has | Settings › Scanner | — |
+| Barcode field | Barcode scanning (BS) | Has | Set when signing in, shown in Settings | — |
+| Scan sounds | Barcode scanning (BS) | Missing | The "Camera scan; scan sounds" row | TallyUI |
+| Line price editing | Cart display (FS) | Has | Settings › Prices | — |
+| Quick discount buttons | Cart display (FS) | Missing | TallyUI's `DiscountForm` has no preset percentages | TallyUI |
+| Grid tile size and tile fields | Products display (FS) | Missing | TallyUI's `Catalogue` takes no column count or field list | TallyUI |
+| Theme | Theme | Missing | `@tallyui/theme` ships one light scheme | TallyUI |
+| Count difference needing approval | — (VendurePOS, RG approval) | Has | Settings › Register | — |
 
 ## Barcode, tax, stores, language
 

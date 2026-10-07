@@ -3,6 +3,10 @@ import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 
+declare global {
+  interface Window { printCalls: number }
+}
+
 // lib/demo/fetch.ts's DEMO_STORE_ORIGIN, copied because fetch.ts imports a value from @tallyui/core, which Playwright's CommonJS loader cannot require.
 const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
 
@@ -331,6 +335,87 @@ test('a demo visitor attaches a customer and sees it on the receipt', async ({ p
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
   expect(consoleErrors).toEqual([]);
+});
+
+test('a default customer starts each new sale and can be removed from one', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('default-customer')).toHaveText('Default customer: none (guest sales)');
+  await page.getByTestId('default-customer-choose').click();
+  const picker = page.getByTestId('default-customer-picker');
+  await picker.getByLabel('Search customers').fill('ada');
+  await picker.getByText('Ada Lovelace', { exact: true }).click();
+  await expect(page.getByTestId('default-customer')).toContainText('Ada Lovelace');
+  await page.reload();
+  await expect(page.getByTestId('default-customer')).toContainText('Ada Lovelace');
+  await page.getByTestId('settings-back').click();
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await expect(page.getByTestId('sale-customer')).toHaveText('Customer: Ada Lovelace');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
+  await page.getByTestId('new-sale').click();
+  await expect(page.getByTestId('sale-customer')).toHaveText('Customer: Ada Lovelace');
+  await page.getByTestId('customer-remove').click();
+  await expect(page.getByTestId('sale-customer')).toHaveCount(0);
+  await expect(page.getByTestId('customer-add')).toBeVisible();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(page.getByTestId('sale-customer')).toHaveCount(0);
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await expect(page.getByTestId('receipt-customer')).toHaveCount(0);
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('default-customer-clear').click();
+  await expect(page.getByTestId('default-customer')).toHaveText('Default customer: none (guest sales)');
+  await page.getByTestId('settings-back').click();
+});
+
+test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.printCalls = 0;
+    window.print = () => { window.printCalls++; };
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
+  await page.getByTestId('auto-print-toggle').click();
+  await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: On');
+  await page.getByTestId('settings-back').click();
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  await page.getByTestId('receipt-print').click();
+  await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(2);
+  await page.getByTestId('new-sale').click();
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('auto-print-toggle').click();
+  await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
+  await page.getByTestId('settings-back').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await page.getByTestId('receipt-print').click();
+  await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
 });
 
 test('a second tab is told the till is open in another tab, and opens after the first closes and it reloads', async ({ page, context }) => {

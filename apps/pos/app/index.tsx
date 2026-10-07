@@ -16,6 +16,7 @@ import type { RxCollection } from 'rxdb';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
+import { useDefaultCustomer } from '../lib/default-customer';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
@@ -342,6 +343,7 @@ function Sale({
     onSaleCompleted: session.url === DEMO_STORE_ORIGIN ? withDemoSaleEvent(outbox.record) : outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
+  useDefaultCustomer(sale, session);
   const [parkedOpen, setParkedOpen] = useState(false);
   const [parked, setParked] = useState<ParkedOrderSummary[]>([]);
   useEffect(() => {
