@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
+import { Order, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
 import { In, IsNull, Not } from 'typeorm';
 import type { FindOptionsWhere, ObjectType } from 'typeorm';
 import {
@@ -7,7 +7,7 @@ import {
 } from '../entities/register.entities';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type {
-  CommandResult, RegisterClosureSubmitPayload, RegisterCommandEnvelope, RegisterCommandResult, RegisterCommandType,
+  CommandResult, OrderRefundEnvelope, RegisterClosureSubmitPayload, RegisterCommandEnvelope, RegisterCommandResult, RegisterCommandType,
   RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterSessionOpenPayload, RegisterSessionSupersededData, RegisterSessionTransitionPayload,
 } from '../vendored/core-commands';
 import { commandFingerprint } from '../vendored/fingerprint';
@@ -92,8 +92,7 @@ export class RegisterService {
         const concurrent = await this.claim(tx, command);
         if (concurrent) return concurrent;
         claimed = true;
-        await this.connection.getRepository(tx, TallyCommand).query('SELECT pg_advisory_xact_lock($1, hashtext($2))',
-          [REGISTER_LOCK_NAMESPACE, JSON.stringify([String(tx.channelId), session?.registerId ?? payload.registerId])]);
+        await this.lockRegister(tx, (session?.registerId ?? payload.registerId)!);
         // 7. The state checks, the writes and the stored result; a register_* conflict is stored (ADR-068 d5).
         const result = await this.handle(tx, command, session);
         if (process.env[TEST_HOOKS_ENV] === '1') await this.testHooks.afterWrites?.(id);
@@ -121,7 +120,7 @@ export class RegisterService {
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
 
-  private replayAnswer(ctx: RequestContext, command: RegisterEnvelope, existing: TallyCommand): RegisterResult {
+  replayAnswer(ctx: RequestContext, command: RegisterEnvelope | OrderRefundEnvelope<Record<string, unknown>>, existing: TallyCommand): RegisterResult {
     if (existing.channelId !== String(ctx.channelId)) {
       return refuse(command.id, 'idempotency_mismatch', 'Command id was already used in another channel', { reason: 'command_in_other_channel' });
     }
@@ -133,7 +132,7 @@ export class RegisterService {
   }
 
   // order.create's claim (ADR 0002 §2), with no clientOrderId.
-  private async claim(tx: RequestContext, command: RegisterEnvelope): Promise<RegisterResult | undefined> {
+  async claim(tx: RequestContext, command: RegisterEnvelope | OrderRefundEnvelope<Record<string, unknown>>): Promise<RegisterResult | undefined> {
     const repository = this.connection.getRepository(tx, TallyCommand);
     const runner = repository.manager.queryRunner!;
     const table = repository.metadata.tablePath.split('.').map(part => runner.connection.driver.escape(part)).join('.');
@@ -142,6 +141,21 @@ export class RegisterService {
       ON CONFLICT (id) DO NOTHING RETURNING id`, [command.id, String(tx.channelId), commandFingerprint(command as never)]);
     await runner.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
     return rows.length ? undefined : this.replayAnswer(tx, command, await repository.findOneByOrFail({ id: command.id }));
+  }
+
+  /** ADR 0007 d3: the register's advisory lock (ADR 0003), for a command that is not a register command. */
+  async lockRegister(tx: RequestContext, registerId: string): Promise<void> {
+    await this.connection.getRepository(tx, TallyCommand).query('SELECT pg_advisory_xact_lock($1, hashtext($2))',
+      [REGISTER_LOCK_NAMESPACE, JSON.stringify([String(tx.channelId), registerId])]);
+  }
+
+  /** ADR 0007 d4.2: the session (or the session an alias names) when it is a session of registerId that is neither closed,
+   * superseded nor closed by a closure; undefined otherwise. Call under lockRegister. */
+  async openSessionFor(tx: RequestContext, sessionId: string, registerId: string): Promise<TallyRegisterSession | undefined> {
+    const session = await this.resolveSession(tx, sessionId);
+    if (!session || session.registerId !== registerId) return undefined;
+    const { status, closed } = await this.sessionState(tx, session);
+    return status === 'closed' || status === 'superseded' || closed ? undefined : session;
   }
 
   private async handle(tx: RequestContext, command: RegisterEnvelope, session?: TallyRegisterSession): Promise<RegisterResult> {
@@ -229,7 +243,8 @@ export class RegisterService {
       const orders = p.orderIds.length ? await this.receivedOrders(tx, { tallyClientOrderId: In(p.orderIds) }) : [];
       const movements = (await repo(TallyRegisterMovement).findBy({ channelId, sessionId: session!.id }))
         .filter(row => p.movementIds.includes(row.id));
-      const { expected } = deriveSessionFigures({ countedFloatMinor: session!.countedFloatMinor, orders, movements });
+      const { expected } = deriveSessionFigures({ countedFloatMinor: session!.countedFloatMinor, orders, movements,
+        refunds: await this.sessionRefunds(tx, session!.id) });
       const variance = deriveVariance(p.counted, expected);
       await repo(TallyRegisterClosure).insert({
         channelId, id: p.closureId, sessionId: session!.id, registerId: p.registerId, number: p.number, businessDay: p.businessDay ?? null,
@@ -309,12 +324,13 @@ export class RegisterService {
     return { status, closed: status === 'closed' || await this.connection.getRepository(tx, TallyRegisterClosure).existsBy(where) };
   }
 
-  /** Derived from the register's closures under its lock, never stored (ADR 0003); refunds stay 0 (ADR-068 d9). */
+  /** Derived from the register's closures under its lock, never stored (ADR 0003); refunds come from the last closure (ADR 0007 d9). */
   private async counters(tx: RequestContext, registerId: string) {
     const last = await this.connection.getRepository(tx, TallyRegisterClosure).findOne({
       where: { channelId: String(tx.channelId), registerId }, order: { number: 'DESC' },
     });
-    return { lastClosureNumber: last?.number ?? 0, perpetualSalesTotalMinor: last?.perpetualSalesTotalMinor ?? 0, perpetualRefundsTotalMinor: 0 };
+    return { lastClosureNumber: last?.number ?? 0, perpetualSalesTotalMinor: last?.perpetualSalesTotalMinor ?? 0,
+      perpetualRefundsTotalMinor: last?.perpetualRefundsTotalMinor ?? 0 };
   }
 
   /** ADR-068 d13.1: the live figure counts every received order in the channel carrying the session's id.
@@ -323,7 +339,24 @@ export class RegisterService {
     const aliases = await this.connection.getRepository(tx, TallyRegisterSessionAlias).findBy({ channelId: session.channelId, sessionId: session.id });
     const orders = await this.receivedOrders(tx, { tallySessionId: In([session.id, ...aliases.map(alias => alias.id)]) });
     const movements = await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId: session.channelId, sessionId: session.id });
-    return { id: session.id, status, ...deriveSessionFigures({ countedFloatMinor: session.countedFloatMinor, orders, movements }) };
+    const { expected, salesCount } = deriveSessionFigures({ countedFloatMinor: session.countedFloatMinor, orders, movements,
+      refunds: await this.sessionRefunds(tx, session.id) });
+    return { id: session.id, status, expected, salesCount };
+  }
+
+  private async sessionRefunds(tx: RequestContext, sessionId: string): Promise<{ byMethod: Record<string, number> }[]> {
+    const refunds = await this.connection.getRepository(tx, Refund).createQueryBuilder('refund')
+      .innerJoin('refund.payment', 'payment')
+      .innerJoin('payment.order', 'sale')
+      .innerJoin('sale.channels', 'channel')
+      .where('channel.id = :channelId', { channelId: tx.channelId })
+      .andWhere('refund.state != :failed', { failed: 'Failed' })
+      .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallySessionId' = :sessionId", { sessionId })
+      .orderBy('refund.id', 'ASC').getMany();
+    return refunds.flatMap(refund => {
+      const method = refund.metadata.tallyMethod;
+      return typeof method === 'string' && method.length ? [{ byMethod: { [method]: refund.total } }] : [];
+    });
   }
 
   /**

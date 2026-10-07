@@ -138,7 +138,7 @@ describe('order.create version 4: net discounts', () => {
       headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` },
     });
     expect(response.status).toBe(200);
-    expect((await response.json()).contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5], register: [1, 2] });
+    expect((await response.json()).contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5], register: [1, 2], 'order.refund': [1] });
     const counts = async () => ({
       orders: await connection.rawConnection.getRepository(Order).count(),
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),

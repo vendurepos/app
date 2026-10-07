@@ -2,7 +2,7 @@ import {
   LanguageCode, Logger, PaymentMethodEligibilityChecker, PaymentMethodHandler,
   OrderLine, ShippingCalculator, ShippingEligibilityChecker, StockLevel, StockLocationService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
-import type { Injector, Order, OrderItemPriceCalculationStrategy, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
+import type { Injector, Order, OrderItemPriceCalculationStrategy, Payment, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
 import { loggerCtx } from '../service/errors';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
@@ -128,6 +128,28 @@ export function isTallyRoute(ctx: RequestContext): boolean {
   return (ctx as unknown as Record<symbol, boolean>)[TALLY_ROUTE] === true;
 }
 
+/** ADR 0007 decision 6: the till refund RefundService is applying, read by the tally-pos handler's createRefund. */
+export type TallyRefundContext = {
+  clientRefundId: string; registerId: string; sessionId: string; cashierRef?: string; destination: 'original_method' | 'cash';
+};
+const TALLY_REFUND = Symbol('vendurepos.tallyRefund');
+
+export function withTallyRefund(ctx: RequestContext, refund: TallyRefundContext): RequestContext {
+  (ctx as unknown as Record<symbol, TallyRefundContext>)[TALLY_REFUND] = refund;
+  return ctx;
+}
+
+export function tallyRefundOf(ctx: RequestContext): TallyRefundContext | undefined {
+  return (ctx as unknown as Record<symbol, TallyRefundContext | undefined>)[TALLY_REFUND];
+}
+
+/** The method a refund leaves the till by: cash for a cash refund, else the payment's own tender method. */
+export function tallyRefundMethod(destination: TallyRefundContext['destination'], payment: Payment): string {
+  if (destination === 'cash') return 'cash';
+  const method = payment.metadata?.tender?.method;
+  return typeof method === 'string' && method.length > 0 ? method : TALLY_PAYMENT_METHOD_CODE;
+}
+
 // ADR 0002 "Closed to the storefront": only the command route, never another plugin's REST
 // controller with the same apiType 'custom'.
 export const tallyPaymentHandler = new PaymentMethodHandler({
@@ -138,6 +160,19 @@ export const tallyPaymentHandler = new PaymentMethodHandler({
     ? { amount, state: 'Settled', metadata }
     : { amount, state: 'Declined', errorMessage: 'tally-pos is only available to the POS route', metadata },
   settlePayment: () => ({ success: true }),
+  // ADR 0007 decision 6: Vendure refuses a Pending result; the till records the money itself.
+  createRefund: (ctx, input, amount, order, payment) => {
+    const refund = tallyRefundOf(ctx);
+    if (isTallyRoute(ctx) && refund) {
+      const { clientRefundId, registerId, sessionId, cashierRef, destination } = refund;
+      return { state: 'Settled', metadata: {
+        tallyClientRefundId: clientRefundId, tallyRegisterId: registerId, tallySessionId: sessionId,
+        ...(cashierRef ? { tallyCashierRef: cashierRef } : {}),
+        tallyDestination: destination, tallyMethod: tallyRefundMethod(destination, payment),
+      } };
+    }
+    return { state: 'Settled' };
+  },
 });
 
 export const tallyPaymentChecker = new PaymentMethodEligibilityChecker({
