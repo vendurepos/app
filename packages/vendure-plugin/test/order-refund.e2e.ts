@@ -257,6 +257,51 @@ describe('order.refund v1', () => {
       { expectedMinor: full, serverMinor: order.payments[0].amount - 1000 });
   });
 
+  it('a second command with an applied clientRefundId is refused, and a Failed refund frees it', async () => {
+    const session = await openSession();
+    const { order } = await sell(2);
+    const lines = [{ orderLineId: order.lines[0].id, quantity: 1, restock: false }];
+    const first = refundFor(order, session, { lines });
+    const result = await post(first);
+    expect(result).toMatchObject({ status: 'applied' });
+    const refundId = result.refund!.refunds[0].id;
+    const again = refundFor(order, session, { clientRefundId: first.payload.clientRefundId, lines }, { [order.lines[0].id]: 1 });
+    await refused(again, order.id, 'invalid_payload', `clientRefundId: ${first.payload.clientRefundId} is already refund ${refundId}`);
+    await connection.rawConnection.getRepository(Refund).update(environment.decode(refundId), { state: 'Failed' });
+    const retry = refundFor(order, session, { clientRefundId: first.payload.clientRefundId, lines }, {});
+    expect(await post(retry)).toMatchObject({ status: 'applied' });
+  });
+
+  it('a restock returns only units not already returned, whoever cancelled them', async () => {
+    const session = await openSession();
+    {
+      const { order } = await sell(3);
+      const stock = order.lines[0].productVariant.stockOnHand;
+      const result = await post(refundFor(order, session, {
+        lines: [{ orderLineId: order.lines[0].id, quantity: 1, restock: true }], shippingMinor: 0,
+      }));
+      expect(result).toMatchObject({ status: 'applied' });
+      const after = await readOrder(order.id);
+      expect(after.lines[0].productVariant.stockOnHand).toBe(stock + 1);
+      const refundId = result.refund!.refunds[0].id;
+      await connection.rawConnection.getRepository(Refund).update(environment.decode(refundId), { state: 'Failed' });
+      expect(await post(refundFor(after, session))).toMatchObject({ status: 'applied' });
+      expect((await readOrder(order.id)).lines[0].productVariant.stockOnHand).toBe(stock + 3);
+    }
+    {
+      const { order } = await sell(3);
+      const stock = order.lines[0].productVariant.stockOnHand;
+      const { cancelOrder } = await adminClient.query<{ cancelOrder: { id: string } }>(parse(`mutation Cancel($input: CancelOrderInput!) {
+        cancelOrder(input: $input) { ... on Order { id } ... on ErrorResult { errorCode message } }
+      }`), { input: { orderId: order.id, lines: [{ orderLineId: order.lines[0].id, quantity: 1 }], reason: 'Back office' } });
+      expect(cancelOrder).toMatchObject({ id: order.id });
+      const after = await readOrder(order.id);
+      expect(after.lines[0].productVariant.stockOnHand).toBe(stock + 1);
+      expect(await post(refundFor(after, session))).toMatchObject({ status: 'applied' });
+      expect((await readOrder(order.id)).lines[0].productVariant.stockOnHand).toBe(stock + 3);
+    }
+  });
+
   it('/info advertises order.refund 1', async () => {
     const response = await fetch(`${base}/tally/v1/info`, { headers: headers(refunder) });
     expect(response.status).toBe(200);
@@ -331,6 +376,28 @@ describe('order.refund v1', () => {
       expect(result).toMatchObject({ status: 'applied' });
       expect(result.register!.closure!.expected!.cash).toBe(expectedCash);
       expect(result.register!.counters!.perpetualRefundsTotalMinor).toBe(123);
+    });
+
+    it('a Failed refund leaves the session figures', async () => {
+      const session = { registerId: randomUUID(), sessionId: randomUUID() };
+      const countedFloatMinor = 10000;
+      expect(await post(envelope('register.session.open', {
+        ...session, openedAt: new Date().toISOString(), countedFloatMinor,
+      }))).toMatchObject({ status: 'applied' });
+      const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }],
+        undefined, undefined, { sessionId: session.sessionId });
+      const sold = await post(sale);
+      expect(sold).toMatchObject({ status: 'applied' });
+      const order = await readOrder(sold.serverRefs!.orderId);
+      const refund = await post(refundFor(order, session, { destination: 'cash' }));
+      expect(refund).toMatchObject({ status: 'applied' });
+      const refundId = refund.refund!.refunds[0].id;
+      await connection.rawConnection.getRepository(Refund).update(environment.decode(refundId), { state: 'Failed' });
+      const result = await post(envelope('register.session.transition', {
+        sessionId: session.sessionId, status: 'open', at: new Date().toISOString(),
+      }));
+      expect(result).toMatchObject({ status: 'applied' });
+      expect(result.register!.session!.expected).toEqual({ cash: countedFloatMinor + sale.payload.totalMinor });
     });
   });
 });

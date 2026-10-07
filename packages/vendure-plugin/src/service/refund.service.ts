@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  Cancellation, FulfillmentLine, Order, OrderLine, OrderService, Payment, RequestContext, StockMovementService, TransactionalConnection, idsAreEqual,
+  Cancellation, FulfillmentLine, Order, OrderLine, OrderService, Payment, Refund, RequestContext, StockMovementService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { tallyPosRefund } from '../config/permissions';
@@ -82,6 +82,16 @@ export class RefundService {
         if (payload.clientOrderId !== undefined && payload.clientOrderId !== order.customFields.tallyClientOrderId) {
           throw new Unstored(refuse(id, 'invalid_payload', `clientOrderId: order ${payload.orderId} is ${order.customFields.tallyClientOrderId}`));
         }
+        const earlier = await this.connection.getRepository(tx, Refund).createQueryBuilder('refund')
+          .innerJoin('refund.payment', 'payment')
+          .innerJoin('payment.order', 'sale')
+          .innerJoin('sale.channels', 'channel')
+          .where('channel.id = :channelId', { channelId: tx.channelId })
+          .andWhere('refund.state != :failed', { failed: 'Failed' })
+          .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallyClientRefundId' = :clientRefundId", { clientRefundId: payload.clientRefundId })
+          .orderBy('refund.id', 'ASC').getOne();
+        if (earlier) throw new Unstored(refuse(id, 'invalid_payload',
+          `clientRefundId: ${payload.clientRefundId} is already refund ${this.orders.encodeId(earlier.id)}`));
         if (!order.customFields.tallyClientOrderId || order.customFields.tallyRejected) {
           throw new Unstored(refuse(id, 'not_till_order', `Order ${payload.orderId} was not taken at a till`));
         }
