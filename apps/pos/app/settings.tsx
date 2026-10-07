@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Platform, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, Input, InputField, Label, Text, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
+import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
+import { catalogueConnector } from '../lib/catalogue';
+import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadScannerMinLength, saveScannerMinLength } from '../lib/scanner-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
 import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
+import { sessionContext, sessionKey } from '../lib/session';
 import { useSession } from '../lib/session-context';
 
 export default function SettingsScreen() {
@@ -18,6 +23,10 @@ export default function SettingsScreen() {
   });
   const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
   const [canEditPrice, setCanEditPrice] = useState(() => loadPriceEditAllowed());
+  const [defaultCustomer, setDefaultCustomer] = useState(() => session ? loadDefaultCustomer(session) : null);
+  const [pickingCustomer, setPickingCustomer] = useState(false);
+  const [autoPrint, setAutoPrint] = useState(() => loadAutoPrint());
+  const connector = useMemo(() => session ? catalogueConnector(session) : null, [session ? sessionKey(session) : null]);
 
   if (!session) return <Redirect href="/sign-in" />;
 
@@ -80,6 +89,57 @@ export default function SettingsScreen() {
           </VStack>
         </CardContent>
       </Card>
+      {connector?.searchCustomers ? (
+        <Card className="w-full max-w-[420px]">
+          <CardHeader><CardTitle aria-level={2}>Customers</CardTitle></CardHeader>
+          <CardContent>
+            <VStack space="lg">
+              <Text testID="default-customer">Default customer: {defaultCustomer ? `${defaultCustomer.name}${defaultCustomer.email ? ` (${defaultCustomer.email})` : ''}` : 'none (guest sales)'}</Text>
+              <Text>Each new sale starts with this customer. Remove it from a sale for a guest sale.</Text>
+              {pickingCustomer ? (
+                <View testID="default-customer-picker">
+                  <CustomerPicker
+                    search={(q) => connector.searchCustomers!(sessionContext(session), q, { limit: 20 })}
+                    selected={null}
+                    onSelect={(customer) => {
+                      if (customer !== null) {
+                        const selected = { id: customer.id, name: customer.name, email: customer.email };
+                        saveDefaultCustomer(session, selected);
+                        setDefaultCustomer(selected);
+                      }
+                      setPickingCustomer(false);
+                    }}
+                    onError={(e) => console.warn('Customer lookup failed', e)}
+                    online={typeof navigator === 'undefined' || navigator.onLine !== false}
+                  />
+                </View>
+              ) : (
+                <Button testID="default-customer-choose" onPress={() => setPickingCustomer(true)}><Text>Choose a default customer</Text></Button>
+              )}
+              {defaultCustomer ? (
+                <Button testID="default-customer-clear" variant="secondary" onPress={() => {
+                  saveDefaultCustomer(session, null);
+                  setDefaultCustomer(null);
+                }}><Text>No default customer</Text></Button>
+              ) : null}
+            </VStack>
+          </CardContent>
+        </Card>
+      ) : null}
+      {Platform.OS === 'web' ? (
+        <Card className="w-full max-w-[420px]">
+          <CardHeader><CardTitle aria-level={2}>Printing</CardTitle></CardHeader>
+          <CardContent>
+            <VStack space="lg">
+              <Text>{"Open the print dialog when a sale's receipt shows."}</Text>
+              <Button testID="auto-print-toggle" onPress={() => {
+                saveAutoPrint(!autoPrint);
+                setAutoPrint(!autoPrint);
+              }}><Text>Print after each sale: {autoPrint ? 'On' : 'Off'}</Text></Button>
+            </VStack>
+          </CardContent>
+        </Card>
+      ) : null}
       <Text testID="settings-barcode-field">Barcode custom field: {session.barcodeField ?? 'none'}. Set when signing in.</Text>
       {/* Back, never a push, because a second till can't open the order store the first one holds. */}
       <Button testID="settings-back" variant="secondary" onPress={() => router.canGoBack() ? router.back() : router.replace('/')}>

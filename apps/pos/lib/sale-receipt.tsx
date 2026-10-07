@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { Button, discountLabel, HStack, injectPrintStyle, orderReference, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, useCurrencyFormatter, type useSale } from '@tallyui/pos';
+import { loadAutoPrint } from './auto-print-setting';
 import { taxRowLabel } from './cart-totals';
 import { MoneyRow, TaxRows } from './sale-cart';
 
@@ -12,6 +13,13 @@ export function SaleReceipt({ sale, store, cashier, registerId, till }: {
   const format = useCurrencyFormatter();
   // TallyUI's print style, as its Receipt: what carries print: 'hide' stays off the page, so the receipt prints alone.
   useEffect(injectPrintStyle, []);
+  const printedFor = useRef<string | null>(null);
+  const receiptOrderId = sale.stage.kind === 'receipt' ? sale.stage.order.id : null;
+  useEffect(() => {
+    if (receiptOrderId === null || receiptOrderId === printedFor.current) return;
+    printedFor.current = receiptOrderId;
+    if (Platform.OS === 'web' && loadAutoPrint()) window.print();
+  }, [receiptOrderId]);
   if (sale.stage.kind !== 'receipt') return null;
   const { order, posOrder } = sale.stage;
   const receipt = buildReceiptData(order, { storeName: store, cashier, register: registerId });
