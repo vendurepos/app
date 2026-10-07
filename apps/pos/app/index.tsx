@@ -22,6 +22,7 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
+import { useOrderHistory } from '../lib/order-history';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
@@ -76,6 +77,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const saleSettings = useSaleSettings(session, connector);
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
+  const history = useOrderHistory(session, ordersOpen);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
   const [registerId] = useState(() => deviceId(defaultStore()));
@@ -244,6 +246,16 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               <Text>Back to sale</Text>
             </Button>
           </HStack>
+          {history.notice ? (
+            <HStack className="items-center border-b border-border px-4 py-2" space="sm">
+              <Text testID="orders-history-notice" className="flex-1 text-sm text-muted-foreground">{history.notice.text}</Text>
+              {history.notice.retry ? (
+                <Button testID="orders-history-retry" variant="secondary" size="sm" disabled={history.loading} onPress={history.reload}>
+                  <Text>Try again</Text>
+                </Button>
+              ) : null}
+            </HStack>
+          ) : null}
           <OrdersList orders={outbox.recent} onRetry={outbox.requeue} stuck={outbox.state.stuck}
             formatDate={(iso) => new Date(iso).toLocaleString()} />
         </VStack>
