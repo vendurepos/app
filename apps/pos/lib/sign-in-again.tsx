@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Button, Input, InputField, Text, VStack } from '@tallyui/components';
 import type { Session } from './session';
 import { useSession } from './session-context';
-import { signIn } from './sign-in';
+import { POS_ACCESS_REFUSED_TEXT, signIn } from './sign-in';
 
-export function SignInAgain({ session, onSignedIn }: { session: Session; onSignedIn(session: Session): void }) {
+export function SignInAgain({ session, onSignedIn, accessRefused }: { session: Session; onSignedIn(session: Session): void; accessRefused?: boolean }) {
   const { setSignedIn } = useSession();
   const [secret, setSecret] = useState('');
   const deviceKey = session.kind === 'api-key';
@@ -29,7 +29,7 @@ export function SignInAgain({ session, onSignedIn }: { session: Session; onSigne
 
   return (
     <VStack space="sm">
-      <Text>{deviceKey ? "This till's device key was refused. Paste a new device key to keep selling; the cart stays."
+      <Text>{accessRefused ? POS_ACCESS_REFUSED_TEXT : deviceKey ? "This till's device key was refused. Paste a new device key to keep selling; the cart stays."
         : 'Your session on the store ended. Enter your password to keep selling; the cart stays.'}</Text>
       <Input>
         <InputField testID={deviceKey ? 'sign-in-again-api-key' : 'sign-in-again-password'} accessibilityLabel={deviceKey ? 'Device key' : 'Password'} secureTextEntry

@@ -12,10 +12,10 @@ const updates = (n: number) => `${n} till ${n === 1 ? 'update' : 'updates'}`;
  * The one line the header shows about till updates (register commands), the most pressing first; undefined while they
  * are only pending or held behind orders. `rejected` counts the commands the store refused one by one: the register
  * outbox's state never carries them, yet each halts its register's later commands (the #81 review). The words follow
- * TallyUI's SyncStatus for till updates.
+ * TallyUI's SyncStatus for till updates; a 403 asks to sign in again like a 401.
  */
 export function registerSyncNotice({ authRequired, refused, stuck, pending }: OutboxState, rejected: number): string | undefined {
-  if (authRequired) return "Till updates aren't sending: this till needs to sign in to the online store again.";
+  if (authRequired || refused?.status === 403) return "Till updates aren't sending: this till needs to sign in to the online store again.";
   const them = rejected === 1 ? 'it' : 'them';
   if (rejected) return `${updates(rejected)} ${rejected === 1 ? 'needs' : 'need'} attention · The online store refused ${them}, `
     + `and later till updates wait behind ${them}. Ask the store owner to look at the till's sync log.`;

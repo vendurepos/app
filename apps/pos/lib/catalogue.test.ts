@@ -399,8 +399,9 @@ describe('catalogue sync lifecycle', () => {
     (cleanup as (() => void) | undefined)?.();
   });
 
-  it('shows a forbidden account its own notice, never the sign-out one, until the store answers again', async () => {
-    const { useCatalogue: catalogueHook, FORBIDDEN_TEXT, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+  it('asks a forbidden account to sign in again with the sign-in words, never the session-ended ones, until the store answers again', async () => {
+    const { useCatalogue: catalogueHook, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+    const { POS_ACCESS_REFUSED_TEXT } = await import('./sign-in');
     const { stopCatalogueSync } = await import('./catalogue');
     const setLastSyncedAt = vi.fn();
     const setError = vi.fn();
@@ -413,12 +414,12 @@ describe('catalogue sync lifecycle', () => {
     catalogueHook(session);
     await stopCatalogueSync();
     const replication = vi.mocked(startReplication).mock.results[0].value;
-    // TallyUI #342: a 403 is fixed by the store; the pull rethrows it on the store's schedule.
+    // TallyUI #342: the pull rethrows a 403 on the store's schedule; the app asks to sign in again (ADR 0023).
     replication.active$.next(true);
     replication.notice$.next({ code: 'forbidden', since: Date.now(), fixedBy: 'store' } satisfies SyncNotice);
     replication.error$.next(new Error('Vendure API error: 403'));
     replication.active$.next(false);
-    expect(setError).toHaveBeenLastCalledWith(FORBIDDEN_TEXT);
+    expect(setError).toHaveBeenLastCalledWith(POS_ACCESS_REFUSED_TEXT);
     expect(setError).not.toHaveBeenCalledWith(SESSION_ENDED_TEXT);
     expect(setLastSyncedAt).not.toHaveBeenCalled();
     // The store lets the account in again: the next pull clears the notice and the catalogue is synced.
