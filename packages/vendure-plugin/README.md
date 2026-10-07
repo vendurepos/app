@@ -53,13 +53,13 @@ auth, CORS, tax strategy and a first sale. Install it with
 `npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
-   of generating a migration for your store, register all five below; do not run
+   of generating a migration for your store, register all six below; do not run
    both approaches for the same schema changes:
 
    ```ts
    import {
      TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
-     TallyPosV51790900000000, TallyPosRegisterV21791000000000,
+     TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
    } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
@@ -69,7 +69,7 @@ auth, CORS, tax strategy and a first sale. Install it with
        synchronize: false,
        migrations: [
          TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
-         TallyPosV51790900000000, TallyPosRegisterV21791000000000,
+         TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
          /* your own migrations */
        ],
        // …
@@ -202,6 +202,7 @@ The plugin answers register contract versions 1 and 2 (`/tally/v1/info` lists `"
 - **Take-over.** A version 2 open with `supersedes` naming the live session takes the register over, in one transaction under the register's lock. Naming anything else is refused `register_session_already_open` with the live session's details. The old session is refused every later command: `register_session_superseded` at version 2, `register_session_closed` at version 1.
 - **Unknown sessions.** An `order.create` naming a session the store does not hold is applied, with the warning `register_session_unknown`. The order keeps the id, and a session opened later under it counts the sale.
 - Run the bundled migration `TallyPosRegisterV21791000000000`, or generate your own, before a till sends register version 2. Its `down` is safe only on a store that never served a version 2 open (ADR 0006, Consequences).
+- Run `TallyPosRegisterOpenVersion1791100000000` before a till sends register version 2; sessions opened before it answer a v1 command on a taken-over session with `register_session_closed`.
 
 ## Development
 

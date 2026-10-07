@@ -47,7 +47,7 @@ describe('register v2 open: resume and take-over (ADR-078)', () => {
   it('records the envelope deviceId as sent and the trimmed deviceName', async () => {
     const s = uuid();
     expect(await send(open(s, uuid(), { deviceName: '  Front till  ' }, 2, ' till-1 '))).toMatchObject({ status: 'applied' });
-    expect(await session(s)).toMatchObject({ deviceId: ' till-1 ', deviceName: 'Front till', supersedes: null });
+    expect(await session(s)).toMatchObject({ deviceId: ' till-1 ', deviceName: 'Front till', supersedes: null, openVersion: 2 });
   });
 
   it('rejects v1 deviceName and malformed v2 fields as unstored invalid_payload', async () => {
@@ -84,7 +84,7 @@ describe('register v2 open: resume and take-over (ADR-078)', () => {
   it('at v1 refuses the same device with exactly the v1 data and no alias', async () => {
     const [s1, s2, r] = [uuid(), uuid(), uuid()];
     expect(await send(open(s1, r, {}, 1))).toMatchObject({ status: 'applied' });
-    expect(await session(s1)).toMatchObject({ deviceId: 'till-1' });
+    expect(await session(s1)).toMatchObject({ deviceId: 'till-1', openVersion: 1 });
     const second = open(s2, r, {}, 1);
     expect(await send(second)).toEqual({ id: second.id, status: 'rejected', error: { code: 'register_session_already_open',
       message: `Register ${r} already has session ${s1} open`, data: { sessionId: s1 } } });
@@ -359,9 +359,9 @@ describe('register v2 later commands: aliases and superseded sessions (ADR-078)'
     } });
   });
 
-  it('stores the v1 closed refusal for a superseded session without data', async () => {
+  it('stores the v1 closed refusal for a superseded session opened at v1 without data', async () => {
     const [s1, s3, r] = [uuid(), uuid(), uuid()];
-    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s1, r, {}, 1))).toMatchObject({ status: 'applied' });
     expect(await send(open(s3, r, { supersedes: s1 }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
     const command = { ...movement(s1), version: 1 };
     const result = { id: command.id, status: 'rejected', error: { code: 'register_session_closed', message: `Session ${s1} is closed` } };
@@ -369,6 +369,36 @@ describe('register v2 later commands: aliases and superseded sessions (ADR-078)'
     expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id }))
       .toMatchObject({ status: 'rejected', result });
     expect(await send(command)).toEqual(result);
+  });
+
+  it('refuses a v1 command on a session opened at v2 with the v2 superseded refusal', async () => {
+    const [s1, s3, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s3, r, { supersedes: s1 }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
+    for (const command of [{ ...movement(s1), version: 1 }, { ...transition(s1, 'closed'), version: 1 }, { ...closure(s1, r), version: 1 }]) {
+      const result = { id: command.id, status: 'rejected', error: {
+        code: 'register_session_superseded', message: `Session ${s1} was taken over by session ${s3}`,
+        data: { sessionId: s1, supersededAt: AT, deviceId: 'till-2', newSessionId: s3 },
+      } };
+      expect(await send(command)).toEqual(result);
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id }))
+        .toMatchObject({ status: 'rejected', result });
+      expect(await send(command)).toEqual(result);
+    }
+  });
+
+  it('keeps the v1 closed refusal for a session with no recorded open version', async () => {
+    const [s1, s3, r] = [uuid(), uuid(), uuid()];
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    expect(await send(open(s3, r, { supersedes: s1 }, 2, 'till-2'))).toMatchObject({ status: 'applied' });
+    await connection.rawConnection.getRepository(TallyRegisterSession).update({ channelId, id: s1 }, { openVersion: null });
+    const command = { ...movement(s1), version: 1 };
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: {
+      code: 'register_session_closed', message: `Session ${s1} is closed`,
+    } });
+    expect(await send(movement(s1))).toMatchObject({ status: 'rejected', error: {
+      code: 'register_session_superseded', data: { sessionId: s1, newSessionId: s3 },
+    } });
   });
 
   it('counts cash sales carrying either the session id or an alias in the live figures', async () => {
