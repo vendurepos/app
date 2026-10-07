@@ -5,7 +5,7 @@ import { SignInError, StoreSettingsError } from '@tallyui/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkBarcodeField } from './barcode-field';
 import { logout } from './logout';
-import { signIn } from './sign-in';
+import { POS_ACCESS_REFUSED_TEXT, signIn } from './sign-in';
 
 vi.mock('./logout', () => ({ logout: vi.fn() }));
 vi.mock('./barcode-field', async (importActual) => ({
@@ -118,6 +118,31 @@ describe('a device key', () => {
 });
 
 describe('signIn', () => {
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ contracts: {} }))); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('refuses an account the plugin answers 403, logs its token out and reads no settings', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 403 }));
+    expect(await signIn(values)).toEqual({ ok: false, error: POS_ACCESS_REFUSED_TEXT });
+    expect(logout).toHaveBeenCalledExactlyOnceWith({ url: 'https://shop.example.com', token: 'test-token' });
+    expect(vendureStoreSettings).not.toHaveBeenCalled();
+    expect(vendureGlobalStockSettings).not.toHaveBeenCalled();
+  });
+
+  it.each([404, 500, new TypeError('Failed to fetch')])('signs in when /info is missing (404), fails (500) or is unreachable', async (response) => {
+    if (response instanceof Error) vi.mocked(fetch).mockRejectedValue(response);
+    else vi.mocked(fetch).mockResolvedValue(new Response(null, { status: response }));
+    expect((await signIn(values)).ok).toBe(true);
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it('rethrows an AbortError from the /info check', async () => {
+    const error = new DOMException('aborted', 'AbortError');
+    const signal = new AbortController().signal;
+    vi.mocked(fetch).mockRejectedValue(error);
+    await expect(signIn(values, { signal })).rejects.toBe(error);
+  });
+
   it('rejects an invalid barcode field before signing in', async () => {
     expect(await signIn({ ...values, barcode_field: 'x{y}' })).toEqual({
       ok: false, error: 'Enter the custom field name, such as barcode.',
@@ -182,6 +207,9 @@ describe('signIn', () => {
     expect(vendureSignIn).toHaveBeenCalledExactlyOnceWith(
       'https://shop.example.com', { email: 'cashier@example.com', password: values.password }, { signal },
     );
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('https://shop.example.com/tally/v1/info', {
+      headers: { Authorization: 'Bearer test-token', 'vendure-token': 'channel-1' }, signal,
+    });
     const context = {
       connectorId: 'vendure', baseUrl: 'https://shop.example.com', signal,
       headers: { Authorization: 'Bearer test-token', 'vendure-token': 'channel-1' },
