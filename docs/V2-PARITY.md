@@ -87,7 +87,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Order history | Pro (MS) | Has | The Orders panel merges the store's 25 newest placed orders (`listVendureOrders`, read-only rows with Vendure's own state) with this till's outbox, newest first; a POS sale shows once, as the till's row. "the demo signs in with one click, sells, runs a register day, keeps it over a reload and resets, all in the page" (the 3 seeded orders after Reset demo); the till role preset has `ReadOrder`, and a role without it gets a panel notice: `apps/pos/e2e/sign-in.spec.ts` "a role without Read order sees a notice in the Orders panel …" | — |
-| Refunds | Pro (CR, PRO) | Missing | No refund command; refunds stay out of every register figure (ADR 0003). The store side is Vendure's own refund (`refundOrder`). The plugin declares `TallyPosRefund`, which the command will check (Front desk, 2026-10-07: online only, POS orders only in v1, refused with no open session). TallyUI's `order.refund` v1 contract comes first | TallyUI contract, then plugin |
+| Refunds | Pro (CR, PRO) | Partial | Store side done: the plugin applies TallyUI's `order.refund` v1 (ADR 0007) as Vendure's own `refundOrder`, one refund per tally-pos payment, settled at once with the till's metadata, restock through Vendure cancellations, and the refund counted in the refunding session's expected figures and at its closure. It requires `TallyPosRefund`, refuses a storefront order (`not_till_order`) and a refund with no open session (`no_open_session`), online only (Front desk, 2026-10-07): `packages/vendure-plugin/test/order-refund.e2e.ts`. Missing: the till's refund flow in the app (an order row's refund action, sending `order.refund` from `pos_refunds`) | app |
 | Promotions and coupon codes | 2.0 (CMP, PRO) | Missing | Vendure promotions, with or without a coupon code, are off on POS orders (ADR 0002) | TallyUI contract, then plugin |
 
 ## Registers, cash and reports
@@ -114,7 +114,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 |---|---|---|---|---|
 | Connect and sign in | Free (FS) | Has | `apps/pos/app/sign-in.tsx`, password or till key (ADR 0004) | — |
 | Sign in again after a 401; session list | Free (FS) | Partial | `apps/pos/lib/sign-in-again.tsx`; no session list | TallyUI |
-| Roles and permissions | Free (PERM) | Partial | Three Vendure custom permissions, assigned to Vendure roles (medusapos ADR 0023, "What vendurepos can copy"). `TallyPosSell` (or `CreateOrder`) gates every `/tally/v1` route, and a 403 is refused at sign-in; a later 403, on a pull or on a command, asks the till to sign in again with the same words (`apps/pos/e2e/sign-in.spec.ts`). `ApproveTallyPosVariance` marks a manager and `TallyPosRefund` a till that may refund; neither opens those routes: `packages/vendure-plugin/test/permissions.e2e.ts`. The till role preset is `tallyEnsurePosTillRole`. Missing: nothing checks `ApproveTallyPosVariance` until the approval route (`POST /tally/v1/register-approvals`, the approval row) lands, nor `TallyPosRefund` until the refund command (the Refunds row) does | TallyUI contract + plugin |
+| Roles and permissions | Free (PERM) | Partial | Three Vendure custom permissions, assigned to Vendure roles (medusapos ADR 0023, "What vendurepos can copy"). `TallyPosSell` (or `CreateOrder`) gates every `/tally/v1` route, and a 403 is refused at sign-in; a later 403, on a pull or on a command, asks the till to sign in again with the same words (`apps/pos/e2e/sign-in.spec.ts`). `ApproveTallyPosVariance` marks a manager and `TallyPosRefund` a till that may refund; neither opens those routes: `packages/vendure-plugin/test/permissions.e2e.ts`. The till role preset is `tallyEnsurePosTillRole`. `order.refund` requires `TallyPosRefund` (`test/order-refund.e2e.ts` "refusals are unstored …"). Missing: nothing checks `ApproveTallyPosVariance` until the approval route (`POST /tally/v1/register-approvals`, the approval row) lands | TallyUI contract + plugin |
 | Switching cashiers | — (WCPOS lacks it too) | Missing | M7 | TallyUI |
 | Settings screen | Free (FS, MS) | Partial | Setting by setting in **Settings, one by one** below; what is left there belongs to TallyUI or to other rows | TallyUI |
 
@@ -168,7 +168,7 @@ The next item is the first row here that is not done. Rows marked TallyUI start 
 1. Register v2 store side: vendurepos/app#167 (merged). Done.
 2. The till side of register v2: bump `@tallyui/*` to the release that carries TallyUI#469 and the outbox (#472); prove resume and take-over in an e2e. Done.
 3. Order history from the store, not just the outbox. It comes before refunds, which start from an order. Done.
-4. Refunds: a TallyUI contract, then a plugin command, with refunds counted in the register figures.
+4. Refunds: a TallyUI contract, then a plugin command, with refunds counted in the register figures. Contract and plugin done; the app's refund flow is next.
 5. Email receipt: Vendure's email plugin already sends mail, so this is mostly plugin work behind a TallyUI action.
 6. Reports and closure history: `GET /tally/v1/registers/{id}` in the plugin.
 7. The variant picker in the catalogue (TallyUI's `VariantPicker` exists).

@@ -7,7 +7,9 @@ import { OrderCreateService } from '../service/order-create.service';
 import type { OrderCreateResult } from '../service/order-create.service';
 import { REGISTER_TYPES, RegisterService } from '../service/register.service';
 import type { RegisterEnvelope, RegisterResult } from '../service/register.service';
+import { RefundService } from '../service/refund.service';
 import type { CommandEnvelope, OrderCreatePayload } from '../vendored/commands';
+import type { CommandResult, OrderRefundEnvelope } from '../vendored/core-commands';
 
 // TallyUI ADR-038: a batch holds 1 to 50 commands; more answers 413 batch_too_large (ruling 18).
 const MAX_COMMANDS = 50;
@@ -47,7 +49,7 @@ export function validateBatch(body: unknown): { commands: Envelope[] } | { messa
  */
 @Controller('tally/v1')
 export class TallyCommandsController {
-  constructor(private orders: OrderCreateService, private registers: RegisterService) {}
+  constructor(private orders: OrderCreateService, private registers: RegisterService, private refunds: RefundService) {}
 
   @Post('commands')
   @HttpCode(200)
@@ -73,7 +75,7 @@ export class TallyCommandsController {
       return { code: 'invalid_payload', message: batch.message };
     }
     markTallyRoute(ctx);
-    const results: Array<OrderCreateResult | RegisterResult> = [];
+    const results: Array<OrderCreateResult | RegisterResult | CommandResult> = [];
     // TallyUI #337: the client-time upper bound is the server clock read once per request, the same for every command in the batch.
     const requestTimeMs = Date.now();
     for (const command of batch.commands) {
@@ -81,6 +83,8 @@ export class TallyCommandsController {
         // ADR 0003: order.create and register.* commands mix in one batch, applied in array order.
         results.push(REGISTER_TYPES.includes(command.type as never)
           ? await this.registers.apply(ctx, command as unknown as RegisterEnvelope, { requestTimeMs })
+          : (command.type as string) === 'order.refund'
+          ? await this.refunds.apply(ctx, command as unknown as OrderRefundEnvelope<Record<string, unknown>>, { requestTimeMs })
           : await this.orders.create(ctx, command, { requestTimeMs }));
       } catch (error) {
         // Stop at the first transient result; the earlier commands have committed and replay as duplicate.

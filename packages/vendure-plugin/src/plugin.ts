@@ -18,6 +18,7 @@ import { TallyCommand } from './entities/tally-command.entity';
 import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
 import { RegisterService } from './service/register.service';
+import { RefundService } from './service/refund.service';
 import { StoreSetupService } from './service/store-setup.service';
 
 /** A new array: `list` plus each item it does not already hold. */
@@ -65,8 +66,8 @@ function commandsBodyParser(): Middleware['handler'] {
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES],
   controllers: [TallyInfoController, TallyCommandsController],
-  providers: [OrderCreateService, RegisterService, StoreSetupService],
-  exports: [OrderCreateService, RegisterService],
+  providers: [OrderCreateService, RegisterService, RefundService, StoreSetupService],
+  exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
   // run this on arrays that setConfig shares with the caller's config.

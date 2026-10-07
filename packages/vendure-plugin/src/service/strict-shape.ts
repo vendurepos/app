@@ -7,6 +7,12 @@ type Fields = Record<string, number>;
 // Each field with the version that introduced it, from src/vendored/commands.ts (`locationId`, declared unversioned, is refused below).
 const since = (version: number, names: string): Fields => Object.fromEntries(names.split(' ').map(name => [name, version]));
 const ENVELOPE = since(1, 'id type version createdAt deviceId attempt payload');
+
+export function refundEnvelopeStrictErrors(command: Record<string, unknown>, version: number): string[] {
+  return Object.keys(command).filter(key => !Object.hasOwn(ENVELOPE, key)).slice(0, 10)
+    .map(key => `envelope.${key}: unknown field in order.refund version ${version}`);
+}
+
 const PAYLOAD = {
   ...since(1, 'clientOrderId createdAt currency pricesIncludeTax lines subtotalMinor taxMinor totalMinor payments customer registerId cashierRef locationId'),
   discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'),

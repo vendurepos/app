@@ -567,7 +567,7 @@ export class OrderCreateService {
     return valid && String(strategy.encodeId(decoded as never)) === id ? decoded as ID : undefined;
   }
 
-  private encodeId(id: ID): string {
+  encodeId(id: ID): string {
     return String(this.idStrategy().encodeId(id as never));
   }
 
