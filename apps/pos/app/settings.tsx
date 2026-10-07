@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Platform, ScrollView, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, Text, VStack,
@@ -31,6 +31,9 @@ export default function SettingsScreen() {
   if (!session) return <Redirect href="/sign-in" />;
 
   return (
+    <>
+    {/* The cards outgrow a short window; flexGrow keeps a short screen centred. */}
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ flexGrow: 1 }}>
     <VStack className="flex-1 items-center justify-center bg-background p-6" space="lg">
       <Stack.Screen options={{ title: 'Settings' }} />
       <Card className="w-full max-w-[420px]">
@@ -146,5 +149,7 @@ export default function SettingsScreen() {
         <Text>Back to the till</Text>
       </Button>
     </VStack>
+    </ScrollView>
+    </>
   );
 }
