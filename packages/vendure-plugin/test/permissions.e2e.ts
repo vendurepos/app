@@ -37,7 +37,7 @@ describe('till route permissions', () => {
     where: { customFields: { tallyClientOrderId: input.payload.clientOrderId } },
   });
 
-  async function tokenWith(permission: 'TallyPosSell' | 'CreateOrder' | 'ReadOrder' | 'ApproveTallyPosVariance') {
+  async function tokenWith(permission: 'TallyPosSell' | 'CreateOrder' | 'ReadOrder' | 'ApproveTallyPosVariance' | 'TallyPosRefund') {
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
     const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
       createRole(input: $input) { id }
@@ -56,7 +56,7 @@ describe('till route permissions', () => {
     return { Authorization: `Bearer ${token}` };
   }
 
-  it('ApproveTallyPosVariance is an assignable permission, and the SuperAdmin role holds it', async () => {
+  it('ApproveTallyPosVariance and TallyPosRefund are assignable permissions, and the SuperAdmin role holds them', async () => {
     const { globalSettings, roles } = await adminClient.query<{
       globalSettings: { serverConfig: { permissions: Array<{ name: string; assignable: boolean }> } };
       roles: { items: Array<{ permissions: string[] }> };
@@ -65,9 +65,11 @@ describe('till route permissions', () => {
       roles(options: { filter: { code: { eq: "__super_admin_role__" } } }) { items { permissions } }
     }`));
     expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'ApproveTallyPosVariance', assignable: true });
+    expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'TallyPosRefund', assignable: true });
     expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'TallyPosSell', assignable: true });
     expect(roles.items).toHaveLength(1);
     expect(roles.items[0].permissions).toContain('ApproveTallyPosVariance');
+    expect(roles.items[0].permissions).toContain('TallyPosRefund');
   });
 
   it('a TallyPosSell-only administrator sells and reads /info', async () => {
@@ -101,6 +103,14 @@ describe('till route permissions', () => {
 
   it('an ApproveTallyPosVariance-only administrator is refused: approving a close does not grant selling', async () => {
     const token = await tokenWith('ApproveTallyPosVariance');
+    const refused = mug();
+    expect((await post({ commands: [refused] }, token)).status).toBe(403);
+    expect(await ledgerFor(refused)).toBeNull();
+    expect((await fetch(`${base}/tally/v1/info`, { headers: headers(token) })).status).toBe(403);
+  });
+
+  it('a TallyPosRefund-only administrator is refused: refunding does not grant selling', async () => {
+    const token = await tokenWith('TallyPosRefund');
     const refused = mug();
     expect((await post({ commands: [refused] }, token)).status).toBe(403);
     expect(await ledgerFor(refused)).toBeNull();

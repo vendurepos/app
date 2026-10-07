@@ -7,7 +7,7 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/spikes/s1-order-recipe.md`).
 
 The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
-commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough). The plugin also declares `ApproveTallyPosVariance` for managers who approve a close over the variance threshold. It opens neither route, and nothing checks it until the approval route lands.
+commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough). The plugin also declares `ApproveTallyPosVariance` for managers who approve a close over the variance threshold. It opens neither route, and nothing checks it until the approval route lands. It also declares `TallyPosRefund`, which the coming `order.refund` command will check. It opens neither route either, and the till role preset leaves it out: a store grants refunds to the roles it chooses. medusapos ADR 0023's `UseTallyPos` is `TallyPosSell` (or `CreateOrder`) here. These permission names are public API once a role stores them, so they are never renamed.
 
 **Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
 so it emits no event. A command already in the ledger always replays its recorded answer first. A
