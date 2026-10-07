@@ -41,6 +41,8 @@ The strict shape (ADR 0003 §4) allows `deviceName` and `supersedes` on `registe
 
 Every open, at any version, records the envelope's `deviceId` on the session. A v2 open also records `deviceName`, trimmed.
 
+Every open also records its version as `openVersion` (migration `TallyPosRegisterOpenVersion1791100000000`).
+
 The migration `TallyPosRegisterV21791000000000` adds three nullable columns to `tally_register_session`: `deviceId`, `deviceName` and `supersedes`.
 
 ### 3. Resume (d2)
@@ -88,8 +90,8 @@ The result carries `superseded: { sessionId, openedAt, deviceId?, deviceName? }`
 
 **Superseded sessions are refused.** On a superseded session, these commands are refused:
 
-- at contract version ≥ 2: `register_session_superseded`, with `RegisterSessionSupersededData`;
-- at contract version 1: `register_session_closed`.
+- when the command or the session's own open is version ≥ 2: `register_session_superseded`, with `RegisterSessionSupersededData` (front desk ruling 2026-10-07, TallyUI/tallyui#515);
+- when the command is version 1 and the session's open version is 1 or unknown (`null`): `register_session_closed`, with no data.
 
 Like every `register_*` conflict (ADR-068 d5), the refusal is stored.
 

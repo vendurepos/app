@@ -190,6 +190,7 @@ export class RegisterService {
         openedAt: p.openedAt, openedBy: p.openedBy ?? null, expectedFloatMinor: p.expectedFloatMinor ?? null,
         countedFloatMinor: p.countedFloatMinor, openingVarianceMinor: p.openingVarianceMinor ?? null, commandId,
         deviceId: command.deviceId, deviceName: p.deviceName?.trim() ?? null, supersedes: takeover ? live.id : null,
+        openVersion: command.version,
       });
       await repo(TallyRegisterSession).insert(opened);
       return applied({ session: await this.liveSession(tx, opened, 'open'), ...(takeover ? { superseded: {
@@ -200,8 +201,9 @@ export class RegisterService {
 
     const { status, closed } = await this.sessionState(tx, session!);
     if (status === 'superseded') {
-      if (command.version === 1) return conflict('register_session_closed', `Session ${session!.id} is closed`);
-      return this.supersededRefusal(tx, commandId, session!);
+      // TallyUI sends later commands at v1; follow what the session's till understands (TallyUI/tallyui#515).
+      if (command.version >= 2 || (session!.openVersion ?? 1) >= 2) return this.supersededRefusal(tx, commandId, session!);
+      return conflict('register_session_closed', `Session ${session!.id} is closed`);
     }
     if (command.type === 'register.session.transition') {
       const p = command.payload as unknown as RegisterSessionTransitionPayload;

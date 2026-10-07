@@ -1,7 +1,7 @@
 import { RequestContextService, TransactionalConnection, runMigrations } from '@vendure/core';
 import { TestServer } from '@vendure/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, RegisterService, TallyPos1790648006022, TallyPosRegister1790800000000, TallyPosRegisterV21791000000000, TallyPosV51790900000000, TallyPosVp2a1790720000000 } from '../src';
+import { OrderCreateService, RegisterService, TallyPos1790648006022, TallyPosRegister1790800000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000, TallyPosV51790900000000, TallyPosVp2a1790720000000 } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import { createPluginTestEnvironment, dbConnectionOptions, pluginTestConfig } from './env';
 import { orderCommand } from './payloads';
@@ -23,6 +23,11 @@ describe('the TallyPos migration', () => {
     const raw = seeded.server.app.get(TransactionalConnection).rawConnection;
     const runner = raw.createQueryRunner();
     try {
+      await new TallyPosRegisterOpenVersion1791100000000().down(runner);
+      expect((await raw.driver.createSchemaBuilder().log()).upQueries.map(item => item.query)).toEqual([
+        'ALTER TABLE "tally_register_session" ADD "openVersion" integer',
+      ]);
+      await new TallyPosRegisterOpenVersion1791100000000().up(runner);
       await new TallyPosRegisterV21791000000000().down(runner);
       expect((await raw.driver.createSchemaBuilder().log()).upQueries.map(item => item.query)).toEqual([
         'CREATE TABLE "tally_register_session_alias" ("channelId" character varying NOT NULL, "id" character varying NOT NULL, "sessionId" character varying NOT NULL, "commandId" character varying NOT NULL, "receivedAt" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_b759fdc911b503ab399194b2cde" PRIMARY KEY ("channelId", "id"))',
@@ -59,14 +64,14 @@ describe('the TallyPos migration', () => {
 
     const config = pluginTestConfig({ dbConnectionOptions: {
       ...dbConnectionOptions, database, synchronize: false,
-      migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000, TallyPosV51790900000000, TallyPosRegisterV21791000000000],
+      migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000, TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000],
     } });
     // runMigrations prints "Your database schema does not match…" when the schema diff is not empty.
     const printed = vi.spyOn(console, 'log');
     try {
-      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022', 'TallyPosVp2a1790720000000', 'TallyPosRegister1790800000000', 'TallyPosV51790900000000', 'TallyPosRegisterV21791000000000']);
+      expect(await runMigrations(config)).toEqual(['TallyPos1790648006022', 'TallyPosVp2a1790720000000', 'TallyPosRegister1790800000000', 'TallyPosV51790900000000', 'TallyPosRegisterV21791000000000', 'TallyPosRegisterOpenVersion1791100000000']);
       const output = printed.mock.calls.flat().join('\n');
-      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000[\s\S]*Successfully ran migration: TallyPosRegister1790800000000[\s\S]*Successfully ran migration: TallyPosV51790900000000[\s\S]*Successfully ran migration: TallyPosRegisterV21791000000000/);
+      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000[\s\S]*Successfully ran migration: TallyPosRegister1790800000000[\s\S]*Successfully ran migration: TallyPosV51790900000000[\s\S]*Successfully ran migration: TallyPosRegisterV21791000000000[\s\S]*Successfully ran migration: TallyPosRegisterOpenVersion1791100000000/);
       expect(output).not.toMatch(/does not match/);
     } finally {
       printed.mockRestore();

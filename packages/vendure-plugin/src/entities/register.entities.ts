@@ -73,6 +73,10 @@ export class TallyRegisterSession {
   @Column('varchar', { nullable: true })
   supersedes: string | null;
 
+  /** The register.session.open version that opened it; null for sessions opened before migration TallyPosRegisterOpenVersion. */
+  @Column('int', { nullable: true })
+  openVersion: number | null;
+
   @Column('varchar')
   commandId: string;
 
