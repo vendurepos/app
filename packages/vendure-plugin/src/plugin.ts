@@ -8,7 +8,7 @@ import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
 import { TallyInfoController } from './api/info.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
-import { tallyPosSell } from './config/permissions';
+import { tallyPosSell, tallyPosApproveVariance } from './config/permissions';
 import {
   TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
@@ -75,7 +75,7 @@ function commandsBodyParser(): Middleware['handler'] {
     const byCode = (a: { code: string }, b: { code: string }) => a.code === b.code;
     config.customFields.Order = withMissing(config.customFields.Order, orderCustomFields, byName);
     config.customFields.OrderLine = withMissing(config.customFields.OrderLine, orderLineCustomFields, byName);
-    config.authOptions.customPermissions = withMissing(config.authOptions.customPermissions, [tallyPosSell], (a, b) => a.Permission === b.Permission);
+    config.authOptions.customPermissions = withMissing(config.authOptions.customPermissions, [tallyPosSell, tallyPosApproveVariance], (a, b) => a.Permission === b.Permission);
     registerOrderIndexes();
     const { orderOptions } = config;
     if (!(orderOptions.orderItemPriceCalculationStrategy instanceof TallyPriceStrategy)) {

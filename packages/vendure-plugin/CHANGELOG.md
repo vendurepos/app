@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A second custom permission, `ApproveTallyPosVariance` (`tallyPosApproveVariance`): it may approve a register close over the variance threshold. The SuperAdmin role holds it. Nothing checks it yet, and it never opens the `/tally/v1` routes, which still need `TallyPosSell` or `CreateOrder`.
 - A command on a superseded session is refused `register_session_superseded` when the command or the session's own open is version 2, so a till that sends later register commands at version 1 (TallyUI 3.8.0) still learns it was taken over; `register_session_closed` stays for a v1 command on a session opened at v1. Migration `TallyPosRegisterOpenVersion1791100000000` adds `openVersion` to `tally_register_session`.
 - Register contract version 2 (ADR 0006): `GET /tally/v1/info` advertises register 1–2. A v2 `register.session.open` records the till's `deviceId` and `deviceName`. The device holding the live session resumes it; a different session id becomes a permanent alias and the result carries `resumed`. Another device takes over with `supersedes` naming the live session, a compare-and-set under the register lock.
 - Register commands resolve session aliases. A command on a superseded session is refused `register_session_superseded` at v2 and `register_session_closed` at v1, and a v2 open naming a superseded session gets the same v2 refusal. The live `expected` and `salesCount` count sales carrying an alias.
