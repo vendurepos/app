@@ -750,9 +750,15 @@ test('a till update the store rejects shows in the header', async ({ page }) => 
   await page.getByTestId('sign-in-submit').click();
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   await expect(page.getByTestId('register-sync-notice')).toHaveCount(0);
-  await openRegister(page);
+  // The store refuses the open, so the session goes to conflict and the Register button never stays up: open by hand.
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
   await expect(page.getByTestId('register-sync-notice')).toHaveText('1 till update needs attention · The online store refused it, '
     + "and later till updates wait behind it. Ask the store owner to look at the till's sync log.");
+  await expect(page.getByTestId('register-conflict')).toBeVisible();
+  await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
