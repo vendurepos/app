@@ -10,6 +10,9 @@ import { normalizeStoreUrl } from './store-url';
 
 export type SignInOutcome = { ok: true; session: Session } | { ok: false; error: string };
 
+// A password account the plugin answers 403: it has neither TallyPosSell nor CreateOrder (medusapos ADR 0023, "At sign-in").
+export const POS_ACCESS_REFUSED_TEXT = "This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).";
+
 /** Signs in with password or api-key credentials plus the app's barcode_field setting. */
 export async function signIn(
   values: Record<string, string | undefined>,
@@ -35,6 +38,15 @@ export async function signIn(
       stock: { trackInventory: false, outOfStockThreshold: 0 },
     };
     const context = { ...sessionContext(session), signal: init?.signal };
+    try {
+      const response = await fetch(`${normalized.url}/tally/v1/info`, { headers: sessionContext(session).headers, signal: init?.signal });
+      if (response.status === 403) {
+        void logout({ url: normalized.url, token });
+        return { ok: false, error: POS_ACCESS_REFUSED_TEXT };
+      }
+    } catch (error) {
+      if ((error as { name?: unknown })?.name === 'AbortError') throw error;
+    }
     const [settings, stock] = await Promise.all([
       vendureStoreSettings(context),
       vendureGlobalStockSettings(context),

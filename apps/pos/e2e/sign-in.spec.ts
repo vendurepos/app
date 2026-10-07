@@ -1807,3 +1807,50 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
     }
   });
 });
+
+test('a password account without POS access is refused at sign-in and keeps no session', async ({ page }) => {
+  const login = await page.request.post(`${STORE_URL}/admin-api`, {
+    data: {
+      query: 'mutation ($username: String!, $password: String!) { login(username: $username, password: $password) { __typename } }',
+      variables: { username: USERNAME, password: PASSWORD },
+    },
+  });
+  expect(login.ok()).toBe(true);
+  const token = login.headers()['vendure-auth-token'];
+  expect(token).toBeTruthy();
+  const admin = async (query: string, variables: Record<string, unknown> = {}) => {
+    const response = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN }, data: { query, variables },
+    });
+    expect(response.ok()).toBe(true);
+    const result = await response.json();
+    expect(result.errors).toBeUndefined();
+    return result.data;
+  };
+  const { activeChannel } = await admin('query { activeChannel { id } }');
+  const suffix = Date.now();
+  const { createRole: role } = await admin('mutation ($input: CreateRoleInput!) { createRole(input: $input) { id } }', {
+    input: {
+      code: `e2e-no-pos-${suffix}`, description: 'E2E without POS access',
+      permissions: ['ReadCatalog', 'ReadSettings', 'ReadCustomer'], channelIds: [activeChannel.id],
+    },
+  });
+  const email = `no-pos-${suffix}@e2e.example`;
+  const password = 'no-pos-password';
+  await admin('mutation ($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }', {
+    input: { firstName: 'No', lastName: 'POS', emailAddress: email, password, roleIds: [role.id] },
+  });
+
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(email);
+  await page.getByTestId('sign-in-password').fill(password);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('sign-in-error')).toHaveText("This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).");
+  await expect(page).toHaveURL(/\/sign-in$/);
+  expect(await page.evaluate(() => localStorage.getItem('vendurepos.session'))).toBeNull();
+  await expectCspMeta(page);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
