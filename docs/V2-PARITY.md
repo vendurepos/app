@@ -58,7 +58,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Search and attach a customer; guest sales | Free (FS) | Has | `apps/pos/lib/sale-customer.tsx`; e2e "attaches a customer" | — |
-| Create a customer from the cart | Pro (MS) | Partial | The connector implements `createCustomer` (online only); no e2e proves the path | app (an e2e) |
+| Create a customer from the cart | Pro (MS) | Has | The connector's `createCustomer` (online only); `apps/pos/e2e/sign-in.spec.ts` "a sale to a searched customer, and one to a new customer, land on those customers in Vendure" | — |
 | Customers management screen | Pro (MS) | Missing | No route | TallyUI, then app |
 
 ## Checkout and payments
