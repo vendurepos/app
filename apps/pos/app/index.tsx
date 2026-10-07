@@ -13,6 +13,7 @@ import {
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
+import { accessRefused } from '../lib/access-refused';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
@@ -36,13 +37,14 @@ import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, tillIdentity, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { POS_ACCESS_REFUSED_TEXT } from '../lib/sign-in';
 import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
-import { FORBIDDEN_TEXT, SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
+import { SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
@@ -97,7 +99,6 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     },
   });
   const notice = outboxNotice(outbox.state);
-  const sessionEnded = outbox.state.authRequired || catalogue.error === SESSION_ENDED_TEXT;
   const traitContext = useMemo(() => ({ currency: session.settings.currency }), [session.settings.currency]);
   const currency = session.settings.currency;
   // The register's collections share the orders database, so they open, close and are kept with it.
@@ -114,6 +115,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     transport: () => holdClosuresForOrders(orderTransport(() => sessionRef.current), pendingSessionOrders(outbox.orders!)),
     onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
   });
+  const refusedAccess = accessRefused(catalogue.error, outbox.state, registerOutbox.state);
+  const sessionEnded = outbox.state.authRequired || catalogue.error === SESSION_ENDED_TEXT || refusedAccess;
   // Once orders have gone, a held closure goes at once rather than at the end of its backoff.
   useFlushOnDrain(outbox.state.pending, () => void registerOutbox.flush());
   const closingWaiting = useClosureWaiting(registerStore?.commands ?? null, outbox.orders);
@@ -214,14 +217,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {sessionEnded ? (
         <View testID="sign-in-again" className="border-b border-border px-4 py-2">
-          <SignInAgain session={session} onSignedIn={(next) => { sessionRef.current = next; void outbox.flush(); void registerOutbox.flush(); }} />
+          <SignInAgain session={session} accessRefused={refusedAccess} onSignedIn={(next) => { sessionRef.current = next; void outbox.flush(); void registerOutbox.flush(); }} />
         </View>
       ) : null}
       {notice ? (
         <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
           <Text testID="orders-notice" className="flex-1 text-sm text-muted-foreground">{notice}</Text>
           {/* The outbox pauses a refused batch until the next flush; a new sale's flush sends it too. */}
-          {outbox.state.refused && !outbox.state.authRequired ? (
+          {outbox.state.refused && outbox.state.refused.status !== 403 && !outbox.state.authRequired ? (
             <Button testID="orders-send-again" variant="secondary" size="sm" disabled={outbox.state.sending}
               onPress={() => void outbox.flush()}>
               <Text>Send again</Text>
@@ -261,7 +264,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   overSheet={closureShown} />
               </TaxProvider>
             </CurrencyProvider>
-          ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === FORBIDDEN_TEXT ? (
+          ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === POS_ACCESS_REFUSED_TEXT ? (
             // A refused session or account fails the settings reads too: the catalogue's notice says why.
             <Text className="p-4 text-sm text-muted-foreground">{catalogue.error}</Text>
           ) : saleSettings.status === 'plugin' ? (
@@ -314,6 +317,7 @@ function countOrders(count: number): string {
 /** The one outbox notice the header shows, the most pressing first; undefined when there is none. */
 function outboxNotice({ authRequired, refused }: OutboxState): string | undefined {
   if (authRequired) return 'The store refused this sign-in. Sign in again below; orders are kept.';
+  if (refused?.status === 403) return 'The store refused this account. Sign in again below; orders are kept.';
   if (refused) return `The store refused the orders (${refused.reason}). They are kept; send them again once the store is fixed.`;
 }
 

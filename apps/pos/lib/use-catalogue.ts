@@ -5,12 +5,11 @@ import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
 import { sessionKey, type Session } from './session';
+import { POS_ACCESS_REFUSED_TEXT } from './sign-in';
 import { storageStartMessage } from './storage-start-failure';
 
 // A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
 export const SESSION_ENDED_TEXT = 'Your session has ended. Sign in again to keep selling.';
-// A `forbidden` notice (TallyUI #342): a 403, fixed by the store; the pull retries on its own, and signing out won't help.
-export const FORBIDDEN_TEXT = "This account isn't allowed to use the till on this store. Ask the store's admin; the till retries on its own.";
 
 export function useCatalogue(session: Session): {
   connector: TallyConnector;
@@ -39,6 +38,7 @@ export function useCatalogue(session: Session): {
     // From TallyUI 3.0 a refused session reaches notice$, never error$, and the pull pauses without an error.
     let tillStopped = false;
     // A forbidden notice stands until the store answers a pull again: the errors rethrown meanwhile don't replace it.
+    // The pull still retries on TallyUI's store schedule, but the app asks the cashier to sign in again (ADR 0023).
     let forbidden = false;
     const subscriptions: Subscription[] = [];
     void startCatalogueSync(session, connector).then(({ db, replication, stockLevels }) => {
@@ -57,7 +57,7 @@ export function useCatalogue(session: Session): {
         if (dead) return;
         tillStopped = notice?.fixedBy === 'till';
         forbidden = notice?.code === 'forbidden';
-        const text = notice?.code === 'unauthorized' ? SESSION_ENDED_TEXT : forbidden ? FORBIDDEN_TEXT : undefined;
+        const text = notice?.code === 'unauthorized' ? SESSION_ENDED_TEXT : forbidden ? POS_ACCESS_REFUSED_TEXT : undefined;
         if (!text) return;
         errorShown = true;
         setError(text);

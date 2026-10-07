@@ -32,6 +32,15 @@ describe('registerSyncNotice', () => {
       + 'online store refused the last send. This till will try again with the next till update, or when the app is reopened.');
   });
 
+  it('asks to sign in again on a refused 403 send, like a 401', () => {
+    expect(registerSyncNotice(state({ refused: { status: 403, reason: 'Forbidden' } }), 0))
+      .toBe("Till updates aren't sending: this till needs to sign in to the online store again.");
+    expect(registerSyncNotice(state({ refused: { status: 403, reason: 'Forbidden' } }), 0))
+      .toBe(registerSyncNotice(state({ authRequired: true }), 0));
+    expect(registerSyncNotice(state({ refused: { status: 422, reason: 'test' } }), 0)).toBe('2 till updates waiting to sync · The '
+      + 'online store refused the last send. This till will try again with the next till update, or when the app is reopened.');
+  });
+
   it('shows a sign-in the store refused, first', () => {
     expect(registerSyncNotice(state({ authRequired: true, refused: { status: 422, reason: 'test' }, stuck: stuck('status_503') }), 1))
       .toBe("Till updates aren't sending: this till needs to sign in to the online store again.");

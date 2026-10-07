@@ -346,6 +346,53 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   expect(cspConsole).toEqual([]);
 });
 
+test('a 403 on the orders asks to sign in again with the sign-in words; signing in again sends the kept sale', async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await openRegister(page);
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ message: 'Forbidden' }) });
+  });
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('sign-in-again')).toContainText("This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).");
+  await expect(page.getByTestId('orders-notice')).toContainText('The store refused this account.');
+  await expect(page.getByTestId('orders-send-again')).toHaveCount(0);
+  await expect(page.getByTestId('sync-status')).toContainText('1 sale waiting to sync');
+  await page.unroute('**/tally/v1/commands');
+  await page.getByTestId('sign-in-again-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-again-submit').click();
+  await expect(page.getByTestId('sign-in-again')).toHaveCount(0);
+  await expect(page.getByTestId('sync-status')).toHaveCount(0, { timeout: 30_000 });
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+test('a 403 on a product pull asks to sign in again with the sign-in words, and signing in again resumes the catalogue', async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
+  await page.route('**/admin-api', (route) => {
+    const body = route.request().postData() ?? '';
+    if (route.request().method() !== 'POST' || !(body.includes('products(') || body.includes('productVariants('))) return route.continue();
+    return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ message: 'Forbidden' }) });
+  });
+  const violations = await cspViolations(page);
+  await page.reload();
+  await expect(page.getByTestId('sign-in-again')).toContainText("This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).");
+  await page.unroute('**/admin-api');
+  await page.getByTestId('sign-in-again-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-again-submit').click();
+  await expect(page.getByTestId('sign-in-again')).toHaveCount(0);
+  await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
+  violations.push(...await cspViolations(page));
+  expect(violations).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('a rejected sale needs attention, is retried from the Orders panel and applies; a refused batch is sent again', async ({ page }) => {
   // The store rejects every order it is sent: each stays rejected until the cashier retries it.
   const sent: { id: string; type: string; payload: { clientOrderId: string } }[] = [];
