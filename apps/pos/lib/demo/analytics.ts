@@ -15,6 +15,12 @@ export function demoAnalyticsEnabled(demo: boolean = DEMO_MODE, hostname: string
   return demo && hostname === DEMO_HOST;
 }
 
+function referringDomain(): string {
+  const referrer = globalThis.document?.referrer;
+  if (!referrer) return '$direct';
+  try { return new URL(referrer).hostname || '$direct'; } catch { return '$direct'; }
+}
+
 export function trackDemoEvent(event: DemoEvent, enabled: boolean = demoAnalyticsEnabled()): void {
   if (!enabled) return;
   try {
@@ -22,7 +28,7 @@ export function trackDemoEvent(event: DemoEvent, enabled: boolean = demoAnalytic
       method: 'POST', headers: { 'Content-Type': 'text/plain' }, credentials: 'omit', keepalive: true,
       body: JSON.stringify({
         api_key: API_KEY, event, distinct_id: visitId,
-        properties: { site: DEMO_HOST, $process_person_profile: false },
+        properties: { site: DEMO_HOST, $process_person_profile: false, ...(event === 'demo_opened' ? { $referring_domain: referringDomain() } : {}) },
       }),
     }).catch(() => {});
   } catch { /* A missing or throwing fetch must not interrupt the demo. */ }
