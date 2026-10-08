@@ -3,8 +3,6 @@ import {
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { addRxPlugin, createRxDatabase, type RxCollection } from 'rxdb';
-import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
-import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { appStorage } from './app-storage';
 import { storeKeyHash, type Session } from './session';
 import type { SaleSettingsState } from './use-sale-settings';
@@ -65,11 +63,18 @@ export async function openOrderStore(name: string, platform: string): Promise<{ 
   try {
     await previous;
     const storage = appStorage();
-    // After the storage, which sets RxDB's premium flag before dev mode's init reads it (createTallyDatabase's order).
-    if (DEV_MODE) addRxPlugin(RxDBDevModePlugin);
+    let validatedStorage = storage;
+    if (DEV_MODE) {
+      const [{ RxDBDevModePlugin }, { wrappedValidateAjvStorage }] = await Promise.all([
+        import('rxdb/plugins/dev-mode'), import('rxdb/plugins/validate-ajv'),
+      ]);
+      // After the storage, which sets RxDB's premium flag before dev mode's init reads it (createTallyDatabase's order).
+      addRxPlugin(RxDBDevModePlugin);
+      validatedStorage = wrappedValidateAjvStorage({ storage });
+    }
     const database = await createRxDatabase({
       name, multiInstance: false, ignoreDuplicate: DEV_MODE,
-      storage: DEV_MODE ? wrappedValidateAjvStorage({ storage }) : storage,
+      storage: validatedStorage,
     });
     // A failed open closes the database here, so the next open, which retries it, starts afresh. pos_orders first, so
     // its migrations settle before anything reads it; then the other collections, then register_sessions and its register document.
