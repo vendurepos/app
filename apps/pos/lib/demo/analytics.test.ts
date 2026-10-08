@@ -25,9 +25,33 @@ it('sends one anonymous, cookieless capture with only the specified properties',
   const body = JSON.parse(fetch.mock.calls[0][1].body);
   expect(body).toEqual({
     api_key: 'phc_BhTJzZ7fXMqcD4MiaUJQsQqPkEpu94yoSAthXFBWemvd', event: 'demo_opened',
-    distinct_id: expect.any(String), properties: { site: 'demo.vendurepos.com', $process_person_profile: false },
+    distinct_id: expect.any(String), properties: { site: 'demo.vendurepos.com', $process_person_profile: false, $referring_domain: '$direct' },
   });
   expect(body.distinct_id.length).toBeGreaterThan(0);
+});
+
+it.each([
+  ['', '$direct'],
+  ['https://vendurepos.com/', 'vendurepos.com'],
+  ['https://docs.vendurepos.com/quick-start?utm_source=newsletter#try', 'docs.vendurepos.com'],
+])('records only the referring host or $direct for referrer %s', (referrer, domain) => {
+  const fetch = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('fetch', fetch);
+  vi.stubGlobal('document', { referrer });
+  trackDemoEvent('demo_opened', true);
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.properties).toEqual({ site: 'demo.vendurepos.com', $process_person_profile: false, $referring_domain: domain });
+  expect(fetch.mock.calls[0][1].body).not.toContain('quick-start');
+  expect(fetch.mock.calls[0][1].body).not.toContain('utm_source');
+});
+
+it.each(['demo_signed_in', 'demo_sale_completed', 'demo_reset'] as const)('omits the referring domain for %s', (event) => {
+  const fetch = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('fetch', fetch);
+  vi.stubGlobal('document', { referrer: 'https://vendurepos.com/' });
+  trackDemoEvent(event, true);
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.properties).toEqual({ site: 'demo.vendurepos.com', $process_person_profile: false });
 });
 
 it('uses the same in-memory visit id for successive events', () => {
