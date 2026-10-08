@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { withStockOverlay, type TallyConnector } from '@tallyui/core';
-import { getStorageHealth } from '@tallyui/database';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
@@ -41,7 +40,7 @@ export function useCatalogue(session: Session): {
     // The pull still retries on TallyUI's store schedule, but the app asks the cashier to sign in again (ADR 0023).
     let forbidden = false;
     const subscriptions: Subscription[] = [];
-    void startCatalogueSync(session, connector).then(({ db, replication, stockLevels }) => {
+    void startCatalogueSync(session, connector).then(({ db, replication, stockLevels, health }) => {
       if (cancelled) return;
       subscriptions.push(db.products.find().$.subscribe((docs) => {
         if (!cancelled) setProducts(docs.map((doc) => doc.toJSON()));
@@ -87,7 +86,6 @@ export function useCatalogue(session: Session): {
         errorShown = false;
         setError(null);
       }));
-      const health = getStorageHealth(db);
       if (health) subscriptions.push(health.subscribe(({ status }) => {
         if (cancelled || status !== 'dead') return;
         dead = true;

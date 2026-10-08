@@ -1,6 +1,6 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { TallyConnector } from '@tallyui/core';
-import { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, type TallyDatabase, type TallyReplicationState } from '@tallyui/database';
+import type { TallyDatabase, TallyReplicationState, STOCK_LEVELS_COLLECTION, getStorageHealth } from '@tallyui/database';
 import { sessionContext, storeKeyHash, type Session } from './session';
 import { appStorage } from './app-storage';
 
@@ -37,12 +37,14 @@ export function catalogueConnector(session: Session): TallyConnector {
 
 export async function startCatalogueSync(session: Session, connector: TallyConnector): Promise<{
   db: TallyDatabase; replication: TallyReplicationState<any, any>; stockLevels: TallyDatabase[typeof STOCK_LEVELS_COLLECTION];
+  health: ReturnType<typeof getStorageHealth>;
 }> {
   return enqueue(() => startUnqueued(session, connector));
 }
 
 async function startUnqueued(session: Session, connector: TallyConnector) {
   await stopUnqueued();
+  const { createTallyDatabase, startReplication, startStockReconcile, startIdReconcile, startFingerprintReconcile, STOCK_LEVELS_COLLECTION, getStorageHealth } = await import('@tallyui/database');
   const name = databaseName(session);
   if (database) {
     const db = await database;
@@ -88,7 +90,8 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     visibility?.removeEventListener('visibilitychange', onVisibilityChange);
     network?.removeEventListener('online', refresh);
   };
-  return { db, replication, stockLevels };
+  const health = getStorageHealth(db);
+  return { db, replication, stockLevels, health };
 }
 
 export async function stopCatalogueSync(): Promise<void> {
