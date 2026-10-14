@@ -9,7 +9,7 @@ import { TallyCommand } from '../entities/tally-command.entity';
 import type {
   CommandResult, OrderRefundEnvelope, RegisterClosureSubmitPayload, RegisterCommandEnvelope, RegisterCommandResult, RegisterCommandType,
   RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterSessionOpenPayload, RegisterSessionSupersededData, RegisterSessionTransitionPayload,
-} from '../vendored/core-commands';
+} from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { deriveSessionFigures, deriveVariance } from '../vendored/register-figures';
 import type { RegisterConflictCode } from '../vendored/register-outcome';

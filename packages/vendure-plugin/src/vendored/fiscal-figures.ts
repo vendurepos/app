@@ -1,4 +1,4 @@
-// TEMPORARY (spike S1): vendored from medusapos@8667f71 packages/medusa-plugin/src/workflows/tally-order-create/fiscal-figures.ts until @tallyui/core/server exists.
+// vendored from medusapos@8667f71 packages/medusa-plugin/src/workflows/tally-order-create/fiscal-figures.ts (ADR 0002: never hand-edited; @tallyui/core@3.9.1's copy adds refusals, so re-vendoring it is its own change)
 import type { CommandError, OrderCreatePayload } from './commands.js' with { 'resolution-mode': 'import' }
 import { currencyDecimals } from './money.js'
 

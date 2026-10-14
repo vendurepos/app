@@ -1,6 +1,5 @@
-// TEMPORARY (spike S1): vendored from medusapos@8667f71 packages/medusa-plugin/src/workflows/tally-order-create/fingerprint.ts until @tallyui/core/server exists.
+// vendored verbatim from @tallyui/core@3.9.1 src/server/fingerprint.ts (ADR 0002: never hand-edited)
 import { createHash } from 'node:crypto'
-import type { CommandEnvelope } from './commands.js' with { 'resolution-mode': 'import' }
 
 /** JSON with recursively sorted object keys; arrays keep their order. */
 export function canonicalJson(value: unknown): string {
@@ -14,7 +13,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 /** Lower-case hex SHA-256 of the canonical command content. */
-export function commandFingerprint(envelope: Pick<CommandEnvelope, 'type' | 'version' | 'payload'>): string {
+export function commandFingerprint(envelope: { type: string; version: number; payload: unknown }): string {
   const { type, version, payload } = envelope
   return createHash('sha256').update(canonicalJson({ type, version, payload })).digest('hex')
 }

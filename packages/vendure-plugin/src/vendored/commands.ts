@@ -1,4 +1,4 @@
-// TEMPORARY (spike S1): vendored from tallyui@2786667 packages/core/src/types/commands.ts until @tallyui/core/server exists.
+// vendored verbatim from @tallyui/core@3.9.1 src/types/commands.ts (ADR 0002: never hand-edited)
 /** Supported command operation. */
 export type CommandType = 'order.create';
 
@@ -6,7 +6,9 @@ export type CommandType = 'order.create';
 export interface CommandEnvelope<P = unknown> {
   id: string; // UUIDv7, the idempotency key; never reused
   type: CommandType;
-  /** 3 when the order carries ADR-065's `display` and `taxByRate` (the store accepts 3), else 2 when discounted, else 1. */
+  /** 3 when the order carries ADR-065's `display` and `taxByRate` (the store accepts 3), else 2 when discounted, else 1;
+   *  4 is 3 with every `discountMinor` tax-exclusive, built only when capped at 4 or more (#286).
+   *  5 is 4 plus fees, shipping and custom lines (ADR-075), sent only for an order that has one. */
   version: 1 | 2 | 3 | 4 | 5;
   payload: P;
   createdAt: string; // ISO 8601, client clock
@@ -21,9 +23,39 @@ export type RegisterCommandType = 'register.session.open' | 'register.session.tr
 export type RegisterCommandEnvelope<P = Record<string, unknown>> =
   Omit<CommandEnvelope<P>, 'type' | 'version'> & { type: RegisterCommandType; version: number };
 /** Any command a transport can carry. */
-export type AnyCommandEnvelope = CommandEnvelope<unknown> | RegisterCommandEnvelope<unknown>;
+export type AnyCommandEnvelope = CommandEnvelope<unknown> | RegisterCommandEnvelope<unknown> | OrderRefundEnvelope<unknown>;
 
-/** An order.create envelope, including v5 charges and custom lines (ADR-075). */
+/** A line's refunded quantity and restock choice (ADR-080). */
+export interface OrderRefundLine { orderLineId: string; quantity: number; restock: boolean }
+/** An online refund against an order, attributed to the refunding session (ADR-080). */
+export interface OrderRefundPayload {
+  clientRefundId: string; orderId: string; clientOrderId?: string; lines: OrderRefundLine[];
+  shippingMinor: number; adjustmentMinor: number; totalMinor: number;
+  destination: 'original_method' | 'cash'; reason: string;
+  registerId: string; sessionId: string; cashierRef?: string; createdAt: string;
+}
+/** An order.refund v1 command with the shared idempotency envelope (ADR-080). */
+export type OrderRefundEnvelope<P = OrderRefundPayload> =
+  Omit<CommandEnvelope<P>, 'type' | 'version'> & { type: 'order.refund'; version: 1 };
+/** The server's refund total, tender attribution and platform refunds (ADR-080). */
+export interface OrderRefundResult {
+  totalMinor: number;
+  byMethod: Record<string, number>;
+  refunds: Array<{ id: string; paymentId: string; totalMinor: number; state: string }>;
+}
+/** Per-command refund refusals (ADR-080 decision 5). */
+export type OrderRefundRejectionCode = 'nothing_to_refund' | 'quantity_exceeds' | 'amount_mismatch'
+  | 'order_state' | 'not_till_order' | 'forbidden' | 'no_open_session';
+/** Lines exceeding the server's refundable quantities (ADR-080). */
+export interface OrderRefundQuantityExceedsData { lines: Array<{ orderLineId: string; quantity: number; refundableQuantity: number }> }
+/** The till's expected refund and the server's computed amount (ADR-080). */
+export interface OrderRefundAmountMismatchData { expectedMinor: number; serverMinor: number }
+/** The order state preventing a refund (ADR-080). */
+export interface OrderRefundOrderStateData { state: string }
+/** The session that is not open on the refunding register (ADR-080). */
+export interface OrderRefundNoOpenSessionData { sessionId: string }
+
+/** An order.create envelope: 5 is 4 plus fees, shipping and custom lines (ADR-075), sent only for an order that has one. */
 export type OrderCreateEnvelope = CommandEnvelope<OrderCreatePayload> & { type: 'order.create'; version: 1 | 2 | 3 | 4 | 5 };
 
 /** Outcome of processing a command. */
@@ -36,10 +68,58 @@ export interface CommandServerRefs {
   totalMinor: number;
 }
 
-/** Non-fatal discrepancies reported while processing a command. */
+/**
+ * Non-fatal discrepancies reported while processing a command. A server may send codes not
+ * listed here (a newer contract); readers go through `knownWarnings`, which drops them, and a
+ * warning never rejects a sale.
+ */
 export type CommandWarning =
-  | { code: 'total_mismatch'; expectedMinor: number; serverMinor: number }
-  | { code: 'insufficient_stock'; variantId: string; quantity: number };
+  | {
+      code: 'total_mismatch'; expectedMinor: number; serverMinor: number;
+      /**
+       * Present if and only if the server added an untaxed rounding surcharge so its total
+       * matches the till's; signed, in minor units, `expectedMinor - serverMinor`, where
+       * `serverMinor` is the platform's total before the bridge.
+       */
+      bridgeMinor?: number;
+    }
+  | {
+      /**
+       * One per variant this sale took below zero stock. `quantity` is the units of this sale that
+       * stock did not cover (medusapos plugin 0.2.0 and later); older servers sent the variant's
+       * whole shortfall under the same field.
+       */
+      code: 'insufficient_stock'; variantId: string; quantity: number;
+    }
+  | {
+      /**
+       * One warning per tax rate whose tax differs by more than the server's rounding tolerance
+       * (order.create v3 only); `expectedMinor` is the till's `taxByRate[].taxMinor` for that
+       * rate and `serverMinor` the platform's tax for it.
+       */
+      code: 'tax_rate_mismatch'; ratePpm: number; expectedMinor: number; serverMinor: number;
+    }
+  /**
+   * The sale's `customerId` (1 to 64 characters) was unknown, deleted or in another channel, so
+   * the sale was kept as a guest sale rather than held (ADR-070).
+   */
+  | { code: 'customer_ignored'; customerId: string }
+  /**
+   * The order named a session the store did not hold when it applied the order (register v2).
+   * The store keeps the id on the order, and an open or alias that arrives later counts it.
+   * It does not mean the session was abandoned.
+   */
+  | { code: 'register_session_unknown'; sessionId: string }
+  /**
+   * One warning per sale, never a refusal: each of the till's figures that differs from the
+   * server's own computation, once, with both values (#257). `total_mismatch` stays separate.
+   * `parseCommandResult` refuses a `field` it doesn't know; `knownWarnings` keeps it (a newer
+   * store's figure), so the type admits any non-empty string besides the three names.
+   */
+  | {
+      code: 'figures_mismatch';
+      fields: Array<{ field: 'subtotalMinor' | 'taxMinor' | 'discountMinor' | (string & {}); tillMinor: number; serverMinor: number }>;
+    };
 
 /** Error reported when a command is rejected. */
 export interface CommandError {
@@ -57,12 +137,23 @@ export interface CommandResult {
   warnings?: CommandWarning[];
   error?: CommandError;
   register?: RegisterCommandResult;
+  refund?: OrderRefundResult;
 }
 
 /** A register command's server figures (registers c2b applies them). */
 export interface RegisterCommandResult {
   /** The session's server state after this command. `expected` is absent when the server redacts it (blind). */
-  session?: { id: string; status: 'open' | 'counting' | 'closed'; expected?: Record<string, number>; salesCount?: number };
+  session?: {
+    id: string; status: 'open' | 'counting' | 'closed' | 'superseded'; expected?: Record<string, number>; salesCount?: number;
+    /** Sent on a resume (register v2): the store session's opening time. */
+    openedAt?: string;
+    /** Sent on a resume (register v2): the store session's counted opening float. */
+    openingFloatMinor?: number;
+  };
+  /** The open was this device's own live session (register v2); the store keeps fromSessionId as a permanent alias of session.id. */
+  resumed?: { fromSessionId: string };
+  /** The session this open took over (register v2). */
+  superseded?: { sessionId: string; openedAt?: string; deviceId?: string; deviceName?: string };
   /** The register's counters: a floor for the till's own, never lowered. */
   counters?: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
   /** `register.closure.submit` only. */
@@ -72,6 +163,20 @@ export interface RegisterCommandResult {
 export interface RegisterSessionOpenPayload {
   sessionId: string; registerId: string; storeKey?: string; businessDay?: string; openedAt: string; openedBy?: string;
   expectedFloatMinor?: number; countedFloatMinor: number; openingVarianceMinor?: number;
+  /** Register v2 only (ADR-078): the till's name on another till's take-over sheet, 1 to 64 characters after trim. */
+  deviceName?: string;
+  /** Register v2 only (ADR-078): the live session this open takes over, a compare-and-set. */
+  supersedes?: string;
+}
+/** error.data for register_session_already_open. */
+export interface RegisterSessionAlreadyOpenData {
+  sessionId: string; registerId?: string; openedAt?: string; openedBy?: string;
+  deviceId?: string; deviceName?: string; status?: 'open' | 'counting';
+}
+/** error.data for register_session_superseded. */
+export interface RegisterSessionSupersededData {
+  sessionId: string; supersededAt?: string; supersededBy?: string;
+  deviceId?: string; deviceName?: string; newSessionId?: string;
 }
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;
@@ -97,8 +202,19 @@ export interface RegisterClosureSubmitPayload {
 /** Order line with client identity and price in minor units. */
 export interface OrderCreateLine {
   clientLineId: string;
+  /** Required unless `custom` is set (version 5). */
   variantId?: string;
-  custom?: OrderCreateCustomLine;
+  /** Version 5 instruction: a non-catalogue line, without variantId; takes line and order discounts. */
+  custom?: {
+    /** Recorded title, 1–255 characters. */
+    name: string;
+    /** Recorded SKU, at most 64 characters when present. */
+    sku?: string;
+    /** Instruction, at most 64 characters; absent means the standard class. */
+    taxClass?: string;
+    /** Instruction: `none` means no tax on this line. */
+    taxStatus: 'taxable' | 'none';
+  };
   title?: string;
   quantity: number;
   unitPriceMinor: number;
@@ -112,18 +228,33 @@ export interface OrderCreateLine {
    * Version 2 (ADR-062): this line's total discount, its own line discounts plus its allocated share of
    * the order discount, in the line's own tax mode and integer minor units. The line is taxed on
    * `unitPriceMinor × quantity − discountMinor`. Present only when above 0.
+   * Version 4+ (#286): tax-exclusive (net) in every mode; an inclusive line's is `net(A) − net(A − D)`.
    */
   discountMinor?: number;
 }
 
+/** Version 5: a fee, never discounted (ADR-075). */
 export interface OrderCreateFee {
-  clientFeeId: string; name: string; amountMinor: number; taxStatus: 'taxable' | 'none'; taxClass?: string; taxMinor: number;
+  /** Identity: UUID, stable for the order's life, at most 36 characters. */
+  clientFeeId: string;
+  /** Recorded fee title, 1–255 characters. */
+  name: string;
+  /** Instruction: integer >= 0, gross when pricesIncludeTax, net otherwise; never discounted. */
+  amountMinor: number;
+  /** Instruction: `none` means no tax on this fee. */
+  taxStatus: 'taxable' | 'none';
+  /** Instruction, at most 64 characters; absent means the standard class. */
+  taxClass?: string;
+  /** Informational till tax, integer >= 0; a server difference is total_mismatch, not a refusal. */
+  taxMinor: number;
 }
-export interface OrderCreateShipping {
-  clientShippingId: string; name: string; methodId?: string; amountMinor: number; taxStatus: 'taxable' | 'none'; taxClass?: string; taxMinor: number;
-}
-export interface OrderCreateCustomLine {
-  name: string; sku?: string; taxClass?: string; taxStatus: 'taxable' | 'none';
+
+/** Version 5: the same instructions and recorded/informational fields as a fee, never discounted. */
+export interface OrderCreateShipping extends Omit<OrderCreateFee, 'clientFeeId'> {
+  /** Identity: UUID, stable for the order's life, at most 36 characters. */
+  clientShippingId: string;
+  /** Recorded shipping method id, at most 64 characters; absent means a POS-entered charge. */
+  methodId?: string;
 }
 
 /** Supported order payment method. */
@@ -141,8 +272,6 @@ export interface OrderCreatePayment {
 
 /** Version 3 (ADR-065): the receipt's display figures, integer minor units of `currency` at `exponent`. */
 export interface OrderCreateDisplay {
-  fees?: Array<{ clientFeeId: string; amountMinor: number }>;
-  shipping?: Array<{ clientShippingId: string; amountMinor: number }>;
   currency: string;
   exponent: number;
   taxInclusive: boolean;
@@ -155,6 +284,20 @@ export interface OrderCreateDisplay {
     clientLineId: string;
     amountMinor: number;
     discounts: Array<{ discountId: string; label?: string; amountMinor: number }>;
+  }>;
+  /** Version 5 recorded figures: one row per payload fee, in the display tax mode. */
+  fees?: Array<{
+    /** Identity: the payload fee's clientFeeId. */
+    clientFeeId: string;
+    /** Recorded integer minor units, equal to the payload fee amount. */
+    amountMinor: number;
+  }>;
+  /** Version 5 recorded figures: one row per payload shipping charge, in the display tax mode. */
+  shipping?: Array<{
+    /** Identity: the payload shipping charge's clientShippingId. */
+    clientShippingId: string;
+    /** Recorded integer minor units, equal to the payload shipping amount. */
+    amountMinor: number;
   }>;
 }
 
@@ -174,36 +317,44 @@ export interface OrderCreatePayload {
   currency: string;
   pricesIncludeTax: boolean;
   lines: OrderCreateLine[];
+  /** Version 5 instructions: fees in the order's tax mode; omitted when none. */
   fees?: OrderCreateFee[];
+  /** Version 5 instructions: shipping in the order's tax mode; omitted when none. */
   shipping?: OrderCreateShipping[];
   subtotalMinor: number;
-  /** Version 2 (ADR-062): the order's total discount, equal to Σ `lines[].discountMinor`. Present only when above 0. */
+  /**
+   * Version 2 (ADR-062): the order's total discount, equal to Σ `lines[].discountMinor`. Present only when above 0.
+   * Version 4+ (#286) means every `discountMinor`, this and each line's, is tax-exclusive, so the sum still holds.
+   */
   discountMinor?: number;
   taxMinor: number;
   totalMinor: number;
   payments: OrderCreatePayment[];
-  /** version 3 only; both or neither. */
+  /** Version 3+; both or neither. */
   display?: OrderCreateDisplay;
-  /** version 3 only; both or neither. */
+  /** Version 3+; both or neither. */
   taxByRate?: OrderCreateTaxRate[];
   customer?: {
     email?: string;
-    /** Version 3 only: the platform's id for the customer picked at the till, a soft reference of at most 64 characters. Absent for a guest sale, or when no customer was picked. */
+    /** Version 3+: the platform's id for the customer picked at the till, a soft reference of at most 64 characters. Absent for a guest sale, or when no customer was picked. */
     customerId?: string;
   } | null;
   registerId?: string;
   cashierRef?: string;
   locationId?: string;
-  /** Version 3 only: the register session the sale was taken for, stamped or late (ADR-032). A late sale names the session that refused its stamp; the server tells the two apart by the session's closure `orderIds`. Absent when the sale had no session. */
+  /** Version 3+: the register session the sale was taken for, stamped or late (ADR-032). A late sale names the session that refused its stamp; the server tells the two apart by the session's closure `orderIds`. Absent when the sale had no session. */
   sessionId?: string;
 }
 
 /** Batch of commands submitted to the server. */
-export interface CommandBatchRequest {
-  commands: CommandEnvelope[];
+export interface CommandBatchRequest<E extends AnyCommandEnvelope = CommandEnvelope> {
+  commands: E[];
 }
 
 /** Results returned by the server for a command batch. */
 export interface CommandBatchResponse {
   results: CommandResult[];
 }
+
+/** The `413` body for a batch over the limit (ADR-038; Front desk ruling 18). */
+export type BatchTooLargeBody = { code: 'batch_too_large'; maxCommands: number; message: string };

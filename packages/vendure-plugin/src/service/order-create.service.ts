@@ -14,7 +14,6 @@ import {
 import { TallyCommand } from '../entities/tally-command.entity';
 import { TallyRegisterSession, TallyRegisterSessionAlias } from '../entities/register.entities';
 import type { CommandEnvelope, CommandResult, CommandWarning, OrderCreatePayload } from '../vendored/commands';
-import type { CommandWarning as CoreCommandWarning } from '../vendored/core-commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
@@ -40,11 +39,11 @@ export type TotalWarning =
 /** A customerId treated as absent (the fallback chain); the till ignores the code as unknown. */
 export type CustomerIgnored = { code: 'customer_ignored'; customerId: string; reason: 'unknown' };
 
-/** Core 3.0.0's figures warning (#38), vendored in core-commands.ts; the older commands.ts predates it. */
-export type FiguresMismatch = Extract<CoreCommandWarning, { code: 'figures_mismatch' }>;
+/** Core's figures warning (#38). */
+export type FiguresMismatch = Extract<CommandWarning, { code: 'figures_mismatch' }>;
 
 /** ADR-078 d7: an unknown register session warns without refusing the sale. */
-type SessionUnknown = Extract<CoreCommandWarning, { code: 'register_session_unknown' }>;
+type SessionUnknown = Extract<CommandWarning, { code: 'register_session_unknown' }>;
 
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
   & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown>; totalWarnings?: TotalWarning[] };
@@ -784,8 +783,7 @@ export class OrderCreateService {
     await this.testObserver?.('setShippingMethod', ctx, order);
     // TallyUI #286: from v4 every discountMinor is tax-exclusive, so the surcharge is net whatever the line's mode, and
     // Vendure grosses it up by the line's taxLines with its own rounding. v2/v3 send it in the line's own mode.
-    // vendored/commands.ts still types version as 1 | 2 | 3, hence the widening.
-    const netDiscounts = (command.version as number) >= 4;
+    const netDiscounts = command.version >= 4;
     for (const line of payload.lines) {
       if (!(line.discountMinor! > 0)) continue;
       const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId) ?? pluginBug(`No order line for clientLineId ${line.clientLineId}`);

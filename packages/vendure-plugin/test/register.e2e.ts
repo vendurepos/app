@@ -6,7 +6,7 @@ import type { RegisterEnvelope, RegisterResult } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
 import { parseCommandResult } from '../src/vendored/command-result';
-import type { RegisterCommandType } from '../src/vendored/core-commands';
+import type { RegisterCommandType } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 

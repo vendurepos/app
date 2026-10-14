@@ -121,10 +121,9 @@ after the replay read, so a stored answer always wins:
   (`21a45c5`, VP3-1), in the order the Front desk ruled on the TallyUI #222
   review. It is refused in step 4 (`service/value-ranges.ts`).
 
-`vendored/versions.ts` is vendored verbatim and deliberately unread since
-vendurepos/app#53. Its header comment ("/info advertises them and
-processBatch enforces them (one source)") is out of date: `/info` and the
-gate read the plugin's own `ORDER_CREATE_VERSIONS` (`service/constants.ts`).
+`vendored/versions.ts` was deleted on 2026-10-14 (tidy pass B8): it was unread since
+vendurepos/app#53. `/info` and the gate read the plugin's own `ORDER_CREATE_VERSIONS`
+(`service/constants.ts`).
 
 The medusapos file is the origin: core's shape check was lifted from it
 (TallyUI `898e98b`), and core now holds the canonical copy, so that is where
