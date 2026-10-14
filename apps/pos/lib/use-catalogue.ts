@@ -10,6 +10,17 @@ import { storageStartMessage } from './storage-start-failure';
 // A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
 export const SESSION_ENDED_TEXT = 'Your session has ended. Sign in again to keep selling.';
 
+// One connector per store session (TallyUI #307): a shared instance would share its reconcile feeds across stores.
+// The session key, not the session object, decides when it is rebuilt.
+export function useCatalogueConnector(session: Session): TallyConnector;
+export function useCatalogueConnector(session: Session | null): TallyConnector | null;
+export function useCatalogueConnector(session: Session | null): TallyConnector | null {
+  const key = session ? sessionKey(session) : null;
+  return useMemo(() => session ? catalogueConnector(session) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key]);
+}
+
 export function useCatalogue(session: Session): {
   connector: TallyConnector;
   products: any[];
@@ -18,8 +29,7 @@ export function useCatalogue(session: Session): {
   stockOverlay: ReadonlyMap<string, unknown> | undefined;
   stockOverlayAsOf: string | undefined;
 } {
-  // One connector per store session (TallyUI #307): a shared instance would share its reconcile feeds across stores.
-  const connector = useMemo(() => catalogueConnector(session), [sessionKey(session)]);
+  const connector = useCatalogueConnector(session);
   const [products, setProducts] = useState<any[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);

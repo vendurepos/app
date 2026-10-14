@@ -1,17 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Platform, ScrollView, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, Text, VStack,
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
-import { catalogueConnector } from '../lib/catalogue';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadScannerMinLength, saveScannerMinLength } from '../lib/scanner-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
 import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
-import { sessionContext, sessionKey } from '../lib/session';
+import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { useCatalogueConnector } from '../lib/use-catalogue';
 
 export default function SettingsScreen() {
   const { session } = useSession();
@@ -26,7 +26,7 @@ export default function SettingsScreen() {
   const [defaultCustomer, setDefaultCustomer] = useState(() => session ? loadDefaultCustomer(session) : null);
   const [pickingCustomer, setPickingCustomer] = useState(false);
   const [autoPrint, setAutoPrint] = useState(() => loadAutoPrint());
-  const connector = useMemo(() => session ? catalogueConnector(session) : null, [session ? sessionKey(session) : null]);
+  const connector = useCatalogueConnector(session);
 
   if (!session) return <Redirect href="/sign-in" />;
 

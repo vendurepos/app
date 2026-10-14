@@ -13,6 +13,10 @@ export type SignInOutcome = { ok: true; session: Session } | { ok: false; error:
 // A password account the plugin answers 403: it has neither TallyPosSell nor CreateOrder (medusapos ADR 0023, "At sign-in").
 export const POS_ACCESS_REFUSED_TEXT = "This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).";
 
+// Provisional settings are used only to build the authenticated context.
+const PROVISIONAL_SETTINGS: Session['settings'] = { currency: '', pricesIncludeTax: false, taxRatesPpm: { default: 0 } };
+const PROVISIONAL_STOCK: Session['stock'] = { trackInventory: false, outOfStockThreshold: 0 };
+
 /** Signs in with password or api-key credentials plus the app's barcode_field setting. */
 export async function signIn(
   values: Record<string, string | undefined>,
@@ -31,11 +35,9 @@ export async function signIn(
   try {
     ({ token } = await vendureSignIn(normalized.url, { email, password }, { signal: init?.signal }));
     signedIn = true;
-    // Provisional settings are used only to build the authenticated context.
     const session: Session = {
       url: normalized.url, channelToken, email, token, ...(barcodeField ? { barcodeField } : {}),
-      settings: { currency: '', pricesIncludeTax: false, taxRatesPpm: { default: 0 } },
-      stock: { trackInventory: false, outOfStockThreshold: 0 },
+      settings: PROVISIONAL_SETTINGS, stock: PROVISIONAL_STOCK,
     };
     const context = { ...sessionContext(session), signal: init?.signal };
     try {
@@ -47,30 +49,19 @@ export async function signIn(
     } catch (error) {
       if ((error as { name?: unknown })?.name === 'AbortError') throw error;
     }
-    const [settings, stock] = await Promise.all([
-      vendureStoreSettings(context),
-      vendureGlobalStockSettings(context),
-    ]);
-    if (barcodeField) {
-      const check = await checkBarcodeField(context, barcodeField);
-      if (check !== 'ok') {
-        void logout({ url: normalized.url, token });
-        return { ok: false, error: check === 'missing'
-          ? `This store's product variants have no custom field named "${barcodeField}".`
-          : check === 'wrong_type' ? `The custom field "${barcodeField}" is not a single text field, so it cannot hold barcodes.`
-            : `Could not check the barcode field: ${check.error}` };
-      }
+    const store = await readStore(context, barcodeField);
+    if (!store.ok) {
+      void logout({ url: normalized.url, token });
+      return { ok: false, error: store.error };
     }
-    return { ok: true, session: { ...session, settings, stock } };
+    return { ok: true, session: { ...session, settings: store.settings, stock: store.stock } };
   } catch (error) {
     if (signedIn) void logout({ url: normalized.url, token });
-    if ((error as { name?: unknown })?.name === 'AbortError') throw error;
-    // StoreSettingsError may wrap the signal's original AbortError.
-    if (init?.signal?.aborted && init.signal.reason?.name === 'AbortError') throw init.signal.reason;
+    rethrowAbort(error, init?.signal);
     const message = error instanceof Error ? error.message : String(error);
     if (signedIn) return {
       ok: false,
-      error: `Could not read the store settings: ${message}${channelToken ? ' Check the channel token.' : ''}`,
+      error: storeReadError(message, channelToken),
     };
     return {
       ok: false,
@@ -88,6 +79,31 @@ function signInFields(values: Record<string, string | undefined>) {
   return { channelToken, barcodeField, error };
 }
 
+async function readStore(
+  context: ReturnType<typeof sessionContext> & { signal?: AbortSignal },
+  barcodeField: string | undefined,
+): Promise<{ ok: true; settings: Session['settings']; stock: Session['stock'] } | { ok: false; error: string }> {
+  const [settings, stock] = await Promise.all([vendureStoreSettings(context), vendureGlobalStockSettings(context)]);
+  if (barcodeField) {
+    const check = await checkBarcodeField(context, barcodeField);
+    if (check !== 'ok') return { ok: false, error: check === 'missing'
+      ? `This store's product variants have no custom field named "${barcodeField}".`
+      : check === 'wrong_type' ? `The custom field "${barcodeField}" is not a single text field, so it cannot hold barcodes.`
+        : `Could not check the barcode field: ${check.error}` };
+  }
+  return { ok: true, settings, stock };
+}
+
+function rethrowAbort(error: unknown, signal: AbortSignal | undefined): void {
+  if ((error as { name?: unknown })?.name === 'AbortError') throw error;
+  // StoreSettingsError may wrap the signal's original AbortError.
+  if (signal?.aborted && signal.reason?.name === 'AbortError') throw signal.reason;
+}
+
+function storeReadError(message: string, channelToken: string | undefined): string {
+  return `Could not read the store settings: ${message}${channelToken ? ' Check the channel token.' : ''}`;
+}
+
 async function signInWithDeviceKey(values: Record<string, string | undefined>, init?: { signal?: AbortSignal }): Promise<SignInOutcome> {
   const normalized = normalizeStoreUrl(values.url ?? '');
   if (!normalized.ok) return normalized;
@@ -97,8 +113,7 @@ async function signInWithDeviceKey(values: Record<string, string | undefined>, i
   if (fieldError) return { ok: false, error: fieldError };
   const provisional: Session = {
     kind: 'api-key', url: normalized.url, channelToken, apiKey, email: '', token: '', ...(barcodeField ? { barcodeField } : {}),
-    settings: { currency: '', pricesIncludeTax: false, taxRatesPpm: { default: 0 } },
-    stock: { trackInventory: false, outOfStockThreshold: 0 },
+    settings: PROVISIONAL_SETTINGS, stock: PROVISIONAL_STOCK,
   };
   let checkedKey = false;
   try {
@@ -114,21 +129,14 @@ async function signInWithDeviceKey(values: Record<string, string | undefined>, i
     const device = (typeof body?.device?.name === 'string' && body.device.name.trim()) || DEVICE_KEY_FALLBACK_NAME;
     checkedKey = true;
     const context = { ...sessionContext(provisional), signal: init?.signal };
-    const [settings, stock] = await Promise.all([vendureStoreSettings(context), vendureGlobalStockSettings(context)]);
-    if (barcodeField) {
-      const check = await checkBarcodeField(context, barcodeField);
-      if (check !== 'ok') return { ok: false, error: check === 'missing'
-        ? `This store's product variants have no custom field named "${barcodeField}".`
-        : check === 'wrong_type' ? `The custom field "${barcodeField}" is not a single text field, so it cannot hold barcodes.`
-          : `Could not check the barcode field: ${check.error}` };
-    }
-    return { ok: true, session: { ...provisional, device, settings, stock } };
+    const store = await readStore(context, barcodeField);
+    if (!store.ok) return { ok: false, error: store.error };
+    return { ok: true, session: { ...provisional, device, settings: store.settings, stock: store.stock } };
   } catch (error) {
-    if ((error as { name?: unknown })?.name === 'AbortError') throw error;
-    if (init?.signal?.aborted && init.signal.reason?.name === 'AbortError') throw init.signal.reason;
+    rethrowAbort(error, init?.signal);
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: checkedKey
-      ? `Could not read the store settings: ${message}${channelToken ? ' Check the channel token.' : ''}`
+      ? storeReadError(message, channelToken)
       : `Could not reach Vendure at ${normalized.url}: ${message}` };
   }
 }
