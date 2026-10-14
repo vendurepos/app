@@ -20,6 +20,7 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY, WALK_IN_EMAIL } from './constants';
 import { classify } from './classification';
+import { CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, clientTimeErrors, ledgerTablePath, nulPath, refuse } from './command-ledger';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
@@ -54,21 +55,11 @@ export type TopUp = { variantId: string; stockLocationId: string; quantity: numb
 export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSave' | 'finalPass' | 'payments';
 
 export { WALK_IN_EMAIL };
-// ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
-const CLAIM_LOCK_TIMEOUT = '5s';
-// Front desk ruling 7: every wait after the claim is bounded; a timeout is a 503 and the till retries.
-const RECIPE_LOCK_TIMEOUT = '10s';
 // Front desk ruling 6: the wait for the sale's stock rows; a timeout is a 503 (transient timeout).
 const STOCK_LOCK_TIMEOUT = '5s';
 // Ruling 14: the two-int advisory key (this, hashtext(email)) serialises creating a customer per email.
 // Distinct from StoreSetupService's 0x7a11; two-int keys are apart from other plugins' single-bigint keys.
 const CUSTOMER_LOCK_NAMESPACE = 0x7a12;
-// ADR-038 #220: a client time no later than the request's clock plus this skew, which absorbs a till whose clock
-// runs ahead; the lower bound is CREATED_AT_FLOOR, and an offline till's old sales from 2020 on still apply.
-const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
-// Front desk ruling 2026-09-30, the same bound in both backends: no POS sale predates the product, and a 1970 clock is a broken till.
-const CREATED_AT_FLOOR = '2020-01-01T00:00:00Z';
-const CREATED_AT_FLOOR_MS = Date.parse(CREATED_AT_FLOOR);
 /** The environment variable that enables the test hooks; production never sets it. */
 export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
@@ -88,52 +79,9 @@ class SetupRefusal extends Error {
 /** What the recipe has written so far, for an admin when it cannot finish. */
 type SaleProgress = { written?: boolean; order?: Order; topUps: TopUp[] };
 
-/** The path of the first string holding U+0000 in an envelope, or undefined. */
-function nulPath(value: unknown, path: string): string | undefined {
-  if (typeof value === 'string') return value.includes('\u0000') ? path : undefined;
-  if (value === null || typeof value !== 'object') return undefined;
-  for (const [key, item] of Object.entries(value)) {
-    const found = nulPath(item, path ? `${path}.${key}` : key);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-// Front desk, 2026-09-30: RFC 3339 with Z or an offset, strict form.
-function clientTimeMs(value: unknown): number | undefined {
-  const match = typeof value === 'string'
-    ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value) : null;
-  if (!match) return undefined;
-  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]
-    || hour > 23 || minute > 59 || second > 59) return undefined;
-  const zone = match[8];
-  const offsetHour = zone === 'Z' ? 0 : Number(zone.slice(1, 3));
-  const offsetMinute = zone === 'Z' ? 0 : Number(zone.slice(4, 6));
-  if (offsetHour > 23 || offsetMinute > 59) return undefined;
-  const fractionMs = Number((match[7]?.slice(1, 4) ?? '').padEnd(3, '0'));
-  const offsetMs = zone === 'Z' ? 0 : (zone[0] === '+' ? 1 : -1) * (offsetHour * 60 + offsetMinute) * 60_000;
-  return Date.UTC(year, month - 1, day, hour, minute, second) + fractionMs - offsetMs;
-}
-
-/** TallyUI #337 (b65c8ff): one message per client-time field outside the bounds, the bound compared exactly, shown to the second. */
-const clientTimeErrors = (fields: [path: string, value: unknown][], upperBoundMs: number) => {
-  const upper = new Date(upperBoundMs).toISOString().replace(/\.\d+Z$/, 'Z');
-  return fields.flatMap(([path, value]) => {
-    const time = clientTimeMs(value);
-    if (time === undefined) return [`${path} must be an RFC 3339 time with Z or an offset`];
-    return time >= CREATED_AT_FLOOR_MS && time <= upperBoundMs ? []
-      : [`${path} must be a time from ${CREATED_AT_FLOOR} to ${upper}`];
-  });
-};
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const rejected = (id: string, code: string, message: string, data?: Record<string, unknown>): OrderCreateResult =>
-  ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
-const storeConfiguration = (id: string) => rejected(id, 'store_configuration',
+const storeConfiguration = (id: string) => refuse(id, 'store_configuration',
   'Missing or reconfigured POS payment or shipping method, manual fulfilment handler, or usable default-zone tax rates');
 
 @Injectable()
@@ -236,7 +184,7 @@ export class OrderCreateService {
       }
       if (error instanceof SetupRefusal) return error.result;
       if (error instanceof StoreConfigurationRefusal) return error.message
-        ? rejected(command.id, 'store_configuration', error.message) : storeConfiguration(command.id);
+        ? refuse(command.id, 'store_configuration', error.message) : storeConfiguration(command.id);
       if (error instanceof TransientCommandError) throw error;
       throw new TransientCommandError(command.id, transientKind(error) ?? 'unclassified', error);
     }
@@ -337,7 +285,7 @@ export class OrderCreateService {
         } });
       }
       const result = resolution === 'applied' ? stored
-        : rejected(commandId, PLATFORM_ERROR_CODE, `${ADMIN_REJECTED}: ${note}`, { platformCode: ADMIN_REJECTED, platformMessage: note });
+        : refuse(commandId, PLATFORM_ERROR_CODE, `${ADMIN_REJECTED}: ${note}`, { platformCode: ADMIN_REJECTED, platformMessage: note });
       // Compare-and-set: only a row still awaiting an admin is resolved.
       const updated = await ledger.update({ id: commandId, status: 'needs_admin' }, { status: resolution, result: { ...result } });
       if (updated.affected !== 1) throw new Error(`Command ${commandId} was resolved meanwhile`);
@@ -357,11 +305,11 @@ export class OrderCreateService {
   private shapeRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
     const id = typeof command?.id === 'string' ? command.id : '';
     if (!command || typeof command !== 'object' || Array.isArray(command)) {
-      return rejected(id, 'invalid_payload', 'Expected command object');
+      return refuse(id, 'invalid_payload', 'Expected command object');
     }
     // Review: Postgres text cannot hold U+0000, so a string carrying it is refused before any database access.
     const nul = nulPath(command, '');
-    if (nul) return rejected(id, 'invalid_payload', `${nul}: must not contain U+0000`);
+    if (nul) return refuse(id, 'invalid_payload', `${nul}: must not contain U+0000`);
     const errors: string[] = [];
     if (!id.length || id.length > 64) errors.push('Invalid id');
     if (command.type !== 'order.create') errors.push('type: expected order.create');
@@ -370,7 +318,7 @@ export class OrderCreateService {
     if (typeof command.deviceId !== 'string') errors.push('Invalid deviceId');
     if (!Number.isSafeInteger(command.attempt) || command.attempt < 1) errors.push('Invalid attempt');
     if (!errors.length && !ORDER_CREATE_VERSIONS.includes(command.version)) {
-      return rejected(id, 'unsupported_version', 'Unsupported order.create version',
+      return refuse(id, 'unsupported_version', 'Unsupported order.create version',
         { orderCreate: Math.max(...ORDER_CREATE_VERSIONS) });
     }
     errors.push(...payloadShapeErrors(command.payload));
@@ -391,7 +339,7 @@ export class OrderCreateService {
         ids.add(id);
       });
     }
-    return errors.length ? rejected(id, 'invalid_payload', errors.join('; ')) : undefined;
+    return errors.length ? refuse(id, 'invalid_payload', errors.join('; ')) : undefined;
   }
   // ADR-038 #220 step 4: the payload's values, after the replay read and the collision lookup and before the claim:
   // an unstored invalid_payload (Front desk, matching precheckCommand).
@@ -401,12 +349,12 @@ export class OrderCreateService {
     const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
     errors.push(...valueRangeErrors(command.payload, maxMoney));
     if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
-    return errors.length ? rejected(command.id, 'invalid_payload', errors.join('; ')) : undefined;
+    return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
   // ADR-038 #220 step 4, the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's.
   private clientTimeRefusal(command: CommandEnvelope<OrderCreatePayload>, upperBoundMs: number): OrderCreateResult | undefined {
     const errors = clientTimeErrors([['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]], upperBoundMs);
-    return errors.length ? rejected(command.id, 'invalid_payload', errors.slice(0, 10).join('; ')) : undefined;
+    return errors.length ? refuse(command.id, 'invalid_payload', errors.slice(0, 10).join('; ')) : undefined;
   }
 
   // ADR 0002 "Store configuration": the POS payment and shipping methods and a usable tax zone.
@@ -443,7 +391,7 @@ export class OrderCreateService {
     const { lines, payments, totalMinor, currency } = command.payload;
     // TallyUI #219: store-wide setup is never stored; the caller rolls the claim back (SetupRefusal).
     if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
-      throw new SetupRefusal(rejected(command.id, 'unsupported_currency', `The channel does not offer ${currency}`));
+      throw new SetupRefusal(refuse(command.id, 'unsupported_currency', `The channel does not offer ${currency}`));
     }
     const setup = await this.setupState(ctx);
     if (setup === 'repairable') throw new RepairStoreSetup();
@@ -453,16 +401,16 @@ export class OrderCreateService {
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines. The limits are store-wide
     // setup (Front desk): not stored, so the same id applies once a limit is raised.
     if (items > orderItemsLimit || lines.some(line => line.quantity > orderLineItemsLimit)) {
-      throw new SetupRefusal(rejected(command.id, 'store_configuration',
+      throw new SetupRefusal(refuse(command.id, 'store_configuration',
         `The sale exceeds orderOptions.orderItemsLimit ${orderItemsLimit} or orderLineItemsLimit ${orderLineItemsLimit}`));
     }
     // The bridge makes Vendure's total equal totalMinor, so the payload alone decides underpaid.
     const paidMinor = payments.reduce((sum, payment) => sum + payment.amountMinor, 0);
-    if (paidMinor < totalMinor) return rejected(command.id, 'underpaid', `Payments of ${paidMinor} are below the total of ${totalMinor}`);
+    if (paidMinor < totalMinor) return refuse(command.id, 'underpaid', `Payments of ${paidMinor} are below the total of ${totalMinor}`);
     for (const [i, line] of lines.entries()) {
       if (line.custom) {
         if (line.custom.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, line.custom.taxClass)) {
-          return rejected(command.id, 'invalid_payload', line.custom.taxClass === undefined
+          return refuse(command.id, 'invalid_payload', line.custom.taxClass === undefined
             ? `lines[${i}].custom.taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
             : `lines[${i}].custom.taxClass: tax_class_unknown: no tax category "${line.custom.taxClass}" in this store`,
           { reason: 'tax_class_unknown', path: `lines[${i}].custom.taxClass` });
@@ -471,12 +419,12 @@ export class OrderCreateService {
       }
       // payload-shape guarantees variantId on non-custom lines.
       if (!await this.findVariant(ctx, line.variantId!)) {
-        return rejected(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
+        return refuse(command.id, 'unknown_variant', `Variant ${line.variantId} is missing or disabled`);
       }
     }
     for (const field of ['fees', 'shipping'] as const) for (const [i, charge] of (command.payload[field] ?? []).entries()) {
       if (charge.taxStatus === 'taxable' && !await resolveTaxCategory(ctx, this.connection, charge.taxClass)) {
-        return rejected(command.id, 'invalid_payload',
+        return refuse(command.id, 'invalid_payload',
           charge.taxClass === undefined
             ? `${field}[${i}].taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
             : `${field}[${i}].taxClass: tax_class_unknown: no tax category "${charge.taxClass}" in this store`,
@@ -543,7 +491,7 @@ export class OrderCreateService {
     } else if (!await this.recordedAnywhere(ctx, clientOrderId)) {
       return undefined;
     }
-    const mismatch = rejected(command.id, 'idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
+    const mismatch = refuse(command.id, 'idempotency_mismatch', 'The clientOrderId is already recorded in another channel',
       { reason: 'client_order_in_other_channel' });
     await ledger.update(command.id, { status: 'rejected', result: { ...mismatch } });
     return mismatch;
@@ -579,7 +527,7 @@ export class OrderCreateService {
   private async claim(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult | undefined> {
     const repository = this.connection.getRepository(ctx, TallyCommand);
     const runner = repository.manager.queryRunner!;
-    const table = repository.metadata.tablePath.split('.').map(part => runner.connection.driver.escape(part)).join('.');
+    const table = ledgerTablePath(repository);
     const fingerprint = commandFingerprint(command);
     await runner.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
     const rows = await runner.query(
@@ -604,11 +552,11 @@ export class OrderCreateService {
     const fingerprint = commandFingerprint(command);
     // N6: another channel's command id never replays that channel's answer.
     if (existing.channelId !== String(ctx.channelId)) {
-      return rejected(command.id, 'idempotency_mismatch', 'Command id was already used in another channel',
+      return refuse(command.id, 'idempotency_mismatch', 'Command id was already used in another channel',
         { reason: 'command_in_other_channel' });
     }
     if (existing.fingerprint !== fingerprint) {
-      return rejected(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
+      return refuse(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
     }
     // The amendment: a row awaiting an admin answers 409 in_progress, never duplicate or rejected.
     if (existing.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
@@ -984,6 +932,3 @@ export class OrderCreateService {
     ]);
   }
 }
-
-// Shared with RegisterService (ADR 0003): the register commands take the same claim, bounds and client-time stage.
-export { CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, clientTimeErrors, nulPath };
