@@ -1,4 +1,4 @@
-// vendored verbatim from @tallyui/core@3.0.0-next.1 src/server/register-payload-shape.ts, plus TallyUI#469 (register v2)
+// vendored verbatim from @tallyui/core@3.9.1 src/server/register-payload-shape.ts (ADR 0002: never hand-edited)
 /** Shape errors before a register command claims a ledger row. Unknown top-level keys are allowed. */
 export function registerPayloadErrors(type: string, payload: unknown): string[] {
   const errors: string[] = []

@@ -127,6 +127,8 @@ TallyUI#469's changes are applied to the vendored files, and each file's provena
 - `register-outcome.ts`: the two refusal codes;
 - `register-payload-shape.ts`: the open's v2 fields.
 
+*2026-10-14 (tidy pass B8): these files are now @tallyui/core@3.9.1's verbatim, and `core-commands.ts` is `commands.ts`; see ADR 0002.*
+
 The plugin stays off `@tallyui/core` (ADR 0003 §6).
 
 ## Consequences
