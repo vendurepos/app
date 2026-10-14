@@ -46,7 +46,7 @@ import { storeLabel } from '../lib/store-label';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
 import { SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
-import { MIN_ORDER_CREATE, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
+import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
 
@@ -137,7 +137,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     commands: registerStore?.commands ?? null, orders: outbox.orders, register: registerStore?.sessions ?? null,
     capabilities: readSettingsCapabilities, storeKey: ordersDatabaseName(session), registerId: boundRegisterId,
     deviceName: session.kind === 'api-key' ? session.device ?? null : null,
-    enabled: (readSettingsCapabilities?.register ?? 0) >= 1, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
+    enabled: (readSettingsCapabilities?.register ?? 0) >= MIN_REGISTER, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
     varianceThreshold: loadVarianceLimitMinor(),
   });
   const [registerOpen, setRegisterOpen] = useState(false);
