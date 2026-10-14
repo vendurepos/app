@@ -9,21 +9,14 @@ import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
+import {
+  CREATED_AT_SKEW_MS, Unstored, clientTimeErrors, ledgerTablePath, nulRefusal, refuse, transientAfterClaim, versionRefusal,
+} from './command-ledger';
 import { ORDER_REFUND_VERSIONS } from './constants';
-import { ErrorResultThrown, TransientCommandError, transientKind, unwrap } from './errors';
-import { CREATED_AT_SKEW_MS, OrderCreateService, clientTimeErrors, nulPath } from './order-create.service';
+import { ErrorResultThrown, unwrap } from './errors';
+import { OrderCreateService } from './order-create.service';
 import { RegisterService } from './register.service';
 import { refundEnvelopeStrictErrors } from './strict-shape';
-
-const refuse = (id: string, code: string, message: string, data?: Record<string, unknown>): CommandResult =>
-  ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
-
-/** A contract refusal rolls back the claim and every write. */
-class Unstored extends Error {
-  constructor(readonly result: CommandResult) {
-    super(result.error!.message);
-  }
-}
 
 /** ADR 0007: one till refund, with the register lock before the order lock. */
 @Injectable()
@@ -38,13 +31,8 @@ export class RefundService {
 
   async apply(ctx: RequestContext, command: OrderRefundEnvelope<Record<string, unknown>>, options: { requestTimeMs?: number } = {}): Promise<CommandResult> {
     const { id, version } = command;
-    const nul = nulPath(command, '');
-    if (nul) return refuse(id, 'invalid_payload', `${nul}: must not contain U+0000`);
-    if (!ORDER_REFUND_VERSIONS.includes(version)) {
-      return refuse(id, 'unsupported_version',
-        `order.refund version ${version} is not supported; this server supports ${ORDER_REFUND_VERSIONS.join(', ')}`,
-        { orderRefund: Math.max(...ORDER_REFUND_VERSIONS) });
-    }
+    const refusal = nulRefusal(command) ?? versionRefusal(id, version, 'order.refund', 'orderRefund', ORDER_REFUND_VERSIONS);
+    if (refusal) return refusal;
     const shape = refundPayloadErrors(command.payload);
     if (shape.length) return refuse(id, 'invalid_payload', shape.join('; '));
     const payload = command.payload as unknown as OrderRefundPayload;
@@ -181,7 +169,7 @@ export class RefundService {
           return await this.connection.withTransaction(ctx, async tx => {
             const repository = this.connection.getRepository(tx, TallyCommand);
             const runner = repository.manager.queryRunner!;
-            const table = repository.metadata.tablePath.split('.').map(part => runner.connection.driver.escape(part)).join('.');
+            const table = ledgerTablePath(repository);
             const rows = await runner.query(`INSERT INTO ${table} ("id", "channelId", "fingerprint", "status", "result")
               VALUES ($1, $2, $3, 'rejected', $4) ON CONFLICT (id) DO NOTHING RETURNING id`,
             [id, String(tx.channelId), commandFingerprint(command as never), JSON.stringify(result)]);
@@ -191,8 +179,7 @@ export class RefundService {
           error = storeError;
         }
       }
-      const kind = transientKind(error);
-      throw new TransientCommandError(id, kind === 'lock' && claimed ? 'timeout' : kind ?? 'unclassified', error);
+      throw transientAfterClaim(id, error, claimed);
     }
   }
 }

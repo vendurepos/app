@@ -14,11 +14,12 @@ import { commandFingerprint } from '../vendored/fingerprint';
 import { deriveSessionFigures, deriveVariance } from '../vendored/register-figures';
 import type { RegisterConflictCode } from '../vendored/register-outcome';
 import { registerPayloadErrors } from '../vendored/register-payload-shape';
-import { REGISTER_VERSIONS } from './constants';
-import { TransientCommandError, transientKind } from './errors';
 import {
-  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, TEST_HOOKS_ENV, clientTimeErrors, nulPath,
-} from './order-create.service';
+  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, Unstored, clientTimeErrors, ledgerTablePath, nulRefusal, refuse,
+  transientAfterClaim, versionRefusal,
+} from './command-ledger';
+import { REGISTER_VERSIONS } from './constants';
+import { TEST_HOOKS_ENV } from './order-create.service';
 import { registerStrictErrors } from './strict-shape';
 
 // ADR 0003: the two-int advisory key (this, hashtext of the channel and register) serialises a register's commands
@@ -38,16 +39,6 @@ export const REGISTER_TYPES = Object.keys(CLIENT_TIMES) as RegisterCommandType[]
 export type RegisterResult = CommandResult;
 export type RegisterEnvelope = RegisterCommandEnvelope<Record<string, unknown>>;
 type Status = 'open' | 'counting' | 'closed' | 'superseded';
-
-const refuse = (id: string, code: string, message: string, data?: Record<string, unknown>): RegisterResult =>
-  ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
-
-/** A state-dependent refusal found after the claim (ADR-068 d5): the transaction, claim included, rolls back unstored. */
-class Unstored extends Error {
-  constructor(readonly result: RegisterResult) {
-    super(result.error!.message);
-  }
-}
 
 /**
  * TallyUI's five register commands at contract versions 1 and 2 (ADR-078 adds the open's resume and take-over), each in its own transaction, in
@@ -102,20 +93,13 @@ export class RegisterService {
     } catch (error) {
       if (error instanceof Unstored) return error.result;
       // As order.create: a wait on another request's claim is 409, every later wait a 503.
-      const kind = transientKind(error);
-      throw new TransientCommandError(id, kind === 'lock' && claimed ? 'timeout' : kind ?? 'unclassified', error);
+      throw transientAfterClaim(id, error, claimed);
     }
   }
 
   private shapeRefusal(command: RegisterEnvelope): RegisterResult | undefined {
-    const nul = nulPath(command, '');
-    if (nul) return refuse(command.id, 'invalid_payload', `${nul}: must not contain U+0000`);
-    // ADR-068 d5 and core's precheckCommand: the message and data name this server's own list.
-    if (!REGISTER_VERSIONS.includes(command.version)) {
-      return refuse(command.id, 'unsupported_version',
-        `register version ${command.version} is not supported; this server supports ${REGISTER_VERSIONS.join(', ')}`,
-        { register: Math.max(...REGISTER_VERSIONS) });
-    }
+    const refusal = nulRefusal(command) ?? versionRefusal(command.id, command.version, 'register', 'register', REGISTER_VERSIONS);
+    if (refusal) return refusal;
     const errors = registerPayloadErrors(command.type, command.payload);
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
@@ -135,7 +119,7 @@ export class RegisterService {
   async claim(tx: RequestContext, command: RegisterEnvelope | OrderRefundEnvelope<Record<string, unknown>>): Promise<RegisterResult | undefined> {
     const repository = this.connection.getRepository(tx, TallyCommand);
     const runner = repository.manager.queryRunner!;
-    const table = repository.metadata.tablePath.split('.').map(part => runner.connection.driver.escape(part)).join('.');
+    const table = ledgerTablePath(repository);
     await runner.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
     const rows = await runner.query(`INSERT INTO ${table} ("id", "channelId", "fingerprint", "status") VALUES ($1, $2, $3, 'pending')
       ON CONFLICT (id) DO NOTHING RETURNING id`, [command.id, String(tx.channelId), commandFingerprint(command as never)]);
@@ -296,10 +280,7 @@ export class RegisterService {
   /** The register's live session, if any: no closed or superseded status and no closure. At most one, under the lock. */
   private async openSessionOf(tx: RequestContext, registerId: string): Promise<TallyRegisterSession | undefined> {
     const repository = this.connection.getRepository(tx, TallyRegisterSession);
-    const table = (entity: ObjectType<object>) => {
-      const { tablePath } = this.connection.getRepository(tx, entity).metadata;
-      return tablePath.split('.').map(part => repository.manager.connection.driver.escape(part)).join('.');
-    };
+    const table = (entity: ObjectType<object>) => ledgerTablePath(this.connection.getRepository(tx, entity));
     return await repository.createQueryBuilder('s').where(`s."channelId" = :channelId AND s."registerId" = :registerId
       AND NOT EXISTS (SELECT 1 FROM ${table(TallyRegisterSessionStatus)} t
         WHERE t."channelId" = s."channelId" AND t."sessionId" = s.id AND t.status IN ('closed', 'superseded'))
