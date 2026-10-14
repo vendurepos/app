@@ -16,6 +16,9 @@ export const MAX_RETRY_MS = 30_000;
 // The plugin this app ships with advertises order.create 4, and v4 carries the net-discount rule. A store below it (no
 // plugin, or an older one: a 404 /info reads as 1) would take a discounted sale at 3 and apply it without that rule.
 export const MIN_ORDER_CREATE = 4;
+// The plugin takes fee and shipping charges from order.create 5 (docs/adr/0005-order-create-v5.md), so the cart
+// offers them only from it.
+export const MIN_ORDER_CREATE_CHARGES = 5;
 // A sale is taken only inside an open register session, synced as the plugin's register commands (vendurepos #79):
 // a store without them has no server record of the drawer, so it waits as `plugin` too.
 export const MIN_REGISTER = 1;

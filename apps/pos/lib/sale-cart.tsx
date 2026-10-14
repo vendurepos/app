@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Button, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, PriceForm, QuantityStepper, Text, VStack } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { cartTotals } from './cart-totals';
+import { MIN_ORDER_CREATE_CHARGES } from './use-sale-settings';
 
 // Vendure keeps one ShippingLine per order, and the plugin refuses a second as `shipping_single` (docs/adr/0005-order-create-v5.md).
 const MAX_SHIPPING_LINES = 1;
@@ -55,7 +56,7 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
   const row = (label: string, amount: number, testID: string, strong = false) =>
     <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
   const empty = !order.lineItems.length; // Pay stays disabled: the plugin refuses a fees-only order (ADR 0005).
-  const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= 5;
+  const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_CHARGES;
   const [removeError, setRemoveError] = useState<string | null>(null);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
   // As TallyUI's own Cart: the open discount form, a line's or the order's (lineId null); useSale applies it or says
