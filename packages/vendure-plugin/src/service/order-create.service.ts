@@ -20,7 +20,9 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import { ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY, WALK_IN_EMAIL } from './constants';
 import { classify } from './classification';
-import { CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, clientTimeErrors, ledgerTablePath, nulPath, refuse } from './command-ledger';
+import {
+  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeErrors, nulPath, refuse, replayRead,
+} from './command-ledger';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
@@ -132,7 +134,7 @@ export class OrderCreateService {
     let commandCtx!: RequestContext;
     try {
       // 2. The replay read: a committed id answers as recorded, never entering the claim, whatever its values now.
-      const replay = await this.replayRead(ctx, command);
+      const replay = await replayRead(this.connection, ctx, command);
       if (replay) return replay;
       // 3. The collision lookup: a sale already recorded is answered by the collision guard after the claim.
       const recorded = await this.recordedAnywhere(ctx, payload.clientOrderId);
@@ -523,45 +525,9 @@ export class OrderCreateService {
     return this.config.entityOptions.entityIdStrategy ?? this.config.entityIdStrategy;
   }
 
-  // ADR 0002 §2 "The claim": Postgres-only. A second claim for the id waits on the uncommitted row.
-  private async claim(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult | undefined> {
-    const repository = this.connection.getRepository(ctx, TallyCommand);
-    const runner = repository.manager.queryRunner!;
-    const table = ledgerTablePath(repository);
-    const fingerprint = commandFingerprint(command);
-    await runner.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
-    const rows = await runner.query(
-      `INSERT INTO ${table} ("id", "channelId", "clientOrderId", "fingerprint", "status") VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (id) DO NOTHING RETURNING id`,
-      [command.id, String(ctx.channelId), command.payload.clientOrderId, fingerprint, 'pending'],
-    );
-    // Only the claim waits 5 s for a 409; every later wait is bounded too (ruling 7), and its timeout is a 503.
-    await runner.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
-    if (rows.length) return undefined;
-    // The safety net for a concurrent request: the other one committed while this one waited.
-    return this.replayAnswer(ctx, command, await repository.findOneByOrFail({ id: command.id }));
-  }
-
-  /** ADR-038 #220 step 2: the explicit replay read, a plain SELECT before any claim. */
-  private async replayRead(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
-    const existing = await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id });
-    return existing ? this.replayAnswer(ctx, command, existing) : undefined;
-  }
-
-  private replayAnswer(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, existing: TallyCommand): OrderCreateResult {
-    const fingerprint = commandFingerprint(command);
-    // N6: another channel's command id never replays that channel's answer.
-    if (existing.channelId !== String(ctx.channelId)) {
-      return refuse(command.id, 'idempotency_mismatch', 'Command id was already used in another channel',
-        { reason: 'command_in_other_channel' });
-    }
-    if (existing.fingerprint !== fingerprint) {
-      return refuse(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
-    }
-    // The amendment: a row awaiting an admin answers 409 in_progress, never duplicate or rejected.
-    if (existing.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
-    const stored = existing.result as unknown as OrderCreateResult;
-    return { ...stored, status: existing.status === 'rejected' ? 'rejected' : 'duplicate' };
+  // A delegate, so ledger.e2e.ts can prove a replay never claims (tidy B1).
+  private claim(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<OrderCreateResult | undefined> {
+    return claimCommand(this.connection, ctx, command, command.payload.clientOrderId);
   }
 
   private clientOrderIdIndex(): string {

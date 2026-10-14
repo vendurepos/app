@@ -2,8 +2,11 @@
  * The shared ledger helpers of the plugin's commands (ADR 0002 §2): one copy for order.create, the register
  * commands and order.refund.
  */
+import type { RequestContext, TransactionalConnection } from '@vendure/core';
 import type { ObjectLiteral, Repository } from 'typeorm';
-import type { CommandResult } from '../vendored/commands';
+import { TallyCommand } from '../entities/tally-command.entity';
+import type { AnyCommandEnvelope, CommandResult } from '../vendored/commands';
+import { commandFingerprint } from '../vendored/fingerprint';
 import { TransientCommandError, transientKind } from './errors';
 
 // ADR 0002 §2: a second claim for the same id waits this long on the uncommitted row.
@@ -90,4 +93,66 @@ export class Unstored extends Error {
 export function transientAfterClaim(id: string, error: unknown, claimed: boolean): TransientCommandError {
   const kind = transientKind(error);
   return new TransientCommandError(id, kind === 'lock' && claimed ? 'timeout' : kind ?? 'unclassified', error);
+}
+
+/** ADR-068 d5 and N6: a recorded command id's answer, the same for every command. */
+export function replayAnswer(ctx: RequestContext, command: AnyCommandEnvelope, existing: TallyCommand): CommandResult {
+  const fingerprint = commandFingerprint(command);
+  // N6: another channel's command id never replays that channel's answer.
+  if (existing.channelId !== String(ctx.channelId)) {
+    return refuse(command.id, 'idempotency_mismatch', 'Command id was already used in another channel',
+      { reason: 'command_in_other_channel' });
+  }
+  if (existing.fingerprint !== fingerprint) {
+    return refuse(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
+  }
+  // The amendment: a row awaiting an admin answers 409 in_progress, never duplicate or rejected.
+  if (existing.status === 'needs_admin') throw new TransientCommandError(command.id, 'needs_admin', undefined);
+  // ADR-068 d5: the result recorded at apply, never the current state.
+  const stored = existing.result as unknown as CommandResult;
+  return { ...stored, status: existing.status === 'rejected' ? 'rejected' : 'duplicate' };
+}
+
+/** ADR-038 #220 step 2: the explicit replay read, a plain SELECT before any claim. */
+export async function replayRead(connection: TransactionalConnection, ctx: RequestContext, command: AnyCommandEnvelope): Promise<CommandResult | undefined> {
+  const existing = await connection.getRepository(ctx, TallyCommand).findOneBy({ id: command.id });
+  return existing ? replayAnswer(ctx, command, existing) : undefined;
+}
+
+// ADR 0002 §2 "The claim": Postgres-only. A second claim for the id waits on the uncommitted row.
+// order.create's claim carries its clientOrderId; a register or refund claim has none.
+export async function claim(
+  connection: TransactionalConnection, tx: RequestContext, command: AnyCommandEnvelope, clientOrderId?: string,
+): Promise<CommandResult | undefined> {
+  const repository = connection.getRepository(tx, TallyCommand);
+  const runner = repository.manager.queryRunner!;
+  const table = ledgerTablePath(repository);
+  const fingerprint = commandFingerprint(command);
+  await runner.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
+  const rows = clientOrderId !== undefined
+    ? await runner.query(
+      `INSERT INTO ${table} ("id", "channelId", "clientOrderId", "fingerprint", "status") VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO NOTHING RETURNING id`,
+      [command.id, String(tx.channelId), clientOrderId, fingerprint, 'pending'],
+    )
+    : await runner.query(`INSERT INTO ${table} ("id", "channelId", "fingerprint", "status") VALUES ($1, $2, $3, 'pending')
+      ON CONFLICT (id) DO NOTHING RETURNING id`, [command.id, String(tx.channelId), fingerprint]);
+  // Only the claim waits 5 s for a 409; every later wait is bounded too (ruling 7), and its timeout is a 503.
+  await runner.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
+  if (rows.length) return undefined;
+  // The safety net for a concurrent request: the other one committed while this one waited.
+  return replayAnswer(tx, command, await repository.findOneByOrFail({ id: command.id }));
+}
+
+/** order.refund's platform_error refusal, stored as rejected; a row already there answers as recorded. The caller owns the transaction. */
+export async function storeRejection(
+  connection: TransactionalConnection, tx: RequestContext, command: AnyCommandEnvelope, result: CommandResult,
+): Promise<CommandResult> {
+  const repository = connection.getRepository(tx, TallyCommand);
+  const runner = repository.manager.queryRunner!;
+  const table = ledgerTablePath(repository);
+  const rows = await runner.query(`INSERT INTO ${table} ("id", "channelId", "fingerprint", "status", "result")
+    VALUES ($1, $2, $3, 'rejected', $4) ON CONFLICT (id) DO NOTHING RETURNING id`,
+  [command.id, String(tx.channelId), commandFingerprint(command), JSON.stringify(result)]);
+  return rows.length ? result : replayAnswer(tx, command, await repository.findOneByOrFail({ id: command.id }));
 }

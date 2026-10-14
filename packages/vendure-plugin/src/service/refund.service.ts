@@ -7,10 +7,9 @@ import { tallyPosRefund } from '../config/permissions';
 import { TALLY_PAYMENT_METHOD_CODE, withTallyRefund } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/commands';
-import { commandFingerprint } from '../vendored/fingerprint';
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
 import {
-  CREATED_AT_SKEW_MS, Unstored, clientTimeErrors, ledgerTablePath, nulRefusal, refuse, transientAfterClaim, versionRefusal,
+  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeErrors, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
 } from './command-ledger';
 import { ORDER_REFUND_VERSIONS } from './constants';
 import { ErrorResultThrown, unwrap } from './errors';
@@ -39,8 +38,8 @@ export class RefundService {
     const { totalMinor, shippingMinor, adjustmentMinor } = payload;
     let claimed = false;
     try {
-      const existing = await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id });
-      if (existing) return this.registers.replayAnswer(ctx, command, existing);
+      const replay = await replayRead(this.connection, ctx, command);
+      if (replay) return replay;
       const strict = refundEnvelopeStrictErrors(command as unknown as Record<string, unknown>, version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
       const times = clientTimeErrors([['createdAt', command.createdAt], ['payload.createdAt', payload.createdAt]],
@@ -48,7 +47,7 @@ export class RefundService {
       if (times.length) return refuse(id, 'invalid_payload', times.slice(0, 10).join('; '));
       if (!ctx.userHasPermissions([tallyPosRefund.Permission])) return refuse(id, 'forbidden', 'TallyPosRefund is required to refund');
       return await this.connection.withTransaction(ctx, async tx => {
-        const concurrent = await this.registers.claim(tx, command);
+        const concurrent = await claim(this.connection, tx, command);
         if (concurrent) return concurrent;
         claimed = true;
         await this.registers.lockRegister(tx, payload.registerId);
@@ -166,15 +165,7 @@ export class RefundService {
         const { errorCode, message } = error.result;
         const result = refuse(id, 'platform_error', `${errorCode}: ${message}`, { platformCode: errorCode, platformMessage: message });
         try {
-          return await this.connection.withTransaction(ctx, async tx => {
-            const repository = this.connection.getRepository(tx, TallyCommand);
-            const runner = repository.manager.queryRunner!;
-            const table = ledgerTablePath(repository);
-            const rows = await runner.query(`INSERT INTO ${table} ("id", "channelId", "fingerprint", "status", "result")
-              VALUES ($1, $2, $3, 'rejected', $4) ON CONFLICT (id) DO NOTHING RETURNING id`,
-            [id, String(tx.channelId), commandFingerprint(command as never), JSON.stringify(result)]);
-            return rows.length ? result : this.registers.replayAnswer(tx, command, await repository.findOneByOrFail({ id }));
-          });
+          return await this.connection.withTransaction(ctx, tx => storeRejection(this.connection, tx, command, result));
         } catch (storeError) {
           error = storeError;
         }
