@@ -61,6 +61,7 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
     lastToken.current = session.token;
     if (!readyRef.current) setTokenEpoch((epoch) => epoch + 1);
   }, [session.token]);
+  const key = sessionKey(session);
   useEffect(() => {
     readyRef.current = false;
     const unmount = new AbortController();
@@ -94,6 +95,6 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
     };
     void attempt(1);
     return () => { unmount.abort(); clearTimeout(timer); };
-  }, [sessionKey(session), connector, tokenEpoch]);
+  }, [key, connector, tokenEpoch]);
   return state;
 }
