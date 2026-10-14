@@ -6,7 +6,7 @@ import type { ID } from '@vendure/core';
 import { tallyPosRefund } from '../config/permissions';
 import { TALLY_PAYMENT_METHOD_CODE, withTallyRefund } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
-import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/core-commands';
+import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/commands';
 import { commandFingerprint } from '../vendored/fingerprint';
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
 import { ORDER_REFUND_VERSIONS } from './constants';

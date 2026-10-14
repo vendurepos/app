@@ -8,8 +8,7 @@ import type { OrderCreateResult } from '../service/order-create.service';
 import { REGISTER_TYPES, RegisterService } from '../service/register.service';
 import type { RegisterEnvelope, RegisterResult } from '../service/register.service';
 import { RefundService } from '../service/refund.service';
-import type { CommandEnvelope, OrderCreatePayload } from '../vendored/commands';
-import type { CommandResult, OrderRefundEnvelope } from '../vendored/core-commands';
+import type { CommandEnvelope, CommandResult, OrderCreatePayload, OrderRefundEnvelope } from '../vendored/commands';
 
 // TallyUI ADR-038: a batch holds 1 to 50 commands; more answers 413 batch_too_large (ruling 18).
 const MAX_COMMANDS = 50;

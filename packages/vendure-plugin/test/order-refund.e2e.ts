@@ -3,7 +3,7 @@ import { Order, Refund, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
-import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/core-commands';
+import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 

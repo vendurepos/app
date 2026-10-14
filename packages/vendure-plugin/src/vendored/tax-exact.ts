@@ -1,4 +1,4 @@
-// TEMPORARY (spike S1): vendored from tallyui@366727a packages/pos/src/tax/exact.ts until @tallyui/core/server exists.
+// vendored from tallyui@366727a packages/pos/src/tax/exact.ts (ADR 0002: never hand-edited; not part of @tallyui/core/server)
 /** Micro-minor-units per minor unit. */
 export const MICROS_PER_MINOR = 1_000_000n;
 

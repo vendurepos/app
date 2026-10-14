@@ -1,17 +1,10 @@
 import { Order, TransactionalConnection } from '@vendure/core';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
 import { ORDER_CREATE_VERSIONS } from '../src/service/constants';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
-import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../src/vendored/versions';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
-
-// A re-vendored versions.ts from a TallyUI core that already lists v5.
-vi.mock('../src/vendored/versions', () => ({
-  SUPPORTED_ORDER_CREATE_VERSIONS: [1, 2, 3, 4, 5],
-  SUPPORTED_REGISTER_VERSIONS: [1],
-}));
 
 describe('the order.create versions are the plugin\'s own, not the vendored list', () => {
   const environment = createPluginTestEnvironment();
@@ -22,10 +15,6 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     connection = server.app.get(TransactionalConnection);
   });
   afterAll(() => server.destroy());
-
-  it('the vendored list is mocked to include v5', () => {
-    expect(SUPPORTED_ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5]);
-  });
 
   it('GET /tally/v1/info advertises order.create 1 to 5', async () => {
     const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, {

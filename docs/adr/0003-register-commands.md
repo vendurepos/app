@@ -191,6 +191,8 @@ The only changes: `register-outcome.ts` and `command-result.ts` import
 vendored files are untouched; the register commands' fingerprint uses
 the existing `fingerprint.ts`, whose algorithm is core's.
 
+*2026-10-14 (tidy pass B8): `core-commands.ts` was folded into `commands.ts`, now @tallyui/core@3.9.1's `src/types/commands.ts` verbatim, and `register-outcome.ts` and `command-result.ts` import `./commands`; see ADR 0002.*
+
 ## Consequences
 
 - `/tally/v1/info` lists `"register": [1]` from `REGISTER_VERSIONS`, the

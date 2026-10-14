@@ -1,5 +1,5 @@
-// vendored verbatim from @tallyui/core@3.0.0-next.1 src/server/register-outcome.ts, plus TallyUI#469 (register v2)
-import type { RegisterCommandResult } from './core-commands'
+// vendored verbatim from @tallyui/core@3.9.1 src/server/register-outcome.ts (ADR 0002: never hand-edited)
+import type { RegisterCommandResult } from './commands'
 
 export type RegisterConflictCode =
   | 'register_session_already_open'

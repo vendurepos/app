@@ -1,4 +1,4 @@
-// TEMPORARY (spike S1): vendored from medusapos@8667f71 packages/medusa-plugin/src/workflows/tally-order-create/payload-shape.ts until @tallyui/core/server exists.
+// vendored from medusapos@8667f71 packages/medusa-plugin/src/workflows/tally-order-create/payload-shape.ts, with local changes (d7a443e, 21a45c5, and the v5 plumbing e82e8aa) that ADR 0002 "Vendored with local changes" lists; the next re-vendor waits on TallyUI/tallyui#275
 /** Shape errors of an order.create payload, e.g. ['lines: expected a non-empty array',
  * 'payments[0].method: expected a string']; [] when the shape is valid. Checks types and
  * presence only (numbers are finite numbers; value ranges are the planner's job). */

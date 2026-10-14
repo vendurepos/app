@@ -103,8 +103,8 @@ marked temporary. The plugin's first PR after S1 consumes the package.
 (Front desk, 2026-09-30); a needed divergence goes through a core change
 instead. `vendored/payload-shape.ts` is copied from medusapos@8667f71
 (`packages/medusa-plugin/src/workflows/tally-order-create/payload-shape.ts`),
-not from TallyUI core. Apart from its one-line provenance header, it differs
-from that source in two places. Both predate the rule, and each keeps the
+not from TallyUI core. Apart from its one-line provenance header, it
+differed from that source in two places before the rule, and each keeps the
 vendored shape stage free of a length check that this server runs in step 4,
 after the replay read, so a stored answer always wins:
 
@@ -121,10 +121,20 @@ after the replay read, so a stored answer always wins:
   (`21a45c5`, VP3-1), in the order the Front desk ruled on the TallyUI #222
   review. It is refused in step 4 (`service/value-ranges.ts`).
 
-`vendored/versions.ts` is vendored verbatim and deliberately unread since
-vendurepos/app#53. Its header comment ("/info advertises them and
-processBatch enforces them (one source)") is out of date: `/info` and the
-gate read the plugin's own `ORDER_CREATE_VERSIONS` (`service/constants.ts`).
+**After the rule.** The order.create v5 plumbing (2026-10-06) changed two
+vendored files by hand: `e82e8aa` added to `payload-shape.ts` the
+custom-line checks, the `variantId` exemption for a custom line and the fees
+and shipping shape checks, and to `fiscal-figures.ts` the
+`display.fees`/`display.shipping` checks and the fees-and-shipping total
+check; `a71d29c` is a type fix in `fiscal-figures.ts`. A re-vendor from
+medusapos@8667f71 would drop them, so each file's header names these
+commits. Both files leave this state through core: `payload-shape.ts` when
+TallyUI/tallyui#275 lands, `fiscal-figures.ts` with core's own copy, which
+adds refusals (tidy pass B8, 2026-10-14).
+
+`vendored/versions.ts` was deleted on 2026-10-14 (tidy pass B8): it was unread since
+vendurepos/app#53. `/info` and the gate read the plugin's own `ORDER_CREATE_VERSIONS`
+(`service/constants.ts`).
 
 The medusapos file is the origin: core's shape check was lifted from it
 (TallyUI `898e98b`), and core now holds the canonical copy, so that is where
@@ -530,9 +540,9 @@ vendurepos/app#53):
 - v1 and v2 orders simply have no snapshot or session id.
 
 `/info` and the version gate read the plugin's own `ORDER_CREATE_VERSIONS`
-(`service/constants.ts`), not the vendored `SUPPORTED_ORDER_CREATE_VERSIONS`,
-so a new version is advertised only by the plugin PR that implements it
-(Front desk, 2026-09-30). `test/versions.e2e.ts` pins this.
+(`service/constants.ts`), not a vendored list (core's `versions.ts` was
+deleted in tidy pass B8), so a new version is advertised only by the plugin
+PR that implements it (Front desk, 2026-09-30). `test/versions.e2e.ts` pins this.
 
 **`taxRounding`.** Beside `contracts`, `/info` has a top-level
 `taxRounding`, whose value is core's TaxRounding JSON
