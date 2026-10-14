@@ -2,7 +2,7 @@
 
 Status: complete. All 12 proofs pass (63 tests). Tightened after the judge-only review; ADR 0002 Accepted after a clean re-review (Front desk ruling)
 Date: 2026-09-29
-Branch: `spike-s1`. Code: `spikes/s1-order-recipe/` (TEMPORARY, evidence only)
+Branch: `spike-s1`. Code: deleted 2026-10-14; the last commit holding `spikes/s1-order-recipe/` is `afa8c26` (`git checkout afa8c26 -- spikes/s1-order-recipe`).
 
 ## What was tested
 
@@ -127,6 +127,7 @@ field, `tallyPriceIncludesTax`.
 
 ## How to rerun
 
+From a checkout of `afa8c26`:
 ```sh
 cd spikes/s1-order-recipe
 npm ci
