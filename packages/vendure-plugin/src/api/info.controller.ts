@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
-import { ADVERTISED_ORDER_CREATE_VERSIONS, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
+import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
@@ -28,7 +28,7 @@ export class TallyInfoController {
   async info(@Ctx() ctx: RequestContext): Promise<TallyInfo> {
     const info: TallyInfo = { contracts: { 'order.create': [...ADVERTISED_ORDER_CREATE_VERSIONS], register: [...REGISTER_VERSIONS],
       'order.refund': [...ORDER_REFUND_VERSIONS] }, taxRounding: this.taxRounding,
-      maxShippingLines: 1, // ADR 0005 ruling (b): one shipping charge per order.
+      maxShippingLines: MAX_SHIPPING_LINES, // ADR 0005 ruling (b): one shipping charge per order.
       lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
     };
     const name = await this.deviceName(ctx);

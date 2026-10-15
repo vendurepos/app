@@ -3,6 +3,8 @@
 // is an unstored invalid_payload in step 4 (after the replay read, so a stored answer wins), since a money field
 // accepted and ignored (v1 `discountMinor`) would charge the full price for a sale the till discounted. The contract
 // declares no free-form map inside order.create.
+import { MAX_SHIPPING_LINES } from './constants';
+
 type Fields = Record<string, number>;
 // Each field with the version that introduced it, from src/vendored/commands.ts (`locationId`, declared unversioned, is refused below).
 const since = (version: number, names: string): Fields => Object.fromEntries(names.split(' ').map(name => [name, version]));
@@ -69,7 +71,7 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
     each(payload.display.shipping, DISPLAY_SHIPPING, 'display.shipping');
   }
   each(payload.taxByRate, TAX_RATE, 'taxByRate');
-  if (Array.isArray(payload.shipping) && payload.shipping.length > 1 && !full()) {
+  if (Array.isArray(payload.shipping) && payload.shipping.length > MAX_SHIPPING_LINES && !full()) {
     errors.push('shipping[1]: shipping_single: this store takes one shipping charge per order');
   }
   return errors;
