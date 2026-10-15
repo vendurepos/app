@@ -10,9 +10,9 @@ export type SaleSettingsState =
 // A read that has not settled by then is a failed read, so a hung request is retried rather than waited on forever.
 export const READ_TIMEOUT_MS = 10_000;
 // The first retry waits this long, and each one after doubles it…
-export const FIRST_RETRY_MS = 1_000;
+const FIRST_RETRY_MS = 1_000;
 // …up to this cap; retries go on for as long as the screen is mounted.
-export const MAX_RETRY_MS = 30_000;
+const MAX_RETRY_MS = 30_000;
 // The plugin this app ships with advertises order.create 4, and v4 carries the net-discount rule. A store below it (no
 // plugin, or an older one: a 404 /info reads as 1) would take a discounted sale at 3 and apply it without that rule.
 export const MIN_ORDER_CREATE = 4;

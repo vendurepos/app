@@ -6,7 +6,7 @@ import { sessionContext, type Session } from './session';
 import { SESSION_ENDED_TEXT } from './use-catalogue';
 
 // One page, newest first; the panel lists recent sales, not the store's whole history.
-export const ORDER_HISTORY_TAKE = 25;
+const ORDER_HISTORY_TAKE = 25;
 export const ORDER_HISTORY_FORBIDDEN_TEXT = "This till can't read the store's orders: its role lacks the Read order permission. Ask the store's admin to add it.";
 export const ORDER_HISTORY_FAILED_TEXT = "Can't load the store's orders.";
 export type OrderHistoryNotice = { text: string; retry: boolean };

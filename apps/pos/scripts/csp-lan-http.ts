@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Set to 1 at build time only for a web export served over plain http on the same LAN as a plain-http store.
-export const LAN_HTTP_ENV = 'VENDUREPOS_WEB_ALLOW_LAN_HTTP';
+const LAN_HTTP_ENV = 'VENDUREPOS_WEB_ALLOW_LAN_HTTP';
 
 const CSP_META = /<meta\s[^>]*?http-equiv="Content-Security-Policy"[^>]*?\scontent="([^"]*)"/gi;
 

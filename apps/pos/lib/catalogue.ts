@@ -14,7 +14,7 @@ export const RESYNC_INTERVAL_MS = 60_000;
 // The default skips the start pass and restarts a 24 h wait on every start, so a till reloaded daily would never run one.
 export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 // A hung storage worker must not prevent the cashier from signing out.
-export const SIGN_OUT_WAIT_MS = 5_000;
+const SIGN_OUT_WAIT_MS = 5_000;
 
 let database: Promise<TallyDatabase> | undefined;
 let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[]; unlisten: () => void } | undefined;
