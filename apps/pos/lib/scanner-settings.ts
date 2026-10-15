@@ -2,7 +2,7 @@ import { defaultStore, type KeyValueStore } from './session';
 import { WEDGE_MIN_LENGTH } from './use-wedge-scanner';
 
 export const SCANNER_MIN_LENGTH_KEY = 'vendurepos.scanner.minLength';
-export const SCANNER_MIN_LENGTH_RANGE = { min: 4, max: 32 } as const;
+const SCANNER_MIN_LENGTH_RANGE = { min: 4, max: 32 } as const;
 
 /** The stored shortest scan for this till, or WEDGE_MIN_LENGTH when none or invalid (not a whole number in range). */
 export function loadScannerMinLength(store: KeyValueStore = defaultStore()): number {

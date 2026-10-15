@@ -1,7 +1,7 @@
 import type { Session } from './session';
 
 // How long sign-out waits for the server logout before aborting the request.
-export const LOGOUT_WAIT_MS = 3_000;
+const LOGOUT_WAIT_MS = 3_000;
 
 /** Best-effort Vendure logout. Never rejects. */
 export async function logout(session: Pick<Session, 'url' | 'token' | 'kind'>, waitMs = LOGOUT_WAIT_MS): Promise<'ok' | 'failed'> {

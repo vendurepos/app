@@ -7,7 +7,7 @@ import {
 export const POS_LOGGERS: readonly Logger[] = [
   saleLogger, outboxLogger, posOrdersLogger, taxLogger, registerCommandsLogger, registerFactsLogger,
 ];
-export const LOG_SINK_ID = 'vendurepos-console';
+const LOG_SINK_ID = 'vendurepos-console';
 
 /** Adds the console sink (warn and error only) to every POS logger; safe to call more than once. */
 export function installLogSinks(): void {

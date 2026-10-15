@@ -3,11 +3,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The public demo's origin (Vercel project vendurepos-demo); the demo build only.
-export const DEMO_SITE_ORIGIN = 'https://demo.vendurepos.com';
+const DEMO_SITE_ORIGIN = 'https://demo.vendurepos.com';
 // The marketing site's share card (vendurepos.com's Next.js opengraph-image), reused rather than copied.
-export const SHARE_IMAGE = 'https://vendurepos.com/opengraph-image';
-export const DEMO_TITLE = 'VendurePOS demo: try the point of sale for Vendure';
-export const DEMO_DESCRIPTION =
+const SHARE_IMAGE = 'https://vendurepos.com/opengraph-image';
+const DEMO_TITLE = 'VendurePOS demo: try the point of sale for Vendure';
+const DEMO_DESCRIPTION =
   'Try VendurePOS in the browser: a sample Vendure store with one-click sign-in. Sell, run a register day, and reset it whenever you like. Nothing to install.';
 
 export const SHARE_TAGS = `    <link rel="canonical" href="${DEMO_SITE_ORIGIN}/demo" />
