@@ -10,14 +10,14 @@ import type {
   CommandResult, OrderRefundEnvelope, RegisterClosureSubmitPayload, RegisterCommandEnvelope, RegisterCommandResult, RegisterCommandType,
   RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterSessionOpenPayload, RegisterSessionSupersededData, RegisterSessionTransitionPayload,
 } from '../vendored/commands';
-import { commandFingerprint } from '../vendored/fingerprint';
 import { deriveSessionFigures, deriveVariance } from '../vendored/register-figures';
 import type { RegisterConflictCode } from '../vendored/register-outcome';
 import { registerPayloadErrors } from '../vendored/register-payload-shape';
 import {
-  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, Unstored, clientTimeErrors, ledgerTablePath, nulRefusal, refuse,
-  transientAfterClaim, versionRefusal,
+  CREATED_AT_SKEW_MS, Unstored, clientTimeErrors, ledgerTablePath, nulRefusal, refuse, transientAfterClaim, versionRefusal,
 } from './command-ledger';
+// A namespace import: RegisterService has its own claim and replayAnswer methods.
+import * as ledger from './command-ledger';
 import { REGISTER_VERSIONS } from './constants';
 import { TEST_HOOKS_ENV } from './order-create.service';
 import { registerStrictErrors } from './strict-shape';
@@ -61,8 +61,8 @@ export class RegisterService {
     let claimed = false;
     try {
       // 2. The replay read: a committed id answers as recorded.
-      const existing = await this.connection.getRepository(ctx, TallyCommand).findOneBy({ id });
-      if (existing) return this.replayAnswer(ctx, command, existing);
+      const replay = await ledger.replayRead(this.connection, ctx, command);
+      if (replay) return replay;
       // 3. Unknown fields and map keys (ADR-070 d1), then the client-time stage (field-kinds.md): unstored.
       const strict = registerStrictErrors(command as unknown as Record<string, unknown>, type, command.version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
@@ -80,7 +80,7 @@ export class RegisterService {
       }
       return await this.connection.withTransaction(ctx, async tx => {
         // 5. The claim, 6. the register's lock, taken before any state read that decides the command.
-        const concurrent = await this.claim(tx, command);
+        const concurrent = await ledger.claim(this.connection, tx, command);
         if (concurrent) return concurrent;
         claimed = true;
         await this.lockRegister(tx, (session?.registerId ?? payload.registerId)!);
@@ -104,27 +104,14 @@ export class RegisterService {
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
 
+  // Public on the exported RegisterService; the protocol is command-ledger's (tidy B1).
   replayAnswer(ctx: RequestContext, command: RegisterEnvelope | OrderRefundEnvelope<Record<string, unknown>>, existing: TallyCommand): RegisterResult {
-    if (existing.channelId !== String(ctx.channelId)) {
-      return refuse(command.id, 'idempotency_mismatch', 'Command id was already used in another channel', { reason: 'command_in_other_channel' });
-    }
-    if (existing.fingerprint !== commandFingerprint(command as never)) {
-      return refuse(command.id, 'idempotency_mismatch', 'Command id was already used with a different payload');
-    }
-    // ADR-068 d5: the result recorded at apply, never the current state.
-    return { ...existing.result as unknown as RegisterResult, status: existing.status === 'rejected' ? 'rejected' : 'duplicate' };
+    return ledger.replayAnswer(ctx, command, existing);
   }
 
-  // order.create's claim (ADR 0002 §2), with no clientOrderId.
+  // Public on the exported RegisterService; the protocol is command-ledger's (tidy B1).
   async claim(tx: RequestContext, command: RegisterEnvelope | OrderRefundEnvelope<Record<string, unknown>>): Promise<RegisterResult | undefined> {
-    const repository = this.connection.getRepository(tx, TallyCommand);
-    const runner = repository.manager.queryRunner!;
-    const table = ledgerTablePath(repository);
-    await runner.query(`SET LOCAL lock_timeout = '${CLAIM_LOCK_TIMEOUT}'`);
-    const rows = await runner.query(`INSERT INTO ${table} ("id", "channelId", "fingerprint", "status") VALUES ($1, $2, $3, 'pending')
-      ON CONFLICT (id) DO NOTHING RETURNING id`, [command.id, String(tx.channelId), commandFingerprint(command as never)]);
-    await runner.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
-    return rows.length ? undefined : this.replayAnswer(tx, command, await repository.findOneByOrFail({ id: command.id }));
+    return ledger.claim(this.connection, tx, command);
   }
 
   /** ADR 0007 d3: the register's advisory lock (ADR 0003), for a command that is not a register command. */
