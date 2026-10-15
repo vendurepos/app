@@ -32,5 +32,7 @@ export function useDefaultCustomer(sale: Pick<ReturnType<typeof useSale>, 'stage
       const customer = loadDefaultCustomer(session);
       if (customer !== null) sale.setCustomer(customer);
     }
+  // Keyed on the order and the stage only: a new empty cart order gets the default customer once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sale.order.id, sale.stage.kind]);
 }

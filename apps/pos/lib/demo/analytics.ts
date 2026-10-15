@@ -7,7 +7,7 @@ export type DemoEvent = 'demo_opened' | 'demo_signed_in' | 'demo_sale_completed'
 // Public PostHog project key shared with vendurepos.com's pageview recorder.
 const API_KEY = 'phc_BhTJzZ7fXMqcD4MiaUJQsQqPkEpu94yoSAthXFBWemvd';
 // Only the public demo host records events; also identifies the site in each capture.
-export const DEMO_HOST = 'demo.vendurepos.com';
+const DEMO_HOST = 'demo.vendurepos.com';
 export const DEMO_CAPTURE_URL = 'https://ph.wcpos.com/e/';
 const visitId = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 

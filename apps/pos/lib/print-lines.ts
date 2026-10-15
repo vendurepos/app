@@ -1,5 +1,5 @@
 // The frame the last print was drawn in; the next print replaces it.
-export const PRINT_FRAME_ID = 'vendurepos-print';
+const PRINT_FRAME_ID = 'vendurepos-print';
 
 /**
  * Prints plain lines through the browser's print dialog, from a hidden frame so the till's page stays as it is. Each
