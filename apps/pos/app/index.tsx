@@ -38,14 +38,13 @@ import { SaleReceipt } from '../lib/sale-receipt';
 import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, tillIdentity, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
-import { POS_ACCESS_REFUSED_TEXT } from '../lib/sign-in';
 import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
-import { SESSION_ENDED_TEXT, useCatalogue } from '../lib/use-catalogue';
+import { useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
@@ -118,8 +117,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     transport: () => holdClosuresForOrders(orderTransport(() => sessionRef.current), pendingSessionOrders(outbox.orders!)),
     onResult: (command, result) => registerCommandsLogger.debug('Register command result', { key: command.key, result }),
   });
-  const refusedAccess = accessRefused(catalogue.error, outbox.state, registerOutbox.state);
-  const sessionEnded = outbox.state.authRequired || catalogue.error === SESSION_ENDED_TEXT || refusedAccess;
+  const refusedAccess = accessRefused(catalogue.refusal, outbox.state, registerOutbox.state);
+  const sessionEnded = outbox.state.authRequired || catalogue.refusal === 'session_ended' || refusedAccess;
   // Once orders have gone, a held closure goes at once rather than at the end of its backoff.
   useFlushOnDrain(outbox.state.pending, () => void registerOutbox.flush());
   const closingWaiting = useClosureWaiting(registerStore?.commands ?? null, outbox.orders);
@@ -277,7 +276,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   overSheet={closureShown} />
               </TaxProvider>
             </CurrencyProvider>
-          ) : catalogue.error === SESSION_ENDED_TEXT || catalogue.error === POS_ACCESS_REFUSED_TEXT ? (
+          ) : catalogue.refusal ? (
             // A refused session or account fails the settings reads too: the catalogue's notice says why.
             <Text className="p-4 text-sm text-muted-foreground">{catalogue.error}</Text>
           ) : saleSettings.status === 'plugin' ? (

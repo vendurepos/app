@@ -4,11 +4,7 @@ import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import type { Subscription } from 'rxjs';
 import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
 import { sessionKey, type Session } from './session';
-import { POS_ACCESS_REFUSED_TEXT } from './sign-in';
-import { storageStartMessage } from './storage-start-failure';
-
-// A till notice (TallyUI #261): the store refused the session, so the pull stays stopped until the cashier signs in again.
-export const SESSION_ENDED_TEXT = 'Your session has ended. Sign in again to keep selling.';
+import { catalogueStatus, INITIAL_CATALOGUE_STATUS, type CatalogueError, type CatalogueEvent, type CatalogueRefusal } from './catalogue-status';
 
 // One connector per store session (TallyUI #307): a shared instance would share its reconcile feeds across stores.
 // The session key, not the session object, decides when it is rebuilt.
@@ -26,13 +22,14 @@ export function useCatalogue(session: Session): {
   products: any[];
   lastSyncedAt: Date | null;
   error: string | null;
+  refusal: CatalogueRefusal | null;
   stockOverlay: ReadonlyMap<string, unknown> | undefined;
   stockOverlayAsOf: string | undefined;
 } {
   const connector = useCatalogueConnector(session);
   const [products, setProducts] = useState<any[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CatalogueError | null>(null);
   const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [stockOverlayAsOf, setStockOverlayAsOf] = useState<string>();
   const overlaidProducts = useMemo(() => products.map(doc => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay)), [products, connector, stockOverlay]);
@@ -40,16 +37,15 @@ export function useCatalogue(session: Session): {
   useEffect(() => {
     setError(null);
     let cancelled = false;
-    let wasActive = false;
-    let failed = false;
-    let errorShown = false;
-    let dead = false;
-    // From TallyUI 3.0 a refused session reaches notice$, never error$, and the pull pauses without an error.
-    let tillStopped = false;
-    // A forbidden notice stands until the store answers a pull again: the errors rethrown meanwhile don't replace it.
-    // The pull still retries on TallyUI's store schedule, but the app asks the cashier to sign in again (ADR 0023).
-    let forbidden = false;
     const subscriptions: Subscription[] = [];
+    let status = INITIAL_CATALOGUE_STATUS;
+    function feed(event: CatalogueEvent) {
+      if (cancelled) return;
+      const step = catalogueStatus(status, event);
+      status = step.state;
+      if (step.synced) setLastSyncedAt(new Date());
+      if (step.error !== undefined) setError(step.error);
+    }
     void startCatalogueSync(session, connector).then(({ db, replication, stockLevels, health }) => {
       if (cancelled) return;
       subscriptions.push(db.products.find().$.subscribe((docs) => {
@@ -62,48 +58,22 @@ export function useCatalogue(session: Session): {
         if (!cancelled) setStockOverlayAsOf(asOf);
       }));
       subscriptions.push(replication.notice$.subscribe((notice) => {
-        if (cancelled) return;
-        if (dead) return;
-        tillStopped = notice?.fixedBy === 'till';
-        forbidden = notice?.code === 'forbidden';
-        const text = notice?.code === 'unauthorized' ? SESSION_ENDED_TEXT : forbidden ? POS_ACCESS_REFUSED_TEXT : undefined;
-        if (!text) return;
-        errorShown = true;
-        setError(text);
+        feed({ type: 'notice', notice });
       }));
       subscriptions.push(replication.active$.subscribe((active) => {
-        if (cancelled || dead || tillStopped || forbidden) return;
-        // A new run starts clean; received$ also clears an error recovered by a retry within the same run.
-        if (active && !wasActive) failed = false;
-        if (wasActive && !active && !failed) {
-          setLastSyncedAt(new Date());
-          errorShown = false;
-          setError(null);
-        }
-        wasActive = active;
+        feed({ type: 'active', active });
       }));
       subscriptions.push(replication.error$.subscribe((error) => {
-        if (cancelled || dead || tillStopped || forbidden) return;
-        failed = true;
-        let inner: any = error;
-        while (inner.parameters?.errors?.[0]) inner = inner.parameters.errors[0];
-        errorShown = true;
-        setError(inner.message ?? String(inner));
+        feed({ type: 'error', error });
       }));
       subscriptions.push(replication.received$.subscribe(() => {
-        if (cancelled || dead || tillStopped || forbidden || !errorShown) return;
-        failed = false;
-        errorShown = false;
-        setError(null);
+        feed({ type: 'received' });
       }));
       if (health) subscriptions.push(health.subscribe(({ status }) => {
-        if (cancelled || status !== 'dead') return;
-        dead = true;
-        setError('Local storage stopped responding. Reload this page.');
+        feed({ type: 'health', status });
       }));
     }).catch((error) => {
-      if (cancelled || dead) return;
-      setError(storageStartMessage(error) ?? error.message ?? String(error));
+      feed({ type: 'start-failed', error });
     });
     return () => {
       cancelled = true;
@@ -113,5 +83,5 @@ export function useCatalogue(session: Session): {
     };
   }, [session, connector]);
 
-  return { connector, products: overlaidProducts, lastSyncedAt, error, stockOverlay, stockOverlayAsOf };
+  return { connector, products: overlaidProducts, lastSyncedAt, error: error?.text ?? null, refusal: error?.refusal ?? null, stockOverlay, stockOverlayAsOf };
 }

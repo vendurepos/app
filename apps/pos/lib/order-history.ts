@@ -3,7 +3,7 @@ import type { OrderHistoryRow } from '@tallyui/components';
 import { ConnectorUnauthorizedError } from '@tallyui/core';
 import { listVendureOrders, type VendureOrderSummary } from '@tallyui/connector-vendure';
 import { sessionContext, type Session } from './session';
-import { SESSION_ENDED_TEXT } from './use-catalogue';
+import { SESSION_ENDED_TEXT } from './catalogue-status';
 
 // One page, newest first; the panel lists recent sales, not the store's whole history.
 export const ORDER_HISTORY_TAKE = 25;

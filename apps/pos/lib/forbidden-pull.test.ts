@@ -39,11 +39,11 @@ it('asks to sign in again with the sign-in words when the store answers a produc
   let cleanup: (() => void) | void = undefined;
   vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
   useCatalogue(session);
-  await vi.waitFor(() => expect(setError).toHaveBeenCalledWith(POS_ACCESS_REFUSED_TEXT));
+  await vi.waitFor(() => expect(setError).toHaveBeenCalledWith({ text: POS_ACCESS_REFUSED_TEXT, refusal: 'access_refused' }));
   expect(fetch.mock.calls.some(([url]) => String(url).startsWith(`${session.url}/`))).toBe(true);
   // Let the refused run end: it must not clear the error or report the catalogue synced.
   await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(setError).toHaveBeenLastCalledWith(POS_ACCESS_REFUSED_TEXT);
+  expect(setError).toHaveBeenLastCalledWith({ text: POS_ACCESS_REFUSED_TEXT, refusal: 'access_refused' });
   expect(setLastSyncedAt).not.toHaveBeenCalled();
   (cleanup as (() => void) | undefined)?.();
   await stopCatalogueSync();
