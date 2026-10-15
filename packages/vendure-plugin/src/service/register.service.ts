@@ -18,13 +18,9 @@ import {
 } from './command-ledger';
 // A namespace import: RegisterService has its own claim and replayAnswer methods.
 import * as ledger from './command-ledger';
-import { REGISTER_VERSIONS } from './constants';
+import { REGISTER_LOCK_NAMESPACE, REGISTER_VERSIONS } from './constants';
 import { TEST_HOOKS_ENV } from './order-create.service';
 import { registerStrictErrors } from './strict-shape';
-
-// ADR 0003: the two-int advisory key (this, hashtext of the channel and register) serialises a register's commands
-// across tills and instances. Apart from StoreSetupService's 0x7a11 and the customer lock's 0x7a12.
-const REGISTER_LOCK_NAMESPACE = 0x7a13;
 
 // Each type's client-time payload fields, in the order of its table in TallyUI's field-kinds.md.
 const CLIENT_TIMES: Record<RegisterCommandType, string[]> = {

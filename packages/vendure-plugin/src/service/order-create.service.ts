@@ -18,7 +18,10 @@ import { commandFingerprint } from '../vendored/fingerprint';
 import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
-import { ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY, WALK_IN_EMAIL } from './constants';
+import {
+  CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
+  TALLY_NO_TAX_CATEGORY, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
+} from './constants';
 import { classify } from './classification';
 import {
   CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeErrors, nulPath, refuse, replayRead,
@@ -59,9 +62,6 @@ export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSa
 export { WALK_IN_EMAIL };
 // Front desk ruling 6: the wait for the sale's stock rows; a timeout is a 503 (transient timeout).
 const STOCK_LOCK_TIMEOUT = '5s';
-// Ruling 14: the two-int advisory key (this, hashtext(email)) serialises creating a customer per email.
-// Distinct from StoreSetupService's 0x7a11; two-int keys are apart from other plugins' single-bigint keys.
-const CUSTOMER_LOCK_NAMESPACE = 0x7a12;
 /** The environment variable that enables the test hooks; production never sets it. */
 export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
@@ -702,7 +702,7 @@ export class OrderCreateService {
       if (!(line.discountMinor! > 0)) continue;
       const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId) ?? pluginBug(`No order line for clientLineId ${line.clientLineId}`);
       const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
-        order, description: 'POS discount', sku: 'TALLY-DISCOUNT', listPrice: -line.discountMinor!,
+        order, description: 'POS discount', sku: TALLY_DISCOUNT_SKU, listPrice: -line.discountMinor!,
         listPriceIncludesTax: netDiscounts ? false : line.taxInclusive ?? payload.pricesIncludeTax,
         taxLines: orderLine.taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
       }));
@@ -721,7 +721,7 @@ export class OrderCreateService {
           taxLines = [{ taxRate: rate.value, description: rate.name }];
         }
         const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
-          order, description: fee.name, sku: 'TALLY-FEE', listPrice: fee.amountMinor,
+          order, description: fee.name, sku: TALLY_FEE_SKU, listPrice: fee.amountMinor,
           listPriceIncludesTax: payload.pricesIncludeTax, taxLines,
         }));
         order.surcharges.push(surcharge);
@@ -736,7 +736,7 @@ export class OrderCreateService {
     const bridgeMinor = payload.totalMinor - serverMinor;
     if (bridgeMinor !== 0) {
       const bridge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
-        order, description: 'POS rounding', sku: 'TALLY-ROUNDING', listPrice: bridgeMinor,
+        order, description: 'POS rounding', sku: TALLY_ROUNDING_SKU, listPrice: bridgeMinor,
         listPriceIncludesTax: true, taxLines: [],
       }));
       order.surcharges.push(bridge);
@@ -773,9 +773,9 @@ export class OrderCreateService {
         || (granularity === 'per_rate_group_items' && !payload.lines.some(line => line.taxInclusive ?? payload.pricesIncludeTax));
       const serverFigures = {
         subtotalMinor: order.subTotal - bridgeMinor
-          - order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-FEE').reduce((sum, surcharge) => sum + surcharge.price, 0),
+          - order.surcharges.filter(surcharge => surcharge.sku === TALLY_FEE_SKU).reduce((sum, surcharge) => sum + surcharge.price, 0),
         taxMinor: (order.subTotalWithTax - order.subTotal) + (order.shippingWithTax - order.shipping),
-        discountMinor: -order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT').reduce((sum, surcharge) => sum + surcharge.price, 0),
+        discountMinor: -order.surcharges.filter(surcharge => surcharge.sku === TALLY_DISCOUNT_SKU).reduce((sum, surcharge) => sum + surcharge.price, 0),
       };
       for (const field of ['subtotalMinor', 'taxMinor', 'discountMinor'] as const) {
         const tillMinor = payload[field] ?? 0, serverMinor = serverFigures[field];
