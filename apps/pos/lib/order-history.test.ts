@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { ConnectorUnauthorizedError } from '@tallyui/core';
 import type { VendureOrderSummary } from '@tallyui/connector-vendure';
 import { ORDER_HISTORY_FAILED_TEXT, ORDER_HISTORY_FORBIDDEN_TEXT, orderHistoryNotice, orderStateLabel, toOrderHistoryRow } from './order-history';
-import { SESSION_ENDED_TEXT } from './use-catalogue';
+import { SESSION_ENDED_TEXT } from './catalogue-status';
 
 it('labels Vendure order states as words', () => {
   expect(orderStateLabel('PaymentSettled')).toBe('Payment settled');

@@ -356,7 +356,7 @@ describe('catalogue sync lifecycle', () => {
     const replication = vi.mocked(startReplication).mock.results[0].value;
     replication.active$.next(true);
     replication.error$.next(new Error('Pull failed'));
-    expect(setError).toHaveBeenLastCalledWith('Pull failed');
+    expect(setError).toHaveBeenLastCalledWith({ text: 'Pull failed', refusal: null });
     replication.active$.next(false);
     replication.active$.next(true);
     replication.received$.next({});
@@ -365,12 +365,13 @@ describe('catalogue sync lifecycle', () => {
     replication.error$.next(new Error('Later pull failed'));
     replication.received$.next({});
     replication.active$.next(false);
-    expect(setError).toHaveBeenLastCalledWith('Local storage stopped responding. Reload this page.');
+    expect(setError).toHaveBeenLastCalledWith({ text: 'Local storage stopped responding. Reload this page.', refusal: null });
     (cleanup as (() => void) | undefined)?.();
   });
 
   it('shows a session the store refused from notice$ and keeps it over later sync events', async () => {
-    const { useCatalogue: catalogueHook, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { SESSION_ENDED_TEXT } = await import('./catalogue-status');
     const { stopCatalogueSync } = await import('./catalogue');
     const setLastSyncedAt = vi.fn();
     const setError = vi.fn();
@@ -388,19 +389,19 @@ describe('catalogue sync lifecycle', () => {
     replication.active$.next(true);
     replication.notice$.next(notice);
     replication.active$.next(false);
-    expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
+    expect(setError).toHaveBeenLastCalledWith({ text: SESSION_ENDED_TEXT, refusal: 'session_ended' });
     // A later reSync run returns the paused empty page: the catalogue must not report itself synced.
     replication.active$.next(true);
     replication.received$.next({});
     replication.error$.next(new Error('Later pull failed'));
     replication.active$.next(false);
-    expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
+    expect(setError).toHaveBeenLastCalledWith({ text: SESSION_ENDED_TEXT, refusal: 'session_ended' });
     expect(setLastSyncedAt).not.toHaveBeenCalled();
     (cleanup as (() => void) | undefined)?.();
   });
 
   it('asks a forbidden account to sign in again with the sign-in words, never the session-ended ones, until the store answers again', async () => {
-    const { useCatalogue: catalogueHook, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
     const { POS_ACCESS_REFUSED_TEXT } = await import('./sign-in');
     const { stopCatalogueSync } = await import('./catalogue');
     const setLastSyncedAt = vi.fn();
@@ -419,8 +420,8 @@ describe('catalogue sync lifecycle', () => {
     replication.notice$.next({ code: 'forbidden', since: Date.now(), fixedBy: 'store' } satisfies SyncNotice);
     replication.error$.next(new Error('Vendure API error: 403'));
     replication.active$.next(false);
-    expect(setError).toHaveBeenLastCalledWith(POS_ACCESS_REFUSED_TEXT);
-    expect(setError).not.toHaveBeenCalledWith(SESSION_ENDED_TEXT);
+    expect(setError).toHaveBeenLastCalledWith({ text: POS_ACCESS_REFUSED_TEXT, refusal: 'access_refused' });
+    expect(setError).not.toHaveBeenCalledWith(expect.objectContaining({ refusal: 'session_ended' }));
     expect(setLastSyncedAt).not.toHaveBeenCalled();
     // The store lets the account in again: the next pull clears the notice and the catalogue is synced.
     replication.active$.next(true);
@@ -489,6 +490,33 @@ describe('catalogue sync lifecycle', () => {
     expect(products[0]).not.toBe(raw);
     expect(raw).toEqual({ id: 'product-1', variants: [{ id: 'variant-1', stockOnHand: 3 }] });
     expect(stockOverlay).toBe(overlay);
+  });
+
+  it('returns the shown error as text and its refusal kind', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { POS_ACCESS_REFUSED_TEXT } = await import('./sign-in');
+    const overlay = new Map();
+    vi.mocked(useMemo).mockImplementation((create) => create());
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([{ text: POS_ACCESS_REFUSED_TEXT, refusal: 'access_refused' }, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const refused = catalogueHook(session);
+    expect(refused.error).toBe(POS_ACCESS_REFUSED_TEXT);
+    expect(refused.refusal).toBe('access_refused');
+
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([{ text: 'Pull failed', refusal: null }, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const failed = catalogueHook(session);
+    expect(failed.error).toBe('Pull failed');
+    expect(failed.refusal).toBeNull();
+
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const clear = catalogueHook(session);
+    expect(clear.error).toBeNull();
+    expect(clear.refusal).toBeNull();
   });
 
   it('subscribes to reconciled stock and its last successful pass until cleanup', async () => {

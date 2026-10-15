@@ -1,7 +1,7 @@
 import type { OutboxState } from '@tallyui/pos';
-import { POS_ACCESS_REFUSED_TEXT } from './sign-in';
+import type { CatalogueRefusal } from './catalogue-status';
 
 /** ADR 0023: a later 403 signs the till in again like a 401, with the sign-in words. */
-export function accessRefused(catalogueError: string | null, ...outboxes: OutboxState[]): boolean {
-  return catalogueError === POS_ACCESS_REFUSED_TEXT || outboxes.some(({ refused }) => refused?.status === 403);
+export function accessRefused(refusal: CatalogueRefusal | null, ...outboxes: OutboxState[]): boolean {
+  return refusal === 'access_refused' || outboxes.some(({ refused }) => refused?.status === 403);
 }

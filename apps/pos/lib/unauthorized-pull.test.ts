@@ -24,7 +24,8 @@ afterEach(async () => {
 });
 
 it('shows the session-ended notice when the store answers a product pull with 401', async () => {
-  const { useCatalogue, SESSION_ENDED_TEXT } = await import('./use-catalogue');
+  const { useCatalogue } = await import('./use-catalogue');
+  const { SESSION_ENDED_TEXT } = await import('./catalogue-status');
   const { stopCatalogueSync } = await import('./catalogue');
   const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }));
   vi.stubGlobal('fetch', fetch);
@@ -38,11 +39,11 @@ it('shows the session-ended notice when the store answers a product pull with 40
   let cleanup: (() => void) | void = undefined;
   vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });
   useCatalogue(session);
-  await vi.waitFor(() => expect(setError).toHaveBeenCalledWith(SESSION_ENDED_TEXT));
+  await vi.waitFor(() => expect(setError).toHaveBeenCalledWith({ text: SESSION_ENDED_TEXT, refusal: 'session_ended' }));
   expect(fetch.mock.calls.some(([url]) => String(url).startsWith(`${session.url}/`))).toBe(true);
   // Let the paused run end: it must not clear the error or report the catalogue synced.
   await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(setError).toHaveBeenLastCalledWith(SESSION_ENDED_TEXT);
+  expect(setError).toHaveBeenLastCalledWith({ text: SESSION_ENDED_TEXT, refusal: 'session_ended' });
   expect(setLastSyncedAt).not.toHaveBeenCalled();
   (cleanup as (() => void) | undefined)?.();
   await stopCatalogueSync();
