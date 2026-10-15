@@ -492,6 +492,33 @@ describe('catalogue sync lifecycle', () => {
     expect(stockOverlay).toBe(overlay);
   });
 
+  it('returns the shown error as text and its refusal kind', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { POS_ACCESS_REFUSED_TEXT } = await import('./sign-in');
+    const overlay = new Map();
+    vi.mocked(useMemo).mockImplementation((create) => create());
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([{ text: POS_ACCESS_REFUSED_TEXT, refusal: 'access_refused' }, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const refused = catalogueHook(session);
+    expect(refused.error).toBe(POS_ACCESS_REFUSED_TEXT);
+    expect(refused.refusal).toBe('access_refused');
+
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([{ text: 'Pull failed', refusal: null }, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const failed = catalogueHook(session);
+    expect(failed.error).toBe('Pull failed');
+    expect(failed.refusal).toBeNull();
+
+    vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
+      .mockReturnValueOnce([null, vi.fn()]).mockReturnValueOnce([null, vi.fn()])
+      .mockReturnValueOnce([overlay, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    const clear = catalogueHook(session);
+    expect(clear.error).toBeNull();
+    expect(clear.refusal).toBeNull();
+  });
+
   it('subscribes to reconciled stock and its last successful pass until cleanup', async () => {
     const { useCatalogue: catalogueHook } = await import('./use-catalogue');
     const { stopCatalogueSync } = await import('./catalogue');

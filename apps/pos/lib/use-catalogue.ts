@@ -38,11 +38,11 @@ export function useCatalogue(session: Session): {
     setError(null);
     let cancelled = false;
     const subscriptions: Subscription[] = [];
-    let status = INITIAL_CATALOGUE_STATUS;
+    let catalogueState = INITIAL_CATALOGUE_STATUS;
     function feed(event: CatalogueEvent) {
       if (cancelled) return;
-      const step = catalogueStatus(status, event);
-      status = step.state;
+      const step = catalogueStatus(catalogueState, event);
+      catalogueState = step.state;
       if (step.synced) setLastSyncedAt(new Date());
       if (step.error !== undefined) setError(step.error);
     }
