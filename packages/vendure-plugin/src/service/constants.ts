@@ -23,7 +23,7 @@ export const ORDER_REFUND_VERSIONS: readonly number[] = [1];
 export const MAX_SHIPPING_LINES = 1;
 
 // The SKUs of the surcharges order.create writes (ADR 0005): a fee, a line discount and the tax rounding bridge.
-// They are stored on orders and read back by refunds and reports, so they never change.
+// They are stored on orders, and order.create's fiscal check reads the fee and discount back, so they never change.
 export const TALLY_FEE_SKU = 'TALLY-FEE';
 export const TALLY_DISCOUNT_SKU = 'TALLY-DISCOUNT';
 export const TALLY_ROUNDING_SKU = 'TALLY-ROUNDING';
