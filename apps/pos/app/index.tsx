@@ -42,6 +42,7 @@ import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
+import { SyncNowControl } from '../lib/sync-now-control';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
@@ -199,6 +200,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text>Register</Text>
           </Button>
         ) : null}
+        <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />
         <Link href="/settings" testID="settings-open" className="rounded-md bg-secondary px-4 py-2">
           <Text className="text-secondary-foreground">Settings</Text>
         </Link>
