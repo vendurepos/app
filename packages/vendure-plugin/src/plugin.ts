@@ -7,6 +7,7 @@ import type { Middleware } from '@vendure/core';
 import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
 import { TallyInfoController } from './api/info.controller';
+import { TallyRegistersController } from './api/registers.controller';
 import { TallyReportsController } from './api/reports.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import { tallyPosSell, tallyPosApproveVariance, tallyPosRefund } from './config/permissions';
@@ -67,7 +68,7 @@ function commandsBodyParser(): Middleware['handler'] {
   dashboard: './dashboard/index.tsx',
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES],
-  controllers: [TallyInfoController, TallyCommandsController, TallyReportsController],
+  controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController],
   providers: [OrderCreateService, RegisterService, RefundService, ReportService, StoreSetupService],
   exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
