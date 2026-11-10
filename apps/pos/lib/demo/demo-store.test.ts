@@ -11,6 +11,7 @@ import { logout } from '../logout';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
+import { demoCategoryImage, demoProductImage } from './product-images';
 import { DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, type DemoStorage } from './store';
 
 // A valid client timestamp shared by the test's order and register commands.
@@ -126,6 +127,39 @@ it('keeps the demo catalogue equal to the dev catalogue with five stocked catego
   expect(added.filter(product => product.variants.length > 1)).toHaveLength(4);
   expect(added.filter(product => !product.trackInventory)).toHaveLength(1);
   expect(added.filter(product => product.trackInventory && product.variants.every(variant => variant.shopFloorStock === 0))).toHaveLength(2);
+});
+
+// The SVG document inside a demo picture's data URI.
+function svgOf(uri: string) {
+  // react-native-web re-encodes a ";utf8," SVG payload, which breaks an already-encoded one.
+  expect(uri.startsWith('data:image/svg+xml;charset=utf-8,')).toBe(true);
+  return decodeURIComponent(uri.slice(uri.indexOf(',') + 1));
+}
+
+it('gives every product its own bundled SVG picture under 1.5 KB, and variants none of their own', () => {
+  const products = new DemoStore(storage).products();
+  const connector = createVendureConnector();
+  for (const product of products) {
+    const svg = svgOf(product.featuredAsset.preview);
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 160 160">.*<\/svg>$/);
+    expect(new TextEncoder().encode(svg).length).toBeLessThan(1536);
+    expect(svg).not.toMatch(/<text|Gradient|filter|https?:\/\/(?!www\.w3\.org\/2000\/svg")/);
+    expect(product.assets).toEqual([product.featuredAsset]);
+    expect(connector.traits.product!.getImageUrl(product)).toBe(product.featuredAsset.preview);
+    expect(product.variants.every(variant => variant.featuredAsset === null)).toBe(true);
+    const category = CATALOGUE.find(entry => entry.slug === product.slug)!.category;
+    expect(product.featuredAsset.preview).not.toBe(demoCategoryImage(category));
+  }
+  expect(new Set(products.map(product => product.featuredAsset.preview)).size).toBe(products.length);
+  expect(new Set(products.map(product => product.featuredAsset.id)).size).toBe(products.length);
+});
+
+it('falls back to a category picture for an unknown slug instead of throwing', () => {
+  expect(demoProductImage('no-such-slug')).toBe(demoCategoryImage('Gifts'));
+  expect(demoProductImage('no-such-slug', 'Coffee')).toBe(demoCategoryImage('Coffee'));
+  for (const category of ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts'] as const) {
+    expect(new TextEncoder().encode(svgOf(demoCategoryImage(category))).length).toBeLessThan(1536);
+  }
 });
 
 it('seeds three historic server orders without changing the till stock baseline', () => {
