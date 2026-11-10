@@ -4,12 +4,12 @@ import { Link, Redirect, Stack } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
-  SplitTender, SyncStatus, TabsTrigger, Text, VStack,
+  SplitTender, SyncStatus, TabsTrigger, Text, VStack, type OrderHistoryRow,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
   catalogueEntries, CurrencyProvider, findEntryByCode, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
-  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type UseOrderOutboxResult,
+  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type PosOrder, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
@@ -24,6 +24,7 @@ import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
 import { toOrderHistoryRow, useOrderHistory } from '../lib/order-history';
+import { OrderSheet } from '../lib/order-sheet';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
@@ -80,6 +81,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const saleSettings = useSaleSettings(session, connector);
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
+  const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   const history = useOrderHistory(session, ordersOpen);
   const historyRows = useMemo(() => history.orders.map(toOrderHistoryRow), [history.orders]);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
@@ -250,7 +252,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {ordersOpen ? (
         <VStack testID="orders-panel" className="flex-1">
           <HStack className="border-b border-border px-4 py-2">
-            <Button testID="orders-close" variant="secondary" size="sm" onPress={() => setOrdersOpen(false)}>
+            <Button testID="orders-close" variant="secondary" size="sm" onPress={() => { setOrdersOpen(false); setOpenOrder(null); }}>
               <Text>Back to sale</Text>
             </Button>
           </HStack>
@@ -264,8 +266,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               ) : null}
             </HStack>
           ) : null}
-          <OrdersList orders={outbox.recent} onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows}
-            formatDate={(iso) => new Date(iso).toLocaleString()} />
+          {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} /> : <OrdersList orders={outbox.recent}
+            onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows} formatDate={(iso) => new Date(iso).toLocaleString()}
+            onOpen={session.url === DEMO_STORE_ORIGIN ? undefined : setOpenOrder} />}
         </VStack>
       ) : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
