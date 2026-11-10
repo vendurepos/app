@@ -16,6 +16,7 @@ import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
+import { ClosureHistory } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
@@ -42,11 +43,14 @@ import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
+import { SyncNowControl } from '../lib/sync-now-control';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
+import { useCatalogueView } from '../lib/use-catalogue-view';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
+import { XReportButton } from '../lib/x-report-button';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
@@ -140,6 +144,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     varianceThreshold: loadVarianceLimitMinor(),
   });
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [closuresOpen, setClosuresOpen] = useState(false);
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
@@ -194,11 +199,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text>Orders</Text>
           </Button>
         ) : null}
+        <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={storeLabel(session)} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {sessionStatus === 'open' ? (
           <Button testID="register-open-panel" variant="secondary" onPress={() => setRegisterOpen(true)}>
             <Text>Register</Text>
           </Button>
         ) : null}
+        <XReportButton register={register} store={storeLabel(session)} currency={currency} timezone={TIMEZONE} actor={actor} />
+        <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />
         <Link href="/settings" testID="settings-open" className="rounded-md bg-secondary px-4 py-2">
           <Text className="text-secondary-foreground">Settings</Text>
         </Link>
@@ -270,8 +278,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
-                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen}
+                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>
@@ -351,6 +359,7 @@ function Sale({
   overSheet: boolean;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
+  const catalogueView = useCatalogueView();
   const typedApproval = useTypedApproval();
   const identity = tillIdentity(session);
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
@@ -478,6 +487,7 @@ function Sale({
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
+          {...catalogueView}
           showCategoryNav
           showViewToggle
           loading={!lastSyncedAt && !error}
