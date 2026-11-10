@@ -2029,3 +2029,98 @@ test('a role without Read order sees a notice in the Orders panel and is not ask
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
+
+test('a till refund: a cash sale is refunded a mug at a time, the first resent after no answer; Vendure refunds it and expected cash drops', async ({ page }) => {
+  // Every command the till sends, the aborted one included, and the store's answer to each.
+  type RefundResult = { id: string; status: string; refund?: { totalMinor: number; byMethod: Record<string, number> } };
+  const commands: SentCommand[] = [];
+  const results = new Map<string, RefundResult>();
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/tally/v1/commands')) commands.push(...request.postDataJSON().commands);
+  });
+  page.on('response', async (response) => {
+    if (response.request().method() !== 'POST' || !response.url().endsWith('/tally/v1/commands')) return;
+    for (const result of ((await response.json().catch(() => ({}))).results ?? []) as RefundResult[]) results.set(result.id, result);
+  });
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  await openRegister(page, '100.00');
+  // Two mugs, €8.00 + 19 % = €9.52 each, paid in cash.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await expect(tender.getByTestId('tender-total')).toContainText('€19.04');
+  await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  await page.getByTestId('orders-open').click();
+  const panel = page.getByTestId('orders-panel');
+  await expect(panel.getByText(/· Synced$/)).toHaveCount(1, { timeout: 30_000 });
+  await panel.getByTestId(/^order-open-/).first().click();
+  await expect(page.getByTestId('order-sheet')).toContainText('€19.04');
+
+  // The first refund's batch never gets an answer; everything else reaches the store.
+  let aborted = false;
+  const noAnswer = (route: Route) => {
+    const request = route.request();
+    if (!aborted && request.method() === 'POST' && (request.postData() ?? '').includes('"order.refund"')) {
+      aborted = true;
+      return route.abort('failed');
+    }
+    return route.continue();
+  };
+  await page.route('**/tally/v1/commands', noAnswer);
+  const sheet = page.getByTestId('refund-sheet');
+  const refundOneMug = async () => {
+    await sheet.getByTestId(/^refund-qty-/).first().fill('1');
+    await sheet.getByTestId('refund-reason').fill('Damaged');
+    await expect(sheet.getByTestId('refund-total')).toHaveText('Refund €9.52');
+    await sheet.getByTestId('refund-submit').click();
+  };
+  await sheet.getByTestId('refund-start').click();
+  await refundOneMug();
+  await expect(sheet.getByTestId('refund-message')).toHaveText("The store hasn't answered yet. Send the refund again: it is never refunded twice.");
+
+  // Send again is the same command under the same refund id, and the store applies it once.
+  await page.unroute('**/tally/v1/commands', noAnswer);
+  await sheet.getByTestId('refund-send-again').click();
+  await expect(sheet.getByTestId('refund-message')).toHaveText('Refunded €9.52 to the original payment.');
+  const refundsSent = commands.filter(({ type }) => type === 'order.refund');
+  expect(refundsSent).toHaveLength(2);
+  expect(refundsSent[1].id).toBe(refundsSent[0].id);
+  expect(refundsSent[1].payload.clientRefundId).toBe(refundsSent[0].payload.clientRefundId);
+  await expect.poll(() => results.get(refundsSent[0].id)?.status).toBe('applied');
+  const applied = results.get(refundsSent[0].id)!.refund!;
+  expect(applied.totalMinor).toBe(952);
+  expect(Object.values(applied.byMethod).reduce((sum, minor) => sum + minor, 0)).toBe(952);
+
+  // The detail re-read the order: one mug is left, and refunding it leaves nothing to refund.
+  await sheet.getByTestId('refund-start').click();
+  await expect(sheet.getByTestId('refund-form')).toContainText('1 left to refund');
+  await refundOneMug();
+  await expect(sheet.getByTestId('refund-message')).toHaveText('Refunded €9.52 to the original payment.');
+  await expect(sheet.getByTestId('refund-start')).toHaveCount(0);
+
+  // Vendure holds both refunds, settled, against the sale's own client order id.
+  const clientOrderId = commands.find(({ type }) => type === 'order.create')!.payload.clientOrderId;
+  const found = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { payments { refunds { total state } } } } }',
+      variables: { id: clientOrderId },
+    },
+  });
+  const orders = (await found.json()).data.orders.items as { payments: { refunds: { total: number; state: string }[] }[] }[];
+  expect(orders).toHaveLength(1);
+  expect(orders[0].payments.flatMap(({ refunds }) => refunds)).toEqual([{ total: 952, state: 'Settled' }, { total: 952, state: 'Settled' }]);
+
+  // €100.00 float + €19.04 cash sale − €19.04 cash refunded.
+  await page.getByTestId('orders-close').click();
+  await page.getByTestId('register-open-panel').click();
+  await expect(page.getByTestId('register-panel').getByTestId('register-panel-expected')).toContainText('€100.00');
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
