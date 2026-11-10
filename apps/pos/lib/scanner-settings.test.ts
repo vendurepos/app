@@ -1,5 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_KEY } from './scanner-settings';
+import {
+  loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_KEY,
+  loadScannerAffixes, saveScannerAffixes, stripScanAffixes, loadScanSounds, saveScanSounds,
+  SCANNER_PREFIX_KEY, SCANNER_SUFFIX_KEY, SCAN_SOUNDS_KEY,
+} from './scanner-settings';
 import type { KeyValueStore } from './session';
 
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
@@ -37,4 +41,53 @@ it('save stores a valid value and refuses an invalid one', () => {
   expect(loadScannerMinLength(store)).toBe(6);
   expect(saveScannerMinLength(4.5, store)).toBe(false);
   expect(loadScannerMinLength(store)).toBe(6);
+});
+
+it('strips the stored prefix and suffix from a scan', () => {
+  saveScannerAffixes({ prefix: '*', suffix: '#' }, store);
+  expect(stripScanAffixes('*2000000000015#', loadScannerAffixes(store))).toBe('2000000000015');
+});
+
+it('leaves a scan without the prefix or suffix as it is', () => {
+  expect(stripScanAffixes('20*000#0000015', { prefix: '*', suffix: '#' })).toBe('20*000#0000015');
+});
+
+it('strips a prefix and suffix of more than one character', () => {
+  expect(stripScanAffixes(']C12000000000015%%', { prefix: ']C1', suffix: '%%' })).toBe('2000000000015');
+});
+
+it('with no prefix or suffix every scan is unchanged', () => {
+  for (const code of ['', '2000000000015', '*2000000000015#', ' AbC ']) {
+    expect(stripScanAffixes(code, { prefix: '', suffix: '' })).toBe(code);
+  }
+});
+
+it('a scan that is only the prefix and suffix strips to nothing', () => {
+  expect(stripScanAffixes('*#', { prefix: '*', suffix: '#' })).toBe('');
+});
+
+it('no prefix, no suffix and no sounds by default', () => {
+  expect(loadScannerAffixes(store)).toEqual({ prefix: '', suffix: '' });
+  expect(loadScanSounds(store)).toBe(false);
+});
+
+it('saves and loads the prefix and suffix, and an empty one is removed', () => {
+  saveScannerAffixes({ prefix: '*', suffix: '#' }, store);
+  expect(loadScannerAffixes(store)).toEqual({ prefix: '*', suffix: '#' });
+  saveScannerAffixes({ prefix: '', suffix: '#' }, store);
+  expect(store.getItem(SCANNER_PREFIX_KEY)).toBeNull();
+  expect(loadScannerAffixes(store)).toEqual({ prefix: '', suffix: '#' });
+  saveScannerAffixes({ prefix: '*', suffix: '' }, store);
+  expect(store.getItem(SCANNER_SUFFIX_KEY)).toBeNull();
+  expect(loadScannerAffixes(store)).toEqual({ prefix: '*', suffix: '' });
+});
+
+it('saves and loads scan sounds', () => {
+  saveScanSounds(true, store);
+  expect(store.getItem(SCAN_SOUNDS_KEY)).toBe('1');
+  expect(loadScanSounds(store)).toBe(true);
+  saveScanSounds(false, store);
+  expect(loadScanSounds(store)).toBe(false);
+  store.setItem(SCAN_SOUNDS_KEY, 'true');
+  expect(loadScanSounds(store)).toBe(false);
 });

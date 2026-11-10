@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import { loadScannerMinLength } from './scanner-settings';
+import { loadScannerAffixes, loadScannerMinLength, loadScanSounds, stripScanAffixes } from './scanner-settings';
+import { playScanSound } from './scan-sound';
 
 // The heuristic is WCPOS v2's (monorepo packages/core/src/screens/main/hooks/barcodes/use-barcode-detection.ts and the
 // @wcpos/scanner wedge detector it drives), with its scanner registration's stricter burst rule
@@ -35,7 +36,7 @@ function setValue(input: HTMLInputElement, value: string) {
  * a scan too, and never reaches the field; typing at human speed stays typing.
  * Web only: a native hardware keyboard is out of scope, so on native this does nothing.
  */
-export function useWedgeScanner(onScan: (code: string) => void) {
+export function useWedgeScanner(onScan: (code: string) => boolean | void) {
   const latest = useRef(onScan);
   useEffect(() => { latest.current = onScan; });
   useEffect(() => {
@@ -75,7 +76,7 @@ export function useWedgeScanner(onScan: (code: string) => void) {
       }
       const fast = event.timeStamp - lastKeyAt < WEDGE_KEY_GAP_MS && money === field;
       if (event.key === 'Enter') {
-        const code = burst;
+        const code = stripScanAffixes(burst, loadScannerAffixes());
         burst = '';
         // A burst part flushed into the field anyway is typing to its end, Enter included: a scan can't restore the
         // amount, as a restore never undoes the onChangeText the flush reached, so the field shows what happened.
@@ -88,7 +89,8 @@ export function useWedgeScanner(onScan: (code: string) => void) {
         // The scan's keys never reached a money field, so it changed nothing: drop them.
         clearTimeout(release);
         held = '';
-        latest.current(code);
+        const added = latest.current(code);
+        if (loadScanSounds()) playScanSound(added === true ? 'hit' : 'miss');
       } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
         if (!fast) {
           flush();

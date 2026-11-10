@@ -1,7 +1,11 @@
 // @vitest-environment happy-dom
 import { useEffect } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { saveScannerMinLength, SCANNER_MIN_LENGTH_KEY } from './scanner-settings';
+import {
+  saveScannerMinLength, SCANNER_MIN_LENGTH_KEY, saveScannerAffixes, saveScanSounds,
+  SCANNER_PREFIX_KEY, SCANNER_SUFFIX_KEY, SCAN_SOUNDS_KEY,
+} from './scanner-settings';
+import { playScanSound } from './scan-sound';
 import { defaultStore } from './session';
 import { useWedgeScanner, WEDGE_KEY_GAP_MS, WEDGE_MIN_LENGTH } from './use-wedge-scanner';
 
@@ -11,6 +15,7 @@ vi.mock('react', async (importActual) => ({
   useEffect: vi.fn(), useRef: (current: unknown) => ({ current }),
 }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
+vi.mock('./scan-sound', () => ({ playScanSound: vi.fn() }));
 
 // The dev store's mug barcode (dev/vendure-store/README.md).
 const CODE = '2000000000015';
@@ -28,6 +33,7 @@ function unmount() {
 beforeEach(() => {
   vi.useFakeTimers();
   onScan.mockClear();
+  vi.mocked(playScanSound).mockClear();
   enters.mockClear();
   cleanups = [];
   vi.mocked(useEffect).mockImplementation((effect) => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); });
@@ -122,6 +128,56 @@ it('takes a scanner-fast burst into a money field as a scan, and not one of its 
   // Not even the first key: the field's onChangeText would have acted on it (a cash payment, the tile counts).
   expect(inputs).not.toHaveBeenCalled();
   expect(enters).not.toHaveBeenCalled();
+});
+
+it('with a prefix and suffix stored, a fast burst wrapped in them scans the code inside', () => {
+  saveScannerAffixes({ prefix: '*', suffix: '#' });
+  try {
+    type(`*${CODE}#`, WEDGE_GAP_MS);
+    expect(onScan.mock.calls).toEqual([[CODE]]);
+  } finally {
+    defaultStore().removeItem(SCANNER_PREFIX_KEY);
+    defaultStore().removeItem(SCANNER_SUFFIX_KEY);
+  }
+});
+
+it('a burst that strips to shorter than the shortest scan is typing', () => {
+  saveScannerAffixes({ prefix: '*', suffix: '#' });
+  try {
+    const counted = moneyInput('');
+    type('*1234567#', WEDGE_GAP_MS, counted);
+    expect(onScan).not.toHaveBeenCalled();
+    expect(counted.value).toBe('*1234567#');
+    expect(enters).toHaveBeenCalledTimes(1);
+  } finally {
+    defaultStore().removeItem(SCANNER_PREFIX_KEY);
+    defaultStore().removeItem(SCANNER_SUFFIX_KEY);
+  }
+});
+
+it.each([['adds', 'hit', true], ['adds nothing', 'miss', undefined]] as const)(
+  'with sounds on, a scan that %s plays the %s sound', (_outcome, sound, added) => {
+    saveScanSounds(true);
+    try {
+      onScan.mockReturnValueOnce(added);
+      type(CODE, WEDGE_GAP_MS);
+      expect(playScanSound).toHaveBeenCalledExactlyOnceWith(sound);
+    } finally {
+      defaultStore().removeItem(SCAN_SOUNDS_KEY);
+    }
+  },
+);
+
+it('with sounds off, a scan plays nothing', () => {
+  saveScanSounds(false);
+  try {
+    onScan.mockReturnValueOnce(true);
+    type(CODE, WEDGE_GAP_MS);
+    expect(onScan).toHaveBeenCalledExactlyOnceWith(CODE);
+    expect(playScanSound).not.toHaveBeenCalled();
+  } finally {
+    defaultStore().removeItem(SCAN_SOUNDS_KEY);
+  }
 });
 
 it('keeps the Shift a scanner sends for a capital out of a money field too', () => {
