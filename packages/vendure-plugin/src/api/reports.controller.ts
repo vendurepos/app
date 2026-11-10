@@ -11,7 +11,12 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\
 // A range of at most 366 days, so a leap year fits and the day rows stay bounded.
 const MAX_RANGE_MS = 366 * 24 * 60 * 60 * 1000;
 
+// Amendment 1: `UTC` or an IANA Area/Location name. Intl accepts a numeric offset such as +01:00, which Postgres's
+// AT TIME ZONE reads POSIX-style (sign inverted), so offsets and bare abbreviations are refused.
+const IANA_ZONE = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)+$/;
+
 function validZone(timeZone: string) {
+  if (timeZone !== 'UTC' && (timeZone.length > 64 || !IANA_ZONE.test(timeZone))) return false;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
     return true;

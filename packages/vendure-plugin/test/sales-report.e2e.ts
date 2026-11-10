@@ -239,4 +239,14 @@ describe('GET /tally/v1/reports/sales', () => {
       expect(await report(params), JSON.stringify(params)).toEqual({ status: 400, body: { code: 'invalid_query', message } });
     }
   });
+
+  it('refuses a numeric offset as the time zone', async () => {
+    // Intl accepts these, but Postgres's AT TIME ZONE reads a bare offset POSIX-style, with the sign inverted.
+    const range = { from: '2026-03-10T00:00:00Z', to: '2026-03-11T00:00:00Z' };
+    for (const timezone of ['+01:00', '-05', 'UTC+1']) {
+      expect(await report({ ...range, timezone }), timezone).toEqual({ status: 400,
+        body: { code: 'invalid_query', message: 'timezone must be an IANA time zone' } });
+    }
+    expect((await ok({ ...range, timezone: 'Etc/GMT-1' })).timezone).toBe('Etc/GMT-1');
+  });
 });
