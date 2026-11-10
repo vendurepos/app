@@ -16,9 +16,9 @@ export const REFUND_AMOUNT_MISMATCH_TEXT =
 export const REFUND_NOT_TILL_ORDER_TEXT = 'Only sales made on a till can be refunded here.';
 export const REFUND_FORBIDDEN_TEXT = "This account can't refund. Ask the store's admin to add the TallyPosRefund permission to its role.";
 export const REFUND_NO_SESSION_TEXT = 'The store has no open register session for this till. Open the register, then try again.';
-export const REFUND_UNKNOWN_TEXT = "The store hasn't answered yet. Send the refund again: it is never refunded twice.";
+export const REFUND_UNKNOWN_TEXT = "The store hasn't answered yet. Don't hand back cash until it confirms. Send the refund again: it is never refunded twice.";
 export const REFUND_UNAUTHORIZED_TEXT = 'Your session has ended. Sign in again, then send the refund again.';
-export const REFUND_PENDING_TEXT = "The store hasn't answered the last refund for this order yet. Send it again before starting a new one.";
+export const REFUND_PENDING_TEXT = "The store hasn't answered the last refund for this order yet. Don't hand back cash until it confirms. Send it again before starting a new one.";
 
 /** Sum of vendureLineRefundWithTax over the lines with a quantity above 0; quantities are by order line id. */
 export function refundTotalMinor(order: VendureOrder, quantities: RefundDraft['quantities']): number {

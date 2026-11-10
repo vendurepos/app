@@ -30,6 +30,7 @@ import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
 import { loadPriceEditAllowed } from '../lib/price-edit-setting';
 import { printLines } from '../lib/print-lines';
+import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
@@ -267,7 +268,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               ) : null}
             </HStack>
           ) : null}
-          {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} /> : <OrdersList orders={outbox.recent}
+          {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} footer={(order, reload) => <RefundSheet order={order}
+            session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
+            capabilities={readSettingsCapabilities} onRefunded={reload} />} /> : <OrdersList orders={outbox.recent}
             onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows} formatDate={(iso) => new Date(iso).toLocaleString()}
             onOpen={session.url === DEMO_STORE_ORIGIN ? undefined : setOpenOrder} />}
         </VStack>
