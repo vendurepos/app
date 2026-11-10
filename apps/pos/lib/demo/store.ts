@@ -1,5 +1,6 @@
 import type { CommandResult, OrderCreatePayload, RegisterClosureSubmitPayload, RegisterCommandResult, RegisterSessionOpenPayload } from '@tallyui/core';
 import { barcodeOf, CATALOGUE } from './catalogue';
+import { demoProductImage } from './product-images';
 
 // All mutable demo data is saved together, including the command ledger.
 export const DEMO_STORAGE_KEY = 'vendurepos.demo-store.v1';
@@ -143,10 +144,13 @@ export class DemoStore {
 
   products() {
     let variantIndex = 0;
+    // Each product's bundled picture; variants keep featuredAsset null and fall back to it, as in Vendure.
+    const assets: { id: string; preview: string }[] = CATALOGUE.map((product, index) =>
+      ({ id: `demo-asset-${index + 1}`, preview: demoProductImage(product.slug) }));
     return CATALOGUE.map((product, index) => ({
       id: String(index + 1), createdAt: SEED_TIME, updatedAt: SEED_TIME,
       name: product.name, slug: product.slug, description: `${product.name} (VendurePOS dev seed)`, enabled: true,
-      featuredAsset: null, assets: [], collections: DEMO_COLLECTIONS.filter(collection => collection.name === product.category), facetValues: [],
+      featuredAsset: assets[index], assets: [assets[index]], collections: DEMO_COLLECTIONS.filter(collection => collection.name === product.category), facetValues: [],
       variants: product.variants.map(variant => {
         const id = String(++variantIndex);
         const category = DEMO_CATEGORIES.find(category => category.name === product.taxCategory)!;
