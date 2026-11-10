@@ -394,6 +394,38 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await page.getByTestId('settings-back').click();
 });
 
+test('the till follows the device\'s dark scheme and prints its receipt in light', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const banner = page.getByTestId('demo-banner');
+  const html = page.locator('html');
+  await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
+  await expect(html).toHaveClass(/\bdark\b/);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(banner).toHaveCSS('background-color', 'rgb(248, 249, 250)');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
+
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  await expect(html).toHaveClass(/\blight\b/);
+  await expect(banner).toHaveCSS('background-color', 'rgb(248, 249, 250)');
+  await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  await expect(html).toHaveClass(/\bdark\b/);
+  await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
+});
+
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
   await page.addInitScript(() => {
     window.printCalls = 0;
