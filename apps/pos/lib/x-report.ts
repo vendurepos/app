@@ -23,7 +23,7 @@ export function xReportLines(
     store,
     `Opened ${closure.opened_at.datetime}`,
     `Printed ${order.printed.datetime}`,
-    `Sales ${breakdowns.transaction_count as number}`,
+    `Sales ${salesCount}`,
     `Opening float ${breakdowns.opening_float.counted_display}`,
     ...breakdowns.movements.map((movement) =>
       `${String(movement.type_label)} ${movement.amount_display} ${movement.reason}${movement.voided ? ' (voided)' : ''}`),
