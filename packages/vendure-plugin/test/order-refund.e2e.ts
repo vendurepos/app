@@ -302,6 +302,19 @@ describe('order.refund v1', () => {
     }
   });
 
+  // Three tills, because one till's refunds are already serialised by the register's advisory lock; only separate registers reach the order-row lock.
+  it('three whole-order refunds sent at once from three tills: one applies, the rest are refused, and no more than was paid leaves', async () => {
+    const sessions = [await openSession(), await openSession(), await openSession()];
+    const { order } = await sell(2);
+    const paid = order.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    const results = await Promise.all(sessions.map(session => post(refundFor(order, session)))) as Array<{ status: string; error?: { code: string } }>;
+    expect(results.filter(result => result.status === 'applied')).toHaveLength(1);
+    expect(results.filter(result => result.status === 'rejected').map(result => result.error?.code)).toEqual(['quantity_exceeds', 'quantity_exceeds']);
+    const refunded = (await readOrder(order.id)).payments.flatMap(payment => payment.refunds)
+      .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0);
+    expect(refunded).toBe(paid);
+  });
+
   it('/info advertises order.refund 1', async () => {
     const response = await fetch(`${base}/tally/v1/info`, { headers: headers(refunder) });
     expect(response.status).toBe(200);
