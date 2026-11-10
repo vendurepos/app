@@ -4,6 +4,7 @@
     "slug": "vendurepos",
     "version": "0.1.0",
     "scheme": "vendurepos",
+    "userInterfaceStyle": "automatic",
     "web": { "bundler": "metro", "output": "single" },
     "plugins": ["expo-router"],
     "experiments": { "typedRoutes": true }
