@@ -1341,6 +1341,65 @@ test('a price change made in Vendure reaches the open till without a reload', as
   expect(cspConsole).toEqual([]);
 });
 
+test('Sync now pulls a price change made in Vendure at once, and the header says when the till last synced', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  // The 60 s re-pull and the price reconcile's 60 s first pass start with the sync: everything below must land before them.
+  const started = Date.now();
+  const tile = page.getByTestId('product-tile-Tally Fixture Mug');
+  await expect(tile).toBeVisible();
+  await expect(page.getByTestId('last-synced')).toHaveText(/^Last synced \d/);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const response = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers,
+    data: { query: '{ productVariants(options: { filter: { sku: { eq: "TALLY-MUG" } } }) { items { id price } } }' },
+  });
+  expect(response.ok()).toBe(true);
+  const original = await response.json();
+  expect(original.errors).toBeUndefined();
+  expect(original.data.productVariants.items).toHaveLength(1);
+  const { id, price }: {
+    id: string; price: number;
+  } = original.data.productVariants.items[0];
+  // ProductPrice uses Intl currency formatting with the browser's runtime locale.
+  const [oldPrice, newPrice] = await page.evaluate((amount) => {
+    const formatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' });
+    return [formatter.format(amount / 100), formatter.format((amount + 100) / 100)];
+  }, price);
+  await expect(tile).toContainText(oldPrice);
+  const query = 'mutation ($input: [UpdateProductVariantInput!]!) { updateProductVariants(input: $input) { id price } }';
+  try {
+    const updated = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, price: price + 100 }] } },
+    });
+    expect(updated.ok()).toBe(true);
+    const result = await updated.json();
+    expect(result.errors).toBeUndefined();
+    expect(result.data.updateProductVariants).toEqual([{ id, price: price + 100 }]);
+    await page.getByTestId('sync-now').click();
+    await expect(tile).toContainText(newPrice, { timeout: 20_000 });
+    expect(Date.now() - started).toBeLessThan(55_000);
+    await expect(page.getByTestId('sync-now')).toBeEnabled();
+  } finally {
+    const restored = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers,
+      data: { query, variables: { input: [{ id, price }] } },
+    });
+    expect(restored.ok()).toBe(true);
+    const result = await restored.json();
+    expect(result.errors).toBeUndefined();
+    expect(result.data.updateProductVariants).toEqual([{ id, price }]);
+  }
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('a stock change made in Vendure shows on the open till when it comes back to the foreground or online', async ({ page }) => {
   test.setTimeout(3 * 60_000);
   await page.goto('/');
