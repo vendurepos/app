@@ -17,3 +17,32 @@ export function saveScannerMinLength(value: number, store: KeyValueStore = defau
   store.setItem(SCANNER_MIN_LENGTH_KEY, String(value));
   return true;
 }
+
+export const SCANNER_PREFIX_KEY = 'vendurepos.scanner.prefix';
+export const SCANNER_SUFFIX_KEY = 'vendurepos.scanner.suffix';
+export const SCAN_SOUNDS_KEY = 'vendurepos.scanner.sounds';
+export interface ScanAffixes { prefix: string; suffix: string }
+
+/** The stored prefix and suffix, each '' when none. */
+export function loadScannerAffixes(store: KeyValueStore = defaultStore()): ScanAffixes {
+  return { prefix: store.getItem(SCANNER_PREFIX_KEY) ?? '', suffix: store.getItem(SCANNER_SUFFIX_KEY) ?? '' };
+}
+/** Stores each; an empty one is removed. */
+export function saveScannerAffixes({ prefix, suffix }: ScanAffixes, store: KeyValueStore = defaultStore()): void {
+  for (const [key, value] of [[SCANNER_PREFIX_KEY, prefix], [SCANNER_SUFFIX_KEY, suffix]]) {
+    if (value) store.setItem(key, value); else store.removeItem(key);
+  }
+}
+/** Off unless stored on ('1'). */
+export function loadScanSounds(store: KeyValueStore = defaultStore()): boolean {
+  return store.getItem(SCAN_SOUNDS_KEY) === '1';
+}
+export function saveScanSounds(on: boolean, store: KeyValueStore = defaultStore()): void {
+  store.setItem(SCAN_SOUNDS_KEY, on ? '1' : '0');
+}
+/** Takes the prefix off the start and the suffix off what is left's end, each only when it matches exactly. */
+export function stripScanAffixes(code: string, { prefix, suffix }: ScanAffixes): string {
+  if (prefix && code.startsWith(prefix)) code = code.slice(prefix.length);
+  if (suffix && code.endsWith(suffix)) code = code.slice(0, -suffix.length);
+  return code;
+}

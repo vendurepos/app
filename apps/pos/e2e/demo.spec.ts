@@ -4,7 +4,7 @@ import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 
 declare global {
-  interface Window { printCalls: number }
+  interface Window { printCalls: number; scanTones: number[] }
 }
 
 // lib/demo/fetch.ts's DEMO_STORE_ORIGIN, copied because fetch.ts imports a value from @tallyui/core, which Playwright's CommonJS loader cannot require.
@@ -48,6 +48,74 @@ async function expectSignedIn(page: Page) {
   // The grid renders its tiles lazily (at phone width the mug is past the first screenful), so wait for the first by name.
   await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 }
+
+/**
+ * A keyboard-wedge scan at scanner speed: each key's keydown and keyup, then Enter's, dispatched to the focus in one
+ * synchronous loop, so every gap is well under WEDGE_KEY_GAP_MS however loaded the machine (Playwright's per-key round
+ * trips can exceed it on a CI runner). Each key does what a real one would: an uncancelled printable keydown in a text
+ * input inserts its character, an uncancelled Enter clicks a focused <button> (react-native-web leaves a native button's
+ * press to that click), and the keyup always follows (it presses any other control), so a key the listener fails to
+ * hold still reaches the field or presses the control.
+ */
+async function wedgeScan(page: Page, code: string) {
+  await page.evaluate((keys) => {
+    for (const key of keys) {
+      const target = document.activeElement ?? document.body;
+      const init = { key, bubbles: true, cancelable: true };
+      const typed = target.dispatchEvent(new KeyboardEvent('keydown', init));
+      if (typed && key.length === 1 && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+        document.execCommand('insertText', false, key);
+      } else if (typed && key === 'Enter' && target instanceof HTMLButtonElement) {
+        target.click();
+      }
+      target.dispatchEvent(new KeyboardEvent('keyup', init));
+    }
+  }, [...code, 'Enter']);
+}
+
+test("Settings takes the scanner's prefix and suffix off each scan, and scan sounds tell a hit from a miss", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.scanTones = [];
+    window.AudioContext = class {
+      state = 'running';
+      currentTime = 0;
+      destination = {};
+      createOscillator() {
+        return { frequency: { setValueAtTime(f: number) { window.scanTones.push(f); } }, connect() {}, start() {}, stop() {} };
+      }
+      createGain() {
+        return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {} };
+      }
+      resume() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('scanner-prefix').fill('*');
+  await page.getByTestId('scanner-suffix').fill('#');
+  await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: Off');
+  await page.getByTestId('scan-sounds-toggle').click();
+  await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: On');
+  await page.getByTestId('settings-back').click();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await wedgeScan(page, '*TALLY-MUG#');
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+  expect(await page.evaluate(() => window.scanTones)).toEqual([880, 1320]);
+  await wedgeScan(page, '*NO-SUCH-CODE#');
+  await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "NO-SUCH-CODE".');
+  expect(await page.evaluate(() => window.scanTones)).toEqual([880, 1320, 330, 220]);
+  await page.reload();
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('scanner-prefix')).toHaveValue('*');
+  await expect(page.getByTestId('scanner-suffix')).toHaveValue('#');
+  await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: On');
+});
 
 async function orderEntries(page: Page) {
   await page.getByTestId('orders-open').click();

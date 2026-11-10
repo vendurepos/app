@@ -31,6 +31,8 @@ the tab is highlighted (`tab-cart-highlight`) while the Products tab stays shown
 | Focus in the Products search field | The search's own Enter looks the code up and adds it once; the wedge listener leaves it alone. The same holds for any other non-money text field (a movement reason, the sign-in fields, a note): the field keeps the keys. | `Catalogue` search; `useWedgeScanner` |
 | An unknown code (any surface) | Closes a panel or sheet as a found code would, then shows `No products match "<code>".` (`scan-not-found`); nothing else changes: the stage, cart and tab stay as they are. | `Sale`, `!entry` → `setScanNotice({ notFound })` |
 
+Settings › Scanner's prefix and suffix are taken off a wedge scan before the shortest-length check and the lookup, each only when it matches at the start or end exactly. Scan sounds (web, off by default) play WCPOS v2's high tone when the scan added a product and the low one for every other outcome on the rows above. Gap: a code entered through the Products search field goes through TallyUI's `Catalogue` search, which neither strips the prefix or suffix nor plays a sound, until TallyUI gives the search a scan hook.
+
 ## A new surface
 
 A new surface inherits a row rather than getting its own ruling:
