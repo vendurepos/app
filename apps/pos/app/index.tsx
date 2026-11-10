@@ -138,6 +138,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const register = useRegisterSession({
     sessions: registerStore?.sessions ?? null, movements: registerStore?.movements ?? null, closures: registerStore?.closures ?? null,
     commands: registerStore?.commands ?? null, orders: outbox.orders, register: registerStore?.sessions ?? null,
+    refunds: registerStore?.refunds ?? null,
     capabilities: readSettingsCapabilities, storeKey: ordersDatabaseName(session), registerId: boundRegisterId,
     deviceName: session.kind === 'api-key' ? session.device ?? null : null,
     enabled: (readSettingsCapabilities?.register ?? 0) >= MIN_REGISTER, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,

@@ -1,6 +1,7 @@
 import {
   addPosOrderCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, registerCommandCollection,
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
+  posRefundCollection, type PosRefundCollection,
 } from '@tallyui/pos';
 import { addRxPlugin, createRxDatabase, type RxCollection } from 'rxdb';
 import { appStorage } from './app-storage';
@@ -39,13 +40,14 @@ const released = new Map<string, Promise<void>>();
 export type RegisterCollections = {
   /** Also the register host: it holds the register document (the closure number and perpetual totals). */
   sessions: RegisterSessionCollection; movements: CashMovementCollection; closures: ClosureCollection; commands: RegisterCommandCollection;
+  refunds: PosRefundCollection;
 };
 
 /** The register collections openOrderStore added to `orders`' database; null while the orders are not open. */
 export function registerCollections(orders: RxCollection<PosOrder> | null): RegisterCollections | null {
   if (!orders) return null;
-  const { register_sessions, cash_movements, closures, register_commands } = orders.database.collections;
-  return { sessions: register_sessions, movements: cash_movements, closures, commands: register_commands };
+  const { register_sessions, cash_movements, closures, register_commands, pos_refunds } = orders.database.collections;
+  return { sessions: register_sessions, movements: cash_movements, closures, commands: register_commands, refunds: pos_refunds };
 }
 
 export function orderDrafts(orders: RxCollection<PosOrder> | null): RxCollection | null {
@@ -85,6 +87,8 @@ export async function openOrderStore(name: string, platform: string): Promise<{ 
         closures: { schema: closureSchema }, register_commands: registerCommandCollection(),
         // Parked carts, local only, never replicated.
         order_drafts: { schema: orderDraftSchema },
+        // Till refunds (order.refund), local only, never replicated; the register counts the applied ones.
+        pos_refunds: posRefundCollection(),
       });
       const register_sessions = await addRegisterSessionCollection(database);
       await ensureRegister(register_sessions, platform);
