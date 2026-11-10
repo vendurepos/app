@@ -1,8 +1,8 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, HStack, Input, InputField, Label, Switch, Text, VStack } from '@tallyui/components';
 import { vendureRefundable, type VendureOrder } from '@tallyui/connector-vendure';
 import { formatMoney, type OrderRefundEnvelope, type ServerCapabilities } from '@tallyui/core';
-import type { PosRefundCollection, RegisterSession } from '@tallyui/pos';
+import { mintUuid, type PosRefundCollection, type RegisterSession } from '@tallyui/pos';
 import { orderTransport } from './order-transport';
 import { tillIdentity, type Session } from './session';
 import { SignInAgain } from './sign-in-again';
@@ -31,6 +31,11 @@ export function RefundSheet({ order, session, refunds, registerSession, deviceId
   const [message, setMessage] = useState<RefundMessage | null>(null);
   // The envelope "Send again" resends; while it is set the form and the start button stay hidden.
   const [resend, setResend] = useState<OrderRefundEnvelope | null>(null);
+  // One refund per opened form: every tap of Refund sends these ids, so a repeat is the same refund, never a second.
+  const [ids, setIds] = useState<{ id: string; clientRefundId: string } | null>(null);
+  const mintIds = () => setIds({ id: mintUuid(), clientRefundId: mintUuid() });
+  // Set before the first await, so a second tap before React re-renders (and disables the button) sends nothing.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     setFormOpen(false);
@@ -60,12 +65,16 @@ export function RefundSheet({ order, session, refunds, registerSession, deviceId
 
   // The plugin re-checks quantities, amount, session and permission: a wrong envelope is refused, never paid out.
   async function send(build: () => OrderRefundEnvelope) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSending(true);
     try {
       const envelope = build();
       const attempt = await sendTillRefund(refunds!, orderTransport(session), envelope);
       const next = refundMessage(attempt, order.currencyCode);
       setMessage(next);
+      // The store refused that id, so the cashier's next try is a new refund.
+      if (attempt.kind === 'answered' && attempt.outcome.kind === 'rejected') mintIds();
       // "Send again" is always the same envelope: the pending record's own, or the one just sent. Never a new id.
       setResend(next.sendAgain ? (attempt.kind === 'pending' ? attempt.record.envelope : envelope) : null);
       if (next.done) {
@@ -77,7 +86,9 @@ export function RefundSheet({ order, session, refunds, registerSession, deviceId
       }
     } catch {
       setMessage({ text: REFUND_FAILED_TEXT, sendAgain: false, signInAgain: false, done: false });
+      mintIds();
     } finally {
+      inFlight.current = false;
       setSending(false);
     }
   }
@@ -86,7 +97,7 @@ export function RefundSheet({ order, session, refunds, registerSession, deviceId
     if (!registerSession) throw new Error('No register session');
     return buildRefundEnvelope(order, { quantities, reason, restock }, {
       sessionId: registerSession.id, registerId: registerSession.register_id, deviceId, cashierRef: tillIdentity(session),
-    });
+    }, ids ?? undefined);
   });
 
   return (
@@ -102,7 +113,7 @@ export function RefundSheet({ order, session, refunds, registerSession, deviceId
         registerSession?.status !== 'open' ? (
           <Text testID="refund-needs-register" className="text-sm text-muted-foreground">{REFUND_NEEDS_REGISTER_TEXT}</Text>
         ) : (
-          <Button testID="refund-start" disabled={sending} onPress={() => { setMessage(null); setFormOpen(true); }}><Text>Refund items</Text></Button>
+          <Button testID="refund-start" disabled={sending} onPress={() => { setMessage(null); mintIds(); setFormOpen(true); }}><Text>Refund items</Text></Button>
         )
       ) : null}
       {!resend && formOpen ? (

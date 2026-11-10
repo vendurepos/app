@@ -2093,7 +2093,7 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   };
   await sheet.getByTestId('refund-start').click();
   await refundOneMug();
-  await expect(sheet.getByTestId('refund-message')).toHaveText("The store hasn't answered yet. Send the refund again: it is never refunded twice.");
+  await expect(sheet.getByTestId('refund-message')).toHaveText("The store hasn't answered yet. Don't hand back cash until it confirms. Send the refund again: it is never refunded twice.");
 
   // Send again is the same command under the same refund id, and the store applies it once.
   await page.unroute('**/tally/v1/commands', noAnswer);
@@ -2133,5 +2133,59 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   await page.getByTestId('register-open-panel').click();
   await expect(page.getByTestId('register-panel').getByTestId('register-panel-expected')).toContainText('€100.00');
   expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+test('a till refund tapped twice at once sends one refund and Vendure applies one', async ({ page }) => {
+  const commands: SentCommand[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/tally/v1/commands')) commands.push(...request.postDataJSON().commands);
+  });
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  await openRegister(page, '100.00');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart').getByTestId('pay-cash').click();
+  const tender = page.getByTestId('tender');
+  await expect(tender.getByTestId('tender-total')).toContainText('€19.04');
+  await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await page.getByTestId('orders-open').click();
+  const panel = page.getByTestId('orders-panel');
+  await expect(panel.getByText(/· Synced$/)).toHaveCount(1, { timeout: 30_000 });
+  await panel.getByTestId(/^order-open-/).first().click();
+  await expect(page.getByTestId('order-sheet')).toContainText('€19.04');
+
+  // The store's answer is held, so a second tap would land while the first refund is in flight.
+  await page.route('**/tally/v1/commands', async (route) => {
+    if ((route.request().postData() ?? '').includes('"order.refund"')) await new Promise((resolve) => setTimeout(resolve, 1_500));
+    return route.continue();
+  });
+  const sheet = page.getByTestId('refund-sheet');
+  await sheet.getByTestId('refund-start').click();
+  await sheet.getByTestId(/^refund-qty-/).first().fill('1');
+  await sheet.getByTestId('refund-reason').fill('Damaged');
+  await expect(sheet.getByTestId('refund-total')).toHaveText('Refund €9.52');
+  // Two taps in one task: React cannot re-render between them, so disabled={sending} is not on the button yet.
+  await sheet.getByTestId('refund-submit').evaluate((el) => { (el as HTMLElement).click(); (el as HTMLElement).click(); });
+  await expect(sheet.getByTestId('refund-message')).toHaveText('Refunded €9.52 to the original payment.');
+  expect(commands.filter(({ type }) => type === 'order.refund')).toHaveLength(1);
+
+  // Vendure holds one refund on the order, not two.
+  const clientOrderId = commands.find(({ type }) => type === 'order.create')!.payload.clientOrderId;
+  const found = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { payments { refunds { total state } } } } }',
+      variables: { id: clientOrderId },
+    },
+  });
+  const orders = (await found.json()).data.orders.items as { payments: { refunds: { total: number; state: string }[] }[] }[];
+  expect(orders).toHaveLength(1);
+  const refunds = orders[0].payments.flatMap((payment) => payment.refunds).filter(({ state }) => state !== 'Failed');
+  expect(refunds.map(({ total }) => total)).toEqual([952]);
   expect(cspConsole).toEqual([]);
 });
