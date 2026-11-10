@@ -803,9 +803,20 @@ test('a till update the store rejects shows in the header', async ({ page }) => 
   await card.getByTestId('open-register-button').click();
   await expect(card).toHaveCount(0);
   await expect(page.getByTestId('register-sync-notice')).toHaveText('1 till update needs attention · The online store refused it, '
-    + "and later till updates wait behind it. Ask the store owner to look at the till's sync log.");
+    + "and later till updates wait behind it. Ask the store owner to look at the sync log in this till's Settings.");
   await expect(page.getByTestId('register-conflict')).toBeVisible();
   await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
+  // The notice sends the store owner to the sync log, which names the store's refusal.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByTestId('settings-open').click();
+  const log = page.getByTestId('sync-log');
+  await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'register_session_already_open' }).first())
+    .toContainText('status=rejected');
+  await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'register_session_already_open' }).first())
+    .toContainText('error=test refusal');
+  await page.getByTestId('sync-log-copy').click();
+  await expect(page.getByTestId('sync-log-copied')).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('errorCode=register_session_already_open');
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });

@@ -48,7 +48,7 @@ describe('registerSyncNotice', () => {
 
   it('shows till updates the store rejected, which the outbox state never carries', () => {
     expect(registerSyncNotice(state(), 1)).toBe('1 till update needs attention · The online store refused it, and later till updates '
-      + "wait behind it. Ask the store owner to look at the till's sync log.");
+      + "wait behind it. Ask the store owner to look at the sync log in this till's Settings.");
     expect(registerSyncNotice(state({ refused: { status: 422, reason: 'test' } }), 2)).toMatch(/^2 till updates need attention · .* them,/);
   });
 });
