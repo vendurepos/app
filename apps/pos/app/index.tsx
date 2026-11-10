@@ -47,6 +47,7 @@ import { SyncNowControl } from '../lib/sync-now-control';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
+import { useCatalogueView } from '../lib/use-catalogue-view';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
@@ -356,6 +357,7 @@ function Sale({
   overSheet: boolean;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
+  const catalogueView = useCatalogueView();
   const typedApproval = useTypedApproval();
   const identity = tillIdentity(session);
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
@@ -483,6 +485,7 @@ function Sale({
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
+          {...catalogueView}
           showCategoryNav
           showViewToggle
           loading={!lastSyncedAt && !error}

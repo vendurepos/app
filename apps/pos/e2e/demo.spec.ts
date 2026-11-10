@@ -294,6 +294,47 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
 });
 
+test('Settings keeps the tile size for this till, and the grid takes it at once', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('tile-size-auto')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('tile-size-3').click();
+  await expect(page.getByTestId('tile-size-3')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-back').click();
+
+  const tiles = page.locator('[data-testid^="product-tile-"]');
+  for (const reload of [false, true]) {
+    if (reload) {
+      await page.reload();
+      await expectSignedIn(page);
+    }
+    await expect(tiles.nth(3)).toBeVisible();
+    await expect(async () => {
+      const first = await tiles.nth(0).boundingBox();
+      const second = await tiles.nth(1).boundingBox();
+      const third = await tiles.nth(2).boundingBox();
+      const fourth = await tiles.nth(3).boundingBox();
+      expect(first).not.toBeNull();
+      expect(second?.y).toBe(first!.y);
+      expect(third?.y).toBe(first!.y);
+      expect(fourth?.y).toBeGreaterThan(first!.y);
+    }).toPass();
+  }
+
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('tile-size-auto').click();
+  await page.getByTestId('settings-back').click();
+  await expect(tiles.nth(3)).toBeVisible();
+  await expect(async () => {
+    const first = await tiles.nth(0).boundingBox();
+    const fourth = await tiles.nth(3).boundingBox();
+    expect(first).not.toBeNull();
+    expect(fourth?.y).toBe(first!.y);
+  }).toPass();
+});
+
 test("over the till's limit, a close needs a typed approver, recorded as typed", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
