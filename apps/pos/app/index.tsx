@@ -16,6 +16,7 @@ import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
+import { ClosureHistory } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
@@ -140,6 +141,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     varianceThreshold: loadVarianceLimitMinor(),
   });
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [closuresOpen, setClosuresOpen] = useState(false);
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
@@ -194,6 +196,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text>Orders</Text>
           </Button>
         ) : null}
+        <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={storeLabel(session)} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {sessionStatus === 'open' ? (
           <Button testID="register-open-panel" variant="secondary" onPress={() => setRegisterOpen(true)}>
             <Text>Register</Text>
@@ -270,8 +273,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown}
-                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); }}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen}
+                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>

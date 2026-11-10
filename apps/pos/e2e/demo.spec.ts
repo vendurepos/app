@@ -330,6 +330,32 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await page.getByTestId('settings-back').click();
 });
 
+test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel-close').click();
+  await page.getByTestId('count-amount').fill('100.00');
+  await page.getByTestId('count-close').click();
+  await page.getByTestId('closure-sheet').getByTestId('closure-done').click();
+  await page.getByTestId('closure-history-open').click();
+  const history = page.getByTestId('closure-history');
+  await expect(history.getByTestId('closure-history-row-1')).toContainText('Closure #1');
+  await expect(history.getByTestId('closure-history-row-1')).toContainText('Sales €0.00 · Exact');
+  await history.getByTestId('closure-history-print-1').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed[0]).toBe('Z report · Closure #1');
+  expect(printed[1]).toMatch(/^Copy · printed /);
+  expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
+  await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
+  await history.getByTestId('closure-history-close').click();
+  await expect(page.getByTestId('closure-history')).toHaveCount(0);
+});
+
 test('a demo visitor attaches a customer and sees it on the receipt', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
