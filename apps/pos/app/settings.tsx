@@ -7,6 +7,7 @@ import {
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadScannerMinLength, saveScannerMinLength } from '../lib/scanner-settings';
+import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
 import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { sessionContext } from '../lib/session';
@@ -61,6 +62,7 @@ export default function SettingsScreen() {
             </Button>
             {saved === true && <Text testID="settings-saved">Saved.</Text>}
             {saved === false && <Text testID="settings-error">Enter a whole number from 4 to 32.</Text>}
+            <ScannerExtraSettings />
           </VStack>
         </CardContent>
       </Card>

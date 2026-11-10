@@ -452,6 +452,7 @@ function Sale({
     if (stage.kind === 'tender') sale.cancelTender();
     if (panelOpen) setTab('cart');
     add(entry, panelOpen || !onProducts, true);
+    return true;
   });
   const notice = scanNotice === 'finish-sale' ? (
     <Text testID="scan-finish-sale" className="text-sm text-muted-foreground">Finish this sale before scanning the next item.</Text>
