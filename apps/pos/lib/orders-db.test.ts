@@ -1,7 +1,8 @@
+import type { VendureOrder } from '@tallyui/connector-vendure';
 import type { SyncNotice } from '@tallyui/core';
 import {
   createOrderBuilder, ensureRegister, finalizeOrder, openSession, readRegister, reconcileRegisterCommands, recordMovement,
-  registerSessionSchema, type PosOrder,
+  registerSessionSchema, type PosOrder, type PosRefund,
 } from '@tallyui/pos';
 import { createRxDatabase } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
@@ -12,6 +13,7 @@ import { appStorage } from './app-storage';
 import { catalogueConnector, databaseName, removeCatalogueDatabaseWithin, startCatalogueSync } from './catalogue';
 import { openOrderStore, ordersDatabaseName, outboxStoreKey, registerCollections, type OrderStore } from './orders-db';
 import type { Session } from './session';
+import { buildRefundEnvelope } from './till-refund';
 
 // Memory storage stands in for SQLite: like the web engine, one storage serves both databases, each under its own name.
 vi.mock('./storage', () => ({ createStorage: () => getRxStorageMemory() }));
@@ -144,6 +146,33 @@ it("adds the register's collections to the orders database, and its records surv
   expect((await again.commands.find().exec()).map(({ key }) => key)).toEqual(expect.arrayContaining(commands));
   // ensureRegister keeps the register document it minted.
   expect((await readRegister(again.sessions))?.id).toBe(minted!.id);
+  await reloaded.close();
+});
+
+it('adds the refunds collection to the orders database, and a refund record survives a reload', async () => {
+  const name = ordersDatabaseName({ url: session.url, channelToken: 'refunds' });
+  const store = await openOrderStore(name, PLATFORM);
+  const refunds = registerCollections(store.orders)!.refunds;
+  expect(refunds.database).toBe(store.orders.database);
+  // Only what buildRefundEnvelope reads; till-refund.test.ts builds a whole store order.
+  const order = {
+    id: 'order-1', customFields: { tallyClientOrderId: 'client-1' }, shippingWithTax: 0, payments: [],
+    lines: [{ id: 'L1', quantity: 1, orderPlacedQuantity: 1, proratedUnitPriceWithTax: 952, proratedLinePriceWithTax: 952 }],
+  } as unknown as VendureOrder;
+  const envelope = buildRefundEnvelope(order, { quantities: { L1: 1 }, reason: 'Damaged', restock: true },
+    { sessionId: 's1', registerId: 'drawer-1', deviceId: 'd1', cashierRef: session.email });
+  const record: PosRefund = {
+    id: envelope.payload.clientRefundId, commandId: envelope.id, orderId: 'order-1', sessionId: 's1', registerId: 'drawer-1',
+    envelope, status: 'pending', createdAt: envelope.createdAt, updatedAt: envelope.createdAt,
+  };
+  await refunds.insert(record);
+  // Read back as a reload would, as above: the database closed, the module fresh, the store reopened.
+  await store.close();
+  vi.resetModules();
+  const reloadedModule = await import('./orders-db');
+  const reloaded = await reloadedModule.openOrderStore(name, PLATFORM);
+  const again = reloadedModule.registerCollections(reloaded.orders)!;
+  expect((await again.refunds.findOne(record.id).exec())?.toJSON()).toEqual(record);
   await reloaded.close();
 });
 
