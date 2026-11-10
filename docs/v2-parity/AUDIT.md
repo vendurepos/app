@@ -361,9 +361,22 @@ v2 paths below are under `monorepo/`; "core" means `packages/core/src`.
 
 ## Screenshots
 
-See `screenshots/` next to this file. Each pair shows this app beside v2 where both could be captured.
+See `screenshots/` next to this file.
 
-<!-- SCREENSHOTS -->
+Captured 2026-11-10. VendurePOS is the live demo (demo.vendurepos.com, 1280×800; phone 390×844). WCPOS v2 has no committed whole-screen screenshots in the monorepo or the wiki, so its column holds only what the repo has: product-grid frame strips, receipt template previews and component-gallery dialogs. A screen-by-screen v2 comparison needs v2 run and captured separately.
+
+| Area | VendurePOS | WCPOS v2 |
+|---|---|---|
+| Sell screen | ![](screenshots/vendurepos-sell.png) | ![](screenshots/wcpos-v2-products-grid-tablet-frames.png) (product pane only) |
+| Phone cart | ![](screenshots/vendurepos-phone-cart.png) | ![](screenshots/wcpos-v2-products-grid-phone-frames.png) (product pane only) |
+| Cash tender | ![](screenshots/vendurepos-tender-cash-change.png) | — |
+| Split tender | ![](screenshots/vendurepos-tender-split.png) | — |
+| Receipt | ![](screenshots/vendurepos-receipt.png) | ![](screenshots/wcpos-v2-receipt-standard.png) ![](screenshots/wcpos-v2-receipt-thermal-80mm.png) (template previews) |
+| Orders | ![](screenshots/vendurepos-orders.png) | ![](screenshots/wcpos-v2-gallery-v2-dialog--footer-sale.png) (order dialog footer, gallery) |
+| Register panel | ![](screenshots/vendurepos-register-panel.png) | — |
+| Close count | ![](screenshots/vendurepos-register-close-count.png) | — |
+| Closure / Z | ![](screenshots/vendurepos-register-closure-report.png) | ![](screenshots/wcpos-v2-gallery-v2-dialog--footer-register.png) (dialog footer, gallery) |
+| Settings | ![](screenshots/vendurepos-settings-full.png) | — |
 
 ## What this repo builds next (app-local or plugin, no shared wait)
 
