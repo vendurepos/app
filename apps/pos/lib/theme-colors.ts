@@ -14,7 +14,11 @@ export interface StackColors {
 
 /** The navigator's colours from the theme tokens, so the header follows light and dark. */
 export function useStackColors(): StackColors {
-  const [card, foreground, background] = useCSSVariable(['--color-card', '--color-foreground', '--color-background']);
+  return stackColors(useCSSVariable(['--color-card', '--color-foreground', '--color-background']));
+}
+
+export function stackColors(tokens: readonly unknown[]): StackColors {
+  const [card, foreground, background] = tokens;
   const foregroundColor = typeof foreground === 'string' && foreground.length > 0 ? foreground : LIGHT_FOREGROUND;
   return {
     headerStyle: { backgroundColor: typeof card === 'string' && card.length > 0 ? card : LIGHT_CARD },
