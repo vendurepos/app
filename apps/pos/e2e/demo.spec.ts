@@ -330,6 +330,22 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await page.getByTestId('settings-back').click();
 });
 
+test('a demo till prints an X report mid-shift and stays open', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-print-x').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed).toEqual(expect.arrayContaining([
+    'X report · Register open', 'Sales 0', 'Opening float €100.00', 'Cash expected €100.00',
+  ]));
+  await expect(page.getByTestId('register-print-x-error')).toHaveCount(0);
+  await expect(page.getByTestId('register-open-panel')).toBeVisible();
+});
+
 test('a demo visitor attaches a customer and sees it on the receipt', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });

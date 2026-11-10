@@ -47,6 +47,7 @@ import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
+import { XReportButton } from '../lib/x-report-button';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
@@ -199,6 +200,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text>Register</Text>
           </Button>
         ) : null}
+        <XReportButton register={register} store={storeLabel(session)} currency={currency} timezone={TIMEZONE} actor={actor} />
         <Link href="/settings" testID="settings-open" className="rounded-md bg-secondary px-4 py-2">
           <Text className="text-secondary-foreground">Settings</Text>
         </Link>
