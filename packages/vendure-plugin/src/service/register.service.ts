@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Order, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
 import { In, IsNull, Not } from 'typeorm';
 import type { FindOptionsWhere, ObjectType } from 'typeorm';
+import type { TallyClosureRead, TallyRegisterRead } from '../api/registers.controller';
 import {
   TallyRegister, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
 } from '../entities/register.entities';
@@ -31,6 +32,17 @@ const CLIENT_TIMES: Record<RegisterCommandType, string[]> = {
   'register.closure.submit': ['openedAt', 'closedAt'],
 };
 export const REGISTER_TYPES = Object.keys(CLIENT_TIMES) as RegisterCommandType[];
+
+// Every field named, never the entity spread: channelId and commandId stay unexposed.
+const closureRead = (row: TallyRegisterClosure): TallyClosureRead => ({
+  closureId: row.id, sessionId: row.sessionId, registerId: row.registerId, number: row.number, businessDay: row.businessDay,
+  openedAt: row.openedAt, closedAt: row.closedAt, closedBy: row.closedBy, approvedBy: row.approvedBy,
+  tillExpected: row.tillExpected, counted: row.counted, expected: row.expected, variance: row.variance,
+  periodSalesTotalMinor: row.periodSalesTotalMinor, periodRefundsTotalMinor: row.periodRefundsTotalMinor,
+  perpetualSalesTotalMinor: row.perpetualSalesTotalMinor, perpetualRefundsTotalMinor: row.perpetualRefundsTotalMinor,
+  unsyncedCount: row.unsyncedCount, unsyncedTotalMinor: row.unsyncedTotalMinor, softwareVersion: row.softwareVersion,
+  orderIds: row.orderIds, movementIds: row.movementIds, receivedAt: row.receivedAt.toISOString(),
+});
 
 export type RegisterResult = CommandResult;
 export type RegisterEnvelope = RegisterCommandEnvelope<Record<string, unknown>>;
@@ -123,6 +135,34 @@ export class RegisterService {
     if (!session || session.registerId !== registerId) return undefined;
     const { status, closed } = await this.sessionState(tx, session);
     return status === 'closed' || status === 'superseded' || closed ? undefined : session;
+  }
+
+  /** `GET /tally/v1/registers/:id`: the register's counters, live session and a page of its closures, newest first; undefined
+   * for a register this channel does not hold. One transaction and no register lock: a concurrent close is an accepted race. */
+  async read(ctx: RequestContext, registerId: string, page: { skip: number; take: number }): Promise<Omit<TallyRegisterRead, 'version'> | undefined> {
+    return this.connection.withTransaction(ctx, async tx => {
+      const channelId = String(tx.channelId);
+      const register = await this.connection.getRepository(tx, TallyRegister).findOneBy({ channelId, id: registerId });
+      if (!register) return undefined;
+      const live = await this.openSessionOf(tx, registerId);
+      const state = live ? await this.sessionState(tx, live) : undefined;
+      let session: TallyRegisterRead['session'] = null;
+      if (live && state && !state.closed) {
+        // openSessionOf excludes closed and superseded sessions, so the status is open or counting.
+        const { id, status, expected, salesCount } = await this.liveSession(tx, live, state.status);
+        session = { id, status: status as 'open' | 'counting', openedAt: live.openedAt, openedBy: live.openedBy, deviceId: live.deviceId,
+          deviceName: live.deviceName, countedFloatMinor: live.countedFloatMinor, expected, salesCount };
+      }
+      const [rows, totalItems] = await this.connection.getRepository(tx, TallyRegisterClosure).findAndCount({
+        where: { channelId, registerId }, order: { number: 'DESC' }, skip: page.skip, take: page.take,
+      });
+      return {
+        register: { id: register.id, receivedAt: register.receivedAt.toISOString() },
+        counters: await this.counters(tx, registerId),
+        session,
+        closures: { items: rows.map(closureRead), totalItems, skip: page.skip, take: page.take },
+      };
+    });
   }
 
   private async handle(tx: RequestContext, command: RegisterEnvelope, session?: TallyRegisterSession): Promise<RegisterResult> {
