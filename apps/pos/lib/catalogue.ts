@@ -17,7 +17,7 @@ export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 const SIGN_OUT_WAIT_MS = 5_000;
 
 let database: Promise<TallyDatabase> | undefined;
-let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[]; unlisten: () => void } | undefined;
+let sync: { replication: TallyReplicationState<any, any>; controller: AbortController; timer: ReturnType<typeof setInterval>; runners: { stop(): void; runNow(): Promise<unknown> }[]; unlisten: () => void; refresh: () => void } | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -40,6 +40,13 @@ export async function startCatalogueSync(session: Session, connector: TallyConne
   health: ReturnType<typeof getStorageHealth>;
 }> {
   return enqueue(() => startUnqueued(session, connector));
+}
+
+/** Sync now: re-pulls the catalogue and re-reads stock at once, as on focus or coming online; false while no sync runs. */
+export function refreshCatalogue(): boolean {
+  if (!sync) return false;
+  sync.refresh();
+  return true;
 }
 
 async function startUnqueued(session: Session, connector: TallyConnector) {
@@ -68,7 +75,7 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     live: true,
   });
   const stockLevels = db[STOCK_LEVELS_COLLECTION];
-  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS), unlisten: () => {} };
+  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS), unlisten: () => {}, refresh: () => {} };
   const stock = startStockReconcile({ collection: stockLevels, adapter: connector.reconcile!.stock!, context });
   sync.runners.push({ stop: stock.stop, runNow: stock.reconcileStock });
   const ids = startIdReconcile({ collection: db.products, adapter: connector.reconcile!.ids!, context, reSync: () => replication.reSync() });
@@ -81,6 +88,7 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
     replication.reSync();
     stock.reconcileStock().catch(error => { if (!controller.signal.aborted) console.warn('Stock reconcile failed:', error); });
   };
+  sync.refresh = refresh;
   const onVisibilityChange = () => { if (document.visibilityState === 'visible') refresh(); };
   const visibility = typeof document !== 'undefined' && typeof document.addEventListener === 'function' ? document : undefined;
   const network = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : undefined;

@@ -105,6 +105,23 @@ describe('catalogue sync lifecycle', () => {
     expect(replication.reSync).toHaveBeenCalledTimes(1);
   });
 
+  it('Sync now re-pulls and re-reads stock while a sync runs, and does nothing once it stops', async () => {
+    const { catalogueConnector, startCatalogueSync, stopCatalogueSync, refreshCatalogue } = await import('./catalogue');
+    const { replication } = await startCatalogueSync(session, catalogueConnector(session));
+    const stock = vi.mocked(startStockReconcile).mock.results[0].value;
+    vi.mocked(stock.reconcileStock).mockClear();
+    vi.mocked(replication.reSync).mockClear();
+    expect(refreshCatalogue()).toBe(true);
+    expect(replication.reSync).toHaveBeenCalledTimes(1);
+    expect(stock.reconcileStock).toHaveBeenCalledTimes(1);
+    await stopCatalogueSync();
+    vi.mocked(stock.reconcileStock).mockClear();
+    vi.mocked(replication.reSync).mockClear();
+    expect(refreshCatalogue()).toBe(false);
+    expect(replication.reSync).not.toHaveBeenCalled();
+    expect(stock.reconcileStock).not.toHaveBeenCalled();
+  });
+
   it('stops listening when the sync stops or restarts', async () => {
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     const window = new EventTarget();

@@ -12,6 +12,7 @@ import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } fr
 import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { SyncLogCard } from '../lib/sync-log-card';
+import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
 export default function SettingsScreen() {
@@ -93,6 +94,7 @@ export default function SettingsScreen() {
           </VStack>
         </CardContent>
       </Card>
+      <TileSizeSettings />
       {connector?.searchCustomers ? (
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Customers</CardTitle></CardHeader>

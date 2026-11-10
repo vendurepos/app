@@ -294,6 +294,47 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
 });
 
+test('Settings keeps the tile size for this till, and the grid takes it at once', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('tile-size-auto')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('tile-size-3').click();
+  await expect(page.getByTestId('tile-size-3')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-back').click();
+
+  const tiles = page.locator('[data-testid^="product-tile-"]');
+  for (const reload of [false, true]) {
+    if (reload) {
+      await page.reload();
+      await expectSignedIn(page);
+    }
+    await expect(tiles.nth(3)).toBeVisible();
+    await expect(async () => {
+      const first = await tiles.nth(0).boundingBox();
+      const second = await tiles.nth(1).boundingBox();
+      const third = await tiles.nth(2).boundingBox();
+      const fourth = await tiles.nth(3).boundingBox();
+      expect(first).not.toBeNull();
+      expect(second?.y).toBe(first!.y);
+      expect(third?.y).toBe(first!.y);
+      expect(fourth?.y).toBeGreaterThan(first!.y);
+    }).toPass();
+  }
+
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('tile-size-auto').click();
+  await page.getByTestId('settings-back').click();
+  await expect(tiles.nth(3)).toBeVisible();
+  await expect(async () => {
+    const first = await tiles.nth(0).boundingBox();
+    const fourth = await tiles.nth(3).boundingBox();
+    expect(first).not.toBeNull();
+    expect(fourth?.y).toBe(first!.y);
+  }).toPass();
+});
+
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -347,6 +388,48 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await page.getByTestId('variance-save').click();
   await expect(page.getByTestId('variance-saved')).toBeVisible();
   await page.getByTestId('settings-back').click();
+});
+
+test('a demo till prints an X report mid-shift and stays open', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-print-x').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed).toEqual(expect.arrayContaining([
+    'X report · Register open', 'Sales 0', 'Opening float €100.00', 'Cash expected €100.00',
+  ]));
+  await expect(page.getByTestId('register-print-x-error')).toHaveCount(0);
+  await expect(page.getByTestId('register-open-panel')).toBeVisible();
+});
+
+test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel-close').click();
+  await page.getByTestId('count-amount').fill('100.00');
+  await page.getByTestId('count-close').click();
+  await page.getByTestId('closure-sheet').getByTestId('closure-done').click();
+  await page.getByTestId('closure-history-open').click();
+  const history = page.getByTestId('closure-history');
+  await expect(history.getByTestId('closure-history-row-1')).toContainText('Closure #1');
+  await expect(history.getByTestId('closure-history-row-1')).toContainText('Sales €0.00 · Exact');
+  await history.getByTestId('closure-history-print-1').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed[0]).toBe('Z report · Closure #1');
+  expect(printed[1]).toMatch(/^Copy · printed /);
+  expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
+  await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
+  await history.getByTestId('closure-history-close').click();
+  await expect(page.getByTestId('closure-history')).toHaveCount(0);
 });
 
 test('a demo visitor attaches a customer and sees it on the receipt', async ({ page }) => {
