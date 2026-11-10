@@ -294,6 +294,25 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
 });
 
+test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('10.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+  await page.getByTestId('settings-open').click();
+  const log = page.getByTestId('sync-log');
+  await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'Register command result' }).first()).toContainText('status=applied');
+  // The open's result carries the session's expected cash, which a blind count hides from the cashier.
+  await expect(log).not.toContainText('expected');
+  await page.getByTestId('sync-log-filter-problems').click();
+  await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'Register command result' })).toHaveCount(0);
+  await page.getByTestId('sync-log-filter-all').click();
+  await expect(log.getByTestId('sync-log-entry').first()).toBeVisible();
+});
+
 test("over the till's limit, a close needs a typed approver, recorded as typed", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

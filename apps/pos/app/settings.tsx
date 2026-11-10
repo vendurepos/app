@@ -11,6 +11,7 @@ import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-se
 import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { SyncLogCard } from '../lib/sync-log-card';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
 export default function SettingsScreen() {
@@ -143,6 +144,7 @@ export default function SettingsScreen() {
           </CardContent>
         </Card>
       ) : null}
+      <SyncLogCard />
       <Text testID="settings-barcode-field">Barcode custom field: {session.barcodeField ?? 'none'}. Set when signing in.</Text>
       {/* Back, never a push, because a second till can't open the order store the first one holds. */}
       <Button testID="settings-back" variant="secondary" onPress={() => router.canGoBack() ? router.back() : router.replace('/')}>
