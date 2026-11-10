@@ -18,7 +18,7 @@ export function registerSyncNotice({ authRequired, refused, stuck, pending }: Ou
   if (authRequired || refused?.status === 403) return "Till updates aren't sending: this till needs to sign in to the online store again.";
   const them = rejected === 1 ? 'it' : 'them';
   if (rejected) return `${updates(rejected)} ${rejected === 1 ? 'needs' : 'need'} attention · The online store refused ${them}, `
-    + `and later till updates wait behind ${them}. Ask the store owner to look at the till's sync log.`;
+    + `and later till updates wait behind ${them}. Ask the store owner to look at the sync log in this till's Settings.`;
   if (refused) return `${updates(pending)} waiting to sync · The online store refused the last send. `
     + 'This till will try again with the next till update, or when the app is reopened.';
   if (stuck?.orders.some(({ reason }) => reason !== ORDERS_PENDING)) {

@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { outboxLogger, saleLogger } from '@tallyui/pos';
+import { outboxLogger, registerSessionsLogger, saleLogger, type LogLevel } from '@tallyui/pos';
 import { installLogSinks, POS_LOGGERS } from './logging';
+import { clearLogEntries, logEntries } from './log-buffer';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -35,4 +36,20 @@ it('installing twice writes each entry once', () => {
   installLogSinks();
   outboxLogger.error('x');
   expect(error).toHaveBeenCalledTimes(1);
+});
+
+it('every level of every POS logger reaches the sync log once, however often installed', () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  clearLogEntries();
+  installLogSinks();
+  installLogSinks();
+  expect(POS_LOGGERS).toContain(registerSessionsLogger);
+  for (const level of ['debug', 'info', 'warn', 'error'] as LogLevel[]) {
+    clearLogEntries();
+    for (const logger of POS_LOGGERS) logger[level]('event');
+    expect(logEntries()).toHaveLength(POS_LOGGERS.length);
+    expect(logEntries().every((entry) => entry.level === level)).toBe(true);
+    expect(new Set(logEntries().map(({ scope }) => scope)).size).toBe(POS_LOGGERS.length);
+  }
 });

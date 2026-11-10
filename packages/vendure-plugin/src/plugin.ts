@@ -7,6 +7,8 @@ import type { Middleware } from '@vendure/core';
 import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
 import { TallyInfoController } from './api/info.controller';
+import { TallyRegistersController } from './api/registers.controller';
+import { TallyReportsController } from './api/reports.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import { tallyPosSell, tallyPosApproveVariance, tallyPosRefund } from './config/permissions';
 import {
@@ -19,6 +21,7 @@ import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
 import { RegisterService } from './service/register.service';
 import { RefundService } from './service/refund.service';
+import { ReportService } from './service/report.service';
 import { StoreSetupService } from './service/store-setup.service';
 
 /** A new array: `list` plus each item it does not already hold. */
@@ -65,8 +68,8 @@ function commandsBodyParser(): Middleware['handler'] {
   dashboard: './dashboard/index.tsx',
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES],
-  controllers: [TallyInfoController, TallyCommandsController],
-  providers: [OrderCreateService, RegisterService, RefundService, StoreSetupService],
+  controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController],
+  providers: [OrderCreateService, RegisterService, RefundService, ReportService, StoreSetupService],
   exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
