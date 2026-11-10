@@ -213,6 +213,17 @@ A till or back office reads one register of the active channel, to show or repri
 - A register the channel does not hold, including another channel's, answers 404 `register_not_found`.
 - `/tally/v1/info` does not list the route. A plugin without it answers 404 with Vendure's own body.
 
+### Sales report: GET /tally/v1/reports/sales
+
+The active channel's POS sales and refunds in a time range, every figure a SQL aggregate in integer minor units.
+
+- The caller needs both `TallyPosSell` and `ReadOrder`; with only one it gets 403 `forbidden`. The till role preset has both.
+- `from` (inclusive) and `to` (exclusive) are ISO date-times with an offset, at most 366 days apart. `registerId` (optional) narrows the report to one register. `timezone` (an IANA zone, default `UTC`) sets only the day buckets. A bad parameter answers 400 `invalid_query`.
+- Only orders in the channel's default currency count, so totals never mix currencies; the answer names that currency.
+- A refund counts on the date it was made, which may be outside its sale's range. Figures are gross; no net-of-refunds figure is given.
+- The answer's top-level keys are `version` (1), `from`, `to`, `timezone`, `currencyCode`, `registerId`, `orders` (count, sales, tax, discounts), `refunds` (count, total), `byMethod` and `byDay`.
+- `/tally/v1/info` does not list the route. Its shape is this plugin's own until TallyUI has a report contract.
+
 ## Development
 
 The package is standalone npm, not part of the pnpm workspace.
