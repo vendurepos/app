@@ -165,7 +165,7 @@ v2 paths below are under `monorepo/`; "core" means `packages/core/src`.
     - It is gated by `TallyPosRefund`, needs an open session, and refuses a duplicate `clientRefundId`.
     - Tests: `e2e/order-refund.e2e.ts`, `e2e/refund-contract.e2e.ts`.
   - No till UI.
-- **Gap: app.** Everything the till needs ships in 3.9.1:
+- **Gap: app.** Everything the till needs ships in 3.12.0 (correction: 3.9.1 lacks `OrdersList onOpen` and `vendureLineRefundWithTax`, so the bump comes first):
   - `getVendureOrder` and `vendureRefundable` (`@tallyui/connector-vendure`);
   - `submitOrderRefund`/`sendOrderRefund` and `posRefundCollection` (`@tallyui/pos`);
   - `OrderDetail` (`@tallyui/components`).
@@ -382,8 +382,8 @@ Captured 2026-11-10. VendurePOS is the live demo (demo.vendurepos.com, 1280×800
 
 Ordered top down: money and the cashier's day first.
 
-1. **Order detail from an Orders row** (app). `getVendureOrder` + `OrderDetail`.
-2. **Till refunds** (app). Builds on 1, using the shipped refund pieces.
+1. **Order detail from an Orders row** (app). `getVendureOrder` + `OrderDetail`. Needs the 3.12.0 bump first, for `OrdersList onOpen`.
+2. **Till refunds** (app). Builds on 1, using the shipped refund pieces. Needs 3.12.0 too, for `vendureLineRefundWithTax`.
 3. **X report mid-shift** (app). `buildXReportDocument`.
 4. **Closure history and Z reprint from this till** (app). The local closure collection.
 5. **Closures read route** (plugin). `GET /tally/v1/registers/:id/closures`.
