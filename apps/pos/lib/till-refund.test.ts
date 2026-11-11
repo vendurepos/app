@@ -27,7 +27,8 @@ type Line = VendureOrder['lines'][number];
 function line(id: string, quantity: number, proratedLinePriceWithTax: number): Line {
   const unit = Math.round(proratedLinePriceWithTax / quantity);
   return {
-    id, quantity, orderPlacedQuantity: quantity, proratedUnitPrice: unit, proratedUnitPriceWithTax: unit, proratedLinePriceWithTax,
+    id, quantity, orderPlacedQuantity: quantity, proratedUnitPrice: unit, proratedUnitPriceWithTax: unit,
+    proratedLinePrice: proratedLinePriceWithTax, proratedLinePriceWithTax,
     taxRate: 19, productVariant: { id: `v-${id}`, name: `Item ${id}`, sku: `SKU-${id}` },
     unitPrice: unit, unitPriceWithTax: unit, linePrice: proratedLinePriceWithTax, linePriceWithTax: proratedLinePriceWithTax,
     discountedLinePrice: proratedLinePriceWithTax, discountedLinePriceWithTax: proratedLinePriceWithTax, discounts: [],
