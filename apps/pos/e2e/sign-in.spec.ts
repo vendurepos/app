@@ -1564,7 +1564,7 @@ test('a sale to a searched customer, and one to a new customer, land on those cu
     expect(customer.errors).toBeUndefined();
     expect(customer.data.createCustomer.__typename).toBe('Customer');
     for (const [index, name] of ['Till Search', 'New Guest'].entries()) {
-      await page.getByTestId('customer-add').click();
+      await page.getByTestId('customer-chip').click();
       const picker = page.getByTestId('customer-picker');
       if (index === 0) {
         await picker.getByLabel('Search customers', { exact: true }).fill('till-search');
@@ -1576,7 +1576,7 @@ test('a sale to a searched customer, and one to a new customer, land on those cu
         await picker.getByPlaceholder('email@example.com', { exact: true }).fill(emails[1]);
         await picker.getByRole('button', { name: 'Save Customer', exact: true }).click();
       }
-      await expect(page.getByTestId('sale-customer')).toHaveText(`Customer: ${name}`);
+      await expect(page.getByTestId('sale-customer')).toHaveText(name);
       await page.getByTestId('product-tile-Tally Fixture Mug').click();
       const cart = page.getByTestId('cart');
       await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
