@@ -465,6 +465,7 @@ test('a demo till prints an X report mid-shift and stays open', async ({ page })
   const card = page.getByTestId('open-register-card');
   await card.getByTestId('open-register-amount').fill('100.00');
   await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('register-print-x').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(printed).toEqual(expect.arrayContaining([
@@ -486,6 +487,7 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   await page.getByTestId('count-amount').fill('100.00');
   await page.getByTestId('count-close').click();
   await page.getByTestId('closure-sheet').getByTestId('closure-done').click();
+  await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('closure-history-open').click();
   const history = page.getByTestId('closure-history');
   await expect(history.getByTestId('closure-history-row-1')).toContainText('Closure #1');

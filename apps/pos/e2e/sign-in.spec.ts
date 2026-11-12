@@ -148,6 +148,7 @@ test('signs in to the dev store', async ({ page }) => {
     data: { query: '{ activeAdministrator { id } }' },
   });
   expect((await beforeSignOut.json()).data.activeAdministrator.id).not.toBeNull();
+  await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
   // signOut() clears the stored session before the sign-in screen renders (lib/session.ts SESSION_KEY).
@@ -274,6 +275,7 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(0);
   await expect(cart.getByTestId('cart-total')).toHaveText('€0.00');
   // Sign-out removes the catalogue database; the stored order is in its own database and must still be there.
+  await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
   await page.getByTestId('sign-in-url').fill(STORE_URL);
@@ -332,6 +334,7 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   await pull;
   // TallyUI's notice$ (#261), never a stale catalogue that looks synced.
   await expect(page.getByText('Your session has ended. Sign in again to keep selling.', { exact: true })).toBeVisible();
+  await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
   await page.getByTestId('sign-in-url').fill(STORE_URL);
@@ -506,6 +509,7 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
   });
   await receipt.getByTestId('receipt-print').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  await page.getByTestId('register-bar-cashier').click();
   // What the dialog would print: the receipt's lines and figures, and none of the till around them.
   await page.emulateMedia({ media: 'print' });
   await expect(receipt.getByText('1 × Tally Fixture Mug')).toBeVisible();
@@ -986,6 +990,7 @@ test.describe('on a narrow screen', () => {
       const panel = page.getByTestId('orders-panel');
       const cart = page.getByTestId('cart');
       // On the Products tab when narrow: the scan switches to Cart because the cashier must see the line.
+      if (width < 768) await page.getByTestId('register-bar-menu').click();
       await page.getByTestId('orders-open').click();
       await expect(panel).toBeVisible();
       await wedgeScan(page, MUG_BARCODE);
@@ -994,6 +999,7 @@ test.describe('on a narrow screen', () => {
       await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
       await expect(page.getByTestId('tab-cart-highlight')).toHaveCount(0);
       // An unknown code closes it too, and says so.
+      if (width < 768) await page.getByTestId('register-bar-menu').click();
       await page.getByTestId('orders-open').click();
       await expect(panel).toBeVisible();
       await wedgeScan(page, '9999999999999');
@@ -1690,6 +1696,7 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
   page.on('request', (request) => {
     if (request.url().endsWith('/admin-api') && (request.postData() ?? '').includes('logout')) logouts.push(request.postData()!);
   });
+  await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('sign-in-submit')).toBeVisible();
   expect(logouts).toEqual([]);

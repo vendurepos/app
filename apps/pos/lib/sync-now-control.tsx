@@ -7,10 +7,10 @@ export function SyncNowControl({ lastSyncedAt, outboxes }: { lastSyncedAt: Date 
   const [busy, setBusy] = useState(false);
   return (
     <>
-      <Text testID="last-synced" className="text-sm text-muted-foreground">
+      <Text testID="last-synced" numberOfLines={1} className="text-xs text-muted-foreground">
         {lastSyncedAt ? `Last synced ${formatStockSyncTime(lastSyncedAt)}` : 'Not synced yet'}
       </Text>
-      <Button testID="sync-now" variant="secondary" disabled={busy} onPress={() => {
+      <Button testID="sync-now" variant="ghost" size="sm" className="px-2" disabled={busy} onPress={() => {
         setBusy(true);
         void syncNow(outboxes, refreshCatalogue).finally(() => setBusy(false));
       }}>

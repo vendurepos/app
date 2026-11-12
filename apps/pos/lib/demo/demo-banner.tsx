@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'expo-router';
 import type { RxStorageSQLiteWasm } from '@tallyui/storage-sqlite/web';
-import { Button, HStack, Text, VStack } from '@tallyui/components';
+import { Button, HStack, Text } from '@tallyui/components';
 import { appStorage } from '../app-storage';
 import { useSession } from '../session-context';
 import { trackDemoEvent } from './analytics';
@@ -51,22 +51,21 @@ export function DemoBanner() {
       setResetting(false);
     });
   }
+  // One slim row (spec B1): it wraps on a phone, to two lines at most.
   return (
-    <VStack testID="demo-banner" dataSet={{ print: 'hide' }} className="border-b border-border bg-background px-4 py-2" space="sm">
-      <HStack className="items-center" space="sm">
-        <Text className="flex-1 text-sm text-muted-foreground">Demo: everything stays in this browser</Text>
-        <Button testID="demo-reset" variant="secondary" size="sm" disabled={resetting} onPress={() => void reset()}>
-          <Text>{resetting ? 'Resetting…' : 'Reset demo'}</Text>
-        </Button>
-      </HStack>
+    <HStack testID="demo-banner" dataSet={{ print: 'hide' }} className="flex-wrap items-center gap-x-3 gap-y-0 border-b border-border bg-background px-3 py-1">
+      <Text className="shrink text-xs text-muted-foreground">Demo: everything stays in this browser</Text>
+      <Button testID="demo-reset" variant="secondary" size="sm" className="h-7 px-2" disabled={resetting} onPress={() => void reset()}>
+        <Text className="text-xs">{resetting ? 'Resetting…' : 'Reset demo'}</Text>
+      </Button>
       {session && !linksHidden ? (
-        <HStack testID="demo-links" className="flex-wrap items-center" space="md">
-          <Link href="https://vendurepos.com" target="_blank" rel="noopener" testID="demo-links-site" className="text-sm text-primary">VendurePOS</Link>
-          <Link href={DEMO_LINKS_QUICKSTART} target="_blank" rel="noopener" testID="demo-links-quickstart" className="text-sm text-primary">Quick start</Link>
-          <Link href="https://github.com/vendurepos/app" target="_blank" rel="noopener" testID="demo-links-github" className="text-sm text-primary">GitHub</Link>
-          <Button testID="demo-links-dismiss" variant="ghost" size="sm" accessibilityLabel="Hide these links" onPress={() => setLinksHidden(true)}><Text>Hide</Text></Button>
+        <HStack testID="demo-links" className="ml-auto flex-wrap items-center gap-x-3">
+          <Link href="https://vendurepos.com" target="_blank" rel="noopener" testID="demo-links-site" className="text-xs text-primary">VendurePOS</Link>
+          <Link href={DEMO_LINKS_QUICKSTART} target="_blank" rel="noopener" testID="demo-links-quickstart" className="text-xs text-primary">Quick start</Link>
+          <Link href="https://github.com/vendurepos/app" target="_blank" rel="noopener" testID="demo-links-github" className="text-xs text-primary">GitHub</Link>
+          <Button testID="demo-links-dismiss" variant="ghost" size="sm" className="h-7 px-2" accessibilityLabel="Hide these links" onPress={() => setLinksHidden(true)}><Text className="text-xs">Hide</Text></Button>
         </HStack>
       ) : null}
-    </VStack>
+    </HStack>
   );
 }
