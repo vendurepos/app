@@ -638,3 +638,25 @@ it('counts a refund of a seeded order in the session that made it', async () => 
   expect(applied).toMatchObject({ status: 'applied', refund: { totalMinor: 952, byMethod: { cash: 952 } } });
   expect(await expectedCash(session, 'cash-seeded')).toBe(1000 - 952);
 });
+
+// 3 mugs less EUR 1.00 is 2300 net, 2737 with tax: 2737 does not divide by 3.
+const UNEVEN: CommandEnvelope<OrderCreatePayload> = { ...ORDER, id: 'uneven-order-command', payload: { ...ORDER.payload, clientOrderId: 'uneven-order',
+  lines: [{ ...ORDER.payload.lines[0], quantity: 3, discountMinor: 100 }], subtotalMinor: 2300, discountMinor: 100, taxMinor: 437, totalMinor: 2737,
+  payments: [{ clientPaymentId: 'cash', method: 'cash', amountMinor: 2737 }],
+  display: { ...ORDER.payload.display!, subtotalMinor: 2300, discountMinor: 100, taxMinor: 437, totalMinor: 2737,
+    lines: [{ clientLineId: 'line', amountMinor: 2300, discounts: [{ discountId: 'discount', amountMinor: 100 }] }] },
+  taxByRate: [{ ratePpm: 190000, code: 'Standard DE', netMinor: 2300, taxMinor: 437, grossMinor: 2737 }] } };
+
+it('refunds an uneven line a unit at a time in shares that add up to the line total', async () => {
+  const session = await signedIn();
+  expect((await send(session, OPEN, UNEVEN)).map(result => result.status)).toEqual(['applied', 'applied']);
+  expect((await detail(session, '4')).lines[0].proratedLinePriceWithTax).toBe(2737);
+  const totals: number[] = [];
+  for (const name of ['u1', 'u2', 'u3']) {
+    const [result] = await send(session, refundEnvelope(await detail(session, '4'), 1, name));
+    expect(result.status).toBe('applied');
+    totals.push(result.refund!.totalMinor);
+  }
+  expect(totals).toEqual([912, 913, 912]);
+  expect(totals.reduce((sum, total) => sum + total, 0)).toBe(2737);
+});
