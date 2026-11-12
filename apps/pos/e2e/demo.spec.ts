@@ -15,6 +15,8 @@ const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
 
 // The mug is the catalogue's first variant, so the simulated store's variant id 1 (lib/demo/store.ts).
 const MUG_VARIANT_ID = '1';
+// lib/demo/store.ts's products(): a product's id is its CATALOGUE index + 1 (the store module imports @tallyui/core).
+const MUG_PRODUCT_ID = String(CATALOGUE.findIndex((product) => product.name === 'Tally Fixture Mug') + 1);
 const MUG_SEED_STOCK = CATALOGUE[0].variants[0].shopFloorStock;
 // Order entries in the Orders panel: "<date> · <total> · <status>" (TallyUI's OrdersList).
 const ORDER_ENTRY = /· (Synced|Waiting to sync|Not accepted)$/;
@@ -170,7 +172,12 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const line = cart.getByTestId('cart-line-TALLY-MUG');
   await expect(line).toBeVisible();
-  await line.getByText('+', { exact: true }).click();
+  const inCart = page.getByTestId(`in-cart-${MUG_PRODUCT_ID}`);
+  await expect(inCart).toHaveText('1');
+  await line.getByTestId('quantity-popover-trigger').click();
+  await page.getByTestId('quantity-popover-keypad-key-2').click();
+  await page.getByTestId('quantity-popover-apply').click();
+  await expect(inCart).toHaveText('2');
   await cart.getByTestId('pay-cash').click();
   await expect(tender.getByTestId('tender-total')).toContainText('€19.04');
   await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
@@ -679,7 +686,7 @@ test('a demo cashier changes a line\'s price and sells at it', async ({ page }) 
   await priceForm.getByRole('textbox', { name: 'Price value', exact: true }).fill('5.00');
   await priceForm.getByRole('button', { name: 'Apply', exact: true }).click();
   const cart = page.getByTestId('cart');
-  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€5.00 each');
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€5.00');
   await expect(cart.getByTestId('cart-total')).toHaveText('€5.95');
   await cart.getByTestId('pay-cash').click();
   const tender = page.getByTestId('tender');

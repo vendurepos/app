@@ -530,6 +530,7 @@ function Sale({
           lastSyncedAt={lastSyncedAt}
           lastStockCheckAt={stockOverlayAsOf ? new Date(stockOverlayAsOf) : null}
           onSelect={add}
+          cartLines={sale.order.lineItems}
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
         />
       </View>

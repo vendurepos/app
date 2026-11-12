@@ -239,8 +239,9 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await page.getByTestId('product-tile-Espresso Beans').click();
   await page.getByRole('button', { name: /ESP-250/ }).click();
   const beans = cart.getByTestId('cart-line-ESP-250');
-  await beans.getByText('+', { exact: true }).click();
-  await beans.getByText('+', { exact: true }).click();
+  await beans.getByTestId('quantity-popover-trigger').click();
+  await page.getByTestId('quantity-popover-keypad-key-3').click();
+  await page.getByTestId('quantity-popover-apply').click();
   await expect(beans).toContainText('Espresso Beans');
   await expect(beans).toContainText('€26.97');
   // 152 + 188.79 -> 189 = 341 (per_order gives 341 too).
@@ -249,8 +250,8 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await page.getByTestId('product-tile-Postcard Set').click();
   await page.getByTestId('product-tile-Postcard Set').click();
   await expectTotals('€46.95', '€5.69', '€52.64', { 'Standard DE 19%': '€3.80', 'Reduced DE 7%': '€1.89' });
-  // − at quantity 1 takes the mug off: Standard 1198 x 19 % = 227.62 -> 228, so 417 (per_order 416).
-  await cart.getByTestId('cart-line-TALLY-MUG').getByText('−', { exact: true }).click();
+  // Remove takes the mug off: Standard 1198 x 19 % = 227.62 -> 228, so 417 (per_order 416).
+  await cart.getByTestId('line-remove-TALLY-MUG').click();
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
   await expectTotals('€38.95', '€4.17', '€43.12', { 'Standard DE 19%': '€2.28', 'Reduced DE 7%': '€1.89' });
   // Cash 50.00 for the €43.12 total: €6.88 change.
@@ -962,7 +963,7 @@ test.describe('on a narrow screen', () => {
     await expect(cartTab).toHaveText('Cart (1) · €9.52');
     await expect(search).toHaveValue('');
     await expect(highlight).toHaveCount(0);
-    // The cart's quantity is a stepper with no text field, so the typist's 12 then Enter goes into the search (which a
+    // The cart's quantity is a keypad behind a tap, with no text field, so the typist's 12 then Enter goes into the search (which a
     // submit blurred: React Native's blurOnSubmit).
     await search.click();
     await page.keyboard.type('12');
