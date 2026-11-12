@@ -28,9 +28,9 @@ const MUG_SEED_STOCK = CATALOGUE[0].variants[0].shopFloorStock;
 const ORDER_ENTRY = /· (Synced|Waiting to sync|Not accepted)$/;
 // The simulated store's 3 seeded orders as Orders panel history rows, newest first.
 const SEEDED_HISTORY = [
-  /^Order DEMO-000003 · 1 item.*€17\.84 · Payment settled$/,
-  /^Order DEMO-000002 · 2 items.*€23\.52 · Payment settled$/,
-  /^Order DEMO-000001 · 1 item.*€9\.52 · Payment settled$/,
+  /^Order DEMO-000003 · 1 item.*€17\.84 · Payment settled\s*Open$/,
+  /^Order DEMO-000002 · 2 items.*€23\.52 · Payment settled\s*Open$/,
+  /^Order DEMO-000001 · 1 item.*€9\.52 · Payment settled\s*Open$/,
 ];
 
 // On demo.vendurepos.com (pnpm e2e:hosted) the demo records events at PostHog: answer them here, so no test run
@@ -204,6 +204,45 @@ async function orderEntries(page: Page) {
 function historyRows(page: Page) {
   return page.getByTestId('orders-panel').locator('[data-testid^="history-row-"]');
 }
+
+test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+
+  await page.getByTestId('orders-open').click();
+  await historyRows(page).filter({ hasText: 'DEMO-000002' }).getByTestId(/^history-open-/).click();
+  const detail = page.getByTestId('order-sheet-detail');
+  await expect(detail).toContainText('DEMO-000002');
+  await expect(detail).toContainText('€23.52');
+  for (const sku of ['ESP-250', 'FIL-500']) {
+    const product = CATALOGUE.find(product => product.variants.some(variant => variant.sku === sku))!;
+    await expect(detail).toContainText(product.name);
+  }
+  await expect(detail).toContainText('Paid €23.52');
+  await expect(page.getByTestId('refund-start')).toHaveCount(0);
+  await page.getByTestId('order-sheet-close').click();
+  for (const id of ['3', '2', '1']) await expect(page.getByTestId(`history-row-${id}`)).toBeVisible();
+  await page.getByTestId('orders-close').click();
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await expect(detail).toContainText('Paid €9.52');
+  await expect(detail).toContainText(mug.name);
+});
 
 test('the demo signs in with one click, sells, runs a register day, keeps it over a reload and resets, all in the page', async ({ page }) => {
   test.setTimeout(3 * 60_000);

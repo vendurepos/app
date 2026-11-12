@@ -31,6 +31,10 @@ const SEED_TIME = '2026-01-01T00:00:00.000Z';
 const STOCK_LOCATION_ID = '2';
 // Vendure expresses tax rates as percentages.
 const PERCENT = 100;
+// Payload tax rates use parts per million; Vendure uses percentages.
+const PPM_PER_PERCENT = 10_000;
+// The real plugin records POS payments under this method code.
+const DEMO_PAYMENT_METHOD = 'tally-pos';
 
 export type DemoStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Command = { id: string; type: string; version: number; payload: any };
@@ -104,6 +108,17 @@ function fingerprint({ type, version, payload }: Command): string {
 
 function demoOrderCode(id: string): string {
   return `DEMO-${id.padStart(6, '0')}`;
+}
+
+export function largestRemainder(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((sum, weight) => sum + weight, 0);
+  const exact = weights.map(weight => total * (sum === 0 ? 1 : weight) / (sum || weights.length));
+  const shares = exact.map(Math.floor);
+  const remaining = total - shares.reduce((sum, share) => sum + share, 0);
+  const ranked = exact.map((share, index) => ({ index, remainder: share - shares[index] }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (const { index } of ranked.slice(0, remaining)) shares[index]++;
+  return shares;
 }
 
 export class DemoStore {
@@ -189,6 +204,69 @@ export class DemoStore {
         },
       };
     });
+  }
+
+  order(id: string): Record<string, unknown> | null {
+    const payload = this.state.orders[Number(id) - 1];
+    if (!payload) return null;
+    const summary = this.orderSummaries()[Number(id) - 1];
+    const surcharges = (payload.fees ?? []).map(fee => {
+      const gross = payload.pricesIncludeTax ? fee.amountMinor : fee.amountMinor + fee.taxMinor;
+      return { description: fee.name, sku: '', price: gross - fee.taxMinor, priceWithTax: gross };
+    });
+    const shippingLines = (payload.shipping ?? []).map(entry => {
+      const gross = payload.pricesIncludeTax ? entry.amountMinor : entry.amountMinor + entry.taxMinor;
+      const net = gross - entry.taxMinor;
+      return { shippingMethod: { name: entry.name }, price: net, priceWithTax: gross,
+        discountedPrice: net, discountedPriceWithTax: gross };
+    });
+    const charges = [...surcharges, ...shippingLines];
+    const goodsGross = payload.totalMinor - charges.reduce((sum, charge) => sum + charge.priceWithTax, 0);
+    const goodsNet = payload.totalMinor - payload.taxMinor - charges.reduce((sum, charge) => sum + charge.price, 0);
+    const weights = payload.lines.map(line => Math.max(0, line.unitPriceMinor * line.quantity - (line.discountMinor ?? 0)));
+    const grossShares = largestRemainder(goodsGross, weights);
+    const netShares = largestRemainder(goodsNet, weights);
+    const variants = this.products().flatMap(product => product.variants);
+    const lines = payload.lines.map((line, index) => {
+      const variant = variants.find(variant => variant.id === line.variantId);
+      const taxClass = line.custom?.taxClass;
+      const category = DEMO_CATEGORIES.find(category => variant ? category.id === variant.taxCategory.id
+        : taxClass !== undefined && (category.id === taxClass || category.name.toLowerCase() === taxClass.trim().toLowerCase()))
+        ?? DEMO_CATEGORIES.find(category => category.isDefault)!;
+      const taxRate = !variant && line.custom?.taxStatus === 'none' ? 0
+        : DEMO_RATES.find(rate => rate.category.id === category.id && rate.zoneId === DEMO_CHANNEL.defaultTaxZone.id)!.value;
+      const unitPrice = line.unitPriceMinor;
+      const linePrice = unitPrice * line.quantity;
+      return {
+        id: `${id}-${index + 1}`, quantity: line.quantity, orderPlacedQuantity: line.quantity,
+        productVariant: { id: line.variantId ?? '', name: line.custom ? line.custom.name : line.title ?? variant!.name,
+          sku: variant?.sku ?? line.custom?.sku ?? '' },
+        customFields: { tallyCustomName: line.custom?.name ?? null, tallyCustomSku: line.custom?.sku ?? null,
+          tallyUnitPrice: unitPrice, tallyPriceIncludesTax: payload.pricesIncludeTax, tallyClientLineId: line.clientLineId },
+        taxRate, discounts: [],
+        proratedLinePrice: netShares[index], proratedLinePriceWithTax: grossShares[index],
+        discountedLinePrice: netShares[index], discountedLinePriceWithTax: grossShares[index],
+        proratedUnitPrice: Math.round(netShares[index] / line.quantity), proratedUnitPriceWithTax: Math.round(grossShares[index] / line.quantity),
+        unitPrice, linePrice,
+        unitPriceWithTax: payload.pricesIncludeTax ? unitPrice : Math.round(unitPrice * (PERCENT + taxRate) / PERCENT),
+        linePriceWithTax: payload.pricesIncludeTax ? linePrice : Math.round(linePrice * (PERCENT + taxRate) / PERCENT),
+      };
+    });
+    return {
+      ...summary, active: false, couponCodes: [], discounts: [], fulfillments: [],
+      customFields: { ...summary.customFields as Record<string, unknown>, tallyPayments: null, tallyShipping: null,
+        tallySnapshot: JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate }) },
+      lines, surcharges, shippingLines,
+      subTotal: netShares.reduce((sum, share) => sum + share, 0), subTotalWithTax: grossShares.reduce((sum, share) => sum + share, 0),
+      shipping: shippingLines.reduce((sum, line) => sum + line.price, 0),
+      shippingWithTax: shippingLines.reduce((sum, line) => sum + line.priceWithTax, 0),
+      taxSummary: payload.taxByRate?.map(rate => ({ description: rate.code ?? `${rate.ratePpm / PPM_PER_PERCENT}%`,
+        taxRate: rate.ratePpm / PPM_PER_PERCENT, taxBase: rate.netMinor, taxTotal: rate.taxMinor }))
+        ?? [{ description: 'Tax', taxRate: 0, taxBase: payload.totalMinor - payload.taxMinor, taxTotal: payload.taxMinor }],
+      payments: payload.payments.map((payment, index) => ({ id: `${id}-p${index + 1}`, method: DEMO_PAYMENT_METHOD,
+        amount: payment.amountMinor, state: 'Settled', transactionId: payment.clientPaymentId, createdAt: payload.createdAt,
+        metadata: { tallyMethod: payment.method }, refunds: [] })),
+    };
   }
 
   apply(command: Command): CommandResult {

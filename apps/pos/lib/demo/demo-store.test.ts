@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createVendureConnector, createVendureVariantFeedReplication, listVendureOrders } from '@tallyui/connector-vendure';
+import { createVendureConnector, createVendureVariantFeedReplication, getVendureOrder, listVendureOrders } from '@tallyui/connector-vendure';
 import { isCommandBatchResponse, type AnyCommandEnvelope, type CommandEnvelope, type OrderCreatePayload, type RegisterCommandEnvelope } from '@tallyui/core';
 import { parseCommandResult } from '@tallyui/core/server';
 import { signIn } from '../sign-in';
 import { sessionContext, type Session } from '../session';
 import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
+import { orderDetailView } from '../order-detail';
 import { readCapabilities } from '../use-sale-settings';
 import { logout } from '../logout';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
 import { demoCategoryImage, demoProductImage } from './product-images';
-import { DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, type DemoStorage } from './store';
+import { DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
 
 // A valid client timestamp shared by the test's order and register commands.
 const TIME = '2026-10-01T10:00:00.000Z';
@@ -207,6 +208,60 @@ it('lists the seeded orders newest first through the real connector, then a sale
   installed.reset();
   expect(await loadOrderHistory(session)).toEqual(seeded);
   expect(original).not.toHaveBeenCalled();
+});
+
+it('splits integer totals by largest remainder, with earlier lines winning ties', () => {
+  expect(largestRemainder(100, [1, 1, 1])).toEqual([34, 33, 33]);
+  expect(largestRemainder(10, [0, 0])).toEqual([5, 5]);
+  expect(largestRemainder(1904, [1600])).toEqual([1904]);
+  const weights = [3, 7, 11];
+  const shares = largestRemainder(1001, weights);
+  expect(shares.reduce((sum, share) => sum + share, 0)).toBe(1001);
+  shares.forEach((share, index) => {
+    expect(Number.isInteger(share)).toBe(true);
+    expect(Math.abs(share - 1001 * weights[index] / 21)).toBeLessThan(1);
+  });
+});
+
+it('reads a seeded order detail through sign-in and the real connector', async () => {
+  const session = await signedIn();
+  const order = await getVendureOrder(sessionContext(session), '1');
+  expect(order).toMatchObject({ code: 'DEMO-000001', state: 'PaymentSettled', totalWithTax: 952,
+    customFields: { tallyClientOrderId: 'seed-order-1' } });
+  expect(order!.lines).toHaveLength(1);
+  expect(order!.lines[0]).toMatchObject({ productVariant: { sku: 'TALLY-MUG' }, quantity: 1,
+    proratedLinePriceWithTax: 952, taxRate: 19 });
+  expect(order!.payments![0]).toMatchObject({ amount: 952, state: 'Settled', method: 'tally-pos', metadata: { tallyMethod: 'cash' } });
+  const view = orderDetailView(order!);
+  expect(view.total).toBe('€9.52');
+  expect(view.lineItems[0].total).toBe('€9.52');
+});
+
+it('reads v5 detail with charges separate from the exact goods allocation and matching summary fields', async () => {
+  const session = await signedIn();
+  expect((await send(session, V5_ORDER))[0].status).toBe('applied');
+  const context = sessionContext(session);
+  const order = (await getVendureOrder(context, '4'))!;
+  expect(order.lines).toHaveLength(2);
+  expect(order.lines[1].customFields?.tallyCustomName).toBe('Gift wrapping');
+  expect(order.surcharges[0].priceWithTax).toBe(119);
+  expect(order.shippingLines[0].priceWithTax).toBe(238);
+  expect(order.lines.reduce((sum, line) => sum + line.proratedLinePriceWithTax, 0)).toBe(order.subTotalWithTax);
+  expect(order.subTotalWithTax).toBe(3332 - 119 - 238);
+  expect(order.subTotalWithTax + order.surcharges.reduce((sum, charge) => sum + charge.priceWithTax, 0) + order.shippingWithTax)
+    .toBe(order.totalWithTax);
+  expect(order.totalWithTax).toBe(3332);
+  expect(order.total).toBe(3332 - 532);
+  expect(order.taxSummary).toEqual([{ description: 'Standard DE', taxRate: 19, taxBase: 2800, taxTotal: 532 }]);
+  expect(order.customFields?.tallySnapshot).toBe(JSON.stringify({ display: V5_ORDER.payload.display, taxByRate: V5_ORDER.payload.taxByRate }));
+  const summary = (await listVendureOrders(context)).items.find(row => row.id === '4');
+  expect(summary).toBeDefined();
+  expect(order).toMatchObject(summary!);
+});
+
+it('returns null through the real connector for an order that does not exist', async () => {
+  const session = await signedIn();
+  expect(await getVendureOrder(sessionContext(session), '99')).toBeNull();
 });
 
 it('pulls the whole catalogue with paginated replication and honours its checkpoints', async () => {

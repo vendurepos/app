@@ -129,6 +129,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'logout': data = { logout: { success: true } }; break;
       case 'Search': case 'customers': data = { customers: store.customers(variables) }; break;
       case 'Orders': case 'orders': data = { orders: page(store.orderSummaries(), variables.options) }; break;
+      case 'Order': case 'order': data = { order: store.order(String(variables.id)) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
       case 'One': case 'customer': data = { customer: store.customer(variables.id) }; break;
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
