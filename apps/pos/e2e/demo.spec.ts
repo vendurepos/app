@@ -28,9 +28,9 @@ const MUG_SEED_STOCK = CATALOGUE[0].variants[0].shopFloorStock;
 const ORDER_ENTRY = /· (Synced|Waiting to sync|Not accepted)$/;
 // The simulated store's 3 seeded orders as Orders panel history rows, newest first.
 const SEEDED_HISTORY = [
-  /^Order DEMO-000003 · 1 item.*€17\.84 · Payment settled$/,
-  /^Order DEMO-000002 · 2 items.*€23\.52 · Payment settled$/,
-  /^Order DEMO-000001 · 1 item.*€9\.52 · Payment settled$/,
+  /^Order DEMO-000003 · 1 item.*€17\.84 · Payment settled\s*Open$/,
+  /^Order DEMO-000002 · 2 items.*€23\.52 · Payment settled\s*Open$/,
+  /^Order DEMO-000001 · 1 item.*€9\.52 · Payment settled\s*Open$/,
 ];
 
 // On demo.vendurepos.com (pnpm e2e:hosted) the demo records events at PostHog: answer them here, so no test run
@@ -204,6 +204,94 @@ async function orderEntries(page: Page) {
 function historyRows(page: Page) {
   return page.getByTestId('orders-panel').locator('[data-testid^="history-row-"]');
 }
+
+test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+
+  await page.getByTestId('orders-open').click();
+  await historyRows(page).filter({ hasText: 'DEMO-000002' }).getByTestId(/^history-open-/).click();
+  const detail = page.getByTestId('order-sheet-detail');
+  await expect(detail).toContainText('DEMO-000002');
+  await expect(detail).toContainText('€23.52');
+  for (const sku of ['ESP-250', 'FIL-500']) {
+    const product = CATALOGUE.find(product => product.variants.some(variant => variant.sku === sku))!;
+    await expect(detail).toContainText(product.name);
+  }
+  await expect(detail).toContainText('Paid €23.52');
+  await expect(page.getByTestId('refund-start')).toBeVisible();
+  await page.getByTestId('order-sheet-close').click();
+  for (const id of ['3', '2', '1']) await expect(page.getByTestId(`history-row-${id}`)).toBeVisible();
+  await page.getByTestId('orders-close').click();
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await expect(detail).toContainText('Paid €9.52');
+  await expect(detail).toContainText(mug.name);
+});
+
+test('a demo cashier refunds a mug from the order sheet; stock comes back and expected cash drops', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+  // Two mugs, €8.00 + 19 % = €9.52 each, paid in cash.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await typeAmount(page, '19.04');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  const sold = await mugStock(page);
+
+  await page.getByTestId('orders-open').click();
+  const panel = page.getByTestId('orders-panel');
+  await expect(panel.getByText(/· Synced$/)).toHaveCount(1);
+  await panel.getByTestId(/^order-open-/).first().click();
+  const sheet = page.getByTestId('refund-sheet');
+  const refundOneMug = async () => {
+    await sheet.getByTestId(/^refund-qty-/).first().fill('1');
+    await sheet.getByTestId('refund-reason').fill('Damaged');
+    await expect(sheet.getByTestId('refund-total')).toHaveText('Refund €9.52');
+    await sheet.getByTestId('refund-submit').click();
+    await expect(sheet.getByTestId('refund-message')).toHaveText('Refunded €9.52 to the original payment.');
+  };
+  await sheet.getByTestId('refund-start').click();
+  await refundOneMug();
+  expect(sold).toBe(MUG_SEED_STOCK - 2);
+  await expect.poll(() => mugStock(page)).toBe(MUG_SEED_STOCK - 1);
+
+  // The sheet re-read the order: one mug is left, and refunding it leaves nothing to refund.
+  await sheet.getByTestId('refund-start').click();
+  await expect(sheet.getByTestId('refund-form')).toContainText('1 left to refund');
+  await refundOneMug();
+  await expect(sheet.getByTestId('refund-start')).toHaveCount(0);
+
+  // €100.00 float + €19.04 cash sale − €19.04 cash refunded.
+  await page.getByTestId('orders-close').click();
+  await page.getByTestId('register-open-panel').click();
+  await expect(page.getByTestId('register-panel').getByTestId('register-panel-expected')).toContainText('€100.00');
+});
 
 test('the demo signs in with one click, sells, runs a register day, keeps it over a reload and resets, all in the page', async ({ page }) => {
   test.setTimeout(3 * 60_000);

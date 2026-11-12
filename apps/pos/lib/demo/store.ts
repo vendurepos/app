@@ -1,4 +1,6 @@
-import type { CommandResult, OrderCreatePayload, RegisterClosureSubmitPayload, RegisterCommandResult, RegisterSessionOpenPayload } from '@tallyui/core';
+import type {
+  CommandResult, OrderCreatePayload, OrderRefundPayload, OrderRefundResult, RegisterClosureSubmitPayload, RegisterCommandResult, RegisterSessionOpenPayload,
+} from '@tallyui/core';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { demoProductImage } from './product-images';
 
@@ -6,7 +8,7 @@ import { demoProductImage } from './product-images';
 export const DEMO_STORAGE_KEY = 'vendurepos.demo-store.v1';
 // Matches plugin 0.3.0's info.controller.ts with the dev store's OrderLevelTaxCalculationStrategy.
 export const DEMO_INFO = {
-  contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1] },
+  contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1], 'order.refund': [1] },
   maxShippingLines: 1,
   lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
@@ -31,18 +33,35 @@ const SEED_TIME = '2026-01-01T00:00:00.000Z';
 const STOCK_LOCATION_ID = '2';
 // Vendure expresses tax rates as percentages.
 const PERCENT = 100;
+// Payload tax rates use parts per million; Vendure uses percentages.
+const PPM_PER_PERCENT = 10_000;
+// The real plugin records POS payments under this method code.
+const DEMO_PAYMENT_METHOD = 'tally-pos';
 
 export type DemoStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Command = { id: string; type: string; version: number; payload: any };
 type Session = RegisterSessionOpenPayload & { status: 'open' | 'counting' | 'closed' };
 type Movement = { movementId: string; sessionId: string; type: string; amountMinor: number; voids?: string };
 type Customer = { __typename: 'Customer'; id: string; firstName: string; lastName: string; emailAddress: string; phoneNumber: string | null };
+// One Vendure Refund on one payment; paymentIndex is the order's payment, method its till method.
+type DemoRefund = {
+  id: string; orderId: string; paymentIndex: number; total: number; shipping: number;
+  lines: { orderLineId: string; quantity: number }[]; reason: string;
+  clientRefundId: string; sessionId: string; method: string;
+};
+// The fields of order()'s detail the refund rules read.
+type RefundableOrder = {
+  id: string; shippingWithTax: number; customFields: { tallyClientOrderId: string };
+  lines: { id: string; quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string } }[];
+  payments: { id: string; amount: number; metadata: { tallyMethod: string } }[];
+};
 type State = {
   customers: Customer[];
   stock: Record<string, { quantity: number; updatedAt: string }>;
   ledger: Record<string, { fingerprint: string; result: CommandResult }>;
   orders: OrderCreatePayload[]; sessions: Record<string, Session>;
   movements: Movement[]; closures: RegisterClosureSubmitPayload[];
+  refunds: DemoRefund[];
 };
 
 function seed(): State {
@@ -92,7 +111,12 @@ function seed(): State {
       taxByRate: [{ ratePpm, netMinor: subtotalMinor, taxMinor, grossMinor: totalMinor }],
     };
   });
-  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers };
+  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers, refunds: [] };
+}
+
+/** A stock entry's next updatedAt: now, and always later than the last. */
+function nextUpdatedAt(updatedAt: string): string {
+  return new Date(Math.max(Date.now(), Date.parse(updatedAt) + 1)).toISOString();
 }
 
 /** Canonical command content, like the plugin's fingerprint, without its Node-only SHA-256 import. */
@@ -106,13 +130,25 @@ function demoOrderCode(id: string): string {
   return `DEMO-${id.padStart(6, '0')}`;
 }
 
+export function largestRemainder(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((sum, weight) => sum + weight, 0);
+  const exact = weights.map(weight => total * (sum === 0 ? 1 : weight) / (sum || weights.length));
+  const shares = exact.map(Math.floor);
+  const remaining = total - shares.reduce((sum, share) => sum + share, 0);
+  const ranked = exact.map((share, index) => ({ index, remainder: share - shares[index] }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (const { index } of ranked.slice(0, remaining)) shares[index]++;
+  return shares;
+}
+
 export class DemoStore {
   private state: State;
   constructor(private storage?: DemoStorage) {
     const saved = storage?.getItem(DEMO_STORAGE_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones.
-      this.state = { ...parsed, customers: Array.isArray(parsed.customers) ? parsed.customers : seed().customers };
+      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones; before refunds, none.
+      this.state = { ...parsed, customers: Array.isArray(parsed.customers) ? parsed.customers : seed().customers,
+        refunds: Array.isArray(parsed.refunds) ? parsed.refunds : [] };
     } else this.state = seed();
   }
 
@@ -191,20 +227,98 @@ export class DemoStore {
     });
   }
 
+  order(id: string): Record<string, unknown> | null {
+    const payload = this.state.orders[Number(id) - 1];
+    if (!payload) return null;
+    const summary = this.orderSummaries()[Number(id) - 1];
+    const surcharges = (payload.fees ?? []).map(fee => {
+      const gross = payload.pricesIncludeTax ? fee.amountMinor : fee.amountMinor + fee.taxMinor;
+      return { description: fee.name, sku: '', price: gross - fee.taxMinor, priceWithTax: gross };
+    });
+    const shippingLines = (payload.shipping ?? []).map(entry => {
+      const gross = payload.pricesIncludeTax ? entry.amountMinor : entry.amountMinor + entry.taxMinor;
+      const net = gross - entry.taxMinor;
+      return { shippingMethod: { name: entry.name }, price: net, priceWithTax: gross,
+        discountedPrice: net, discountedPriceWithTax: gross };
+    });
+    const charges = [...surcharges, ...shippingLines];
+    const goodsGross = payload.totalMinor - charges.reduce((sum, charge) => sum + charge.priceWithTax, 0);
+    const goodsNet = payload.totalMinor - payload.taxMinor - charges.reduce((sum, charge) => sum + charge.price, 0);
+    const weights = payload.lines.map(line => Math.max(0, line.unitPriceMinor * line.quantity - (line.discountMinor ?? 0)));
+    const grossShares = largestRemainder(goodsGross, weights);
+    const netShares = largestRemainder(goodsNet, weights);
+    const variants = this.products().flatMap(product => product.variants);
+    const lines = payload.lines.map((line, index) => {
+      const variant = variants.find(variant => variant.id === line.variantId);
+      const taxClass = line.custom?.taxClass;
+      const category = DEMO_CATEGORIES.find(category => variant ? category.id === variant.taxCategory.id
+        : taxClass !== undefined && (category.id === taxClass || category.name.toLowerCase() === taxClass.trim().toLowerCase()))
+        ?? DEMO_CATEGORIES.find(category => category.isDefault)!;
+      const taxRate = !variant && line.custom?.taxStatus === 'none' ? 0
+        : DEMO_RATES.find(rate => rate.category.id === category.id && rate.zoneId === DEMO_CHANNEL.defaultTaxZone.id)!.value;
+      const unitPrice = line.unitPriceMinor;
+      const linePrice = unitPrice * line.quantity;
+      return {
+        id: `${id}-${index + 1}`, quantity: line.quantity, orderPlacedQuantity: line.quantity,
+        productVariant: { id: line.variantId ?? '', name: line.custom ? line.custom.name : line.title ?? variant!.name,
+          sku: variant?.sku ?? line.custom?.sku ?? '' },
+        customFields: { tallyCustomName: line.custom?.name ?? null, tallyCustomSku: line.custom?.sku ?? null,
+          tallyUnitPrice: unitPrice, tallyPriceIncludesTax: payload.pricesIncludeTax, tallyClientLineId: line.clientLineId },
+        taxRate, discounts: [],
+        proratedLinePrice: netShares[index], proratedLinePriceWithTax: grossShares[index],
+        discountedLinePrice: netShares[index], discountedLinePriceWithTax: grossShares[index],
+        proratedUnitPrice: Math.round(netShares[index] / line.quantity), proratedUnitPriceWithTax: Math.round(grossShares[index] / line.quantity),
+        unitPrice, linePrice,
+        unitPriceWithTax: payload.pricesIncludeTax ? unitPrice : Math.round(unitPrice * (PERCENT + taxRate) / PERCENT),
+        linePriceWithTax: payload.pricesIncludeTax ? linePrice : Math.round(linePrice * (PERCENT + taxRate) / PERCENT),
+      };
+    });
+    return {
+      ...summary, active: false, couponCodes: [], discounts: [], fulfillments: [],
+      customFields: { ...summary.customFields as Record<string, unknown>, tallyPayments: null, tallyShipping: null,
+        tallySnapshot: JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate }) },
+      lines, surcharges, shippingLines,
+      subTotal: netShares.reduce((sum, share) => sum + share, 0), subTotalWithTax: grossShares.reduce((sum, share) => sum + share, 0),
+      shipping: shippingLines.reduce((sum, line) => sum + line.price, 0),
+      shippingWithTax: shippingLines.reduce((sum, line) => sum + line.priceWithTax, 0),
+      taxSummary: payload.taxByRate?.map(rate => ({ description: rate.code ?? `${rate.ratePpm / PPM_PER_PERCENT}%`,
+        taxRate: rate.ratePpm / PPM_PER_PERCENT, taxBase: rate.netMinor, taxTotal: rate.taxMinor }))
+        ?? [{ description: 'Tax', taxRate: 0, taxBase: payload.totalMinor - payload.taxMinor, taxTotal: payload.taxMinor }],
+      payments: payload.payments.map((payment, index) => ({ id: `${id}-p${index + 1}`, method: DEMO_PAYMENT_METHOD,
+        amount: payment.amountMinor, state: 'Settled', transactionId: payment.clientPaymentId, createdAt: payload.createdAt,
+        metadata: { tallyMethod: payment.method },
+        refunds: this.state.refunds.filter(refund => refund.orderId === id && refund.paymentIndex === index).map(refund => ({
+          id: refund.id, total: refund.total, items: refund.total - refund.shipping, shipping: refund.shipping, adjustment: 0,
+          state: 'Settled', reason: refund.reason, lines: refund.lines,
+          metadata: { tallyMethod: refund.method, tallySessionId: refund.sessionId, tallyClientRefundId: refund.clientRefundId },
+        })) })),
+    };
+  }
+
   apply(command: Command): CommandResult {
     const { id, type, version, payload: p } = command;
     const refuse = (code: string, message: string, data?: Record<string, unknown>): CommandResult =>
       ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
     const isOrder = type === 'order.create';
-    const versions = DEMO_INFO.contracts[isOrder ? 'order.create' : 'register'];
+    const isRefund = type === 'order.refund';
+    const versions = DEMO_INFO.contracts[isOrder ? 'order.create' : isRefund ? 'order.refund' : 'register'];
     if (!versions.includes(version)) return refuse('unsupported_version', isOrder ? 'Unsupported order.create version'
-      : `register version ${version} is not supported; this server supports ${versions.join(', ')}`,
-    isOrder ? { orderCreate: Math.max(...versions) } : { register: Math.max(...versions) });
+      : `${isRefund ? 'order.refund' : 'register'} version ${version} is not supported; this server supports ${versions.join(', ')}`,
+    isOrder ? { orderCreate: Math.max(...versions) } : isRefund ? { orderRefund: Math.max(...versions) } : { register: Math.max(...versions) });
     const content = fingerprint(command);
     const previous = this.state.ledger[id];
     if (previous) return previous.fingerprint !== content
       ? refuse('idempotency_mismatch', 'Command id was already used with a different payload')
       : { ...previous.result, status: previous.result.status === 'rejected' ? 'rejected' : 'duplicate' };
+    if (isRefund) {
+      const refund = this.refund(p, refuse);
+      // A refusal is not recorded, as the plugin's refusals are Unstored: only an applied refund is.
+      if ('status' in refund) return refund;
+      const result: CommandResult = { id, status: 'applied', refund };
+      this.state.ledger[id] = { fingerprint: content, result };
+      this.storage?.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state));
+      return result;
+    }
     let result: CommandResult = { id, status: 'applied' };
     if (isOrder && p.shipping?.length > 1) result = refuse('invalid_payload', 'shipping[1]: shipping_single: this store takes one shipping charge per order');
     if (isOrder && result.status !== 'rejected') {
@@ -227,7 +341,7 @@ export class DemoStore {
         const stock = this.state.stock[line.variantId];
         if (stock) {
           stock.quantity -= line.quantity;
-          stock.updatedAt = new Date(Math.max(Date.now(), Date.parse(stock.updatedAt) + 1)).toISOString();
+          stock.updatedAt = nextUpdatedAt(stock.updatedAt);
         }
       }
       const orderId = String(this.state.orders.length);
@@ -241,7 +355,8 @@ export class DemoStore {
       }
     } else if (type === 'register.closure.submit') {
       const last = this.state.closures.filter(closure => closure.registerId === p.registerId).at(-1);
-      const counters = { lastClosureNumber: last?.number ?? 0, perpetualSalesTotalMinor: last?.perpetualSalesTotalMinor ?? 0, perpetualRefundsTotalMinor: 0 };
+      const counters = { lastClosureNumber: last?.number ?? 0, perpetualSalesTotalMinor: last?.perpetualSalesTotalMinor ?? 0,
+        perpetualRefundsTotalMinor: last?.perpetualRefundsTotalMinor ?? 0 };
       if (p.number !== counters.lastClosureNumber + 1) result = refuse('register_closure_number_invalid',
         `Closure number ${p.number} is not ${counters.lastClosureNumber + 1}`, { counters });
       else {
@@ -251,7 +366,8 @@ export class DemoStore {
         result.register = {
           closure: { serverClosureId: p.closureId, number: p.number, expected,
             variance: Object.fromEntries(Object.entries(p.counted as Record<string, number>).map(([key, value]) => [key, value - (expected[key] ?? 0)])) },
-          counters: { ...counters, lastClosureNumber: p.number, perpetualSalesTotalMinor: p.perpetualSalesTotalMinor },
+          counters: { ...counters, lastClosureNumber: p.number, perpetualSalesTotalMinor: p.perpetualSalesTotalMinor,
+            perpetualRefundsTotalMinor: p.perpetualRefundsTotalMinor },
         };
       }
     } else if (!isOrder) {
@@ -278,6 +394,84 @@ export class DemoStore {
       if (row.type === 'paid_in') expected.cash += row.amountMinor;
       if (row.type === 'paid_out') expected.cash -= row.amountMinor;
     }
+    // The plugin's sessionRefunds: every refund the session made, live or at a closure alike.
+    for (const refund of this.state.refunds) if (refund.sessionId === id) expected[refund.method] = (expected[refund.method] ?? 0) - refund.total;
     return { expected, salesCount: orders.length };
+  }
+
+  /** order.refund v1 as the plugin's refund.service.ts apply, for one channel and a cashier with every permission. */
+  private refund(p: OrderRefundPayload, refuse: (code: string, message: string, data?: Record<string, unknown>) => CommandResult): CommandResult | OrderRefundResult {
+    const session = this.state.sessions[p.sessionId];
+    if (!session || session.registerId !== p.registerId || session.status === 'closed') return refuse('no_open_session',
+      `Session ${p.sessionId} is not open on register ${p.registerId}`, { sessionId: p.sessionId });
+    const order = this.order(p.orderId) as RefundableOrder | null;
+    if (!order) return refuse('invalid_payload', `orderId: no order ${p.orderId} in this channel`);
+    if (p.clientOrderId !== undefined && p.clientOrderId !== order.customFields.tallyClientOrderId) {
+      return refuse('invalid_payload', `clientOrderId: order ${p.orderId} is ${order.customFields.tallyClientOrderId}`);
+    }
+    const earlier = this.state.refunds.find(refund => refund.clientRefundId === p.clientRefundId);
+    if (earlier) return refuse('invalid_payload', `clientRefundId: ${p.clientRefundId} is already refund ${earlier.id}`);
+    const previous = this.state.refunds.filter(refund => refund.orderId === order.id);
+    const lines = [];
+    for (const [index, input] of p.lines.entries()) {
+      const line = order.lines.find(line => line.id === input.orderLineId);
+      if (!line) return refuse('invalid_payload', `lines[${index}].orderLineId: no line ${input.orderLineId} on order ${p.orderId}`);
+      lines.push({ input, line });
+    }
+    type Line = RefundableOrder['lines'][number];
+    const refundedOf = (line: Line) => previous.flatMap(refund => refund.lines)
+      .filter(refundLine => refundLine.orderLineId === line.id).reduce((sum, refundLine) => sum + refundLine.quantity, 0);
+    // ADR 0007: a line's share of its total, so a whole line is the line total and partial refunds add up to it.
+    const shareOf = (line: Line, quantity: number) => {
+      if (line.quantity === 0) return 0;
+      const before = refundedOf(line);
+      return Math.round((before + quantity) * line.proratedLinePriceWithTax / line.quantity)
+        - Math.round(before * line.proratedLinePriceWithTax / line.quantity);
+    };
+    const over = lines.map(({ input, line }) => ({
+      orderLineId: input.orderLineId, quantity: input.quantity, refundableQuantity: line.quantity - refundedOf(line),
+    })).filter(line => line.quantity > line.refundableQuantity);
+    if (over.length) return refuse('quantity_exceeds', 'A refunded quantity is more than the line has left to refund', { lines: over });
+    const { totalMinor, shippingMinor, adjustmentMinor } = p;
+    if (!lines.length && shippingMinor === 0 && adjustmentMinor === 0) return refuse('nothing_to_refund', 'Nothing to refund');
+    const refundableShipping = order.shippingWithTax - previous.reduce((sum, refund) => sum + refund.shipping, 0);
+    const remainderOf = (index: number) => Math.max(0, order.payments[index].amount - previous
+      .filter(refund => refund.paymentIndex === index).reduce((sum, refund) => sum + refund.total, 0));
+    const moneyRemainder = order.payments.reduce((sum, _payment, index) => sum + remainderOf(index), 0);
+    const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
+    const server = Math.min(Math.max(raw, 0), moneyRemainder);
+    if (shippingMinor > refundableShipping || raw !== server || server !== totalMinor) {
+      return refuse('amount_mismatch', `Refund total ${totalMinor} does not match the server's ${server}`,
+        { expectedMinor: totalMinor, serverMinor: server });
+    }
+    if (server === 0) return refuse('nothing_to_refund', 'Nothing to refund');
+
+    const refunds: OrderRefundResult['refunds'] = [];
+    const byMethod: Record<string, number> = {};
+    let left = server;
+    for (const [index, payment] of order.payments.entries()) {
+      const share = Math.min(left, remainderOf(index));
+      if (share === 0) continue;
+      const stored: DemoRefund = {
+        id: String(this.state.refunds.length + 1), orderId: order.id, paymentIndex: index, total: share,
+        shipping: refunds.length ? 0 : shippingMinor,
+        lines: refunds.length ? [] : lines.map(({ input }) => ({ orderLineId: input.orderLineId, quantity: input.quantity })),
+        reason: p.reason, clientRefundId: p.clientRefundId, sessionId: p.sessionId, method: payment.metadata.tallyMethod,
+      };
+      this.state.refunds.push(stored);
+      refunds.push({ id: stored.id, paymentId: payment.id, totalMinor: share, state: 'Settled' });
+      byMethod[stored.method] = (byMethod[stored.method] ?? 0) + share;
+      left -= share;
+      if (left === 0) break;
+    }
+    // Every POS order is fulfilled at create, so the whole refunded quantity goes back to tracked stock.
+    for (const { input, line } of lines) {
+      const stock = input.restock ? this.state.stock[line.productVariant.id] : undefined;
+      if (stock) {
+        stock.quantity += input.quantity;
+        stock.updatedAt = nextUpdatedAt(stock.updatedAt);
+      }
+    }
+    return { totalMinor: server, byMethod, refunds };
   }
 }

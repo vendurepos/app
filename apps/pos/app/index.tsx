@@ -298,7 +298,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
             capabilities={readSettingsCapabilities} onRefunded={reload} />} /> : <OrdersList orders={outbox.recent}
             onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows} formatDate={(iso) => new Date(iso).toLocaleString()}
-            onOpen={session.url === DEMO_STORE_ORIGIN ? undefined : setOpenOrder} />}
+            onOpen={setOpenOrder} />}
         </VStack>
       ) : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
