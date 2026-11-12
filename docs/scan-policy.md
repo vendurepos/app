@@ -5,6 +5,9 @@ The rule (Front desk, 2026-09-30): **a scan is intent to sell and is never silen
 - It adds visibly wherever a sale can be edited, closing panels or sheets to do so.
 - It starts a sale where none is open.
 - It shows a notice where adding is impossible (payment taken, register counting or closing).
+- It reaches the cart only while the till is the screen in front (Front desk, 2026-11-12). The till screen stays
+  mounted under a screen pushed over it (Settings), and its wedge listener stands down while it is not focused
+  (`useFocusEffect` in `Sale`), so a scan never adds to a sale nobody can see.
 
 A keyboard-wedge scan is caught by `useWedgeScanner` (`apps/pos/lib/use-wedge-scanner.ts`) wherever the focus is,
 except in a non-money text field, and handled by the `useWedgeScanner` callback in `Sale` (`apps/pos/app/index.tsx`). That
@@ -36,6 +39,8 @@ it. The camera is web only for now.
 | Receipt | Starts the next sale (New sale), then adds, line lit up where the cart shows. | `Sale`, `sale.newSale()` |
 | No open register session | Adds as on the tab shown: only Pay waits for the register to open. | `Sale`, `add`; `OpenRegisterCard` in place of Pay |
 | Focus in the Products search field | The search's own Enter looks the code up and adds it once; the wedge listener leaves it alone. The same holds for any other non-money text field (a movement reason, the sign-in fields, a note): the field keeps the keys. | `Catalogue` search; `useWedgeScanner` |
+| Settings (pushed over the till) | Adds nothing to the sale. Settings › Scanner's "Barcode scanning test" shows the last key the scanner sent with its gap in ms (`scanner-test-key`) and the code detected after the prefix, suffix and shortest-length rules (`scanner-test-code`), with the scan sound as set. Back on the till, scans add again. | `Sale`, `useWedgeScanner(onScan, focused)`; `ScannerTestArea` in `lib/scanner-test-area.tsx` |
+| Sign-in and the demo landing (no session) | Adds nothing; the till is not mounted, and no later sale picks the scan up. | No listener: `Sale` mounts only with a session |
 | An unknown code (any surface) | Closes a panel or sheet as a found code would, then shows `No products match "<code>".` (`scan-not-found`); nothing else changes: the stage, cart and tab stay as they are. | `Sale`, `!entry` → `setScanNotice({ notFound })` |
 
 Settings › Scanner's prefix and suffix are taken off a wedge scan before the shortest-length check and the lookup, each only when it matches at the start or end exactly. Scan sounds (web, off by default) play WCPOS v2's high tone when the scan added a product and the low one for every other outcome on the rows above. Gap: a code entered through the Products search field goes through TallyUI's `Catalogue` search, which neither strips the prefix or suffix nor plays a sound, until TallyUI gives the search a scan hook.
@@ -43,6 +48,9 @@ Settings › Scanner's prefix and suffix are taken off a wedge scan before the s
 ## A new surface
 
 A new surface inherits a row rather than getting its own ruling:
+
+- **It is a screen of its own** (a route pushed over the till, or one that replaces it): the Settings row. The cart takes nothing while it is in front.
+- Everything below is a surface on the till screen itself: the Orders panel, the Register panel and its sheets, the customer picker, and any modal over the till.
 
 - **It covers the sale and can be dismissed without losing anything** (a panel, a sheet, a dialog): the Orders panel
   row. Close it (add it to `panelOpen` / `onClosePanels`), then add with the line lit up.

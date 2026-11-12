@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **18 / 56** rows at parity (round 10, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **19 / 56** rows at parity (round 11, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -175,7 +175,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [ ] **9.1 Tabbed settings area.** The tabs are General, Tax, Printing, Card readers, Customer display, Barcode and Theme. VendurePOS has one long page. *Shared:* `SettingsLayout` exists in 3.12.0. *App:* adopt it.
 - [ ] **9.2 Theme: System / Light / Dark, plus Scale.** VendurePOS follows the system light or dark mode (#210), with no picker and no scale. *Shared* theme tokens, *app* settings.
 - [ ] **9.3 Language.** *Shared:* i18n.
-- [ ] **9.4 Barcode settings with a test area.** VendurePOS has the length, prefix, suffix and sounds, but no test area. *App.*
+- [x] **9.4 Barcode settings with a test area.** Done (spec B10): Settings › Scanner ends with v2's "Barcode scanning test": the last key the scanner sent with its gap in ms, and the code detected after the prefix, suffix and shortest length, with the scan sound as set (web). A scan on Settings no longer adds to the sale hidden under it (demo e2e "Settings' barcode test"). v2's average-time threshold is not a setting: the 24 ms key gap is fixed in code (`WEDGE_KEY_GAP_MS`), and the test area shows each key's gap against it. *App.*
 - [ ] **9.5 Printing: printers and receipt templates.** VendurePOS has "Print after each sale". *Shared + app.*
 - [ ] **9.6 Tax display options and "Tax based on: shop base / customer".** *App,* Vendure way: the zone.
 - [ ] **9.7 Card readers.** *Shared + plugin,* Vendure way.
@@ -222,3 +222,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 8 | 2026-11-12 | 15 / 56 | B7 demo orders: 7.4; 7.3 opens on the demo, receipt reprint still missing. |
 | 9 | 2026-11-12 | 16 / 56 | B8 receipt reprint: 7.3. |
 | 10 | 2026-11-12 | 18 / 56 | B9 cart header: 2.3 customer chip, 2.12 add toast; the address pin moves to 5.2. |
+| 11 | 2026-11-12 | 19 / 56 | B10 Settings: 9.4 barcode scanning test; the till's scanner listens only while the till is in front. |
