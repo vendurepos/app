@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { checkout, takePayment, typeAmount } from './checkout';
 
 declare global {
   interface Window { cspViolations: string[]; printCalls: number }
@@ -255,10 +256,11 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
   await expectTotals('€38.95', '€4.17', '€43.12', { 'Standard DE 19%': '€2.28', 'Reduced DE 7%': '€1.89' });
   // Cash 50.00 for the €43.12 total: €6.88 change.
-  await cart.getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await expect(tender.getByTestId('tender-total')).toHaveText('€43.12');
-  await tender.getByTestId('cash-tendered').locator('input').fill('50.00');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toHaveText('€43.12');
+  await typeAmount(page, '50.00');
+  await takePayment(page);
   await expect(tender.getByTestId('tender-change')).toContainText('€6.88');
   await tender.getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
@@ -359,9 +361,9 @@ test('a 403 on the orders asks to sign in again with the sign-in words; signing 
     return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ message: 'Forbidden' }) });
   });
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('sign-in-again')).toContainText("This account can't use the POS on this store. Ask the store's admin for POS access (the TallyPosSell permission).");
   await expect(page.getByTestId('orders-notice')).toContainText('The store refused this account.');
@@ -422,9 +424,9 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   // Pays the cart's total in cash; resolves to the order's client id and its receipt total in minor units.
   const cashSale = async () => {
     const before = sent.length;
-    await cart.getByTestId('pay-cash').click();
-    const tender = page.getByTestId('tender');
-    await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+    await checkout(page);
+    const tender = page.getByTestId('tender-pane');
+    await takePayment(page);
     await tender.getByTestId('tender-complete').click();
     const total = Math.round(Number((await page.getByTestId('receipt').getByTestId('receipt-total').innerText()).replace(/[^\d.]/g, '')) * 100);
     await expect.poll(() => sent.length).toBeGreaterThan(before);
@@ -497,9 +499,10 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
   await page.getByTestId('sign-in-submit').click();
   await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('10.00');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '10.00');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
   await expect(receipt.getByTestId('receipt-total')).toHaveText('€9.52');
@@ -518,11 +521,11 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
     await expect(receipt.getByTestId(id)).toBeVisible();
   }
   await expect(page.getByText('VendurePOS', { exact: true })).toBeHidden();
-  for (const id of ['signed-in-store', 'sign-out', 'pay-cash', 'pay-card', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
+  for (const id of ['signed-in-store', 'sign-out', 'checkout', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
     await expect(page.getByTestId(id)).toBeHidden();
   }
   await expect(page.getByTestId('nav-rail')).toBeHidden();
-  // On screen, all of it is back (the Pay buttons went with the cart at the tender).
+  // On screen, all of it is back (Checkout is hidden during tender and receipt).
   await page.emulateMedia({ media: 'screen' });
   await expect(page.getByText('VendurePOS', { exact: true })).toBeVisible();
   for (const id of ['signed-in-store', 'sign-out', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
@@ -550,20 +553,23 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
   const cart = page.getByTestId('cart');
-  const tender = page.getByTestId('tender');
+  const tender = page.getByTestId('tender-pane');
   // No session: the cart builds, and the open card stands where Pay would be.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
   await expect(cart.getByTestId('open-register-card')).toBeVisible();
-  await expect(cart.getByTestId('pay-cash')).toHaveCount(0);
+  await expect(cart.getByTestId('checkout')).toHaveCount(0);
   await openRegister(page, '100.00');
   // A cash sale and a card sale of the mug, €8.00 + 19 %: €9.52 each.
-  await cart.getByTestId('pay-cash').click();
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await page.getByTestId('new-sale').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await cart.getByTestId('pay-card').click();
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await page.getByTestId('new-sale').click();
   // Paid in €10.00 and paid out €5.00 from the Register panel, then the paid in undone.
@@ -616,7 +622,7 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   await expect(sheet).toHaveCount(0);
   // Closed: the next sale waits for the register to open again.
   await expect(cart.getByTestId('open-register-card')).toBeVisible();
-  await expect(cart.getByTestId('pay-cash')).toHaveCount(0);
+  await expect(cart.getByTestId('checkout')).toHaveCount(0);
   await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
@@ -668,10 +674,11 @@ test('a discounted sale: line and order discounts, paid, and applied by the plug
   // discount 160 + 100 = 260, total 2899 − 260 + 352 = 2991.
   const figures = { subtotal: '€28.99', discount: '−€2.60', tax: '€3.52', 'tax-Standard DE 19%': '€2.64', 'tax-Reduced DE 7%': '€0.88', total: '€29.91' };
   await expectFigures('cart', figures);
-  await cart.getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await expect(tender.getByTestId('tender-total')).toHaveText('€29.91');
-  await tender.getByTestId('cash-tendered').locator('input').fill('30.00');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toHaveText('€29.91');
+  await typeAmount(page, '30.00');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
   await expectFigures('receipt', { ...figures, 'line-0-discount-0': '−€1.60', 'order-discount': '−€1.00', change: '€0.09' });
@@ -736,12 +743,12 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
-  const cart = page.getByTestId('cart');
-  const tender = page.getByTestId('tender');
+  const tender = page.getByTestId('tender-pane');
   const cashSale = async () => {
     await page.getByTestId('product-tile-Tally Fixture Mug').click();
-    await cart.getByTestId('pay-cash').click();
-    await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+    await checkout(page);
+    await typeAmount(page, '9.52');
+    await takePayment(page);
     await tender.getByTestId('tender-complete').click();
     await page.getByTestId('new-sale').click();
   };
@@ -840,9 +847,9 @@ test('the sync status shows a sale waiting and retrying, then a store without th
   await openRegister(page);
   const cashSale = async () => {
     await page.getByTestId('product-tile-Tally Fixture Mug').click();
-    await page.getByTestId('cart').getByTestId('pay-cash').click();
-    const tender = page.getByTestId('tender');
-    await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+    await checkout(page);
+    const tender = page.getByTestId('tender-pane');
+    await takePayment(page);
     await tender.getByTestId('tender-complete').click();
     await page.getByTestId('new-sale').click();
   };
@@ -1144,17 +1151,17 @@ test.describe('on a narrow screen', () => {
     await expect(counted).toHaveValue('15.00');
   });
 
-  test('a scan into a cleared cash tendered field adds no payment: back to the cart, and the mug is added', async ({ page }) => {
+  test('a scan at a cleared cash entry adds no payment: back to the cart, and the mug is added', async ({ page }) => {
     await signInWithBarcodes(page);
     const cartTab = page.getByTestId('tab-cart');
-    const tender = page.getByTestId('tender');
+    const tender = page.getByTestId('tender-pane');
     await cartTab.click();
     await openRegister(page);
     await wedgeScan(page, MUG_BARCODE);
-    await page.getByTestId('cart').getByTestId('pay-cash').click();
-    const cashInput = tender.getByTestId('cash-tendered').locator('input');
-    await cashInput.fill('');
-    await expect(cashInput).toHaveValue('');
+    await checkout(page);
+    await page.getByTestId('tender-keypad-key-clear').click();
+    await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€0.00');
+    await tender.getByTestId('tender-balance').click();
     await wedgeScan(page, MUG_BARCODE);
     await expect(tender).toHaveCount(0);
     await expect(cartTab).toHaveText('Cart (2) · €19.04');
@@ -1169,9 +1176,10 @@ test.describe('on a narrow screen', () => {
     await cartTab.click();
     await openRegister(page);
     await wedgeScan(page, MUG_BARCODE);
-    await page.getByTestId('cart').getByTestId('pay-cash').click();
-    await page.getByTestId('tender').getByTestId('cash-tendered').locator('input').fill('9.52');
-    await page.getByTestId('tender').getByTestId('tender-complete').click();
+    await checkout(page);
+    await typeAmount(page, '9.52');
+    await takePayment(page);
+    await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
     await page.getByTestId('new-sale').click();
     await page.getByTestId('register-open-panel').click();
     await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
@@ -1199,7 +1207,7 @@ test.describe('on a narrow screen', () => {
     await page.route('**/tally/v1/commands', (route) => route.request().method() === 'POST' ? route.abort() : route.continue());
     const cartTab = page.getByTestId('tab-cart');
     const cart = page.getByTestId('cart');
-    const tender = page.getByTestId('tender');
+    const tender = page.getByTestId('tender-pane');
     const receipt = page.getByTestId('receipt');
     const lineHighlight = cart.getByTestId('cart-line-highlight-TALLY-MUG');
     await cartTab.click();
@@ -1209,7 +1217,7 @@ test.describe('on a narrow screen', () => {
     // The scan above added with no session open; Pay waits for the register.
     await openRegister(page);
     // Nothing entered: back to the cart, one more mug, its line lit up.
-    await cart.getByTestId('pay-cash').click();
+    await checkout(page);
     await expect(tender).toBeVisible();
     await wedgeScan(page, MUG_BARCODE);
     await expect(lineHighlight).toBeVisible();
@@ -1217,18 +1225,18 @@ test.describe('on a narrow screen', () => {
     await expect(cartTab).toHaveText('Cart (2) · €19.04');
     await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€16.00');
     // A cash amount entered: the tender, its amount and the cart stay as they are.
-    await cart.getByTestId('pay-cash').click();
-    const cashInput = tender.getByTestId('cash-tendered').locator('input');
-    await cashInput.fill('20.00');
-    await expect(tender.getByTestId('tender-change')).toContainText('€0.96');
-    // Off the field, so the listener takes the scan.
-    await tender.getByTestId('tender-total').click();
+    await checkout(page);
+    await typeAmount(page, '20.00');
+    await expect(tender.getByTestId('tender-entry-hint')).toContainText('€0.96');
+    // Off the keypad, so the scan's Enter does not press a key.
+    await tender.getByTestId('tender-balance').click();
     await wedgeScan(page, MUG_BARCODE);
     await expect(page.getByTestId('scan-finish-sale')).toHaveText('Finish this sale before scanning the next item.');
     await expect(tender).toBeVisible();
-    await expect(cashInput).toHaveValue('20.00');
-    await expect(tender.getByTestId('tender-total')).toHaveText('€19.04');
+    await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€20.00');
+    await expect(tender.getByTestId('tender-balance')).toHaveText('€19.04');
     await expect(cartTab).toHaveText('Cart (2) · €19.04');
+    await takePayment(page);
     await tender.getByTestId('tender-complete').click();
     await expect(receipt).toBeVisible();
     await expect(page.getByTestId('scan-finish-sale')).toHaveCount(0);
@@ -1289,9 +1297,10 @@ test.describe('on a narrow screen', () => {
     await expect(cart.getByText(taxRows)).toHaveText(['Tax', 'incl. Standard DE 19%']);
     await expect(cart.getByTestId('cart-tax')).toHaveText('€3.04');
     await expect(cart.getByTestId('cart-tax-Standard DE 19%')).toHaveText('€3.04');
-    await cart.getByTestId('pay-cash').click();
-    const tender = page.getByTestId('tender');
-    await tender.getByTestId('cash-tendered').locator('input').fill('20.00');
+    await checkout(page);
+    const tender = page.getByTestId('tender-pane');
+    await typeAmount(page, '20.00');
+    await takePayment(page);
     await tender.getByTestId('tender-complete').click();
     const receipt = page.getByTestId('receipt');
     await expect(receipt.getByTestId('receipt-total')).toHaveText('€19.04');
@@ -1514,9 +1523,9 @@ test('signing in again in place keeps the cart and sells with the new session', 
   await page.getByTestId('sign-in-again-submit').click();
   await expect(page.getByTestId('sign-in-again')).toHaveCount(0, { timeout: 30_000 });
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
-  await cart.getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await page.getByTestId('new-sale').click();
@@ -1569,9 +1578,9 @@ test('a sale to a searched customer, and one to a new customer, land on those cu
       await page.getByTestId('product-tile-Tally Fixture Mug').click();
       const cart = page.getByTestId('cart');
       await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
-      await cart.getByTestId('pay-cash').click();
-      const tender = page.getByTestId('tender');
-      await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+      await checkout(page);
+      const tender = page.getByTestId('tender-pane');
+      await takePayment(page);
       await tender.getByTestId('tender-complete').click();
       await expect(page.getByTestId('receipt-customer')).toHaveText(`Customer: ${name}`);
       await page.getByTestId('new-sale').click();
@@ -1655,9 +1664,9 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const sent = page.waitForResponse((response) => response.request().method() === 'POST'
     && response.url().endsWith('/tally/v1/commands') && (response.request().postData() ?? '').includes('order.create'));
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill((await tender.getByTestId('tender-total').innerText()).replace(/[^\d.]/g, ''));
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect(page.getByTestId('receipt-order')).toContainText(`Till: ${name}`);
@@ -1720,7 +1729,7 @@ test('a split sale, part cash and part card, is applied by the plugin with both 
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const sent = page.waitForResponse((response) => response.request().method() === 'POST'
     && response.url().endsWith('/tally/v1/commands') && (response.request().postData() ?? '').includes('order.create'));
-  await page.getByTestId('pay-split').click();
+  await checkout(page);
   await page.getByTestId('tender-method-cash').click();
   // The keypad has no decimal key: digits shift in from the right, so 5, 0, 0 is €5.00.
   for (const key of ['5', '0', '0']) await page.getByTestId(`tender-keypad-key-${key}`).click();
@@ -1790,9 +1799,10 @@ test('fees, a shipping charge and a custom item, one with a tax class, are appli
   // Reduced 200 × 7 % = 14. Subtotal excludes charges: 1800; total 1800 + 200 + 500 + 451 = 2951.
   const figures = { subtotal: '€18.00', tax: '€4.51', 'tax-Standard DE 19%': '€4.37', 'tax-Reduced DE 7%': '€0.14', total: '€29.51' };
   await expectFigures('cart', { ...figures, 'fee-0-amount': '€2.00', 'shipping-0-amount': '€5.00' });
-  await cart.getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('30.00');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '30.00');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expectFigures('receipt', { ...figures, 'fee-0': '€2.00', 'shipping-0': '€5.00', change: '€0.49' });
   await expect.poll(() => sent.length).toBeGreaterThan(0);
@@ -2071,10 +2081,11 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   // Two mugs, €8.00 + 19 % = €9.52 each, paid in cash.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await expect(tender.getByTestId('tender-total')).toContainText('€19.04');
-  await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await typeAmount(page, '19.04');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await page.getByTestId('receipt').getByTestId('new-sale').click();
 
@@ -2158,10 +2169,11 @@ test('a till refund tapped twice at once sends one refund and Vendure applies on
   await openRegister(page, '100.00');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await expect(tender.getByTestId('tender-total')).toContainText('€19.04');
-  await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await typeAmount(page, '19.04');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await page.getByTestId('receipt').getByTestId('new-sale').click();
   await page.getByTestId('orders-open').click();

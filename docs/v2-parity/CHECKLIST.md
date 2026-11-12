@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **3 / 56** rows at parity (round 1, 2026-11-10). The two rows marked N/A are not counted.
+**Score:** **9 / 56** rows at parity (round 4, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -54,9 +54,9 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | ![](demo-pairs/04-cart-3-items-wcpos.webp) | ![](demo-pairs/04-cart-3-items-vendurepos.webp) |
 
 - [ ] **2.1 Open carts as tabs.** Every cart stays open by itself, and a strip under the cart shows "Guest $83.03 …", a count and "+ New"; one tap switches. VendurePOS has one sale and an explicit Park dialog. *Shared:* a cart-tabs strip (`ParkedSales` is the closest piece). *App:* several live carts.
-- [ ] **2.2 One "Checkout €total" button** opening the checkout screen (section 3). VendurePOS has three buttons: Pay cash, Pay by card and Split. *App.*
+- [x] **2.2 One "Checkout €total" button** opening the checkout screen (section 3). Done (spec B3): the cart foot has one "Checkout €total" button in place of Pay cash, Pay by card and Split.
 - [ ] **2.3 Customer chip in the cart header** ("GU Guest", with an address pin). VendurePOS has an "Add customer" button. *App.*
-- [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. *Left:* the Checkout foot (2.2) and the price popover (2.7).
+- [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. *Left:* the price popover (2.7).
 - [ ] **2.5 Line shows the variant's attributes** ("Size: 32 · Color: Blue") **and a struck-through regular price** on sale items. VendurePOS shows "name · variant" and no regular price. *App/connector.*
 - [ ] **2.6 Tap the quantity for a keypad popover** (− / +, 0–9, Done). *Shared:* a keypad popover. Mostly done (spec B2): tapping a line's quantity opens TallyUI 3.18.0's `LinePopover` keypad (0–9, delete, Apply, Cancel), and each line has its own Remove. *Left:* the keypad has no − / + keys.
 - [ ] **2.7 Tap the price for a keypad with quick discounts** (−5 / −10 / −15 %). VendurePOS has a price dialog and a separate discount dialog per line. *App.*
@@ -84,10 +84,10 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
   - quick amounts and a numeric keypad;
   - the order summary on the right, with a Payments list and Total / Paid / Remaining.
 
-  VendurePOS has an in-column cash form. *Shared:* `CheckoutLayout` exists in 3.12.0; the keypad and method cards are needed. *App:* the screen.
-- [ ] **3.2 Payment-method list on one screen:** Cash, Card, and the store's other methods. In VendurePOS, card and split are separate buttons back on the cart. *App, Vendure way:* the channel's payment methods.
-- [ ] **3.3 Split payments shown as a Payments list** with Paid and Remaining. VendurePOS has a Split flow; *app* layout.
-- [ ] **3.4 Quick cash amounts complete the sale.** On VendurePOS, tapping €50.00 did not enable Complete sale in headless Chromium; typing the amount did. *App:* verify, and fix if real.
+  Mostly done (spec B3): Checkout opens TallyUI 3.19.0's `TenderPane` in the catalogue's place, with "Remaining €x", method tiles, quick amounts, a keypad and the Payments list; the cart stays on the right, locked, with its totals. On a phone the pane fills the Cart tab. *Left:* the Split chip, and Paid / Remaining sit in the pane rather than in the summary on the right.
+- [ ] **3.2 Payment-method list on one screen:** Cash, Card, and the store's other methods. Mostly done (spec B3): Cash and Card terminal are tiles on the one checkout screen. *Left, Vendure way:* the tiles are the till's fixed pair, not the channel's own payment methods.
+- [x] **3.3 Split payments shown as a Payments list** with Paid and Remaining. Done (spec B3): each leg is a ledger row (method, amount, Captured, Cancel payment) under "Remaining €x" and "€x of €y paid"; the next leg pre-fills the remaining balance.
+- [x] **3.4 Quick cash amounts complete the sale.** Done (spec B3): tapping €50.00 and Take enables Complete sale and shows the change; e2e "a demo cashier pays cash with a quick amount" proves it.
 - [x] **3.5 Receipt after the sale** with Print and New sale.
 
 | WCPOS | VendurePOS |
@@ -213,3 +213,6 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | Round | Date | Score | Moved |
 |---|---|---|---|
 | 1 | 2026-11-10 | 3 / 56 | Baseline. |
+| 2 | 2026-11-12 | 4 / 56 | B1 frame: 1.2. |
+| 3 | 2026-11-12 | 6 / 56 | B2 cart: 1.4, 2.4. |
+| 4 | 2026-11-12 | 9 / 56 | B3 checkout: 2.2, 3.3, 3.4; 3.1 and 3.2 mostly done. |

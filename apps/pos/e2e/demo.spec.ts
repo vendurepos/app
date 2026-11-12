@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
+import { checkout, takePayment, typeAmount } from './checkout';
 
 declare global {
   interface Window { printCalls: number; scanTones: number[] }
@@ -168,7 +169,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await card.getByTestId('open-register-button').click();
   await expect(card).toHaveCount(0);
   const cart = page.getByTestId('cart');
-  const tender = page.getByTestId('tender');
+  const tender = page.getByTestId('tender-pane');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const line = cart.getByTestId('cart-line-TALLY-MUG');
   await expect(line).toBeVisible();
@@ -178,9 +179,10 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await page.getByTestId('quantity-popover-keypad-key-2').click();
   await page.getByTestId('quantity-popover-apply').click();
   await expect(inCart).toHaveText('2');
-  await cart.getByTestId('pay-cash').click();
-  await expect(tender.getByTestId('tender-total')).toContainText('€19.04');
-  await tender.getByTestId('cash-tendered').locator('input').fill('19.04');
+  await checkout(page);
+  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await typeAmount(page, '19.04');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toContainText('€19.04');
   const reference = (await page.getByTestId('receipt-order').innerText()).match(/^Order (\S+)/)![1];
@@ -533,9 +535,10 @@ test('a demo visitor attaches a customer and sees it on the receipt', async ({ p
   await page.getByTestId('customer-picker').getByText('Ada Lovelace', { exact: true }).click();
   await expect(page.getByTestId('sale-customer')).toContainText('Ada Lovelace');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
   expect(consoleErrors).toEqual([]);
@@ -560,9 +563,10 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   await expect(page.getByTestId('sale-customer')).toHaveText('Customer: Ada Lovelace');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
   await page.getByTestId('new-sale').click();
@@ -572,8 +576,9 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await expect(page.getByTestId('customer-add')).toBeVisible();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expect(page.getByTestId('sale-customer')).toHaveCount(0);
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect(page.getByTestId('receipt-customer')).toHaveCount(0);
@@ -601,9 +606,10 @@ test('the till follows the device\'s dark scheme and prints its receipt in light
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
 
@@ -632,9 +638,10 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
@@ -646,8 +653,9 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
   await page.getByTestId('settings-back').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  await tender.getByTestId('cash-tendered').locator('input').fill('9.52');
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await page.getByTestId('receipt-print').click();
@@ -688,9 +696,10 @@ test('a demo cashier changes a line\'s price and sells at it', async ({ page }) 
   const cart = page.getByTestId('cart');
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€5.00');
   await expect(cart.getByTestId('cart-total')).toHaveText('€5.95');
-  await cart.getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('5.95');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '5.95');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   const receiptLine = page.getByTestId('receipt').getByText('1 × Tally Fixture Mug', { exact: true });
   await expect(receiptLine).toBeVisible();
@@ -713,9 +722,10 @@ test('a demo cashier parks a sale, sells another, then resumes the parked one', 
   await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
 
   await page.getByTestId('product-tile-Filter Coffee').click();
-  await page.getByTestId('cart').getByTestId('pay-cash').click();
-  const tender = page.getByTestId('tender');
-  await tender.getByTestId('cash-tendered').locator('input').fill('20.00');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await typeAmount(page, '20.00');
+  await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt').getByText('1 × Filter Coffee', { exact: true })).toBeVisible();
   await page.getByTestId('new-sale').click();
@@ -790,7 +800,7 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('pay-split').click();
+  await checkout(page);
   await page.getByTestId('tender-method-cash').click();
   // The keypad has no decimal key: digits shift in from the right, so 5, 0, 0 is €5.00.
   for (const key of ['5', '0', '0']) await page.getByTestId(`tender-keypad-key-${key}`).click();
@@ -806,6 +816,33 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€5.00');
   await expect(receipt.getByTestId('receipt-payment-external')).toBeVisible();
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.00');
+});
+
+test('a demo cashier pays cash with a quick amount: the cart is locked beside the checkout', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeHidden();
+  const cart = page.getByTestId('cart');
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(cart.getByTestId('line-remove-TALLY-MUG')).toHaveCount(0);
+  await expect(cart.getByTestId('checkout')).toHaveCount(0);
+  await expect(cart.getByTestId('add-charge')).toHaveCount(0);
+  await page.getByTestId('tender-quick-5000').click();
+  await takePayment(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-change')).toContainText('€40.48');
+  await expect(tender.getByTestId('tender-complete')).toBeEnabled();
+  await tender.getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  await expect(receipt.getByTestId('receipt-change')).toHaveText('€40.48');
+  await receipt.getByTestId('new-sale').click();
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
 });
 
 test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee', async ({ page }) => {
@@ -835,8 +872,10 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await expect(cart.getByTestId('cart-fee-0-amount')).toHaveText('€2.00');
   await expect(cart.getByTestId('cart-tax-Reduced DE 7%')).toHaveText('€0.14');
   await expect(cart.getByTestId('cart-total')).toHaveText('€11.66');
-  await cart.getByTestId('pay-card').click();
-  await page.getByTestId('tender').getByTestId('tender-complete').click();
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
   await expect(receipt.getByTestId('receipt-fee-0')).toHaveText('€2.00');
   await expect(receipt.getByTestId('receipt-tax-Reduced DE 7%')).toHaveText('€0.14');
