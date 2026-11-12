@@ -220,6 +220,31 @@ test("Settings' barcode test shows a scan and its last key, and adds nothing to 
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Support at the foot of the rail opens the quick start, GitHub issues and the version, and a scan closes it and adds', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('support-open').click();
+  await expect(page.getByTestId('support-sheet')).toBeVisible();
+  await expect(page.getByTestId('support-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
+  await expect(page.getByTestId('support-issues')).toHaveAttribute('href', 'https://github.com/vendurepos/app/issues');
+  // apps/pos/app.json's version.
+  await expect(page.getByTestId('support-version')).toHaveText('VendurePOS 0.1.0');
+  // The foot of the rail: Support sits below Settings.
+  const settingsBox = await page.getByTestId('settings-open').boundingBox();
+  const supportBox = await page.getByTestId('support-open').boundingBox();
+  expect(supportBox!.y).toBeGreaterThan(settingsBox!.y);
+  // A scan closes the sheet and adds (docs/scan-policy.md, "A new surface").
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('support-sheet')).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test('a scan on the demo sign-in screen adds nothing to the next sale', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

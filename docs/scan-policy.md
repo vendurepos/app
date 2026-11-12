@@ -50,7 +50,7 @@ Settings › Scanner's prefix and suffix are taken off a wedge scan before the s
 A new surface inherits a row rather than getting its own ruling:
 
 - **It is a screen of its own** (a route pushed over the till, or one that replaces it): the Settings row. The cart takes nothing while it is in front.
-- Everything below is a surface on the till screen itself: the Orders panel, the Register panel and its sheets, the customer picker, and any modal over the till.
+- Everything below is a surface on the till screen itself: the Orders panel, the Register panel and its sheets, the customer picker, the Support sheet (it closes like the Orders panel), and any modal over the till.
 
 - **It covers the sale and can be dismissed without losing anything** (a panel, a sheet, a dialog): the Orders panel
   row. Close it (add it to `panelOpen` / `onClosePanels`), then add with the line lit up.

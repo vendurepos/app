@@ -49,7 +49,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { SyncNowControl } from '../lib/sync-now-control';
-import { CashierSheet, tillNavItems } from '../lib/till-frame';
+import { CashierSheet, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
@@ -161,6 +161,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [registerOpen, setRegisterOpen] = useState(false);
   const [closuresOpen, setClosuresOpen] = useState(false);
   const [cashierOpen, setCashierOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
@@ -192,9 +193,10 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closePanels = () => { setOrdersOpen(false); setOpenOrder(null); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); };
+  const closePanels = () => { setOrdersOpen(false); setOpenOrder(null); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
+    else if (id === 'support') setSupportOpen(true);
     else if (id === 'orders') setOrdersOpen((open) => !open);
     else if (id === 'register') setRegisterOpen(true);
     else closePanels();
@@ -251,6 +253,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
+      <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
         <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
@@ -314,8 +317,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen || cashierOpen}
-                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); }}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
+                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>

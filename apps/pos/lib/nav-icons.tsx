@@ -26,3 +26,12 @@ export const SettingsIcon = createSvgIcon('SettingsIcon', () => (
     <Path d="M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0" />
   </>
 ));
+
+// Support: an outline speech bubble holding tabler `help`'s question mark.
+export const SupportIcon = createSvgIcon('SupportIcon', () => (
+  <>
+    <Path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-6l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+    <Path d="M12 12a2 2 0 0 0 .914-3.782a1.98 1.98 0 0 0-2.414.483" />
+    <Path d="M12 15v.01" />
+  </>
+));
