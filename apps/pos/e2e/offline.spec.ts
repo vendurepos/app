@@ -100,7 +100,11 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
       if (PRODUCTS[sku].variant) await page.getByRole('button', { name: PRODUCTS[sku].variant }).click();
       const line = cart.getByTestId(`cart-line-${sku}`);
       await expect(line).toBeVisible();
-      if (quantity === 2) await line.getByText('+', { exact: true }).click();
+      if (quantity === 2) {
+        await line.getByTestId('quantity-popover-trigger').click();
+        await page.getByTestId('quantity-popover-keypad-key-2').click();
+        await page.getByTestId('quantity-popover-apply').click();
+      }
     }
     await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(lines.length);
     const startedAt = Date.now();

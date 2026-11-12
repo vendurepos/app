@@ -36,7 +36,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [ ] **1.1 Navigation rail.** Wide screens show a left icon rail (POS, Products, Orders, Customers, Reports; Store health, Settings and Support at the foot; the version number), and phones get a drawer. Done (spec B1, TallyUI 3.18.0 `AppShell`): the rail on wide screens and the drawer on phones, with POS, Orders (badged with orders that need attention), Register and Settings. *Left:* Products, Customers, Reports, Store health and Support have no screens in VendurePOS yet, and the rail shows no version number.
 - [x] **1.2 Compact header.** One slim bar reading "Store · Register", with a bell and the cashier's avatar. Done (spec B1): one `RegisterBar` row (the name, the register pill, the signed-in store, last synced and Sync now on wide screens, the Register door, the avatar); the avatar opens a cashier sheet with X report, Closures and Sign out; the demo banner is one slim row. A single-register store shows no register name, as in v2. No bell: VendurePOS has no notifications yet.
 - [ ] **1.3 Product images on tiles.** *App/shared:* the Vendure connector needs `featuredAsset`, and the tile needs an image slot. VendurePOS tiles are text only.
-- [ ] **1.4 In-cart quantity badge on a tile.** *Shared:* the tile.
+- [x] **1.4 In-cart quantity badge on a tile.** *Shared:* the tile. Done (spec B2): the till passes its cart lines to TallyUI 3.18.0's `Catalogue`, whose grid tiles show the count.
 - [ ] **1.5 Browse by category.** Coloured category poster tiles with counts, a breadcrumb ("Categories › All products"), then the products. VendurePOS shows every product, with category chips. *App, Vendure way:* collections.
 - [ ] **1.6 Filter pills.** In stock, On sale, Featured, Tag and Brand, with a searchable picker per pill. *Vendure way:* in stock, on sale, plus one pill per facet. *Shared:* `FilterChipGroup` exists in 3.12.0, so the work is the *app* wiring and the facet reads.
 - [ ] **1.7 Camera scan button next to search.** Search itself is at parity. *App.*
@@ -56,11 +56,11 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [ ] **2.1 Open carts as tabs.** Every cart stays open by itself, and a strip under the cart shows "Guest $83.03 …", a count and "+ New"; one tap switches. VendurePOS has one sale and an explicit Park dialog. *Shared:* a cart-tabs strip (`ParkedSales` is the closest piece). *App:* several live carts.
 - [ ] **2.2 One "Checkout €total" button** opening the checkout screen (section 3). VendurePOS has three buttons: Pay cash, Pay by card and Split. *App.*
 - [ ] **2.3 Customer chip in the cart header** ("GU Guest", with an address pin). VendurePOS has an "Add customer" button. *App.*
-- [ ] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`.
+- [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. *Left:* the Checkout foot (2.2) and the price popover (2.7).
 - [ ] **2.5 Line shows the variant's attributes** ("Size: 32 · Color: Blue") **and a struck-through regular price** on sale items. VendurePOS shows "name · variant" and no regular price. *App/connector.*
-- [ ] **2.6 Tap the quantity for a keypad popover** (− / +, 0–9, Done). VendurePOS has steppers on every line. *Shared:* a keypad popover.
+- [ ] **2.6 Tap the quantity for a keypad popover** (− / +, 0–9, Done). *Shared:* a keypad popover. Mostly done (spec B2): tapping a line's quantity opens TallyUI 3.18.0's `LinePopover` keypad (0–9, delete, Apply, Cancel), and each line has its own Remove. *Left:* the keypad has no − / + keys.
 - [ ] **2.7 Tap the price for a keypad with quick discounts** (−5 / −10 / −15 %). VendurePOS has a price dialog and a separate discount dialog per line. *App.*
-- [ ] **2.8 Quiet lines.** WCPOS shows Edit / Remove on hover. VendurePOS shows Discount and Price buttons and a stepper on every line. *App.*
+- [ ] **2.8 Quiet lines.** WCPOS shows Edit / Remove on hover. VendurePOS shows Discount, Price and Remove links on every line. *App.*
 - [x] **2.9 Itemised tax lines in the totals.** VendurePOS shows "incl. Reduced DE 7 %" and "incl. Standard DE 19 %", Vendure's way.
 - [ ] **2.10 "+" menu:** misc product, fee, shipping, discount, new customer. VendurePOS's "Add charge" covers fee, shipping and custom item. Missing: a percentage fee and an "amount includes tax" switch. *App.*
 - [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. *App + plugin* (order note and void).

@@ -1,7 +1,10 @@
 import { useState, type ReactNode } from 'react';
-import { View } from 'react-native';
-import { Button, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, PriceForm, QuantityStepper, Text, VStack } from '@tallyui/components';
+import { useWindowDimensions, View } from 'react-native';
+import {
+  Button, CartColumnHeads, CartLine, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, LinePopover, PriceForm, Text, VStack,
+} from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
+import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
 import { MIN_ORDER_CREATE_CHARGES } from './use-sale-settings';
 
@@ -51,7 +54,12 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
 }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
-  const money = (amount: number) => format({ amount, currency: order.currency });
+  const amount = (minor: number) => ({ amount: minor, currency: order.currency });
+  const money = (minor: number) => format(amount(minor));
+  // The Price column folds on a narrow cart or a phone window (v2's rule), in the heads and every line alike.
+  const [cartWidth, setCartWidth] = useState<number>();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const showPrice = cartShowsPrice({ cartWidth, windowWidth, windowHeight });
   const totals = cartTotals(order);
   const row = (label: string, amount: number, testID: string, strong = false) =>
     <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
@@ -68,6 +76,8 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
   const orderAmounts = order.discounts.length === 1
     ? [{ discountId: order.discounts[0].id, amountMinor: order.display.orderDiscountMinor }] : [];
   return (
+    <View className="flex-1 min-h-0" onLayout={(event) => setCartWidth(event.nativeEvent.layout.width)}>
+    <CartColumnHeads showPrice={showPrice} />
     <CartPanel testID="cart" items={order.lineItems}
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
       afterItems={empty && !chargesOffered ? undefined : (
@@ -117,23 +127,26 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
           {highlightSku && line.sku && line.sku === highlightSku ? (
             <View testID={`cart-line-highlight-${line.sku || line.id}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
           ) : null}
-          <HStack space="sm" className="items-center px-3 py-2">
-            <VStack space="none" className="flex-1">
-              <Text className="text-sm font-medium" numberOfLines={2}>{line.name}</Text>
-              <Text className="text-xs text-muted-foreground">{money(line.unitPriceMinor)} each</Text>
-              <HStack space="sm">
-                <Button testID={`line-discount-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
-                  onPress={() => setForm({ lineId: line.id })}>
-                  <Text className="text-xs">Discount</Text>
-                </Button>
-                {canEditPrice && <Button testID={`line-price-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
-                  onPress={() => setForm({ lineId: line.id, kind: 'price' })}><Text className="text-xs">Price</Text></Button>}
-              </HStack>
-            </VStack>
-            {/* − at 1 takes the line off: TallyUI's updateQuantity removes a line set to 0. */}
-            <QuantityStepper quantity={line.quantity} min={0} onChangeQuantity={(quantity) => sale.setQuantity(line.id, quantity)} />
-            {/* Before any discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them. */}
-            <Text className="w-20 text-right text-sm font-semibold">{money(display(line.id).amountMinor)}</Text>
+          {/* As TallyUI's Cart with lineEditor="popover": the quantity opens v2's keypad. The total is before any
+              discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them. */}
+          <CartLine name={line.name} attributes={line.attributes} quantity={line.quantity} unitPrice={amount(line.unitPriceMinor)}
+            regularUnitPrice={line.regularUnitPriceMinor === undefined ? undefined : amount(line.regularUnitPriceMinor)}
+            lineTotal={amount(display(line.id).amountMinor)} showPrice={showPrice}
+            quantitySlot={<LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
+              onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }} />} />
+          {/* Under the Item column (CartLine's w-12 Qty cell and the name's px-3). The keypad writes nothing for 0, so
+              the line has its own Remove. */}
+          <HStack space="md" className="-mt-2 pb-1 pl-15 pr-3">
+            <Button testID={`line-discount-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
+              onPress={() => setForm({ lineId: line.id })}>
+              <Text className="text-xs">Discount</Text>
+            </Button>
+            {canEditPrice && <Button testID={`line-price-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
+              onPress={() => setForm({ lineId: line.id, kind: 'price' })}><Text className="text-xs">Price</Text></Button>}
+            <Button testID={`line-remove-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
+              accessibilityLabel={`Remove ${line.name}`} onPress={() => sale.remove(line.id)}>
+              <Text className="text-xs text-destructive">Remove</Text>
+            </Button>
           </HStack>
           {line.discounts.length ? (
             <View testID={`line-discounts-${line.sku || line.id}`} className="pb-2">
@@ -176,5 +189,6 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
         </VStack>
       }
     />
+    </View>
   );
 }
