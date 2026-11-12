@@ -271,8 +271,18 @@ test('one click from a fresh visit at phone width', async ({ page }) => {
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  // The v2 frame: Sign out is in the cashier sheet and Settings in the drawer, each one tap behind the bar.
+  await expect(page.getByTestId('register-bar-cashier')).toBeInViewport();
+  await expect(page.getByTestId('register-bar-menu')).toBeInViewport();
+  await page.getByTestId('register-bar-cashier').click();
   await expect(page.getByTestId('sign-out')).toBeInViewport();
+  await expect(page.getByTestId('sign-out')).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('cashier-sheet')).toHaveCount(0);
+  await page.getByTestId('register-bar-menu').click();
   await expect(page.getByTestId('settings-open')).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('nav-drawer')).toHaveCount(0);
   await expect(page.getByTestId('register-open-panel')).toBeInViewport();
   await page.getByTestId('register-open-panel').click();
   await expect(page.getByTestId('register-panel-dismiss')).toBeInViewport();

@@ -520,12 +520,14 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
   for (const id of ['signed-in-store', 'sign-out', 'pay-cash', 'pay-card', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
     await expect(page.getByTestId(id)).toBeHidden();
   }
+  await expect(page.getByTestId('nav-rail')).toBeHidden();
   // On screen, all of it is back (the Pay buttons went with the cart at the tender).
   await page.emulateMedia({ media: 'screen' });
   await expect(page.getByText('VendurePOS', { exact: true })).toBeVisible();
   for (const id of ['signed-in-store', 'sign-out', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
     await expect(page.getByTestId(id)).toBeVisible();
   }
+  await expect(page.getByTestId('nav-rail')).toBeVisible();
 });
 
 type SentCommand = { id: string; type: string; payload: Record<string, unknown> };
