@@ -6,6 +6,7 @@ describe('tillNavEntries', () => {
     expect(tillNavEntries({ ordersShown: false, registerShown: false, rejected: 0 })).toEqual([
       { id: 'pos', label: 'POS' },
       { id: 'settings', label: 'Settings', group: 'bottom' },
+      { id: 'support', label: 'Support', group: 'bottom' },
     ]);
   });
 
@@ -15,6 +16,7 @@ describe('tillNavEntries', () => {
       { id: 'orders', label: 'Orders', badge: 2 },
       { id: 'register', label: 'Register' },
       { id: 'settings', label: 'Settings', group: 'bottom' },
+      { id: 'support', label: 'Support', group: 'bottom' },
     ]);
     expect(tillNavEntries({ ordersShown: true, registerShown: false, rejected: 0 })[1]).toEqual({ id: 'orders', label: 'Orders' });
   });

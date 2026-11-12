@@ -1,4 +1,4 @@
-export type TillNavId = 'pos' | 'orders' | 'register' | 'settings';
+export type TillNavId = 'pos' | 'orders' | 'register' | 'settings' | 'support';
 
 export interface TillNavEntry {
   id: TillNavId;
@@ -9,7 +9,7 @@ export interface TillNavEntry {
 
 /**
  * The frame's nav items (spec B1): POS always; Orders where the orders store is open, badged with the orders that need
- * attention; Register while the session is open; Settings at the foot.
+ * attention; Register while the session is open; Settings and Support at the foot.
  */
 export function tillNavEntries({ ordersShown, registerShown, rejected }: {
   ordersShown: boolean; registerShown: boolean; rejected: number;
@@ -18,6 +18,7 @@ export function tillNavEntries({ ordersShown, registerShown, rejected }: {
   if (ordersShown) entries.push({ id: 'orders', label: 'Orders', ...(rejected > 0 ? { badge: rejected } : {}) });
   if (registerShown) entries.push({ id: 'register', label: 'Register' });
   entries.push({ id: 'settings', label: 'Settings', group: 'bottom' });
+  entries.push({ id: 'support', label: 'Support', group: 'bottom' });
   return entries;
 }
 
