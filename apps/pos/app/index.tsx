@@ -14,6 +14,7 @@ import {
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
+import { AddToast, useAddToast } from '../lib/add-toast';
 import { useCameraScanner } from '../lib/camera-scan';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
@@ -441,10 +442,13 @@ function Sale({
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   const onProducts = !wide && tab === 'products';
+  // v2's "<name> added to cart" toast, for an add the sale took (never a refused one).
+  const toast = useAddToast();
   function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts, scanned = false) {
     // Only the cart takes new lines: a tender or a receipt is for the sale as it stands (a scan has just left them).
     if (stage.kind !== 'cart' && !scanned) return;
-    sale.add(entry, connector.traits.product);
+    const added = sale.add(entry, connector.traits.product);
+    if (typeof added === 'object' && added.lineId) toast.show(added.lineId);
     setScanNotice(null);
     // Confirmed in place: on Products the Cart tab's count and total tick up and the tab lights up briefly; where the
     // cart shows, the line lights up.
@@ -571,6 +575,8 @@ function Sale({
       <ParkedSales sale={sale} parked={parked}
         onDiscard={async (id) => { await drafts!.findOne(id).exec().then((doc) => doc?.remove()); }}
         currency={session.settings.currency} open={parkedOpen} onOpenChange={setParkedOpen} />
+      {/* A line removed meanwhile shows nothing. */}
+      <AddToast name={sale.order.lineItems.find((line) => line.id === toast.lineId)?.name ?? null} />
     </View>
   );
 }

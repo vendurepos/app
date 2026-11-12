@@ -751,7 +751,7 @@ test('a demo visitor attaches a customer and sees it on the receipt', async ({ p
   await page.getByTestId('open-register-amount').fill('100.00');
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
-  await page.getByTestId('customer-add').click();
+  await page.getByTestId('customer-chip').click();
   await page.getByLabel('Search customers').fill('ada');
   await page.getByTestId('customer-picker').getByText('Ada Lovelace', { exact: true }).click();
   await expect(page.getByTestId('sale-customer')).toContainText('Ada Lovelace');
@@ -782,7 +782,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await page.getByTestId('open-register-amount').fill('100.00');
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
-  await expect(page.getByTestId('sale-customer')).toHaveText('Customer: Ada Lovelace');
+  await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
@@ -791,10 +791,10 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
   await page.getByTestId('new-sale').click();
-  await expect(page.getByTestId('sale-customer')).toHaveText('Customer: Ada Lovelace');
+  await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
   await page.getByTestId('customer-remove').click();
   await expect(page.getByTestId('sale-customer')).toHaveCount(0);
-  await expect(page.getByTestId('customer-add')).toBeVisible();
+  await expect(page.getByTestId('customer-chip')).toContainText('Guest');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expect(page.getByTestId('sale-customer')).toHaveCount(0);
   await checkout(page);
@@ -807,6 +807,30 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await page.getByTestId('default-customer-clear').click();
   await expect(page.getByTestId('default-customer')).toHaveText('Default customer: none (guest sales)');
   await page.getByTestId('settings-back').click();
+});
+
+test("a demo cashier sees Guest in the cart's customer chip and a toast when an item is added", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+  await expect(page.getByTestId('customer-row')).toContainText('Customer');
+  await expect(page.getByTestId('customer-chip')).toContainText('Guest');
+
+  // The mug's cart line is named as the product.
+  const toast = page.getByTestId('add-toast');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+  await expect(toast).toBeVisible();
+  await expect(toast).toHaveText('Tally Fixture Mug added to cart');
+  await expect(toast).toBeHidden({ timeout: 5000 });
+
+  // One more on the same line toasts too.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(toast).toBeVisible();
 });
 
 test('the till follows the device\'s dark scheme and prints its receipt in light', async ({ page }) => {
