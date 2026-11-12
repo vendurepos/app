@@ -4,7 +4,7 @@ import { Redirect, Stack, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
-  SplitTender, SyncStatus, TabsTrigger, Text, VStack, type OrderHistoryRow,
+  SyncStatus, TabsTrigger, TenderPane, Text, VStack, type OrderHistoryRow,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
@@ -38,7 +38,6 @@ import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register
 import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
-import { SaleTender } from '../lib/sale-tender';
 import { defaultStore, tillIdentity, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { SignInAgain } from '../lib/sign-in-again';
@@ -49,6 +48,7 @@ import { SyncNowControl } from '../lib/sync-now-control';
 import { CashierSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
+import { tenderTyped, useTillTender } from '../lib/till-tender';
 import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
 import { useCatalogueView } from '../lib/use-catalogue-view';
@@ -411,10 +411,7 @@ function Sale({
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
-  const [split, setSplit] = useState(false);
-  useEffect(() => {
-    if (stage.kind === 'cart') setSplit(false);
-  }, [stage.kind]);
+  const tender = useTillTender(sale);
   const currency = session.settings.currency;
   // The register refuses to count or close under a tender.
   useEffect(() => {
@@ -422,11 +419,9 @@ function Sale({
     return () => onTender(false);
   }, [stage.kind, onTender]);
   const [payError, setPayError] = useState<string>();
-  async function pay(method: 'cash' | 'external' | 'split') {
-    setSplit(method === 'split');
+  async function checkout() {
     setPayError(undefined);
-    // Split starts a cash tender with no payment; SplitTender adds each one (ADR-072).
-    setPayError(await startTenderInSession(register, sale, method === 'split' ? 'cash' : method));
+    setPayError(await startTenderInSession(register, sale, 'cash'));
   }
   const format = useCurrencyFormatter();
   // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes a
@@ -461,7 +456,7 @@ function Sale({
         </Button>
       ) : null}
       <SaleCustomer sale={sale} connector={connector} session={session} />
-      <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onPay={(method) => void pay(method)} payGate={payGate} payError={payError}
+      <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
     </>
   );
@@ -471,11 +466,11 @@ function Sale({
   // A scan is intent to sell (Front desk, 2026-09-30; docs/scan-policy.md): it closes the Orders or Register panel (and a
   // cash-movement sheet), and an add shows its line on the Cart tab. The register counting or closing adds nothing and
   // says so. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the
-  // cart (Back to the cart), then adds. A payment entered (cash typed, a card tender's own payment) or saving is this sale
-  // being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
+  // cart (Back to the cart), then adds. A payment taken, cash typed on the keypad (a cleared entry does not count), or
+  // saving is this sale being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
   useWedgeScanner((code) => {
     const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
-    const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0);
+    const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0 || tenderTyped(tender.state));
     if (panelOpen) onClosePanels();
     if (!entry) return setScanNotice({ notFound: code });
     if (registerClosing) return setScanNotice('finish-closing');
@@ -516,7 +511,7 @@ function Sale({
         </Portal>
       ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
-      <View dataSet={{ print: 'hide' }} className="flex-1" style={!wide && tab === 'cart' ? { display: 'none' } : undefined}>
+      <View dataSet={{ print: 'hide' }} className="flex-1" style={(!wide && tab === 'cart') || (wide && stage.kind === 'tender') ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
@@ -534,10 +529,17 @@ function Sale({
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
         />
       </View>
+      {wide && stage.kind === 'tender' ? (
+        <View dataSet={{ print: 'hide' }} className="flex-1">
+          <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>
+        </View>
+      ) : null}
       <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
-        {stage.kind !== 'cart' ? (
+        {stage.kind === 'tender' ? (wide ? (
+          <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
+            highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
+        ) : <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>) : stage.kind === 'receipt' ? (
           <ScrollView>
-            {split ? <SplitTender sale={sale} /> : <SaleTender sale={sale} />}
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
           </ScrollView>
         ) : register.session?.status === 'conflict' ? cart(
@@ -549,7 +551,7 @@ function Sale({
             {cart()}
           </RegisterColumn>
         ) : cart(registerReady
-          // The cart stays usable with no session; only Pay waits for the register to open (INTEGRATION.md).
+          // The cart stays usable with no session; only Checkout waits for the register to open (INTEGRATION.md).
           ? <OpenRegisterCard register={register} currency={currency} className="mt-2 border border-border" />
           : <Text className="mt-2 text-sm text-muted-foreground">Opening the register…</Text>)}
       </View>

@@ -43,12 +43,12 @@ export function TaxRows({ label, amount, testID, rates }: {
 }
 
 /**
- * The cart and its Cash, Card and Split Pay buttons. `onPay` starts the tender (through the register's gate); `payGate`, when given, stands
- * in for the Pay buttons (the open-register card while no session is open), and `payError` says why a Pay was refused.
+ * The cart and its Checkout button. `onCheckout` starts the tender (through the register's gate); `payGate`, when given,
+ * replaces Checkout, and `payError` says why checkout was refused. `locked` shows the cart beside a tender without edits or checkout.
  * `highlightSku` lights up that line, as an add confirms in place.
  */
-export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEditPrice, taxClasses }: {
-  sale: ReturnType<typeof useSale>; onPay(method: 'cash' | 'external' | 'split'): void; payGate?: ReactNode; payError?: string;
+export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, canEditPrice, taxClasses, locked }: {
+  sale: ReturnType<typeof useSale>; onCheckout(): void; payGate?: ReactNode; payError?: string; locked?: boolean;
   highlightSku?: string; canEditPrice: boolean;
   taxClasses: { id: string; label: string }[];
 }) {
@@ -63,7 +63,7 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
   const totals = cartTotals(order);
   const row = (label: string, amount: number, testID: string, strong = false) =>
     <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
-  const empty = !order.lineItems.length; // Pay stays disabled: the plugin refuses a fees-only order (ADR 0005).
+  const empty = !order.lineItems.length; // Checkout stays disabled: the plugin refuses a fees-only order (ADR 0005).
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_CHARGES;
   const [removeError, setRemoveError] = useState<string | null>(null);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
@@ -88,26 +88,26 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
               <Text testID={`cart-${kind === 'fees' ? 'fee' : 'shipping'}-${index}-amount`} className="text-sm">
                 {money(order.display[kind]!.find((row) => row.id === charge.id)!.amountMinor)}
               </Text>
-              <Button variant="outline" size="sm" accessibilityLabel={`Remove ${charge.name}`} onPress={() => {
+              {!locked && <Button variant="outline" size="sm" accessibilityLabel={`Remove ${charge.name}`} onPress={() => {
                 const refusal = kind === 'fees' ? sale.removeFee(charge.id) : sale.removeShipping(charge.id);
                 setRemoveError(typeof refusal === 'string' ? refusal : null);
-              }}><Text>Remove</Text></Button>
+              }}><Text>Remove</Text></Button>}
             </HStack>
           )))}
           {!empty && <>
             {order.discounts.length ? (
-              <View testID="order-discounts">
+              <View testID="order-discounts" pointerEvents={locked ? 'none' : undefined}>
                 <DiscountChips discounts={order.discounts} amounts={orderAmounts} currency={order.currency} onRemove={sale.removeDiscount}
                   prefix="Order discount" />
               </View>
             ) : null}
-            {discountForm(null, 'Order discount') ?? (
+            {!locked && (discountForm(null, 'Order discount') ?? (
               <Button testID="order-discount" variant="outline" size="sm" className="mx-3 self-start" onPress={() => setForm({ lineId: null })}>
                 <Text>Order discount</Text>
               </Button>
-            )}
+            ))}
           </>}
-          {chargesOffered && (form?.kind === 'charge' ? (
+          {!locked && chargesOffered && (form?.kind === 'charge' ? (
             <ChargeForm currency={order.currency} lineTax={sale.capabilities?.lineTax} taxClasses={taxClasses} shippingTaxFromStore={false}
               onClose={() => setForm(null)} onApply={({ kind, name, amountMinor, taxStatus, taxClass }) => {
                 if (kind === 'shipping' && (order.shipping?.length ?? 0) >= MAX_SHIPPING_LINES) return SHIPPING_SINGLE_REFUSAL;
@@ -127,16 +127,16 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
           {highlightSku && line.sku && line.sku === highlightSku ? (
             <View testID={`cart-line-highlight-${line.sku || line.id}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
           ) : null}
-          {/* As TallyUI's Cart with lineEditor="popover": the quantity opens v2's keypad. The total is before any
+          {/* When editable, as TallyUI's Cart with lineEditor="popover": the quantity opens v2's keypad. The total is before any
               discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them. */}
           <CartLine name={line.name} attributes={line.attributes} quantity={line.quantity} unitPrice={amount(line.unitPriceMinor)}
             regularUnitPrice={line.regularUnitPriceMinor === undefined ? undefined : amount(line.regularUnitPriceMinor)}
             lineTotal={amount(display(line.id).amountMinor)} showPrice={showPrice}
-            quantitySlot={<LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
+            quantitySlot={locked ? undefined : <LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
               onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }} />} />
           {/* Under the Item column (CartLine's w-12 Qty cell and the name's px-3). The keypad writes nothing for 0, so
               the line has its own Remove. */}
-          <HStack space="md" className="-mt-2 pb-1 pl-15 pr-3">
+          {!locked && <HStack space="md" className="-mt-2 pb-1 pl-15 pr-3">
             <Button testID={`line-discount-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
               onPress={() => setForm({ lineId: line.id })}>
               <Text className="text-xs">Discount</Text>
@@ -147,15 +147,15 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
               accessibilityLabel={`Remove ${line.name}`} onPress={() => sale.remove(line.id)}>
               <Text className="text-xs text-destructive">Remove</Text>
             </Button>
-          </HStack>
+          </HStack>}
           {line.discounts.length ? (
-            <View testID={`line-discounts-${line.sku || line.id}`} className="pb-2">
+            <View testID={`line-discounts-${line.sku || line.id}`} className="pb-2" pointerEvents={locked ? 'none' : undefined}>
               <DiscountChips discounts={line.discounts} amounts={display(line.id).discounts} currency={order.currency}
                 onRemove={sale.removeDiscount} />
             </View>
           ) : null}
-          {discountForm(line.id, `Discount on ${line.name}`)}
-          {canEditPrice && form?.lineId === line.id && form.kind === 'price' && (
+          {!locked && discountForm(line.id, `Discount on ${line.name}`)}
+          {!locked && canEditPrice && form?.lineId === line.id && form.kind === 'price' && (
             <PriceForm lineName={line.name} currency={order.currency} currentMinor={line.unitPriceMinor}
               onApply={(minor) => { const refusal = sale.setUnitPrice(line.id, minor); if (!refusal) setForm(null); return refusal; }}
               onClose={() => setForm(null)} />
@@ -173,19 +173,11 @@ export function SaleCart({ sale, onPay, payGate, payError, highlightSku, canEdit
             rates={totals.taxRows.map((tax) => ({ key: tax.label, name: tax.name, amount: money(tax.amountMinor) }))} />
           <HStack space="none" className="mt-1 border-t border-border pt-2" />
           {row('Total', totals.totalMinor, 'cart-total', true)}
-          {payGate ?? (
-            <HStack space="sm" className="mt-2">
-              <Button testID="pay-cash" className="flex-1" disabled={empty} onPress={() => onPay('cash')}>
-                <Text>Pay cash</Text>
-              </Button>
-              <Button testID="pay-card" variant="secondary" className="flex-1" disabled={empty} onPress={() => onPay('external')}>
-                <Text>Pay by card</Text>
-              </Button>
-              <Button testID="pay-split" variant="outline" disabled={empty} onPress={() => onPay('split')}>
-                <Text>Split</Text>
-              </Button>
-            </HStack>
-          )}
+          {!locked && (payGate ?? (
+            <Button testID="checkout" className="mt-2" disabled={empty} onPress={onCheckout}>
+              <Text>{`Checkout ${money(totals.totalMinor)}`}</Text>
+            </Button>
+          ))}
         </VStack>
       }
     />
