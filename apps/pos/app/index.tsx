@@ -14,6 +14,7 @@ import {
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
+import { useCameraScanner } from '../lib/camera-scan';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { ClosureHistory } from '../lib/closure-history-sheet';
@@ -38,6 +39,7 @@ import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register
 import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
+import { loadCameraPanelHeight, saveCameraPanelHeight } from '../lib/scanner-settings';
 import { defaultStore, tillIdentity, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { SignInAgain } from '../lib/sign-in-again';
@@ -468,7 +470,8 @@ function Sale({
   // says so. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the
   // cart (Back to the cart), then adds. A payment taken, cash typed on the keypad (a cleared entry does not count), or
   // saving is this sale being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
-  useWedgeScanner((code) => {
+  /** A scanned code, from the wedge or the camera: docs/scan-policy.md. Returns true only when it added. */
+  function onScan(code: string): true | void {
     const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
     const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0 || tenderTyped(tender.state));
     if (panelOpen) onClosePanels();
@@ -480,7 +483,11 @@ function Sale({
     if (panelOpen) setTab('cart');
     add(entry, panelOpen || !onProducts, true);
     return true;
-  });
+  }
+  useWedgeScanner(onScan);
+  const camera = useCameraScanner(onScan);
+  const catalogueHidden = (!wide && tab === 'cart') || (wide && stage.kind === 'tender');
+  const [cameraHeight] = useState(() => loadCameraPanelHeight());
   const notice = scanNotice === 'finish-sale' ? (
     <Text testID="scan-finish-sale" className="text-sm text-muted-foreground">Finish this sale before scanning the next item.</Text>
   ) : scanNotice === 'finish-closing' ? (
@@ -511,11 +518,14 @@ function Sale({
         </Portal>
       ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
-      <View dataSet={{ print: 'hide' }} className="flex-1" style={(!wide && tab === 'cart') || (wide && stage.kind === 'tender') ? { display: 'none' } : undefined}>
+      <View dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
           {...catalogueView}
+          cameraScan={Platform.OS === 'web'}
+          // The panel unmounts while the catalogue is hidden, so the camera is let go.
+          cameraScanner={catalogueHidden ? undefined : { ...camera, height: cameraHeight, onHeightChange: (height) => saveCameraPanelHeight(height) }}
           showCategoryNav
           showViewToggle
           loading={!lastSyncedAt && !error}
