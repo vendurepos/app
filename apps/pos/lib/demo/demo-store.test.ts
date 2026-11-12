@@ -8,6 +8,7 @@ import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
 import { orderDetailView } from '../order-detail';
 import { readCapabilities } from '../use-sale-settings';
+import { buildRefundEnvelope, type RefundTill } from '../till-refund';
 import { logout } from '../logout';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
@@ -108,9 +109,9 @@ it('signs in through the app, checks the barcode field and reads the seeded tax 
 });
 
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
-  expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5] }, maxShippingLines: 1, lineTax: { none: true, classes: true } });
+  expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5], 'order.refund': [1] }, maxShippingLines: 1, lineTax: { none: true, classes: true } });
   expect(await readCapabilities(await signedIn(), createVendureConnector())).toEqual({
-    orderCreate: 5, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
+    orderCreate: 5, orderRefund: 1, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
     lineTax: { none: true, classes: true },
   });
 });
@@ -527,4 +528,113 @@ it('Reset demo removes created customers', async () => {
   installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
   expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.id))
     .toEqual(['c2', 'c4', 'c6', 'c5', 'c1', 'c7', 'c3', 'c8']);
+});
+
+// The till the refund tests open: register 'register', session 'session', float EUR 10.00.
+const OPEN = register('register.session.open', 'open', { sessionId: 'session', registerId: 'register', openedAt: TIME, countedFloatMinor: 1000 });
+const TILL: RefundTill = { sessionId: 'session', registerId: 'register', deviceId: 'till', cashierRef: 'cashier@demo.vendurepos.com' };
+// Three mugs paid unevenly by cash and card (a till card payment is method 'external'), with ORDER's tax shape.
+const SPLIT: CommandEnvelope<OrderCreatePayload> = { ...ORDER, id: 'split-command', payload: { ...ORDER.payload, clientOrderId: 'split',
+  lines: [{ ...ORDER.payload.lines[0], quantity: 3 }], subtotalMinor: 2400, taxMinor: 456, totalMinor: 2856,
+  payments: [{ clientPaymentId: 'cash', method: 'cash', amountMinor: 2000 }, { clientPaymentId: 'card', method: 'external', amountMinor: 856 }],
+  display: { ...ORDER.payload.display!, subtotalMinor: 2400, taxMinor: 456, totalMinor: 2856, lines: [{ clientLineId: 'line', amountMinor: 2400, discounts: [] }] },
+  taxByRate: [{ ratePpm: 190000, code: 'Standard DE', netMinor: 2400, taxMinor: 456, grossMinor: 2856 }] } };
+
+async function detail(session: Session, id: string) {
+  const order = await getVendureOrder(sessionContext(session), id);
+  if (!order) throw new Error(`No order ${id}`);
+  return order;
+}
+
+/** The app's own envelope refunding `quantity` of the order's first line, with restock, under ids named after `name`. */
+function refundEnvelope(order: Awaited<ReturnType<typeof detail>>, quantity: number, name: string, till = TILL) {
+  return buildRefundEnvelope(order, { quantities: { [order.lines[0].id]: quantity }, reason: 'Damaged', restock: true }, till,
+    { id: `${name}-command`, clientRefundId: name, now: TIME });
+}
+
+/** The live session's expected cash, read from a register command's result. */
+async function expectedCash(session: Session, id: string) {
+  const [result] = await send(session, register('register.session.transition', id, { sessionId: 'session', status: 'open', at: TIME }));
+  return result.register!.session!.expected!.cash;
+}
+
+it('refunds a till sale a mug at a time: on the order, back in stock, out of expected cash, then nothing left', async () => {
+  const session = await signedIn();
+  expect((await send(session, OPEN, ORDER)).map(result => result.status)).toEqual(['applied', 'applied']);
+  const sold = await mugStock(session);
+  const before = await detail(session, '4');
+  expect(await expectedCash(session, 'cash-sold')).toBe(2904);
+  const [first] = await send(session, refundEnvelope(before, 1, 'first'));
+  expect(first).toMatchObject({ status: 'applied', refund: { totalMinor: 952, byMethod: { cash: 952 } } });
+  expect(first.refund!.refunds).toEqual([{ id: '1', paymentId: '4-p1', totalMinor: 952, state: 'Settled' }]);
+  expect(await mugStock(session)).toBe(sold + 1);
+  expect((await detail(session, '4')).payments![0].refunds)
+    .toEqual([expect.objectContaining({ total: 952, state: 'Settled', lines: [{ orderLineId: '4-1', quantity: 1 }] })]);
+  expect(await expectedCash(session, 'cash-first')).toBe(1952);
+  const [second] = await send(session, refundEnvelope(await detail(session, '4'), 1, 'second'));
+  expect(second).toMatchObject({ status: 'applied', refund: { totalMinor: 952 } });
+  const [third] = await send(session, refundEnvelope(before, 1, 'third'));
+  expect(third).toMatchObject({ status: 'rejected', error: { code: 'quantity_exceeds' } });
+  expect((third.error!.data as { lines: { refundableQuantity: number }[] }).lines[0].refundableQuantity).toBe(0);
+});
+
+it('replays an applied refund as a duplicate and refuses its refund id under a new command id', async () => {
+  const session = await signedIn();
+  await send(session, OPEN, ORDER);
+  const envelope = refundEnvelope(await detail(session, '4'), 1, 'once');
+  const [applied] = await send(session, envelope);
+  expect(applied.status).toBe('applied');
+  expect(await send(session, envelope)).toEqual([{ ...applied, status: 'duplicate' }]);
+  expect((await send(session, { ...envelope, id: 'another-command' }))[0])
+    .toMatchObject({ status: 'rejected', error: { code: 'invalid_payload', message: 'clientRefundId: once is already refund 1' } });
+});
+
+it('refuses a total a cent off without recording it, so the right total under the same id applies', async () => {
+  const session = await signedIn();
+  await send(session, OPEN, ORDER);
+  const envelope = refundEnvelope(await detail(session, '4'), 1, 'cent');
+  expect((await send(session, { ...envelope, payload: { ...envelope.payload, totalMinor: 951 } }))[0]).toMatchObject({ status: 'rejected',
+    error: { code: 'amount_mismatch', message: "Refund total 951 does not match the server's 952", data: { expectedMinor: 951, serverMinor: 952 } } });
+  expect((await send(session, envelope))[0].status).toBe('applied');
+});
+
+it('refuses an unsupported version and a session that is not open, recording neither', async () => {
+  const session = await signedIn();
+  await send(session, OPEN, ORDER);
+  const envelope = refundEnvelope(await detail(session, '4'), 1, 'nope', { ...TILL, sessionId: 'nope' });
+  expect((await send(session, { ...envelope, version: 2 } as unknown as AnyCommandEnvelope))[0].error)
+    .toMatchObject({ code: 'unsupported_version', data: { orderRefund: 1 } });
+  expect((await send(session, envelope))[0].error).toEqual({ code: 'no_open_session',
+    message: 'Session nope is not open on register register', data: { sessionId: 'nope' } });
+});
+
+it('splits a refund over cash then card, with the lines on the first refund only', async () => {
+  const session = await signedIn();
+  await send(session, OPEN, SPLIT);
+  const [applied] = await send(session, refundEnvelope(await detail(session, '4'), 3, 'uneven'));
+  expect(applied).toMatchObject({ status: 'applied', refund: { totalMinor: 2856, byMethod: { cash: 2000, external: 856 } } });
+  expect(applied.refund!.refunds.map(refund => [refund.paymentId, refund.totalMinor])).toEqual([['4-p1', 2000], ['4-p2', 856]]);
+  const { payments } = await detail(session, '4');
+  expect(payments![0].refunds[0].lines).toEqual([{ orderLineId: '4-1', quantity: 3 }]);
+  expect(payments![1].refunds[0].lines).toEqual([]);
+});
+
+it('a saved demo state from before refunds loads, reads the seeded orders and takes a refund', async () => {
+  const session = await signedIn();
+  await send(session, OPEN, ORDER);
+  const saved = JSON.parse(values.get(DEMO_STORAGE_KEY)!);
+  delete saved.refunds;
+  values.set(DEMO_STORAGE_KEY, JSON.stringify(saved));
+  installed.uninstall();
+  installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
+  expect((await detail(session, '1')).customFields?.tallyClientOrderId).toBe('seed-order-1');
+  expect((await send(session, refundEnvelope(await detail(session, '4'), 1, 'old')))[0].status).toBe('applied');
+});
+
+it('counts a refund of a seeded order in the session that made it', async () => {
+  const session = await signedIn();
+  await send(session, OPEN);
+  const [applied] = await send(session, refundEnvelope(await detail(session, '1'), 1, 'seeded'));
+  expect(applied).toMatchObject({ status: 'applied', refund: { totalMinor: 952, byMethod: { cash: 952 } } });
+  expect(await expectedCash(session, 'cash-seeded')).toBe(1000 - 952);
 });

@@ -22,6 +22,7 @@
  * POST /tally/v1/commands (register.movement.record) — apps/pos/app/index.tsx via order-transport.ts.
  * POST /tally/v1/commands (register.movement.void) — apps/pos/app/index.tsx via order-transport.ts.
  * POST /tally/v1/commands (register.closure.submit) — apps/pos/lib/closure-hold.ts via order-transport.ts.
+ * POST /tally/v1/commands (order.refund) — apps/pos/lib/refund-sheet.tsx via till-refund.ts and order-transport.ts.
  */
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, type DemoStorage } from './store';
