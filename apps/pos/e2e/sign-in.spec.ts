@@ -1711,16 +1711,17 @@ test('a split sale, part cash and part card, is applied by the plugin with both 
   const sent = page.waitForResponse((response) => response.request().method() === 'POST'
     && response.url().endsWith('/tally/v1/commands') && (response.request().postData() ?? '').includes('order.create'));
   await page.getByTestId('pay-split').click();
-  await page.getByTestId('split-tender-method-cash').click();
-  await page.getByTestId('split-tender-amount').fill('5');
-  await page.getByTestId('split-tender-add-button').click();
-  await expect(page.getByTestId('split-tender-complete')).toBeDisabled();
-  await page.getByTestId('split-tender-method-card').click();
-  // SplitTender pre-fills the remaining balance after adding the cash payment.
-  await page.getByTestId('split-tender-add-button').click();
-  await expect(page.locator('[data-testid^="split-tender-row-"]')).toHaveCount(2);
-  await expect(page.getByTestId('split-tender-complete')).toBeEnabled();
-  await page.getByTestId('split-tender-complete').click();
+  await page.getByTestId('tender-method-cash').click();
+  // The keypad has no decimal key: digits shift in from the right, so 5, 0, 0 is €5.00.
+  for (const key of ['5', '0', '0']) await page.getByTestId(`tender-keypad-key-${key}`).click();
+  await page.getByTestId('tender-take').click();
+  await expect(page.getByTestId('tender-complete')).toBeDisabled();
+  await page.getByTestId('tender-method-external').click();
+  // The pane pre-types the remaining balance after the cash payment is taken.
+  await page.getByTestId('tender-take').click();
+  await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"])')).toHaveCount(2);
+  await expect(page.getByTestId('tender-complete')).toBeEnabled();
+  await page.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   const response = await sent;
   expect(response.status()).toBe(200);
