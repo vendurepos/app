@@ -889,6 +889,32 @@ test('a demo cashier pays cash with a quick amount: the cart is locked beside th
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
 });
 
+// Row 6.4: a refusal during a tender reaches the cashier as its message alone (TallyUI errorText), never the class name.
+test('a demo cashier who closes the register during a checkout is told to finish the sale, in plain words', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender).toBeVisible();
+
+  await page.getByTestId('register-open-panel').click();
+  const panel = page.getByTestId('register-panel');
+  await panel.getByTestId('register-panel-close').click();
+  await expect(panel.getByText('Finish or cancel the sale in progress first.', { exact: true })).toBeVisible();
+  await expect(panel).not.toContainText('RegisterTenderInProgressError');
+  await expect(panel).not.toContainText('Error:');
+  await expect(page.getByTestId('register-count')).toHaveCount(0);
+
+  await panel.getByTestId('register-panel-dismiss').click();
+  await expect(panel).toHaveCount(0);
+  await expect(tender).toBeVisible();
+});
+
 test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
