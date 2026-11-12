@@ -147,7 +147,7 @@ test('the camera scan button adds what the camera sees once, follows the scan ru
   await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.cameraStreams.length)).toBe(streamsBeforeHide + 1);
   await expect.poll(() => page.evaluate(() => window.cameraStreams.at(-1)!.getTracks().some((track) =>
-    track.readyState === 'live')))).toBe(true);
+    track.readyState === 'live'))).toBe(true);
 });
 
 test("Settings takes the scanner's prefix and suffix off each scan, and scan sounds tell a hit from a miss", async ({ page }) => {
