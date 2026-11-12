@@ -21,8 +21,8 @@ import { MICROS_PER_MINOR, roundMicrosToMinor, taxMicros } from '../../../packag
 
 const packageRequire = createRequire(import.meta.url);
 const tallyuiVersion: string = packageRequire(join(dirname(packageRequire.resolve('@tallyui/pos')), '../package.json')).version;
-const envelopePath = fileURLToPath(new URL('../../../packages/vendure-plugin/test/fixtures/discount-matrix.json', import.meta.url));
-const frozenPath = fileURLToPath(new URL('./__fixtures__/pos-orders-tallyui-3.19.0.json', import.meta.url));
+const envelopePath = fileURLToPath(new URL('../../../packages/vendure-plugin/test/fixtures/discount-matrix.json', import.meta.url).href);
+const frozenPath = fileURLToPath(new URL('./__fixtures__/pos-orders-tallyui-3.19.0.json', import.meta.url).href);
 const now = new Date('2026-11-12T10:00:00.000Z');
 const matrix = (['per_line_items', 'per_rate_group_items'] as const).flatMap((granularity) =>
   (['exclusive', 'inclusive'] as const).flatMap((mode) =>
@@ -170,7 +170,7 @@ describe('the till discount totals and frozen 3.19.0 orders', () => {
 
   it('requires a coupon cell before the till applies coupons', async () => {
     for (const directory of ['../app', '.']) {
-      const root = fileURLToPath(new URL(directory, import.meta.url));
+      const root = fileURLToPath(new URL(directory, import.meta.url).href);
       for (const file of await readdir(root, { recursive: true })) {
         if (!/\.tsx?$/.test(file) || /\.(test|spec)\.tsx?$/.test(file) || file.split('/').includes('__tests__')) continue;
         const source = await readFile(join(root, file), 'utf8');
