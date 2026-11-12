@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **9 / 56** rows at parity (round 4, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **11 / 56** rows at parity (round 5, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -56,11 +56,11 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [ ] **2.1 Open carts as tabs.** Every cart stays open by itself, and a strip under the cart shows "Guest $83.03 …", a count and "+ New"; one tap switches. VendurePOS has one sale and an explicit Park dialog. *Shared:* a cart-tabs strip (`ParkedSales` is the closest piece). *App:* several live carts.
 - [x] **2.2 One "Checkout €total" button** opening the checkout screen (section 3). Done (spec B3): the cart foot has one "Checkout €total" button in place of Pay cash, Pay by card and Split.
 - [ ] **2.3 Customer chip in the cart header** ("GU Guest", with an address pin). VendurePOS has an "Add customer" button. *App.*
-- [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. *Left:* the price popover (2.7).
+- [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. The price popover followed in spec B4 (2.7).
 - [ ] **2.5 Line shows the variant's attributes** ("Size: 32 · Color: Blue") **and a struck-through regular price** on sale items. VendurePOS shows "name · variant" and no regular price. *App/connector.*
-- [ ] **2.6 Tap the quantity for a keypad popover** (− / +, 0–9, Done). *Shared:* a keypad popover. Mostly done (spec B2): tapping a line's quantity opens TallyUI 3.18.0's `LinePopover` keypad (0–9, delete, Apply, Cancel), and each line has its own Remove. *Left:* the keypad has no − / + keys.
-- [ ] **2.7 Tap the price for a keypad with quick discounts** (−5 / −10 / −15 %). VendurePOS has a price dialog and a separate discount dialog per line. *App.*
-- [ ] **2.8 Quiet lines.** WCPOS shows Edit / Remove on hover. VendurePOS shows Discount, Price and Remove links on every line. *App.*
+- [ ] **2.6 Tap the quantity for a keypad popover** (− / +, 0–9, Done). *Shared:* a keypad popover. Mostly done (spec B2): tapping a line's quantity opens TallyUI 3.18.0's `LinePopover` keypad (0–9, delete, Apply, Cancel), with the line's Discount and Remove as its actions (spec B4). *Left:* the keypad has no − / + keys.
+- [x] **2.7 Tap the price for a keypad with quick discounts** (−5 / −10 / −15 %). Done (spec B4): when the till allows price edits, tapping a line's price opens TallyUI's `LinePopover` price keypad. It has v2's −5 / −10 / −15 % quick keys and strikes through the regular price when the line is sold below it. When the Price column folds (narrow cart or phone), Price is an action in the quantity keypad and opens the price form.
+- [x] **2.8 Quiet lines.** WCPOS shows Edit / Remove on hover. Done (spec B4): the line shows only quantity, name, price and total. Discount and Remove are actions in the line's quantity keypad, one tap away, the touch-first equivalent of v2's hover (a till tablet has no hover).
 - [x] **2.9 Itemised tax lines in the totals.** VendurePOS shows "incl. Reduced DE 7 %" and "incl. Standard DE 19 %", Vendure's way.
 - [ ] **2.10 "+" menu:** misc product, fee, shipping, discount, new customer. VendurePOS's "Add charge" covers fee, shipping and custom item. Missing: a percentage fee and an "amount includes tax" switch. *App.*
 - [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. *App + plugin* (order note and void).
@@ -216,3 +216,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 2 | 2026-11-12 | 4 / 56 | B1 frame: 1.2. |
 | 3 | 2026-11-12 | 6 / 56 | B2 cart: 1.4, 2.4. |
 | 4 | 2026-11-12 | 9 / 56 | B3 checkout: 2.2, 3.3, 3.4; 3.1 and 3.2 mostly done. |
+| 5 | 2026-11-12 | 11 / 56 | B4 cart lines: 2.7, 2.8. |
