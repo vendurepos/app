@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **11 / 56** rows at parity (round 5, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **12 / 56** rows at parity (round 6, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -129,7 +129,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
   VendurePOS has top-bar buttons. *App;* store and register switching need *plugin* support.
 - [ ] **6.2 Register panel header:** the drawer total, "open since 03:12 · 11 h 34 m", other tenders, and Print X-report in the panel. VendurePOS has the same functions without that header, and X report sits in the top bar. *App.*
 - [ ] **6.3 Pay in / pay out reason chips** (Float, Change, Bank, Other). VendurePOS has a free-text reason. *App.*
-- [ ] **6.4 Close register: a cashier never sees a raw error.** Closing during a tender shows "RegisterTenderInProgressError: Finish or cancel…". *App:* a bug.
+- [x] **6.4 Close register: a cashier never sees a raw error.** The capture showed "RegisterTenderInProgressError: Finish or cancel…" when closing during a tender. Done (spec B5): TallyUI 3.19.0's register panel and count show a refusal's message alone (`errorText`). A demo e2e now pins it: Close register during a checkout says "Finish or cancel the sale in progress first.", opens no count, and leaves the checkout open.
 - [x] **6.5 Count the drawer by denomination at close.**
 - [ ] **6.6 Several registers per store, picked on the device** ("Which register is this device at?"). *Plugin + app.*
 
@@ -217,3 +217,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 3 | 2026-11-12 | 6 / 56 | B2 cart: 1.4, 2.4. |
 | 4 | 2026-11-12 | 9 / 56 | B3 checkout: 2.2, 3.3, 3.4; 3.1 and 3.2 mostly done. |
 | 5 | 2026-11-12 | 11 / 56 | B4 cart lines: 2.7, 2.8. |
+| 6 | 2026-11-12 | 12 / 56 | B5 close during a tender: 6.4 (a regression test; the fix came with TallyUI 3.19.0). |
