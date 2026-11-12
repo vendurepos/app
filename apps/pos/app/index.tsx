@@ -25,6 +25,7 @@ import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
 import { toOrderHistoryRow, useOrderHistory } from '../lib/order-history';
+import { OrderReceipt } from '../lib/order-receipt';
 import { OrderSheet } from '../lib/order-sheet';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
 import { orderTransport } from '../lib/order-transport';
@@ -279,13 +280,13 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {ordersOpen ? (
         <VStack testID="orders-panel" className="flex-1">
-          <HStack className="border-b border-border px-4 py-2">
+          <HStack dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
             <Button testID="orders-close" variant="secondary" size="sm" onPress={() => { setOrdersOpen(false); setOpenOrder(null); }}>
               <Text>Back to sale</Text>
             </Button>
           </HStack>
           {history.notice ? (
-            <HStack className="items-center border-b border-border px-4 py-2" space="sm">
+            <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
               <Text testID="orders-history-notice" className="flex-1 text-sm text-muted-foreground">{history.notice.text}</Text>
               {history.notice.retry ? (
                 <Button testID="orders-history-retry" variant="secondary" size="sm" disabled={history.loading} onPress={history.reload}>
@@ -296,7 +297,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           ) : null}
           {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} footer={(order, reload) => <RefundSheet order={order}
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
-            capabilities={readSettingsCapabilities} onRefunded={reload} />} /> : <OrdersList orders={outbox.recent}
+            capabilities={readSettingsCapabilities} onRefunded={reload} />}
+            receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back} />} /> : <OrdersList orders={outbox.recent}
             onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows} formatDate={(iso) => new Date(iso).toLocaleString()}
             onOpen={setOpenOrder} />}
         </VStack>

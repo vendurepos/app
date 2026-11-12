@@ -53,7 +53,7 @@ type DemoRefund = {
 type RefundableOrder = {
   id: string; shippingWithTax: number; customFields: { tallyClientOrderId: string };
   lines: { id: string; quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string } }[];
-  payments: { id: string; amount: number; metadata: { tallyMethod: string } }[];
+  payments: { id: string; amount: number; metadata: { tender: { method: string } } }[];
 };
 type State = {
   customers: Customer[];
@@ -275,7 +275,7 @@ export class DemoStore {
     });
     return {
       ...summary, active: false, couponCodes: [], discounts: [], fulfillments: [],
-      customFields: { ...summary.customFields as Record<string, unknown>, tallyPayments: null, tallyShipping: null,
+      customFields: { ...summary.customFields as Record<string, unknown>, tallyPayments: JSON.stringify(payload.payments), tallyShipping: null,
         tallySnapshot: JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate }) },
       lines, surcharges, shippingLines,
       subTotal: netShares.reduce((sum, share) => sum + share, 0), subTotalWithTax: grossShares.reduce((sum, share) => sum + share, 0),
@@ -286,7 +286,7 @@ export class DemoStore {
         ?? [{ description: 'Tax', taxRate: 0, taxBase: payload.totalMinor - payload.taxMinor, taxTotal: payload.taxMinor }],
       payments: payload.payments.map((payment, index) => ({ id: `${id}-p${index + 1}`, method: DEMO_PAYMENT_METHOD,
         amount: payment.amountMinor, state: 'Settled', transactionId: payment.clientPaymentId, createdAt: payload.createdAt,
-        metadata: { tallyMethod: payment.method },
+        metadata: { tender: payment },
         refunds: this.state.refunds.filter(refund => refund.orderId === id && refund.paymentIndex === index).map(refund => ({
           id: refund.id, total: refund.total, items: refund.total - refund.shipping, shipping: refund.shipping, adjustment: 0,
           state: 'Settled', reason: refund.reason, lines: refund.lines,
@@ -456,7 +456,7 @@ export class DemoStore {
         id: String(this.state.refunds.length + 1), orderId: order.id, paymentIndex: index, total: share,
         shipping: refunds.length ? 0 : shippingMinor,
         lines: refunds.length ? [] : lines.map(({ input }) => ({ orderLineId: input.orderLineId, quantity: input.quantity })),
-        reason: p.reason, clientRefundId: p.clientRefundId, sessionId: p.sessionId, method: payment.metadata.tallyMethod,
+        reason: p.reason, clientRefundId: p.clientRefundId, sessionId: p.sessionId, method: payment.metadata.tender.method,
       };
       this.state.refunds.push(stored);
       refunds.push({ id: stored.id, paymentId: payment.id, totalMinor: share, state: 'Settled' });

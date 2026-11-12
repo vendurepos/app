@@ -1,4 +1,4 @@
-import { Fragment, type JSX, type ReactNode } from 'react';
+import { Fragment, useState, type JSX, type ReactNode } from 'react';
 import { Button, HStack, OrderDetail, Text, VStack, type OrderHistoryRow } from '@tallyui/components';
 import type { VendureOrder } from '@tallyui/connector-vendure';
 import type { PosOrder } from '@tallyui/pos';
@@ -6,20 +6,28 @@ import { ORDER_LOADING_TEXT, orderDetailTarget, orderDetailView, useOrderDetail 
 import type { Session } from './session';
 
 /** One order's read-only detail from the store, opened from the Orders panel. */
-export function OrderSheet({ session, row, onClose, footer }: {
+export function OrderSheet({ session, row, onClose, footer, receipt }: {
   session: Session; row: PosOrder | OrderHistoryRow; onClose(): void;
   /** Rendered in OrderDetail's footerSlot once the order is loaded; reload re-reads it from the store. */
   footer?: (order: VendureOrder, reload: () => void) => ReactNode;
+  /** The loaded order's receipt, shown in place of the detail after Receipt; back returns to the detail. */
+  receipt?: (order: VendureOrder, back: () => void) => ReactNode;
 }): JSX.Element {
   const target = orderDetailTarget(row);
   const { order, notice, loading, reload } = useOrderDetail(session, 'orderId' in target ? target.orderId : null);
+  const [showReceipt, setShowReceipt] = useState(false);
   const view = order ? orderDetailView(order) : null;
   return (
     <VStack testID="order-sheet" className="flex-1">
-      <HStack className="border-b border-border px-4 py-2">
+      <HStack dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
         <Button testID="order-sheet-close" variant="secondary" size="sm" onPress={onClose}>
           <Text>Back to orders</Text>
         </Button>
+        {order && receipt && !showReceipt ? (
+          <Button testID="order-sheet-receipt" variant="secondary" size="sm" onPress={() => setShowReceipt(true)}>
+            <Text>Receipt</Text>
+          </Button>
+        ) : null}
       </HStack>
       {'note' in target ? (
         <Text testID="order-sheet-note" className="px-4 py-2 text-sm text-muted-foreground">{target.note}</Text>
@@ -37,7 +45,7 @@ export function OrderSheet({ session, row, onClose, footer }: {
           ) : null}
         </HStack>
       ) : null}
-      {order && view ? (
+      {order && receipt && showReceipt ? receipt(order, () => setShowReceipt(false)) : order && view ? (
         <OrderDetail testID="order-sheet-detail" orderNumber={view.orderNumber} status={view.status} lineItems={view.lineItems}
           subtotal={view.subtotal} tax={view.tax} total={view.total}
           paymentSlot={(
