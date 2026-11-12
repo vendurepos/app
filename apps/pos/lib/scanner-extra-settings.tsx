@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Platform } from 'react-native';
 import { Button, Input, InputField, Label, Text } from '@tallyui/components';
 import { loadScannerAffixes, loadScanSounds, saveScannerAffixes, saveScanSounds } from './scanner-settings';
+import { ScannerTestArea } from './scanner-test-area';
 
 /** Settings › Scanner: the prefix and suffix taken off each scan, and scan sounds. */
 export function ScannerExtraSettings(): JSX.Element {
@@ -30,5 +31,6 @@ export function ScannerExtraSettings(): JSX.Element {
         setSounds(!sounds);
       }}><Text>Scan sounds: {sounds ? 'On' : 'Off'}</Text></Button>
     </>}
+    <ScannerTestArea />
   </>;
 }

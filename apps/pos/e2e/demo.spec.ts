@@ -195,6 +195,55 @@ test("Settings takes the scanner's prefix and suffix off each scan, and scan sou
   await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: On');
 });
 
+test("Settings' barcode test shows a scan and its last key, and adds nothing to the sale", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('scanner-prefix').fill('*');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await expect(page.getByTestId('scanner-test-code')).toHaveText('None yet');
+  await wedgeScan(page, '*TALLY-MUG');
+  await expect(page.getByTestId('scanner-test-code')).toHaveText('TALLY-MUG');
+  await expect(page.getByTestId('scanner-test-key')).toContainText('Enter');
+  await page.getByTestId('scanner-prefix').fill('');
+  await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('cart')).not.toContainText('Tally Fixture Mug');
+  // The till listens again once it has the focus back.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test('a scan on the demo sign-in screen adds nothing to the next sale', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('register-bar-cashier').click();
+  await page.getByTestId('sign-out').click();
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await wedgeScan(page, 'TALLY-MUG');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  if (await page.getByTestId('open-register-card').count()) {
+    await page.getByTestId('open-register-amount').fill('100.00');
+    await page.getByTestId('open-register-button').click();
+    await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  }
+  await expect(page.getByTestId('cart')).not.toContainText('Tally Fixture Mug');
+  await expect(page.getByTestId('scan-not-found')).toHaveCount(0);
+});
+
 async function orderEntries(page: Page) {
   await page.getByTestId('orders-open').click();
   const entries = page.getByTestId('orders-panel').getByText(ORDER_ENTRY);
