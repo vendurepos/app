@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 
 declare global {
@@ -252,7 +253,7 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   await page.getByTestId('product-tile-Postcard Set').click();
   await expectTotals('€46.95', '€5.69', '€52.64', { 'Standard DE 19%': '€3.80', 'Reduced DE 7%': '€1.89' });
   // Remove takes the mug off: Standard 1198 x 19 % = 227.62 -> 228, so 417 (per_order 416).
-  await cart.getByTestId('line-remove-TALLY-MUG').click();
+  await lineAction(page, 'TALLY-MUG', 'remove');
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
   await expectTotals('€38.95', '€4.17', '€43.12', { 'Standard DE 19%': '€2.28', 'Reduced DE 7%': '€1.89' });
   // Cash 50.00 for the €43.12 total: €6.88 change.
@@ -646,8 +647,9 @@ test('a discounted sale: line and order discounts, paid, and applied by the plug
   const cart = page.getByTestId('cart');
   await openRegister(page);
   // TallyUI's DiscountForm: Percent or Amount, the value, Apply.
-  const discount = async (open: string, form: string, type: 'Percent' | 'Amount', value: string) => {
-    await cart.getByTestId(open).click();
+  const discount = async (open: string | (() => Promise<void>), form: string, type: 'Percent' | 'Amount', value: string) => {
+    if (typeof open === 'string') await cart.getByTestId(open).click();
+    else await open();
     const group = cart.getByRole('group', { name: form });
     await group.getByRole('button', { name: type }).click();
     await group.getByLabel('Discount value').fill(value);
@@ -661,7 +663,7 @@ test('a discounted sale: line and order discounts, paid, and applied by the plug
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('product-tile-Filter Coffee').click();
-  await discount('line-discount-TALLY-MUG', 'Discount on Tally Fixture Mug', 'Percent', '10');
+  await discount(() => lineAction(page, 'TALLY-MUG', 'discount'), 'Discount on Tally Fixture Mug', 'Percent', '10');
   await discount('order-discount', 'Order discount', 'Amount', '1.00');
   await expect(cart.getByTestId('line-discounts-TALLY-MUG').getByRole('button')).toHaveAccessibleName('Remove discount 10% −€1.60');
   await expect(cart.getByTestId('line-discounts-FIL-500')).toHaveCount(0);
@@ -703,7 +705,7 @@ test('a discounted sale: line and order discounts, paid, and applied by the plug
   await receipt.getByTestId('new-sale').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expectFigures('cart', { total: '€9.52' });
-  await discount('line-discount-TALLY-MUG', 'Discount on Tally Fixture Mug', 'Percent', '10');
+  await discount(() => lineAction(page, 'TALLY-MUG', 'discount'), 'Discount on Tally Fixture Mug', 'Percent', '10');
   await discount('order-discount', 'Order discount', 'Amount', '1.00');
   // 800 − 80 − 100 = 620, tax 117.8 -> 118: 738.
   await expectFigures('cart', { discount: '−€1.80', total: '€7.38' });

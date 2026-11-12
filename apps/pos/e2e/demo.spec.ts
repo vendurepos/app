@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
+import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 
 declare global {
@@ -689,11 +690,11 @@ test('a demo cashier changes a line\'s price and sells at it', async ({ page }) 
   await page.getByTestId('open-register-button').click();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('line-price-TALLY-MUG').click();
-  const priceForm = page.getByTestId('price-form');
-  await priceForm.getByRole('textbox', { name: 'Price value', exact: true }).fill('5.00');
-  await priceForm.getByRole('button', { name: 'Apply', exact: true }).click();
   const cart = page.getByTestId('cart');
+  await cart.getByTestId('cart-line-TALLY-MUG').getByTestId('price-popover-trigger').click();
+  await page.getByTestId('price-popover-keypad-key-5').click();
+  await expect(page.getByTestId('price-popover-value')).toHaveText('5');
+  await page.getByTestId('price-popover-apply').click();
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toContainText('€5.00');
   await expect(cart.getByTestId('cart-total')).toHaveText('€5.95');
   await checkout(page);
@@ -704,6 +705,48 @@ test('a demo cashier changes a line\'s price and sells at it', async ({ page }) 
   const receiptLine = page.getByTestId('receipt').getByText('1 × Tally Fixture Mug', { exact: true });
   await expect(receiptLine).toBeVisible();
   await expect(receiptLine.locator('..').getByText('€5.00', { exact: true })).toBeVisible();
+});
+
+test('a demo cashier takes 10 % off a line on its price keypad, and lines keep their actions in the quantity keypad', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const line = page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG');
+  await expect(line.getByRole('button', { name: 'Discount', exact: true })).toHaveCount(0);
+  await expect(line.getByTestId('line-remove-TALLY-MUG')).toHaveCount(0);
+  await line.getByTestId('price-popover-trigger').click();
+  await page.getByTestId('price-discount-10').click();
+  await page.getByTestId('price-popover-apply').click();
+  await expect(line).toContainText('€7.20');
+  await expect(page.getByTestId('cart').getByTestId('cart-total')).toHaveText('€8.57');
+  await line.getByTestId('quantity-popover-trigger').click();
+  await expect(page.getByTestId('quantity-popover-action-discount')).toBeVisible();
+  await expect(page.getByTestId('quantity-popover-action-remove')).toBeVisible();
+  await expect(page.getByTestId('quantity-popover-action-price')).toHaveCount(0);
+  await page.getByTestId('quantity-popover-action-remove').click();
+  await expect(line).toHaveCount(0);
+});
+
+test('at phone width the price keypad folds into the line\'s quantity keypad', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('tab-cart').click();
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('tab-products').click();
+  await page.getByRole('searchbox').fill('Mug');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('tab-cart').click();
+  await expect(page.getByTestId('cart').getByTestId('price-popover-trigger')).toHaveCount(0);
+  await lineAction(page, 'TALLY-MUG', 'price');
+  await expect(page.getByTestId('price-form')).toBeVisible();
 });
 
 test('a demo cashier parks a sale, sells another, then resumes the parked one', async ({ page }) => {
@@ -830,7 +873,8 @@ test('a demo cashier pays cash with a quick amount: the cart is locked beside th
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeHidden();
   const cart = page.getByTestId('cart');
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
-  await expect(cart.getByTestId('line-remove-TALLY-MUG')).toHaveCount(0);
+  await expect(cart.getByTestId('quantity-popover-trigger')).toHaveCount(0);
+  await expect(cart.getByTestId('price-popover-trigger')).toHaveCount(0);
   await expect(cart.getByTestId('checkout')).toHaveCount(0);
   await expect(cart.getByTestId('add-charge')).toHaveCount(0);
   await page.getByTestId('tender-quick-5000').click();

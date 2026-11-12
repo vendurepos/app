@@ -4,6 +4,7 @@ import {
   Button, CartColumnHeads, CartLine, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, LinePopover, PriceForm, Text, VStack,
 } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
+import { lineActionIds, QUICK_DISCOUNTS } from './cart-line-actions';
 import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
 import { MIN_ORDER_CREATE_CHARGES } from './use-sale-settings';
@@ -127,27 +128,23 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
           {highlightSku && line.sku && line.sku === highlightSku ? (
             <View testID={`cart-line-highlight-${line.sku || line.id}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
           ) : null}
-          {/* When editable, as TallyUI's Cart with lineEditor="popover": the quantity opens v2's keypad. The total is before any
-              discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them. */}
+          {/* The quantity keypad carries the line's Discount and Remove, because the keypad writes nothing for 0.
+              The total is before any discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them. */}
           <CartLine name={line.name} attributes={line.attributes} quantity={line.quantity} unitPrice={amount(line.unitPriceMinor)}
             regularUnitPrice={line.regularUnitPriceMinor === undefined ? undefined : amount(line.regularUnitPriceMinor)}
             lineTotal={amount(display(line.id).amountMinor)} showPrice={showPrice}
             quantitySlot={locked ? undefined : <LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
-              onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }} />} />
-          {/* Under the Item column (CartLine's w-12 Qty cell and the name's px-3). The keypad writes nothing for 0, so
-              the line has its own Remove. */}
-          {!locked && <HStack space="md" className="-mt-2 pb-1 pl-15 pr-3">
-            <Button testID={`line-discount-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
-              onPress={() => setForm({ lineId: line.id })}>
-              <Text className="text-xs">Discount</Text>
-            </Button>
-            {canEditPrice && <Button testID={`line-price-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
-              onPress={() => setForm({ lineId: line.id, kind: 'price' })}><Text className="text-xs">Price</Text></Button>}
-            <Button testID={`line-remove-${line.sku || line.id}`} variant="link" size="sm" className="h-7 self-start px-0"
-              accessibilityLabel={`Remove ${line.name}`} onPress={() => sale.remove(line.id)}>
-              <Text className="text-xs text-destructive">Remove</Text>
-            </Button>
-          </HStack>}
+              onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }}
+              actions={lineActionIds({ canEditPrice, priceShown: showPrice }).map((id) => {
+                switch (id) {
+                  case 'discount': return { id, label: 'Discount', onPress: () => setForm({ lineId: line.id }) };
+                  case 'price': return { id, label: 'Price', onPress: () => setForm({ lineId: line.id, kind: 'price' }) };
+                  case 'remove': return { id, label: 'Remove', destructive: true, onPress: () => sale.remove(line.id) };
+                }
+              })} />}
+            priceSlot={!locked && canEditPrice ? <LinePopover kind="price" lineName={line.name} currency={order.currency} value={line.unitPriceMinor}
+              regularValue={line.regularUnitPriceMinor} quickDiscounts={QUICK_DISCOUNTS} textClassName="text-right text-muted-foreground"
+              onApply={(minor) => sale.setUnitPrice(line.id, minor)} /> : undefined} />
           {line.discounts.length ? (
             <View testID={`line-discounts-${line.sku || line.id}`} className="pb-2" pointerEvents={locked ? 'none' : undefined}>
               <DiscountChips discounts={line.discounts} amounts={display(line.id).discounts} currency={order.currency}
