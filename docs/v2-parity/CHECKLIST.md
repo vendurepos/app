@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **12 / 56** rows at parity (round 6, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **14 / 56** rows at parity (round 7, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -35,11 +35,11 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
 - [ ] **1.1 Navigation rail.** Wide screens show a left icon rail (POS, Products, Orders, Customers, Reports; Store health, Settings and Support at the foot; the version number), and phones get a drawer. Done (spec B1, TallyUI 3.18.0 `AppShell`): the rail on wide screens and the drawer on phones, with POS, Orders (badged with orders that need attention), Register and Settings. *Left:* Products, Customers, Reports, Store health and Support have no screens in VendurePOS yet, and the rail shows no version number.
 - [x] **1.2 Compact header.** One slim bar reading "Store · Register", with a bell and the cashier's avatar. Done (spec B1): one `RegisterBar` row (the name, the register pill, the signed-in store, last synced and Sync now on wide screens, the Register door, the avatar); the avatar opens a cashier sheet with X report, Closures and Sign out; the demo banner is one slim row. A single-register store shows no register name, as in v2. No bell: VendurePOS has no notifications yet.
-- [ ] **1.3 Product images on tiles.** *App/shared:* the Vendure connector needs `featuredAsset`, and the tile needs an image slot. VendurePOS tiles are text only.
+- [x] **1.3 Product images on tiles.** *App/shared:* the Vendure connector needs `featuredAsset`, and the tile needs an image slot. Done (checked in round 7, no code change): TallyUI's `Catalogue` grid tile renders the product image, the Vendure connector reads `featuredAsset` and then `assets[0]`, and the till's CSP allows `https:` images. On demo.vendurepos.com on 2026-11-12, 30 of 30 tiles showed a loaded picture, at both wide and phone width.
 - [x] **1.4 In-cart quantity badge on a tile.** *Shared:* the tile. Done (spec B2): the till passes its cart lines to TallyUI 3.18.0's `Catalogue`, whose grid tiles show the count.
 - [ ] **1.5 Browse by category.** Coloured category poster tiles with counts, a breadcrumb ("Categories › All products"), then the products. VendurePOS shows every product, with category chips. *App, Vendure way:* collections.
-- [ ] **1.6 Filter pills.** In stock, On sale, Featured, Tag and Brand, with a searchable picker per pill. *Vendure way:* in stock, on sale, plus one pill per facet. *Shared:* `FilterChipGroup` exists in 3.12.0, so the work is the *app* wiring and the facet reads.
-- [ ] **1.7 Camera scan button next to search.** Search itself is at parity. *App.*
+- [ ] **1.6 Filter pills.** In stock, On sale, Featured, Tag and Brand, with a searchable picker per pill. *Vendure way:* in stock, on sale, plus one pill per facet. *Shared:* `FilterChipGroup` exists in 3.12.0, so the work is the *app* wiring and the facet reads. *Round 7 finding:* TallyUI 3.20.0's `Catalogue` takes `showFilterBar` and `filterChips`, but it applies only the In stock chip itself. It never passes `ProductFilterBar` an `onTermPress`, so the term pills cannot open a picker. Facet pills therefore need a TallyUI change first (shared), and On sale needs a ruling on what "on sale" means for Vendure, which has no compare-at price.
+- [x] **1.7 Camera scan button next to search.** Search itself is at parity. *App.* Done (spec B6): on web the Products search has TallyUI 3.20.0's camera button and inline `CameraScannerPanel`, with a resizable height that is remembered. Every accepted read goes through the same scan handler as a wedge scan (`docs/scan-policy.md`). An item resting in view is added once. The camera is let go while the catalogue is hidden. *Left:* native (iOS/Android) has no camera viewfinder yet, so the button shows on web only.
 - [ ] **1.8 "Showing n of N" and infinite load at the foot of the grid.** *App.*
 - [ ] **1.9 Grid and table toggle.** Both demos have one, but the columns have not been compared. *App.*
 
@@ -218,3 +218,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 4 | 2026-11-12 | 9 / 56 | B3 checkout: 2.2, 3.3, 3.4; 3.1 and 3.2 mostly done. |
 | 5 | 2026-11-12 | 11 / 56 | B4 cart lines: 2.7, 2.8. |
 | 6 | 2026-11-12 | 12 / 56 | B5 close during a tender: 6.4 (a regression test; the fix came with TallyUI 3.19.0). |
+| 7 | 2026-11-12 | 14 / 56 | B6 camera scan: 1.7; 1.3 checked on the demo and already at parity (TallyUI 3.20.0). |
