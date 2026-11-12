@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
@@ -490,7 +490,14 @@ function Sale({
     add(entry, panelOpen || !onProducts, true);
     return true;
   }
-  useWedgeScanner(onScan);
+  // The till stays mounted under Settings (router.push), and a scan there must not add to a sale nobody can see: the
+  // wedge listens only while the till screen is focused.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(useCallback(() => {
+    setFocused(true);
+    return () => setFocused(false);
+  }, []));
+  useWedgeScanner(onScan, focused);
   const camera = useCameraScanner(onScan);
   const catalogueHidden = (!wide && tab === 'cart') || (wide && stage.kind === 'tender');
   const [cameraHeight] = useState(() => loadCameraPanelHeight());

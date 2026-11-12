@@ -35,10 +35,13 @@ function setValue(input: HTMLInputElement, value: string) {
  * A money field is the exception (Front desk, 2026-09-30: a barcode in an amount is a money error): a burst into it is
  * a scan too, and never reaches the field; typing at human speed stays typing.
  * Web only: a native hardware keyboard is out of scope, so on native this does nothing.
+ * While `active` is false the listener leaves every key alone: it prevents nothing, scans nothing and plays nothing.
  */
-export function useWedgeScanner(onScan: (code: string) => boolean | void) {
+export function useWedgeScanner(onScan: (code: string) => boolean | void, active = true) {
   const latest = useRef(onScan);
   useEffect(() => { latest.current = onScan; });
+  const activeRef = useRef(active);
+  useEffect(() => { activeRef.current = active; });
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     let burst = '';
@@ -68,6 +71,11 @@ export function useWedgeScanner(onScan: (code: string) => boolean | void) {
       settle = setTimeout(() => { if (performance.now() - lastKeyAt >= WEDGE_KEY_GAP_MS) flush(); }, 0);
     }
     function onKeyDown(event: KeyboardEvent) {
+      if (!activeRef.current) {
+        flush();
+        burst = '';
+        return;
+      }
       const target = event.target as HTMLElement | null;
       const money = moneyField(target);
       if (!money && (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable)) {

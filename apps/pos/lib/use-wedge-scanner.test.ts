@@ -306,3 +306,30 @@ it('types the rest of a burst whose first keys a pause put in a money field, Ent
   expect(counted.value).toBe(CODE);
   expect(enters).toHaveBeenCalledTimes(1);
 });
+
+it('an inactive scanner leaves a scanner-fast burst alone: no scan, no sound, and its Enter goes on', () => {
+  unmount();
+  useWedgeScanner(onScan, false);
+  saveScanSounds(true);
+  try {
+    type(CODE, WEDGE_GAP_MS);
+    expect(onScan).not.toHaveBeenCalled();
+    expect(playScanSound).not.toHaveBeenCalled();
+    expect(enters).toHaveBeenCalledTimes(1);
+  } finally {
+    defaultStore().removeItem(SCAN_SOUNDS_KEY);
+  }
+});
+
+// The react mock's useRef hands each call a new ref, so calling the hook again is a second listener beside the inactive
+// one, not the same listener's ref flipped: it shows the inactive listener does not get in the way of an active one.
+it('a scanner made active again scans', () => {
+  unmount();
+  useWedgeScanner(onScan, false);
+  type(CODE, WEDGE_GAP_MS);
+  expect(onScan).not.toHaveBeenCalled();
+  useWedgeScanner(onScan, true);
+  type(CODE, WEDGE_GAP_MS);
+  expect(onScan.mock.calls).toEqual([[CODE]]);
+  expect(enters).toHaveBeenCalledTimes(1);
+});
