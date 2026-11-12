@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **14 / 56** rows at parity (round 7, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **15 / 56** rows at parity (round 8, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -147,8 +147,8 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
 - [ ] **7.1 Orders as a full screen from the rail.** It has a table (status, number, customer, date, cashier, payment method, total), is grouped by day, and has paging. VendurePOS has a "Recent" list of cards. *App.*
 - [ ] **7.2 Order search and filters:** status, payment method, customer, cashier, register, date range. *App.*
-- [ ] **7.3 Order detail:** items, totals, payment, Receipt reprint. The order sheet (#214) is on `main`, but in this capture a tap on a seeded demo order showed nothing. *App:* verify on the demo.
-- [ ] **7.4 Refund from the order detail.** #216 is waiting on merge. *App.*
+- [ ] **7.3 Order detail:** items, totals, payment, Receipt reprint. *Round 8:* the demo now answers `order(id)`, so on demo.vendurepos.com a tap on a seeded order or on a till sale opens the order sheet with its items, totals and payment (demo e2e "opens a seeded order"). *Still missing:* Receipt reprint from a stored order; the till prints only the live sale's receipt. *App.*
+- [x] **7.4 Refund from the order detail.** Done in round 8: #216's refund sheet works on the demo too, because the demo store takes `order.refund` v1 under the plugin's rules (per-line shares, quantity left, split across payments, restock, expected cash). Demo e2e "refunds a mug from the order sheet".
 
 ## 8. Reports
 
@@ -219,3 +219,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 5 | 2026-11-12 | 11 / 56 | B4 cart lines: 2.7, 2.8. |
 | 6 | 2026-11-12 | 12 / 56 | B5 close during a tender: 6.4 (a regression test; the fix came with TallyUI 3.19.0). |
 | 7 | 2026-11-12 | 14 / 56 | B6 camera scan: 1.7; 1.3 checked on the demo and already at parity (TallyUI 3.20.0). |
+| 8 | 2026-11-12 | 15 / 56 | B7 demo orders: 7.4; 7.3 opens on the demo, receipt reprint still missing. |
