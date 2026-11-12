@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **19 / 56** rows at parity (round 11, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **20 / 56** rows at parity (round 12, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -33,7 +33,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 |---|---|
 | ![](demo-pairs/02-sell-empty-wcpos.webp) | ![](demo-pairs/02-sell-empty-vendurepos.webp) |
 
-- [ ] **1.1 Navigation rail.** Wide screens show a left icon rail (POS, Products, Orders, Customers, Reports; Store health, Settings and Support at the foot; the version number), and phones get a drawer. Done (spec B1, TallyUI 3.18.0 `AppShell`): the rail on wide screens and the drawer on phones, with POS, Orders (badged with orders that need attention), Register and Settings. *Left:* Products, Customers, Reports, Store health and Support have no screens in VendurePOS yet, and the rail shows no version number.
+- [ ] **1.1 Navigation rail.** Wide screens show a left icon rail (POS, Products, Orders, Customers, Reports; Store health, Settings and Support at the foot; the version number), and phones get a drawer. Done (spec B1, TallyUI 3.18.0 `AppShell`): the rail on wide screens and the drawer on phones, with POS, Orders (badged with orders that need attention), Register and Settings. Support is at the foot too (11.2, spec B11). *Left:* Products, Customers, Reports and Store health have no screens in VendurePOS yet, and the rail shows no version number (the Support sheet does).
 - [x] **1.2 Compact header.** One slim bar reading "Store · Register", with a bell and the cashier's avatar. Done (spec B1): one `RegisterBar` row (the name, the register pill, the signed-in store, last synced and Sync now on wide screens, the Register door, the avatar); the avatar opens a cashier sheet with X report, Closures and Sign out; the demo banner is one slim row. A single-register store shows no register name, as in v2. No bell: VendurePOS has no notifications yet.
 - [x] **1.3 Product images on tiles.** *App/shared:* the Vendure connector needs `featuredAsset`, and the tile needs an image slot. Done (checked in round 7, no code change): TallyUI's `Catalogue` grid tile renders the product image, the Vendure connector reads `featuredAsset` and then `assets[0]`, and the till's CSP allows `https:` images. On demo.vendurepos.com on 2026-11-12, 30 of 30 tiles showed a loaded picture, at both wide and phone width.
 - [x] **1.4 In-cart quantity badge on a tile.** *Shared:* the tile. Done (spec B2): the till passes its cart lines to TallyUI 3.18.0's `Catalogue`, whose grid tiles show the count.
@@ -203,7 +203,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | ![](demo-pairs/13-notifications-wcpos.webp) | — |
 
 - [ ] **11.1 Notifications bell and inbox.** *App.*
-- [ ] **11.2 Support entry in the rail.** *App:* for VendurePOS, docs and GitHub links in place of a chat widget.
+- [x] **11.2 Support entry in the rail.** *App:* for VendurePOS, docs and GitHub links in place of a chat widget. Done (spec B11): Support sits at the foot of the rail under Settings (in the drawer on phones) and opens a side sheet with the quick-start guide, "Report a problem on GitHub" and the app version; a scan closes it and adds, as for the Orders panel (demo e2e "Support at the foot of the rail").
 - N/A **11.3 Sign-in page.** WCPOS uses the store's WordPress login; VendurePOS has its own sign-in and a demo landing page. Neither is a POS screen to match.
 
 ---
@@ -223,3 +223,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 9 | 2026-11-12 | 16 / 56 | B8 receipt reprint: 7.3. |
 | 10 | 2026-11-12 | 18 / 56 | B9 cart header: 2.3 customer chip, 2.12 add toast; the address pin moves to 5.2. |
 | 11 | 2026-11-12 | 19 / 56 | B10 Settings: 9.4 barcode scanning test; the till's scanner listens only while the till is in front. |
+| 12 | 2026-11-12 | 20 / 56 | B11 rail: 11.2 Support with the quick start, GitHub issues and the version. |
