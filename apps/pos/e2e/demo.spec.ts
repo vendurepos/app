@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
-import { barcodeOf, CATALOGUE } from '../lib/demo/catalogue';
+import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
@@ -115,7 +115,8 @@ test('the camera scan button adds what the camera sees once, follows the scan ru
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   await page.getByTestId('camera-scan-button').click();
   await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
-  const mug = { code: barcodeOf(0), format: 'ean_13' };
+  // The demo signs in with no barcode field, so the camera reads the SKU, as the wedge test types it.
+  const mug = { code: 'TALLY-MUG', format: 'code_128' };
   await page.evaluate((seen) => { window.cameraSees = seen; }, mug);
   const line = page.getByTestId('cart-line-TALLY-MUG');
   const inCart = page.getByTestId(`in-cart-${MUG_PRODUCT_ID}`);
