@@ -589,7 +589,7 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   const paidInId = (await paidIn.getAttribute('data-testid'))!.replace('movement-row-', '');
   await panel.getByTestId(`movement-void-${paidInId}`).click();
   await expect(paidIn).toHaveCount(0);
-  await expect(panel.getByTestId('register-panel-sales-count')).toHaveText('2 sales this session');
+  await expect(panel.getByTestId('register-panel-session-sales')).toContainText('2 sales');
   // €100.00 + €9.52 − €5.00.
   await expect(panel.getByTestId('register-panel-expected')).toContainText('€104.52');
   await panel.getByTestId('register-panel-close').click();

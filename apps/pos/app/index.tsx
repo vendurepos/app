@@ -33,6 +33,7 @@ import { orderTransport } from '../lib/order-transport';
 import { startTenderInSession } from '../lib/pay-gate';
 import { loadPriceEditAllowed } from '../lib/price-edit-setting';
 import { printLines } from '../lib/print-lines';
+import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { isClosingStatus } from '../lib/register-conflict';
@@ -58,7 +59,6 @@ import { useCatalogue } from '../lib/use-catalogue';
 import { useCatalogueView } from '../lib/use-catalogue-view';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
-import { XReportButton } from '../lib/x-report-button';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
@@ -249,7 +249,6 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
         pending={pending} onSignOut={handleSignOut}>
-        <XReportButton register={register} store={store} currency={currency} timezone={TIMEZONE} actor={actor} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
@@ -339,7 +338,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       </View>
       {/* Dialogs, drawn through the root PortalHost. */}
       {/* Mounted only while open, so a scan that closes it closes a cash-movement sheet within it for good. */}
-      {registerPanelShown ? <RegisterPanel register={register} currency={currency} open onOpenChange={setRegisterOpen} /> : null}
+      {registerPanelShown ? <RegisterPanel register={register} currency={currency} open onOpenChange={setRegisterOpen} presentation="side" storeName={store}
+        onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })} /> : null}
       {closureShown && register.lastClosure ? (
         <>
           <ClosureSheet register={register} currency={currency} onPrint={printZ} onDone={() => setClosingSessionId(null)} />

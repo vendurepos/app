@@ -779,14 +779,58 @@ test('a demo till prints an X report mid-shift and stays open', async ({ page })
   const card = page.getByTestId('open-register-card');
   await card.getByTestId('open-register-amount').fill('100.00');
   await card.getByTestId('open-register-button').click();
-  await page.getByTestId('register-bar-cashier').click();
-  await page.getByTestId('register-print-x').click();
+  // v2 prints the X report from the register panel's footer (parity 6.2).
+  await page.getByTestId('register-open-panel').click();
+  const panel = page.getByTestId('register-panel');
+  await panel.getByTestId('register-panel-print').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(printed).toEqual(expect.arrayContaining([
     'X report · Register open', 'Sales 0', 'Opening float €100.00', 'Cash expected €100.00',
   ]));
-  await expect(page.getByTestId('register-print-x-error')).toHaveCount(0);
+  await expect(panel.getByTestId('register-panel-print-error')).toHaveCount(0);
+  await panel.getByTestId('register-panel-dismiss').click();
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
+});
+
+test("the register panel is v2's side sheet: store and session age, the drawer hero, other tenders and Print X-report", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  // One mug by card, €8.00 + 19 % = €9.52.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await page.getByTestId('new-sale').click();
+
+  await page.getByTestId('register-open-panel').click();
+  const panel = page.getByTestId('register-panel');
+  await expect(panel.getByTestId('register-panel-title')).toHaveText('Register');
+  const description = panel.getByTestId('register-panel-description');
+  await expect(description).toHaveText(/· open since \d{1,2}:\d{2} · \d+ m · Cashier$/);
+  // lib/demo/fetch.ts's DEMO_STORE_NAME (see DEMO_STORE_ORIGIN above for why it is not imported).
+  await expect(description).toContainText('VendurePOS demo store');
+  await expect(panel.getByTestId('register-panel-hero')).toContainText('€100.00');
+  await expect(panel.getByTestId('register-panel-hero')).toContainText('in the drawer');
+  await expect(panel.getByTestId('register-panel-session-sales')).toContainText('1 sale');
+  await expect(panel.getByTestId('register-panel-other-tenders')).toBeVisible();
+  await expect(panel.getByTestId('register-panel-other-tenders')).toContainText('€9.52');
+  await expect(panel.getByTestId('register-panel-print')).toBeVisible();
+  await expect(panel.getByTestId('register-panel-footer').getByTestId('register-panel-close')).toBeVisible();
+  const box = (await panel.boundingBox())!;
+  expect(box.x).toBeGreaterThan(page.viewportSize()!.width / 2);
+  await panel.getByTestId('register-panel-dismiss').click();
+
+  // The cashier sheet no longer has an X report: v2's avatar sheet has none.
+  await page.getByTestId('register-bar-cashier').click();
+  await expect(page.getByTestId('cashier-sheet')).toBeVisible();
+  await expect(page.getByTestId('register-print-x')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('cashier-sheet')).toHaveCount(0);
 });
 
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
