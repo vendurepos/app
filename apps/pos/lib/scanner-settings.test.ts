@@ -3,6 +3,7 @@ import {
   loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_KEY,
   loadScannerAffixes, saveScannerAffixes, stripScanAffixes, loadScanSounds, saveScanSounds,
   SCANNER_PREFIX_KEY, SCANNER_SUFFIX_KEY, SCAN_SOUNDS_KEY,
+  CAMERA_PANEL_HEIGHT_KEY, loadCameraPanelHeight, saveCameraPanelHeight,
 } from './scanner-settings';
 import type { KeyValueStore } from './session';
 
@@ -90,4 +91,27 @@ it('saves and loads scan sounds', () => {
   expect(loadScanSounds(store)).toBe(false);
   store.setItem(SCAN_SOUNDS_KEY, 'true');
   expect(loadScanSounds(store)).toBe(false);
+});
+
+it('camera panel height: nothing stored, out of range or not a number is undefined; a stored height in range is used', () => {
+  expect(loadCameraPanelHeight(store)).toBeUndefined();
+  for (const value of ['95', '481', '176.5', 'abc', '', 'NaN', 'Infinity']) {
+    store.setItem(CAMERA_PANEL_HEIGHT_KEY, value);
+    expect(loadCameraPanelHeight(store)).toBeUndefined();
+  }
+  for (const height of [96, 176, 480]) {
+    store.setItem(CAMERA_PANEL_HEIGHT_KEY, String(height));
+    expect(loadCameraPanelHeight(store)).toBe(height);
+  }
+});
+
+it('camera panel height: save rounds and stores in range, ignores out of range', () => {
+  for (const [height, stored] of [[95.6, '96'], [176.5, '177'], [480.4, '480']]) {
+    saveCameraPanelHeight(Number(height), store);
+    expect(store.getItem(CAMERA_PANEL_HEIGHT_KEY)).toBe(stored);
+  }
+  for (const height of [95.4, 480.5, NaN, Infinity, -Infinity]) {
+    saveCameraPanelHeight(height, store);
+    expect(store.getItem(CAMERA_PANEL_HEIGHT_KEY)).toBe('480');
+  }
 });

@@ -1,12 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
-import { CATALOGUE } from '../lib/demo/catalogue';
+import { barcodeOf, CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 
 declare global {
-  interface Window { printCalls: number; scanTones: number[] }
+  interface Window {
+    printCalls: number; scanTones: number[];
+    cameraStreams: MediaStream[];
+    cameraSees: { code: string; format: string } | null;
+  }
 }
 
 // lib/demo/fetch.ts's DEMO_STORE_ORIGIN, copied because fetch.ts imports a value from @tallyui/core, which Playwright's CommonJS loader cannot require.
@@ -76,6 +80,75 @@ async function wedgeScan(page: Page, code: string) {
     }
   }, [...code, 'Enter']);
 }
+
+test('the camera scan button adds what the camera sees once, follows the scan rules and lets the camera go while the catalogue is hidden', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.cameraStreams = [];
+    window.cameraSees = null;
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 48;
+        canvas.getContext('2d')!.fillRect(0, 0, 64, 48);
+        const stream = canvas.captureStream();
+        window.cameraStreams.push(stream);
+        return stream;
+      },
+    } });
+    Object.assign(window, { BarcodeDetector: class {
+      constructor({ formats }: { formats: string[] }) {
+        const supported = ['aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix', 'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'upc_a', 'upc_e'];
+        if (formats.some((format) => !supported.includes(format))) throw new TypeError('Unsupported barcode format');
+      }
+      async detect(source: unknown) {
+        if (!(source instanceof HTMLVideoElement)) throw new TypeError('Expected a video element');
+        return window.cameraSees ? [{ rawValue: window.cameraSees.code, format: window.cameraSees.format }] : [];
+      }
+    } });
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await page.getByTestId('camera-scan-button').click();
+  await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
+  const mug = { code: barcodeOf(0), format: 'ean_13' };
+  await page.evaluate((seen) => { window.cameraSees = seen; }, mug);
+  const line = page.getByTestId('cart-line-TALLY-MUG');
+  const inCart = page.getByTestId(`in-cart-${MUG_PRODUCT_ID}`);
+  await expect(line).toBeVisible();
+  await expect(inCart).toHaveText('1');
+  await page.waitForTimeout(2000);
+  await expect(inCart).toHaveText('1');
+  await page.evaluate(() => { window.cameraSees = null; });
+  await page.waitForTimeout(1500);
+  await page.evaluate((seen) => { window.cameraSees = seen; }, mug);
+  await expect(inCart).toHaveText('2');
+  await page.evaluate(() => { window.cameraSees = { code: 'NO-SUCH-CODE', format: 'qr_code' }; });
+  await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "NO-SUCH-CODE".');
+  await expect(inCart).toHaveText('2');
+  await page.evaluate(() => { window.cameraSees = null; });
+  const streamsBeforeHide = await page.evaluate(() => window.cameraStreams.length);
+  expect(streamsBeforeHide).toBeGreaterThan(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByTestId('tab-cart').click();
+  await expect.poll(() => page.evaluate(() => window.cameraStreams.every((stream) =>
+    stream.getTracks().every((track) => track.readyState === 'ended')))).toBe(true);
+  await page.evaluate((seen) => { window.cameraSees = seen; }, mug);
+  await page.waitForTimeout(1000);
+  await expect(line).toBeVisible();
+  if (await inCart.count()) await expect(inCart).toHaveText('2');
+  else await expect(line.getByTestId('quantity-popover-trigger')).toHaveText('2');
+  await page.evaluate(() => { window.cameraSees = null; });
+  await page.getByTestId('tab-products').click();
+  await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.cameraStreams.length)).toBe(streamsBeforeHide + 1);
+  await expect.poll(() => page.evaluate(() => window.cameraStreams.at(-1)!.getTracks().some((track) =>
+    track.readyState === 'live')))).toBe(true);
+});
 
 test("Settings takes the scanner's prefix and suffix off each scan, and scan sounds tell a hit from a miss", async ({ page }) => {
   await page.addInitScript(() => {

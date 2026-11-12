@@ -40,6 +40,19 @@ export function loadScanSounds(store: KeyValueStore = defaultStore()): boolean {
 export function saveScanSounds(on: boolean, store: KeyValueStore = defaultStore()): void {
   store.setItem(SCAN_SOUNDS_KEY, on ? '1' : '0');
 }
+
+export const CAMERA_PANEL_HEIGHT_KEY = 'vendurepos.scanner.cameraHeight';
+/** The camera panel's last height (v2 keeps it): a stored whole number in 96..480, else undefined (the panel's default). */
+export function loadCameraPanelHeight(store: KeyValueStore = defaultStore()): number | undefined {
+  const value = Number(store.getItem(CAMERA_PANEL_HEIGHT_KEY));
+  return Number.isInteger(value) && value >= 96 && value <= 480 ? value : undefined;
+}
+/** Stores Math.round(height) when that is in 96..480; anything else is ignored. */
+export function saveCameraPanelHeight(height: number, store: KeyValueStore = defaultStore()): void {
+  const rounded = Math.round(height);
+  if (rounded >= 96 && rounded <= 480) store.setItem(CAMERA_PANEL_HEIGHT_KEY, String(rounded));
+}
+
 /** Takes the prefix off the start and the suffix off what is left's end, each only when it matches exactly. */
 export function stripScanAffixes(code: string, { prefix, suffix }: ScanAffixes): string {
   if (prefix && code.startsWith(prefix)) code = code.slice(prefix.length);

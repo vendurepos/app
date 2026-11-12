@@ -13,6 +13,13 @@ taken; the receipt or a tender; then add. "Adds, line lit up" means the cart lin
 briefly (`cart-line-highlight-<SKU>`); "Cart tab lights up" means the narrow Cart tab's count and total tick up and
 the tab is highlighted (`tab-cart-highlight`) while the Products tab stays shown.
 
+A camera scan (web, the Products search's camera button, TallyUI's `CameraScannerPanel`) goes through the same
+`onScan` in `Sale` as a wedge scan, so every row below applies. It is not affix-stripped. A partial read under the
+shortest scan length is dropped silently. An item resting in view is added once (TallyUI `createScanSession`, continuous,
+1.2 s), and an EAN/UPC read with a bad check digit is dropped. Scan sounds are the same. While the catalogue is hidden
+(the narrow Cart tab, a wide tender), the panel is unmounted and the camera let go; showing the catalogue again reopens
+it. The camera is web only for now.
+
 | Surface | What a scan does | Where |
 |---|---|---|
 | Products tab (narrow), cart stage | Adds; the Cart tab lights up and Products stays shown. | `Sale`, `add(entry, !onProducts)` |
