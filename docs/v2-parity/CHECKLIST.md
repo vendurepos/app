@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **16 / 56** rows at parity (round 9, 2026-11-12). The two rows marked N/A are not counted.
+**Score:** **18 / 56** rows at parity (round 10, 2026-11-12). The two rows marked N/A are not counted.
 
 ---
 
@@ -55,7 +55,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
 - [ ] **2.1 Open carts as tabs.** Every cart stays open by itself, and a strip under the cart shows "Guest $83.03 …", a count and "+ New"; one tap switches. VendurePOS has one sale and an explicit Park dialog. *Shared:* a cart-tabs strip (`ParkedSales` is the closest piece). *App:* several live carts.
 - [x] **2.2 One "Checkout €total" button** opening the checkout screen (section 3). Done (spec B3): the cart foot has one "Checkout €total" button in place of Pay cash, Pay by card and Split.
-- [ ] **2.3 Customer chip in the cart header** ("GU Guest", with an address pin). VendurePOS has an "Add customer" button. *App.*
+- [x] **2.3 Customer chip in the cart header** ("GU Guest", with an address pin). Done (spec B9): the cart header reads "Customer" and a chip with an initials avatar and the customer's name, or Guest; the chip opens the customer picker and a small × removes the customer (demo e2e "sees Guest in the cart's customer chip"). The address pin opens v2's per-order address editor, so it moves to 5.2. *App.*
 - [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. The price popover followed in spec B4 (2.7).
 - [ ] **2.5 Line shows the variant's attributes** ("Size: 32 · Color: Blue") **and a struck-through regular price** on sale items. VendurePOS shows "name · variant" and no regular price. *App/connector.*
 - [ ] **2.6 Tap the quantity for a keypad popover** (− / +, 0–9, Done). *Shared:* a keypad popover. Mostly done (spec B2): tapping a line's quantity opens TallyUI 3.18.0's `LinePopover` keypad (0–9, delete, Apply, Cancel), with the line's Discount and Remove as its actions (spec B4). *Left:* the keypad has no − / + keys.
@@ -64,7 +64,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [x] **2.9 Itemised tax lines in the totals.** VendurePOS shows "incl. Reduced DE 7 %" and "incl. Standard DE 19 %", Vendure's way.
 - [ ] **2.10 "+" menu:** misc product, fee, shipping, discount, new customer. VendurePOS's "Add charge" covers fee, shipping and custom item. Missing: a percentage fee and an "amount includes tax" switch. *App.*
 - [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. *App + plugin* (order note and void).
-- [ ] **2.12 Toast when an item is added.** *App.*
+- [x] **2.12 Toast when an item is added.** Done (spec B9): every add the sale takes, by tap or scan, shows "<item> added to cart" at the top of the till for 2.5 s; a refused add shows none, and the toast never takes a tap (demo e2e "a toast when an item is added"). *App.*
 
 | WCPOS | VendurePOS |
 |---|---|
@@ -110,7 +110,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | ![](demo-pairs/06-customer-pick-wcpos.webp) | ![](demo-pairs/06-customer-pick-vendurepos.webp) |
 
 - [ ] **5.1 Customer picker** with avatars and a Guest row. VendurePOS's search, list and "New customer" are close. *App.*
-- [ ] **5.2 Per-order address editor:** billing, "shipping same as billing", company, tax ID. *App + plugin.*
+- [ ] **5.2 Per-order address editor:** billing, "shipping same as billing", company, tax ID, opened from an address pin beside the cart's customer chip (2.3). *App + plugin.*
 
 ## 6. Register and cashier
 
@@ -221,3 +221,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 7 | 2026-11-12 | 14 / 56 | B6 camera scan: 1.7; 1.3 checked on the demo and already at parity (TallyUI 3.20.0). |
 | 8 | 2026-11-12 | 15 / 56 | B7 demo orders: 7.4; 7.3 opens on the demo, receipt reprint still missing. |
 | 9 | 2026-11-12 | 16 / 56 | B8 receipt reprint: 7.3. |
+| 10 | 2026-11-12 | 18 / 56 | B9 cart header: 2.3 customer chip, 2.12 add toast; the address pin moves to 5.2. |
