@@ -244,6 +244,64 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await expect(detail).toContainText(mug.name);
 });
 
+test("a demo cashier reprints a finished sale's receipt from the order sheet and prints it alone", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await expect(card).toHaveCount(0);
+
+  // One mug, €9.52, paid from €10.00 in cash.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '10.00');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  const live = page.getByTestId('receipt');
+  await expect(live.getByTestId('receipt-total')).toHaveText('€9.52');
+  await expect(live.getByTestId('receipt-change')).toHaveText('€0.48');
+  const tendered = await live.getByTestId('receipt-payment-cash').textContent();
+  await live.getByTestId('new-sale').click();
+
+  // The reprint, built from the order the store holds, shows what the live receipt showed.
+  await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await page.getByTestId('order-sheet-receipt').click();
+  const reprint = page.getByTestId('order-receipt');
+  await expect(reprint.getByTestId('order-receipt-total')).toHaveText('€9.52');
+  await expect(reprint.getByTestId('order-receipt-payment-cash')).toHaveText(tendered!);
+  await expect(reprint.getByTestId('order-receipt-change')).toHaveText('€0.48');
+  await expect(reprint.getByTestId('order-receipt-order')).toContainText('DEMO-');
+
+  // Playwright can't drive the OS print dialog: window.print becomes a recorder.
+  await page.evaluate(() => {
+    window.printCalls = 0;
+    window.print = () => { window.printCalls++; };
+  });
+  await reprint.getByTestId('order-receipt-print').click();
+  await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  // What the dialog would print: the receipt alone, none of the orders panel or sheet around it.
+  await page.emulateMedia({ media: 'print' });
+  await expect(reprint).toBeVisible();
+  for (const id of ['orders-close', 'order-sheet-close', 'order-receipt-print', 'order-receipt-back']) {
+    await expect(page.getByTestId(id)).toBeHidden();
+  }
+  await page.emulateMedia({ media: 'screen' });
+
+  await reprint.getByTestId('order-receipt-back').click();
+  await expect(page.getByTestId('order-sheet-detail')).toBeVisible();
+
+  // A seeded order reprints too.
+  await page.getByTestId('order-sheet-close').click();
+  await historyRows(page).filter({ hasText: 'DEMO-000002' }).getByTestId(/^history-open-/).click();
+  await page.getByTestId('order-sheet-receipt').click();
+  await expect(page.getByTestId('order-receipt').getByTestId('order-receipt-total')).toHaveText('€23.52');
+});
+
 test('a demo cashier refunds a mug from the order sheet; stock comes back and expected cash drops', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

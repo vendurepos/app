@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createVendureConnector, createVendureVariantFeedReplication, getVendureOrder, listVendureOrders } from '@tallyui/connector-vendure';
+import { createVendureConnector, createVendureVariantFeedReplication, getVendureOrder, listVendureOrders, type VendureOrder } from '@tallyui/connector-vendure';
 import { isCommandBatchResponse, type AnyCommandEnvelope, type CommandEnvelope, type OrderCreatePayload, type RegisterCommandEnvelope } from '@tallyui/core';
 import { parseCommandResult } from '@tallyui/core/server';
 import { signIn } from '../sign-in';
@@ -7,6 +7,7 @@ import { sessionContext, type Session } from '../session';
 import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
 import { orderDetailView } from '../order-detail';
+import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
 import { buildRefundEnvelope, type RefundTill } from '../till-refund';
 import { logout } from '../logout';
@@ -232,10 +233,25 @@ it('reads a seeded order detail through sign-in and the real connector', async (
   expect(order!.lines).toHaveLength(1);
   expect(order!.lines[0]).toMatchObject({ productVariant: { sku: 'TALLY-MUG' }, quantity: 1,
     proratedLinePriceWithTax: 952, taxRate: 19 });
-  expect(order!.payments![0]).toMatchObject({ amount: 952, state: 'Settled', method: 'tally-pos', metadata: { tallyMethod: 'cash' } });
+  expect(order!.payments![0]).toMatchObject({ amount: 952, state: 'Settled', method: 'tally-pos', metadata: { tender: { method: 'cash' } } });
   const view = orderDetailView(order!);
   expect(view.total).toBe('€9.52');
   expect(view.lineItems[0].total).toBe('€9.52');
+});
+
+it('a demo sale paid with change reprints with the charged total, the tendered cash and the change', async () => {
+  const session = await signedIn();
+  const [cash] = ORDER.payload.payments;
+  expect(cash).toMatchObject({ method: 'cash', amountMinor: ORDER.payload.totalMinor, tenderedMinor: 2000 });
+  expect(cash.changeMinor).toBe(cash.tenderedMinor! - ORDER.payload.totalMinor);
+  const [applied] = await send(session, ORDER);
+  expect(applied).toMatchObject({ status: 'applied', serverRefs: { orderId: '4' } });
+  const detail = new DemoStore(storage).order('4') as unknown as VendureOrder;
+  const receipt = storedReceiptData(detail, { storeName: 'x', pricesIncludeTax: ORDER.payload.pricesIncludeTax });
+  expect(receipt.totals.totalMinor).toBe(detail.totalWithTax);
+  expect(receipt.payments).toEqual([{ method: 'cash', amountMinor: 2000 }]);
+  expect(receipt.changeDueMinor).toBe(2000 - detail.totalWithTax);
+  expect(receipt.payments[0].amountMinor - receipt.changeDueMinor).toBe(receipt.totals.totalMinor);
 });
 
 it('reads v5 detail with charges separate from the exact goods allocation and matching summary fields', async () => {
