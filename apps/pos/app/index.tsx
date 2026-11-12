@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
-import { Link, Redirect, Stack } from 'expo-router';
+import { Redirect, Stack, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import {
-  Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
+  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   SplitTender, SyncStatus, TabsTrigger, Text, VStack, type OrderHistoryRow,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
@@ -46,6 +46,8 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { SyncNowControl } from '../lib/sync-now-control';
+import { CashierSheet, tillNavItems } from '../lib/till-frame';
+import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
@@ -63,6 +65,8 @@ const PLUGIN_NAME = 'the VendurePOS plugin';
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 // From this window width the cart sits beside the catalogue; below it, Products and Cart are tabs.
 const WIDE_MIN_WIDTH = 768;
+// AppShell's own boundary (TallyUI shell/app-shell.tsx): the rail needs WIDE_MIN_WIDTH wide AND this tall, else a drawer.
+const FRAME_WIDE_MIN_HEIGHT = 480;
 // How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70), and a cart line
 // when an add lands where the cart shows.
 const CART_HIGHLIGHT_MS = 600;
@@ -76,7 +80,10 @@ export default function HomeScreen() {
 function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): void }) {
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
+  const { width, height } = useWindowDimensions();
+  const wide = width >= WIDE_MIN_WIDTH;
+  const framePhone = !wide || height < FRAME_WIDE_MIN_HEIGHT;
+  const router = useRouter();
   const catalogue = useCatalogue(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
@@ -149,6 +156,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   });
   const [registerOpen, setRegisterOpen] = useState(false);
   const [closuresOpen, setClosuresOpen] = useState(false);
+  const [cashierOpen, setCashierOpen] = useState(false);
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
@@ -178,51 +186,67 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // An order store that can't open would lose the next sale at tender, so replace the sale instead of showing it.
   if (storageFailure) return <StorageFailure {...storageFailure} />;
 
-  return (
-    <VStack className="flex-1 bg-background">
-      {/* A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx). */}
-      <Stack.Screen options={{ title: 'VendurePOS', headerTitle: ({ children }) => (
-        <View dataSet={{ print: 'hide' }}><Text className="text-lg font-semibold">{children}</Text></View>
-      ) }} />
-      <HStack dataSet={{ print: 'hide' }} className="flex-wrap items-center justify-between border-b border-border px-4 py-2" space="sm">
-        <Text testID="signed-in-store" className={`${wide ? 'flex-1' : 'w-full'} text-sm text-muted-foreground`}>Signed in to {storeLabel(session)}</Text>
-        {closingWaiting ? (
-          <Text testID="register-closing-pending" className="text-sm text-muted-foreground">
-            Closing — waiting for {countOrders(closingWaiting)}
+  const store = storeLabel(session);
+  const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
+  const closePanels = () => { setOrdersOpen(false); setOpenOrder(null); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); };
+  const navigate = (id: string) => {
+    if (id === 'settings') router.push('/settings');
+    else if (id === 'orders') setOrdersOpen((open) => !open);
+    else if (id === 'register') setRegisterOpen(true);
+    else closePanels();
+  };
+  // The bar and its notes: one row on screen, none on paper. The bar's built-in Register door is hidden for ours, which
+  // keeps today's rule (an open session) and the `register-open-panel` id the e2e specs press; TallyUI fixes its id.
+  const registerBar = (
+    <View dataSet={{ print: 'hide' }}>
+      <RegisterBar register={register} registerId={boundRegisterId} multiRegister={false} storeName="VendurePOS"
+        // The till's online signal (as lib/sale-customer.tsx): the browser's, read at render.
+        online={typeof navigator === 'undefined' || navigator.onLine !== false}
+        onOpenPanel={() => setRegisterOpen(true)} cashier={{ name: identity, onPress: () => setCashierOpen(true) }}
+        className="[&_[data-testid=register-bar-open-panel]]:hidden"
+        syncStatus={<>
+          <Text testID="signed-in-store" numberOfLines={1} className="min-w-0 max-w-[45%] shrink text-xs text-muted-foreground">
+            Signed in to {store}
           </Text>
-        ) : null}
-        {outbox.state.rejected ? (
-          <Button testID="orders-rejected" variant="ghost" size="sm" onPress={() => setOrdersOpen(true)}>
-            <Text className="text-sm text-muted-foreground">
-              {countOrders(outbox.state.rejected)} {outbox.state.rejected === 1 ? 'needs' : 'need'} attention
-            </Text>
-          </Button>
-        ) : null}
-        {outbox.orders !== null ? (
-          <Button testID="orders-open" variant="secondary" onPress={() => setOrdersOpen((open) => !open)}>
-            <Text>Orders</Text>
-          </Button>
-        ) : null}
-        <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={storeLabel(session)} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
-        {sessionStatus === 'open' ? (
-          <Button testID="register-open-panel" variant="secondary" onPress={() => setRegisterOpen(true)}>
-            <Text>Register</Text>
-          </Button>
-        ) : null}
-        <XReportButton register={register} store={storeLabel(session)} currency={currency} timezone={TIMEZONE} actor={actor} />
-        <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />
-        <Link href="/settings" testID="settings-open" className="rounded-md bg-secondary px-4 py-2">
-          <Text className="text-secondary-foreground">Settings</Text>
-        </Link>
-        {/* A record() not yet settled would be lost with the sale, and a close with its Z; the outbox closes its store at unmount. */}
-        {signOutLocked && !pending ? (
-          <Text testID="sign-out-locked" className="text-sm text-muted-foreground">{signOutLocked}</Text>
-        ) : null}
-        <Button testID="sign-out" variant="secondary" disabled={pending || !!signOutLocked}
-          onPress={handleSignOut}>
-          <Text>Sign out</Text>
-        </Button>
-      </HStack>
+          {framePhone ? null : sync}
+          {sessionStatus === 'open' ? (
+            <Button testID="register-open-panel" variant="ghost" size="sm" className="px-2" accessibilityLabel="Open register panel"
+              onPress={() => setRegisterOpen(true)}>
+              <Text className={register.overdue ? 'text-warning' : undefined}>Register ›</Text>
+            </Button>
+          ) : null}
+        </>} />
+      {closingWaiting || outbox.state.rejected ? (
+        <HStack className="flex-wrap items-center border-b border-border px-3 py-1" space="sm">
+          {closingWaiting ? (
+            <Text testID="register-closing-pending" className="text-xs text-muted-foreground">Closing — waiting for {countOrders(closingWaiting)}</Text>
+          ) : null}
+          {outbox.state.rejected ? (
+            <Button testID="orders-rejected" variant="ghost" size="sm" className="h-7 px-2" onPress={() => setOrdersOpen(true)}>
+              <Text className="text-xs text-muted-foreground">
+                {countOrders(outbox.state.rejected)} {outbox.state.rejected === 1 ? 'needs' : 'need'} attention
+              </Text>
+            </Button>
+          ) : null}
+        </HStack>
+      ) : null}
+    </View>
+  );
+
+  return (
+    // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
+    // rail, which takes no dataSet, is hidden by the shell's print variant.
+    <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, registerShown: sessionStatus === 'open',
+      rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, registerOpen: registerPanelShown })}
+      onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
+    <VStack className="flex-1 bg-background">
+      <Stack.Screen options={{ headerShown: false }} />
+      <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
+        pending={pending} onSignOut={handleSignOut}>
+        <XReportButton register={register} store={store} currency={currency} timezone={TIMEZONE} actor={actor} />
+        <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
+        {framePhone ? sync : null}
+      </CashierSheet>
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
         <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
@@ -285,8 +309,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen}
-                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); }}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen || cashierOpen}
+                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>
@@ -322,6 +346,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </>
       ) : null}
     </VStack>
+    </AppShell>
   );
 }
 

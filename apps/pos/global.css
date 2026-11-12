@@ -1,5 +1,46 @@
 @import 'tailwindcss';
 @import 'uniwind';
 @import '@tallyui/theme/tokens.css';
+/* v2's type scale and derived ramp (TallyUI 3.18.0), after the tokens it overrides. */
+@import '@tallyui/theme/scale.css';
 
 @source './node_modules/@tallyui/components/src';
+
+/* v2's destructive pair and six Poster tile tints, copied from Tally Woo's apps/pos/global.css
+   (itself from monorepo apps/main/global.css), over @tallyui/theme's #dc2626 / #f85149. */
+@theme {
+  --color-destructive: oklch(0.52 0.22 25);
+  --color-destructive-foreground: oklch(0.99 0.01 25);
+  --color-tile-tint-0: oklch(0.86 0.09 262);
+  --color-tile-tint-1: oklch(0.88 0.10 160);
+  --color-tile-tint-2: oklch(0.88 0.10 40);
+  --color-tile-tint-3: oklch(0.86 0.09 310);
+  --color-tile-tint-4: oklch(0.90 0.11 90);
+  --color-tile-tint-5: oklch(0.88 0.09 200);
+}
+
+@layer theme {
+  :root {
+    @variant light {
+      --color-tile-tint-0: oklch(0.86 0.09 262);
+      --color-tile-tint-1: oklch(0.88 0.10 160);
+      --color-tile-tint-2: oklch(0.88 0.10 40);
+      --color-tile-tint-3: oklch(0.86 0.09 310);
+      --color-tile-tint-4: oklch(0.90 0.11 90);
+      --color-tile-tint-5: oklch(0.88 0.09 200);
+      --color-destructive: oklch(0.52 0.22 25);
+      --color-destructive-foreground: oklch(0.99 0.01 25);
+    }
+
+    @variant dark {
+      --color-tile-tint-0: oklch(0.32 0.05 250);
+      --color-tile-tint-1: oklch(0.32 0.05 160);
+      --color-tile-tint-2: oklch(0.33 0.05 40);
+      --color-tile-tint-3: oklch(0.32 0.05 300);
+      --color-tile-tint-4: oklch(0.34 0.05 90);
+      --color-tile-tint-5: oklch(0.31 0.03 200);
+      --color-destructive: oklch(0.67 0.2 25);
+      --color-destructive-foreground: oklch(0.15 0.02 25);
+    }
+  }
+}
