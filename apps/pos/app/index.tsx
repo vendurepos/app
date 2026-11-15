@@ -193,7 +193,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closePanels = () => { setOrdersOpen(false); setOpenOrder(null); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  const closeCoveringPanels = () => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  // A scan closes what covers the sale (onClosePanels) and keeps the open order; the rail's Sale tap drops it too.
+  const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
     else if (id === 'support') setSupportOpen(true);
@@ -317,7 +319,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
-                  onClosePanels={() => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); }}
+                  onClosePanels={closeCoveringPanels}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>
@@ -459,6 +461,8 @@ function Sale({
     clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
+  const highlightSku = typeof highlight === 'object' ? highlight?.sku : undefined;
+  const tenderPane = <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>;
   const cart = (payGate?: ReactNode) => (
     <>
       {drafts ? (
@@ -468,7 +472,7 @@ function Sale({
       ) : null}
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
-        highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
+        highlightSku={highlightSku} />
     </>
   );
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
@@ -557,14 +561,14 @@ function Sale({
       </View>
       {wide && stage.kind === 'tender' ? (
         <View dataSet={{ print: 'hide' }} className="flex-1">
-          <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>
+          {tenderPane}
         </View>
       ) : null}
       <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind === 'tender' ? (wide ? (
           <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
-            highlightSku={typeof highlight === 'object' ? highlight?.sku : undefined} />
-        ) : <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>) : stage.kind === 'receipt' ? (
+            highlightSku={highlightSku} />
+        ) : tenderPane) : stage.kind === 'receipt' ? (
           <ScrollView>
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
           </ScrollView>
