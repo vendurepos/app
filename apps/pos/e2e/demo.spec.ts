@@ -4,6 +4,8 @@ import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
+import { openRegister } from './register';
+import { wedgeScan } from './wedge';
 
 declare global {
   interface Window {
@@ -57,30 +59,6 @@ async function expectSignedIn(page: Page) {
   await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 }
 
-/**
- * A keyboard-wedge scan at scanner speed: each key's keydown and keyup, then Enter's, dispatched to the focus in one
- * synchronous loop, so every gap is well under WEDGE_KEY_GAP_MS however loaded the machine (Playwright's per-key round
- * trips can exceed it on a CI runner). Each key does what a real one would: an uncancelled printable keydown in a text
- * input inserts its character, an uncancelled Enter clicks a focused <button> (react-native-web leaves a native button's
- * press to that click), and the keyup always follows (it presses any other control), so a key the listener fails to
- * hold still reaches the field or presses the control.
- */
-async function wedgeScan(page: Page, code: string) {
-  await page.evaluate((keys) => {
-    for (const key of keys) {
-      const target = document.activeElement ?? document.body;
-      const init = { key, bubbles: true, cancelable: true };
-      const typed = target.dispatchEvent(new KeyboardEvent('keydown', init));
-      if (typed && key.length === 1 && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
-        document.execCommand('insertText', false, key);
-      } else if (typed && key === 'Enter' && target instanceof HTMLButtonElement) {
-        target.click();
-      }
-      target.dispatchEvent(new KeyboardEvent('keyup', init));
-    }
-  }, [...code, 'Enter']);
-}
-
 test('the camera scan button adds what the camera sees once, follows the scan rules and lets the camera go while the catalogue is hidden', async ({ page }) => {
   await page.addInitScript(() => {
     window.cameraStreams = [];
@@ -110,9 +88,7 @@ test('the camera scan button adds what the camera sees once, follows the scan ru
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('camera-scan-button').click();
   await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
   // The demo signs in with no barcode field, so the camera reads the SKU, as the wedge test types it.
@@ -170,9 +146,7 @@ test("Settings takes the scanner's prefix and suffix off each scan, and scan sou
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('settings-open').click();
   await page.getByTestId('scanner-prefix').fill('*');
   await page.getByTestId('scanner-suffix').fill('#');
@@ -199,9 +173,7 @@ test("Settings' barcode test shows a scan and its last key, and adds nothing to 
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('settings-open').click();
   await page.getByTestId('scanner-prefix').fill('*');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -224,9 +196,7 @@ test('Support at the foot of the rail opens the quick start, GitHub issues and t
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('support-open').click();
   await expect(page.getByTestId('support-sheet')).toBeVisible();
   await expect(page.getByTestId('support-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
@@ -249,9 +219,7 @@ test('a scan on the demo sign-in screen adds nothing to the next sale', async ({
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('sign-out').click();
   await expect(page.getByTestId('demo-enter')).toBeVisible();
@@ -261,9 +229,7 @@ test('a scan on the demo sign-in screen adds nothing to the next sale', async ({
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   if (await page.getByTestId('open-register-card').count()) {
-    await page.getByTestId('open-register-amount').fill('100.00');
-    await page.getByTestId('open-register-button').click();
-    await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+    await openRegister(page);
   }
   await expect(page.getByTestId('cart')).not.toContainText('Tally Fixture Mug');
   await expect(page.getByTestId('scan-not-found')).toHaveCount(0);
@@ -283,10 +249,7 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill('100.00');
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
+  await openRegister(page);
 
   await page.getByTestId('orders-open').click();
   await historyRows(page).filter({ hasText: 'DEMO-000002' }).getByTestId(/^history-open-/).click();
@@ -322,10 +285,7 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill('100.00');
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
+  await openRegister(page);
 
   // One mug, €9.52, paid from €10.00 in cash.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -380,10 +340,7 @@ test('a demo cashier refunds a mug from the order sheet; stock comes back and ex
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill('100.00');
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
+  await openRegister(page);
   // Two mugs, €8.00 + 19 % = €9.52 each, paid in cash.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -459,10 +416,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   expect(CATALOGUE).toHaveLength(30);
 
   // A sale: the register opened with €100.00, 2 × mug for cash, €8.00 × 2 + 19 % = €19.04.
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill('100.00');
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
+  await openRegister(page);
   const cart = page.getByTestId('cart');
   const tender = page.getByTestId('tender-pane');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -721,10 +675,7 @@ test("the sync log in Settings keeps a till update's outcome, never its figures"
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill('10.00');
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
+  await openRegister(page, '10.00');
   await page.getByTestId('settings-open').click();
   const log = page.getByTestId('sync-log');
   await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'Register command result' }).first()).toContainText('status=applied');
@@ -796,9 +747,7 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   // One mug by card, €8.00 + 19 % = €9.52.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
@@ -866,9 +815,7 @@ test('a demo visitor attaches a customer and sees it on the receipt', async ({ p
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('customer-chip').click();
   await page.getByLabel('Search customers').fill('ada');
   await page.getByTestId('customer-picker').getByText('Ada Lovelace', { exact: true }).click();
@@ -897,9 +844,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await page.reload();
   await expect(page.getByTestId('default-customer')).toContainText('Ada Lovelace');
   await page.getByTestId('settings-back').click();
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
@@ -931,10 +876,7 @@ test("a demo cashier sees Guest in the cart's customer chip and a toast when an 
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill('100.00');
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
+  await openRegister(page);
   await expect(page.getByTestId('customer-row')).toContainText('Customer');
   await expect(page.getByTestId('customer-chip')).toContainText('Guest');
 
@@ -965,9 +907,7 @@ test('the till follows the device\'s dark scheme and prints its receipt in light
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
 
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
@@ -997,9 +937,7 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await page.getByTestId('auto-print-toggle').click();
   await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: On');
   await page.getByTestId('settings-back').click();
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
@@ -1048,9 +986,7 @@ test('a demo cashier changes a line\'s price and sells at it', async ({ page }) 
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const cart = page.getByTestId('cart');
   await cart.getByTestId('cart-line-TALLY-MUG').getByTestId('price-popover-trigger').click();
@@ -1073,9 +1009,7 @@ test('a demo cashier takes 10 % off a line on its price keypad, and lines keep t
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const line = page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG');
   await expect(line.getByRole('button', { name: 'Discount', exact: true })).toHaveCount(0);
@@ -1099,9 +1033,7 @@ test('at phone width the price keypad folds into the line\'s quantity keypad', a
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await page.getByTestId('tab-cart').click();
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('tab-products').click();
   await page.getByRole('searchbox').fill('Mug');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -1115,9 +1047,7 @@ test('a demo cashier parks a sale, sells another, then resumes the parked one', 
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
 
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('parked-open').click();
@@ -1201,9 +1131,7 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   await page.getByTestId('tender-method-cash').click();
@@ -1227,9 +1155,7 @@ test('a demo cashier pays cash with a quick amount: the cart is locked beside th
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeHidden();
@@ -1256,9 +1182,7 @@ test('a demo cashier who closes the register during a checkout is told to finish
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
@@ -1281,9 +1205,7 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('open-register-amount').fill('100.00');
-  await page.getByTestId('open-register-button').click();
-  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const cart = page.getByTestId('cart');
   const form = cart.getByRole('group', { name: 'Add charge' });

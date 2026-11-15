@@ -1,6 +1,8 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
+import { openRegister } from './register';
+import { wedgeScan } from './wedge';
 
 declare global {
   interface Window { cspViolations: string[]; printCalls: number }
@@ -45,16 +47,6 @@ const PASSWORD = 'superadmin';
 // apps/pos/lib/till-ids.ts owns these localStorage keys; keep app code out of the e2e.
 const DEVICE_ID_KEY = 'vendurepos.register_id';
 const BOUND_REGISTER_ID_KEY = 'vendurepos.bound_register_id';
-
-// A sale needs an open register session: opens this till's drawer with a float. On a narrow screen the open card is
-// on the Cart tab.
-async function openRegister(page: Page, float = '100.00') {
-  const card = page.getByTestId('open-register-card');
-  await card.getByTestId('open-register-amount').fill(float);
-  await card.getByTestId('open-register-button').click();
-  await expect(card).toHaveCount(0);
-  await expect(page.getByTestId('register-open-panel')).toBeVisible();
-}
 
 async function signIn(page: Page) {
   // Extra contexts do not get the page fixture's CSP observer.
@@ -900,30 +892,6 @@ test.describe('on a narrow screen', () => {
     await page.getByTestId('sign-in-submit').click();
     // The narrow grid renders only what's in view, so wait for the first tile by name rather than the mug.
     await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
-  }
-
-  /**
-   * A keyboard-wedge scan at scanner speed: each key's keydown and keyup, then Enter's, dispatched to the focus in one
-   * synchronous loop, so every gap is well under WEDGE_KEY_GAP_MS however loaded the machine (Playwright's per-key round
-   * trips can exceed it on a CI runner). Each key does what a real one would: an uncancelled printable keydown in a text
-   * input inserts its character, an uncancelled Enter clicks a focused <button> (react-native-web leaves a native button's
-   * press to that click), and the keyup always follows (it presses any other control), so a key the listener fails to
-   * hold still reaches the field or presses the control.
-   */
-  async function wedgeScan(page: Page, code: string) {
-    await page.evaluate((keys) => {
-      for (const key of keys) {
-        const target = document.activeElement ?? document.body;
-        const init = { key, bubbles: true, cancelable: true };
-        const typed = target.dispatchEvent(new KeyboardEvent('keydown', init));
-        if (typed && key.length === 1 && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
-          document.execCommand('insertText', false, key);
-        } else if (typed && key === 'Enter' && target instanceof HTMLButtonElement) {
-          target.click();
-        }
-        target.dispatchEvent(new KeyboardEvent('keyup', init));
-      }
-    }, [...code, 'Enter']);
   }
 
   /** A scan typed key by key, for a text field whose own handling of the keys is under test: the listener leaves it be. */
