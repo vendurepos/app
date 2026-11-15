@@ -27,6 +27,16 @@ export const DEMO_RATES = [
   { name: 'Standard DK', value: 25, category: { id: '1' }, zoneId: 'DK' },
   { name: 'Reduced DK', value: 25, category: { id: '2' }, zoneId: 'DK' },
 ].map(rate => ({ ...rate, enabled: true, customerGroup: null }));
+/** The category a line's or charge's tax class names: by id, or by name ignoring case and outer spaces. */
+function taxCategoryOf(taxClass: string) {
+  return DEMO_CATEGORIES.find(category => category.id === taxClass || category.name.toLowerCase() === taxClass.trim().toLowerCase());
+}
+/** A category's rate, in percent, in the channel's tax zone. */
+function zoneRate(categoryId: string): number {
+  return DEMO_RATES.find(rate => rate.category.id === categoryId && rate.zoneId === DEMO_CHANNEL.defaultTaxZone.id)!.value;
+}
+// The unsupported_version refusal's data key for each contract, as the plugin's command services name it.
+const CONTRACT_DATA_KEY = { 'order.create': 'orderCreate', 'order.refund': 'orderRefund', register: 'register' } as const;
 // Stable initial timestamps allow the connector's updatedAt probes and checkpoints to work.
 const SEED_TIME = '2026-01-01T00:00:00.000Z';
 // Only the seed's shop-floor location is visible in the simulated POS channel.
@@ -174,7 +184,7 @@ export class DemoStore {
     };
     const customer: Customer = { ...input, __typename: 'Customer', id: `c${this.state.customers.length + 1}`, phoneNumber: input.phoneNumber ?? null };
     this.state.customers.push(customer);
-    this.storage?.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state));
+    this.save();
     return customer;
   }
 
@@ -190,11 +200,11 @@ export class DemoStore {
       variants: product.variants.map(variant => {
         const id = String(++variantIndex);
         const category = DEMO_CATEGORIES.find(category => category.name === product.taxCategory)!;
-        const rate = DEMO_RATES.find(rate => rate.category.id === category.id && rate.zoneId === DEMO_CHANNEL.defaultTaxZone.id)!;
+        const rate = zoneRate(category.id);
         return {
           id, productId: String(index + 1), updatedAt: this.state.stock[id]?.updatedAt ?? SEED_TIME,
           name: [product.name, ...variant.options].join(' '), sku: variant.sku,
-          price: variant.priceMinor, priceWithTax: Math.round(variant.priceMinor * (PERCENT + rate.value) / PERCENT),
+          price: variant.priceMinor, priceWithTax: Math.round(variant.priceMinor * (PERCENT + rate) / PERCENT),
           currencyCode: DEMO_CHANNEL.defaultCurrencyCode, enabled: true, featuredAsset: null,
           trackInventory: product.trackInventory ? 'TRUE' : 'FALSE', outOfStockThreshold: 0, useGlobalOutOfStockThreshold: true,
           stockLevels: [{ stockLocationId: STOCK_LOCATION_ID, stockOnHand: this.state.stock[id]?.quantity ?? variant.shopFloorStock, stockAllocated: 0 }],
@@ -251,11 +261,11 @@ export class DemoStore {
     const lines = payload.lines.map((line, index) => {
       const variant = variants.find(variant => variant.id === line.variantId);
       const taxClass = line.custom?.taxClass;
-      const category = DEMO_CATEGORIES.find(category => variant ? category.id === variant.taxCategory.id
-        : taxClass !== undefined && (category.id === taxClass || category.name.toLowerCase() === taxClass.trim().toLowerCase()))
+      const category = (variant ? DEMO_CATEGORIES.find(category => category.id === variant.taxCategory.id)
+        : taxClass !== undefined ? taxCategoryOf(taxClass) : undefined)
         ?? DEMO_CATEGORIES.find(category => category.isDefault)!;
       const taxRate = !variant && line.custom?.taxStatus === 'none' ? 0
-        : DEMO_RATES.find(rate => rate.category.id === category.id && rate.zoneId === DEMO_CHANNEL.defaultTaxZone.id)!.value;
+        : zoneRate(category.id);
       const unitPrice = line.unitPriceMinor;
       const linePrice = unitPrice * line.quantity;
       return {
@@ -301,10 +311,11 @@ export class DemoStore {
       ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
     const isOrder = type === 'order.create';
     const isRefund = type === 'order.refund';
-    const versions = DEMO_INFO.contracts[isOrder ? 'order.create' : isRefund ? 'order.refund' : 'register'];
+    const contract = isOrder ? 'order.create' : isRefund ? 'order.refund' : 'register';
+    const versions = DEMO_INFO.contracts[contract];
     if (!versions.includes(version)) return refuse('unsupported_version', isOrder ? 'Unsupported order.create version'
-      : `${isRefund ? 'order.refund' : 'register'} version ${version} is not supported; this server supports ${versions.join(', ')}`,
-    isOrder ? { orderCreate: Math.max(...versions) } : isRefund ? { orderRefund: Math.max(...versions) } : { register: Math.max(...versions) });
+      : `${contract} version ${version} is not supported; this server supports ${versions.join(', ')}`,
+    { [CONTRACT_DATA_KEY[contract]]: Math.max(...versions) });
     const content = fingerprint(command);
     const previous = this.state.ledger[id];
     if (previous) return previous.fingerprint !== content
@@ -316,7 +327,7 @@ export class DemoStore {
       if ('status' in refund) return refund;
       const result: CommandResult = { id, status: 'applied', refund };
       this.state.ledger[id] = { fingerprint: content, result };
-      this.storage?.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state));
+      this.save();
       return result;
     }
     let result: CommandResult = { id, status: 'applied' };
@@ -325,7 +336,7 @@ export class DemoStore {
       for (const field of ['fees', 'shipping', 'lines'] as const) {
         for (const [i, entry] of (p[field] ?? []).entries()) {
           const taxClass = field === 'lines' ? entry.custom?.taxClass : entry.taxClass;
-          if (taxClass !== undefined && !DEMO_CATEGORIES.some(category => category.id === taxClass || category.name.toLowerCase() === taxClass.trim().toLowerCase())) {
+          if (taxClass !== undefined && !taxCategoryOf(taxClass)) {
             const path = `${field}[${i}]${field === 'lines' ? '.custom' : ''}.taxClass`;
             result = refuse('invalid_payload', `${path}: tax_class_unknown: no tax category "${taxClass}" in this store`, { reason: 'tax_class_unknown', path });
             break;
@@ -337,12 +348,7 @@ export class DemoStore {
     if (isOrder && result.status === 'applied') {
       this.state.orders.push(p);
       for (const line of p.lines) {
-        if (!line.variantId) continue;
-        const stock = this.state.stock[line.variantId];
-        if (stock) {
-          stock.quantity -= line.quantity;
-          stock.updatedAt = nextUpdatedAt(stock.updatedAt);
-        }
+        if (line.variantId) this.adjustStock(line.variantId, -line.quantity);
       }
       const orderId = String(this.state.orders.length);
       result.serverRefs = { orderId, displayId: demoOrderCode(orderId), totalMinor: p.totalMinor };
@@ -376,8 +382,18 @@ export class DemoStore {
       result.register = { session: this.liveSession(p.sessionId) };
     }
     this.state.ledger[id] = { fingerprint: content, result };
-    this.storage?.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state));
+    this.save();
     return result;
+  }
+
+  private save(): void { this.storage?.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state)); }
+  /** Moves a tracked variant's stock by delta and bumps its updatedAt; untracked variants have no stock entry. */
+  private adjustStock(variantId: string, delta: number): void {
+    const stock = this.state.stock[variantId];
+    if (stock) {
+      stock.quantity += delta;
+      stock.updatedAt = nextUpdatedAt(stock.updatedAt);
+    }
   }
 
   private liveSession(id: string): NonNullable<RegisterCommandResult['session']> {
@@ -466,11 +482,7 @@ export class DemoStore {
     }
     // Every POS order is fulfilled at create, so the whole refunded quantity goes back to tracked stock.
     for (const { input, line } of lines) {
-      const stock = input.restock ? this.state.stock[line.productVariant.id] : undefined;
-      if (stock) {
-        stock.quantity += input.quantity;
-        stock.updatedAt = nextUpdatedAt(stock.updatedAt);
-      }
+      if (input.restock) this.adjustStock(line.productVariant.id, input.quantity);
     }
     return { totalMinor: server, byMethod, refunds };
   }
