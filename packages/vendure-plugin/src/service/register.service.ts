@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Order, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
+import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
 import { In, IsNull, Not } from 'typeorm';
 import type { FindOptionsWhere, ObjectType } from 'typeorm';
 import type { TallyClosureRead, TallyRegisterRead } from '../api/registers.controller';

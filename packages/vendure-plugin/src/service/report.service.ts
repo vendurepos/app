@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Order, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
+import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
 import { channelRefunds } from './channel-refunds';
 import { TALLY_DISCOUNT_SKU } from './constants';
 
