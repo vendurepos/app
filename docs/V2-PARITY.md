@@ -65,7 +65,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
-| Cash with quick amounts and change | Free (FS, PC) | Has | `apps/pos/lib/sale-tender.tsx` | — |
+| Cash with quick amounts and change | Free (FS, PC) | Has | TallyUI `TenderPane` in `apps/pos/app/index.tsx` | — |
 | Card recorded as an external payment | Free (PC) | Has | "Card payment approved" | — |
 | Split payment | 2.0 (CMP) | Has | TallyUI `SplitTender`; e2e "splits a sale" | — |
 | Offline checkout | 2.0 (CMP) | Has | VA5/VA7; `apps/pos/e2e/offline.spec.ts` | — |
