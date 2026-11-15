@@ -1,6 +1,6 @@
 import { closeNeedsApproval } from '@tallyui/pos';
 import { beforeEach, expect, it } from 'vitest';
-import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor, typedApprover, VARIANCE_LIMIT_KEY } from './register-approval';
+import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor, typedApprover, VARIANCE_LIMIT_KEY } from './register-approval';
 import type { KeyValueStore } from './session';
 
 let store: KeyValueStore;
@@ -25,6 +25,12 @@ it('parses amounts to minor units and refuses the rest', () => {
   for (const text of ['5.555', '-1', 'abc', '100000.01', ' ', ' 5', '5\n', '5.', '.5', '1e2']) {
     expect(parseVarianceLimit(text)).toEqual({ ok: false });
   }
+});
+
+it('formats a limit as the text the parser reads back', () => {
+  for (const minor of [0, 101, 550, 10000000]) expect(parseVarianceLimit(formatVarianceLimit(minor))).toEqual({ ok: true, minor });
+  expect(formatVarianceLimit(550)).toBe('5.50');
+  expect(formatVarianceLimit(undefined)).toBe('');
 });
 
 it('save and load round-trip, and saving undefined clears it', () => {
