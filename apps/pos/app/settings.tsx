@@ -6,10 +6,10 @@ import {
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
-import { loadScannerMinLength, saveScannerMinLength } from '../lib/scanner-settings';
+import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
 import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
-import { loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
+import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { SyncLogCard } from '../lib/sync-log-card';
@@ -20,10 +20,7 @@ export default function SettingsScreen() {
   const { session } = useSession();
   const [text, setText] = useState(() => String(loadScannerMinLength()));
   const [saved, setSaved] = useState<boolean | null>(null);
-  const [varianceText, setVarianceText] = useState(() => {
-    const minor = loadVarianceLimitMinor();
-    return minor === undefined ? '' : (minor / 100).toFixed(2);
-  });
+  const [varianceText, setVarianceText] = useState(() => formatVarianceLimit(loadVarianceLimitMinor()));
   const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
   const [canEditPrice, setCanEditPrice] = useState(() => loadPriceEditAllowed());
   const [defaultCustomer, setDefaultCustomer] = useState(() => session ? loadDefaultCustomer(session) : null);
@@ -56,12 +53,12 @@ export default function SettingsScreen() {
                 onChangeText={setText}
               />
             </Input>
-            <Text>From 4 to 32 characters. A shorter fast burst is treated as typing.</Text>
+            <Text>{`From ${SCANNER_MIN_LENGTH_RANGE.min} to ${SCANNER_MIN_LENGTH_RANGE.max} characters. A shorter fast burst is treated as typing.`}</Text>
             <Button testID="settings-save" onPress={() => setSaved(/^\d+$/.test(text) && saveScannerMinLength(Number(text)))}>
               <Text>Save</Text>
             </Button>
             {saved === true && <Text testID="settings-saved">Saved.</Text>}
-            {saved === false && <Text testID="settings-error">Enter a whole number from 4 to 32.</Text>}
+            {saved === false && <Text testID="settings-error">{`Enter a whole number from ${SCANNER_MIN_LENGTH_RANGE.min} to ${SCANNER_MIN_LENGTH_RANGE.max}.`}</Text>}
             <ScannerExtraSettings />
           </VStack>
         </CardContent>

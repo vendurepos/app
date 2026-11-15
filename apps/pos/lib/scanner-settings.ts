@@ -2,7 +2,8 @@ import { defaultStore, type KeyValueStore } from './session';
 import { WEDGE_MIN_LENGTH } from './use-wedge-scanner';
 
 export const SCANNER_MIN_LENGTH_KEY = 'vendurepos.scanner.minLength';
-const SCANNER_MIN_LENGTH_RANGE = { min: 4, max: 32 } as const;
+/** The shortest-barcode setting's allowed range, in characters. */
+export const SCANNER_MIN_LENGTH_RANGE = { min: 4, max: 32 } as const;
 
 /** The stored shortest scan for this till, or WEDGE_MIN_LENGTH when none or invalid (not a whole number in range). */
 export function loadScannerMinLength(store: KeyValueStore = defaultStore()): number {
@@ -42,15 +43,17 @@ export function saveScanSounds(on: boolean, store: KeyValueStore = defaultStore(
 }
 
 export const CAMERA_PANEL_HEIGHT_KEY = 'vendurepos.scanner.cameraHeight';
+/** The camera panel height setting's allowed range. */
+const CAMERA_PANEL_HEIGHT_RANGE = { min: 96, max: 480 } as const;
 /** The camera panel's last height (v2 keeps it): a stored whole number in 96..480, else undefined (the panel's default). */
 export function loadCameraPanelHeight(store: KeyValueStore = defaultStore()): number | undefined {
   const value = Number(store.getItem(CAMERA_PANEL_HEIGHT_KEY));
-  return Number.isInteger(value) && value >= 96 && value <= 480 ? value : undefined;
+  return Number.isInteger(value) && value >= CAMERA_PANEL_HEIGHT_RANGE.min && value <= CAMERA_PANEL_HEIGHT_RANGE.max ? value : undefined;
 }
 /** Stores Math.round(height) when that is in 96..480; anything else is ignored. */
 export function saveCameraPanelHeight(height: number, store: KeyValueStore = defaultStore()): void {
   const rounded = Math.round(height);
-  if (rounded >= 96 && rounded <= 480) store.setItem(CAMERA_PANEL_HEIGHT_KEY, String(rounded));
+  if (rounded >= CAMERA_PANEL_HEIGHT_RANGE.min && rounded <= CAMERA_PANEL_HEIGHT_RANGE.max) store.setItem(CAMERA_PANEL_HEIGHT_KEY, String(rounded));
 }
 
 /** Takes the prefix off the start and the suffix off what is left's end, each only when it matches exactly. */

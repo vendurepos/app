@@ -15,6 +15,10 @@ export function parseVarianceLimit(text: string): { ok: true; minor: number | un
   if (text.match(/^\d+(?:\.\d{1,2})?$/)?.[0] !== text || Number(text) > 100000) return { ok: false };
   return { ok: true, minor: Math.round(Number(text) * 100) };
 }
+/** The text parseVarianceLimit reads back: two decimals, or '' for no limit. */
+export function formatVarianceLimit(minor: number | undefined): string {
+  return minor === undefined ? '' : (minor / 100).toFixed(2);
+}
 
 export function saveVarianceLimitMinor(minor: number | undefined, store: KeyValueStore = defaultStore()): void {
   if (minor === undefined) store.removeItem(VARIANCE_LIMIT_KEY);
