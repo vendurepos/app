@@ -194,7 +194,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
   const closeCoveringPanels = () => { setOrdersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
-  // A scan closes what covers the sale (onClosePanels) and keeps the open order; the rail's Sale tap drops it too.
+  // A scan (onClosePanels) and the rail's Sale tap close what covers the sale and drop the open order (Front desk, 2026-11-15).
   const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
@@ -319,7 +319,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
-                  onClosePanels={closeCoveringPanels}
+                  onClosePanels={closePanels}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>

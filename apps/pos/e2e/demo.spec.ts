@@ -281,6 +281,25 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await expect(detail).toContainText(mug.name);
 });
 
+// Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
+test('a scan over an open order closes the Orders panel, and Orders reopens on the list', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('orders-open').click();
+  await historyRows(page).filter({ hasText: 'DEMO-000002' }).getByTestId(/^history-open-/).click();
+  await expect(page.getByTestId('order-sheet-detail')).toContainText('DEMO-000002');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('orders-panel')).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+  await page.getByTestId('orders-open').click();
+  await expect(historyRows(page).filter({ hasText: 'DEMO-000002' })).toBeVisible();
+  await expect(page.getByTestId('order-sheet-detail')).toHaveCount(0);
+});
+
 test("a demo cashier reprints a finished sale's receipt from the order sheet and prints it alone", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
