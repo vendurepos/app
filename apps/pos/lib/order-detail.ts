@@ -7,7 +7,7 @@ import { orderHistoryNotice, orderStateLabel, type OrderHistoryNotice } from './
 import { sessionContext, type Session } from './session';
 
 export const ORDER_NOT_SYNCED_TEXT = "This sale hasn't reached the store yet. You can open it here once it has synced.";
-export const ORDER_GONE_TEXT = "This order isn't in the store any more.";
+const ORDER_GONE_TEXT = "This order isn't in the store any more.";
 export const ORDER_DETAIL_FAILED_TEXT = "Can't load this order.";
 export const ORDER_LOADING_TEXT = 'Loading the order…';
 

@@ -8,8 +8,8 @@ import { tillIdentity, type Session } from './session';
 import { SignInAgain } from './sign-in-again';
 import { buildRefundEnvelope, pendingRefund, refundMessage, refundTotalMinor, sendTillRefund, type RefundMessage } from './till-refund';
 
-export const REFUND_NEEDS_REGISTER_TEXT = 'Open the register to refund this order.';
-export const REFUND_FAILED_TEXT = "Can't send this refund. Check the quantities and try again.";
+const REFUND_NEEDS_REGISTER_TEXT = 'Open the register to refund this order.';
+const REFUND_FAILED_TEXT = "Can't send this refund. Check the quantities and try again.";
 
 /** A whole number from 0 to max, empty meaning 0 (Number('') is 0); null when it is anything else. */
 function parseQuantity(text: string, max: number): number | null {
