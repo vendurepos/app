@@ -24,7 +24,7 @@ import {
 } from './constants';
 import { classify } from './classification';
 import {
-  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeErrors, nulPath, refuse, replayRead,
+  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, nulPath, refuse, replayRead,
 } from './command-ledger';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
@@ -139,9 +139,12 @@ export class OrderCreateService {
       // 3. The collision lookup: a sale already recorded is answered by the collision guard after the claim.
       const recorded = await this.recordedAnywhere(ctx, payload.clientOrderId);
       // 4. The value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal figures): unstored. Then the
-      // client-time stage (TallyUI #337), its own refusal with only time messages; the clock is the request's, read once.
+      // client-time stage (TallyUI #337): the envelope's createdAt, then the payload's; its own refusal with only time
+      // messages; the clock is the request's, read once.
       const invalidValue = recorded ? undefined
-        : this.valueRefusal(command) ?? this.clientTimeRefusal(command, (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
+        : this.valueRefusal(command) ?? clientTimeRefusal(command.id,
+          [['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]],
+          (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
       if (invalidValue) return invalidValue;
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       commandCtx = new RequestContext({
@@ -352,11 +355,6 @@ export class OrderCreateService {
     errors.push(...valueRangeErrors(command.payload, maxMoney));
     if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
-  }
-  // ADR-038 #220 step 4, the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's.
-  private clientTimeRefusal(command: CommandEnvelope<OrderCreatePayload>, upperBoundMs: number): OrderCreateResult | undefined {
-    const errors = clientTimeErrors([['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]], upperBoundMs);
-    return errors.length ? refuse(command.id, 'invalid_payload', errors.slice(0, 10).join('; ')) : undefined;
   }
 
   // ADR 0002 "Store configuration": the POS payment and shipping methods and a usable tax zone.

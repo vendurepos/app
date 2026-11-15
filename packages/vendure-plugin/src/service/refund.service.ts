@@ -8,8 +8,9 @@ import { TALLY_PAYMENT_METHOD_CODE, withTallyRefund } from '../config/strategies
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/commands';
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
+import { channelRefunds } from './channel-refunds';
 import {
-  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeErrors, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
+  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeRefusal, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
 } from './command-ledger';
 import { ORDER_REFUND_VERSIONS } from './constants';
 import { ErrorResultThrown, unwrap } from './errors';
@@ -42,9 +43,9 @@ export class RefundService {
       if (replay) return replay;
       const strict = refundEnvelopeStrictErrors(command as unknown as Record<string, unknown>, version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
-      const times = clientTimeErrors([['createdAt', command.createdAt], ['payload.createdAt', payload.createdAt]],
+      const timeRefusal = clientTimeRefusal(id, [['createdAt', command.createdAt], ['payload.createdAt', payload.createdAt]],
         (options.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
-      if (times.length) return refuse(id, 'invalid_payload', times.slice(0, 10).join('; '));
+      if (timeRefusal) return timeRefusal;
       if (!ctx.userHasPermissions([tallyPosRefund.Permission])) return refuse(id, 'forbidden', 'TallyPosRefund is required to refund');
       return await this.connection.withTransaction(ctx, async tx => {
         const concurrent = await claim(this.connection, tx, command);
@@ -69,12 +70,7 @@ export class RefundService {
         if (payload.clientOrderId !== undefined && payload.clientOrderId !== order.customFields.tallyClientOrderId) {
           throw new Unstored(refuse(id, 'invalid_payload', `clientOrderId: order ${payload.orderId} is ${order.customFields.tallyClientOrderId}`));
         }
-        const earlier = await this.connection.getRepository(tx, Refund).createQueryBuilder('refund')
-          .innerJoin('refund.payment', 'payment')
-          .innerJoin('payment.order', 'sale')
-          .innerJoin('sale.channels', 'channel')
-          .where('channel.id = :channelId', { channelId: tx.channelId })
-          .andWhere('refund.state != :failed', { failed: 'Failed' })
+        const earlier = await channelRefunds(this.connection, tx)
           .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallyClientRefundId' = :clientRefundId", { clientRefundId: payload.clientRefundId })
           .orderBy('refund.id', 'ASC').getOne();
         if (earlier) throw new Unstored(refuse(id, 'invalid_payload',

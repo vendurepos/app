@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Order, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
+import { channelRefunds } from './channel-refunds';
 import { TALLY_DISCOUNT_SKU } from './constants';
 
 /** The plugin's own sales report shape, versioned; it moves into TallyUI once TallyUI has a report contract. */
@@ -111,12 +112,7 @@ export class ReportService {
 
   /** Non-failed refunds of the channel's POS orders, on the date each was made (which may be outside the sale's range). */
   private posRefunds(ctx: RequestContext, query: SalesQuery) {
-    const builder = this.connection.getRepository(ctx, Refund).createQueryBuilder('refund')
-      .innerJoin('refund.payment', 'payment')
-      .innerJoin('payment.order', 'sale')
-      .innerJoin('sale.channels', 'channel')
-      .where('channel.id = :channelId', { channelId: ctx.channelId })
-      .andWhere('refund.state != :failed', { failed: 'Failed' })
+    const builder = channelRefunds(this.connection, ctx)
       .andWhere('sale.customFields.tallyClientOrderId IS NOT NULL')
       .andWhere('sale.currencyCode = :currency', { currency: ctx.channel.defaultCurrencyCode })
       .andWhere(`${REFUND_AT} >= CAST(:from AS timestamptz)`, { from: query.from })

@@ -65,6 +65,14 @@ export const clientTimeErrors = (fields: [path: string, value: unknown][], upper
 export const refuse = (id: string, code: string, message: string, data?: Record<string, unknown>): CommandResult & { status: 'rejected' } =>
   ({ id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } });
 
+/** A client-time refusal lists at most this many messages. */
+const MAX_CLIENT_TIME_ERRORS = 10;
+/** The client-time stage's refusal (TallyUI #337): the messages for the fields outside the bounds, or undefined. */
+export function clientTimeRefusal(id: string, fields: [path: string, value: unknown][], upperBoundMs: number) {
+  const errors = clientTimeErrors(fields, upperBoundMs);
+  return errors.length ? refuse(id, 'invalid_payload', errors.slice(0, MAX_CLIENT_TIME_ERRORS).join('; ')) : undefined;
+}
+
 /** Review: Postgres text cannot hold U+0000, so a string carrying it is refused before any database access. */
 export function nulRefusal(command: { id: string }) {
   const nul = nulPath(command, '');

@@ -14,8 +14,9 @@ import type {
 import { deriveSessionFigures, deriveVariance } from '../vendored/register-figures';
 import type { RegisterConflictCode } from '../vendored/register-outcome';
 import { registerPayloadErrors } from '../vendored/register-payload-shape';
+import { channelRefunds } from './channel-refunds';
 import {
-  CREATED_AT_SKEW_MS, Unstored, clientTimeErrors, ledgerTablePath, nulRefusal, refuse, transientAfterClaim, versionRefusal,
+  CREATED_AT_SKEW_MS, Unstored, clientTimeRefusal, ledgerTablePath, nulRefusal, refuse, transientAfterClaim, versionRefusal,
 } from './command-ledger';
 // A namespace import: RegisterService has its own claim and replayAnswer methods.
 import * as ledger from './command-ledger';
@@ -74,9 +75,9 @@ export class RegisterService {
       // 3. Unknown fields and map keys (ADR-070 d1), then the client-time stage (field-kinds.md): unstored.
       const strict = registerStrictErrors(command as unknown as Record<string, unknown>, type, command.version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
-      const times = clientTimeErrors([['createdAt', command.createdAt], ...CLIENT_TIMES[type].map(
+      const timeRefusal = clientTimeRefusal(id, [['createdAt', command.createdAt], ...CLIENT_TIMES[type].map(
         (field): [string, unknown] => [`payload.${field}`, payload[field]])], (options.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
-      if (times.length) return refuse(id, 'invalid_payload', times.slice(0, 10).join('; '));
+      if (timeRefusal) return timeRefusal;
       // 4. The resolved session. Sessions and aliases are write-once, so an unknown one, or a closure naming another register, is refused
       // here, unstored and without a lock (ADR-068 d5), and a known one's register never changes.
       // An alias names its session (ADR-078 d2).
@@ -349,12 +350,7 @@ export class RegisterService {
   }
 
   private async sessionRefunds(tx: RequestContext, sessionId: string): Promise<{ byMethod: Record<string, number> }[]> {
-    const refunds = await this.connection.getRepository(tx, Refund).createQueryBuilder('refund')
-      .innerJoin('refund.payment', 'payment')
-      .innerJoin('payment.order', 'sale')
-      .innerJoin('sale.channels', 'channel')
-      .where('channel.id = :channelId', { channelId: tx.channelId })
-      .andWhere('refund.state != :failed', { failed: 'Failed' })
+    const refunds = await channelRefunds(this.connection, tx)
       .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallySessionId' = :sessionId", { sessionId })
       .orderBy('refund.id', 'ASC').getMany();
     return refunds.flatMap(refund => {
