@@ -152,9 +152,9 @@ test("Settings takes the scanner's prefix and suffix off each scan, and scan sou
   await openSettings(page, 'barcode');
   await page.getByTestId('scanner-prefix').fill('*');
   await page.getByTestId('scanner-suffix').fill('#');
-  await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: Off');
+  await expect(page.getByTestId('scan-sounds-toggle')).toHaveAttribute('aria-checked', 'false');
   await page.getByTestId('scan-sounds-toggle').click();
-  await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: On');
+  await expect(page.getByTestId('scan-sounds-toggle')).toHaveAttribute('aria-checked', 'true');
   await page.getByTestId('settings-back').click();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
@@ -168,7 +168,7 @@ test("Settings takes the scanner's prefix and suffix off each scan, and scan sou
   await openSettings(page, 'barcode');
   await expect(page.getByTestId('scanner-prefix')).toHaveValue('*');
   await expect(page.getByTestId('scanner-suffix')).toHaveValue('#');
-  await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: On');
+  await expect(page.getByTestId('scan-sounds-toggle')).toHaveAttribute('aria-checked', 'true');
 });
 
 test("Settings' barcode test shows a scan and its last key, and adds nothing to the sale", async ({ page }) => {
@@ -781,6 +781,12 @@ test('Settings shows one section at a time, General first, and stacks behind Men
   await page.getByTestId('settings-open').click();
   await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('tile-size-auto')).toBeVisible();
+  await expect(page.getByTestId('price-edit-toggle')).toHaveAttribute('role', 'switch');
+  await expect(page.getByTestId('price-edit-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('price-edit-toggle').click();
+  await expect(page.getByTestId('price-edit-toggle')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('price-edit-toggle').click();
+  await expect(page.getByTestId('price-edit-toggle')).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByTestId('scanner-min-length')).toHaveCount(0);
   await expect(page.getByTestId('variance-limit')).toHaveCount(0);
   await page.getByTestId('settings-section-register').click();
@@ -1098,9 +1104,9 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openSettings(page, 'printing');
-  await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
+  await expect(page.getByTestId('auto-print-toggle')).toHaveAttribute('aria-checked', 'false');
   await page.getByTestId('auto-print-toggle').click();
-  await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: On');
+  await expect(page.getByTestId('auto-print-toggle')).toHaveAttribute('aria-checked', 'true');
   await page.getByTestId('settings-back').click();
   await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -1116,7 +1122,7 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await page.getByTestId('new-sale').click();
   await openSettings(page, 'printing');
   await page.getByTestId('auto-print-toggle').click();
-  await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
+  await expect(page.getByTestId('auto-print-toggle')).toHaveAttribute('aria-checked', 'false');
   await page.getByTestId('settings-back').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);

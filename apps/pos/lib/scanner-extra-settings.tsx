@@ -1,6 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Platform } from 'react-native';
-import { Button, Input, InputField, Label, Text } from '@tallyui/components';
+import { Input, InputField, Label, SettingsRow, Switch, Text } from '@tallyui/components';
 import { loadScannerAffixes, loadScanSounds, saveScannerAffixes, saveScanSounds } from './scanner-settings';
 import { ScannerTestArea } from './scanner-test-area';
 
@@ -25,11 +25,9 @@ export function ScannerExtraSettings(): JSX.Element {
       }} /></Input>
     <Text>Taken off each scan before the lookup. Leave both empty if your scanner adds nothing.</Text>
     {Platform.OS === 'web' && <>
-      <Text>{"Beep when a scan adds a product, and a lower tone when it doesn't."}</Text>
-      <Button testID="scan-sounds-toggle" onPress={() => {
-        saveScanSounds(!sounds);
-        setSounds(!sounds);
-      }}><Text>Scan sounds: {sounds ? 'On' : 'Off'}</Text></Button>
+      <SettingsRow label="Scan sounds" description="Beep when a scan adds a product, and a lower tone when it doesn't."
+        action={<Switch testID="scan-sounds-toggle" accessibilityLabel="Scan sounds" checked={sounds}
+          onCheckedChange={(on) => { saveScanSounds(on); setSounds(on); }} />} />
     </>}
     <ScannerTestArea />
   </>;

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, Text, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, VStack,
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
@@ -108,13 +108,9 @@ export default function SettingsScreen() {
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Prices</CardTitle></CardHeader>
         <CardContent>
-          <VStack space="lg">
-            <Text>{"Let cashiers change a line's price in the cart."}</Text>
-            <Button testID="price-edit-toggle" onPress={() => {
-              savePriceEditAllowed(!canEditPrice);
-              setCanEditPrice(!canEditPrice);
-            }}><Text>Price changes: {canEditPrice ? 'On' : 'Off'}</Text></Button>
-          </VStack>
+          <SettingsRow label="Price changes" description="Let cashiers change a line's price in the cart."
+            action={<Switch testID="price-edit-toggle" accessibilityLabel="Price changes" checked={canEditPrice}
+              onCheckedChange={(on) => { savePriceEditAllowed(on); setCanEditPrice(on); }} />} />
         </CardContent>
       </Card>
       <TileSizeSettings />
@@ -160,13 +156,9 @@ export default function SettingsScreen() {
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Printing</CardTitle></CardHeader>
           <CardContent>
-            <VStack space="lg">
-              <Text>{"Open the print dialog when a sale's receipt shows."}</Text>
-              <Button testID="auto-print-toggle" onPress={() => {
-                saveAutoPrint(!autoPrint);
-                setAutoPrint(!autoPrint);
-              }}><Text>Print after each sale: {autoPrint ? 'On' : 'Off'}</Text></Button>
-            </VStack>
+            <SettingsRow label="Print after each sale" description="Open the print dialog when a sale's receipt shows."
+              action={<Switch testID="auto-print-toggle" accessibilityLabel="Print after each sale" checked={autoPrint}
+                onCheckedChange={(on) => { saveAutoPrint(on); setAutoPrint(on); }} />} />
           </CardContent>
         </Card>
       ) : null}
