@@ -39,6 +39,8 @@ function zoneRate(categoryId: string): number {
 const CONTRACT_DATA_KEY = { 'order.create': 'orderCreate', 'order.refund': 'orderRefund', register: 'register' } as const;
 // Stable initial timestamps allow the connector's updatedAt probes and checkpoints to work.
 const SEED_TIME = '2026-01-01T00:00:00.000Z';
+// The seeded orders' cashier: the demo sign-in's email (DEMO_CREDENTIALS in fetch.ts, which imports this file).
+const SEED_CASHIER = 'cashier@demo.vendurepos.com';
 // Only the seed's shop-floor location is visible in the simulated POS channel.
 const STOCK_LOCATION_ID = '2';
 // Vendure expresses tax rates as percentages.
@@ -113,6 +115,7 @@ function seed(): State {
     const taxMinor = Math.round(subtotalMinor * ratePpm / 1_000_000);
     const totalMinor = subtotalMinor + taxMinor;
     return { clientOrderId, createdAt, currency: 'EUR', pricesIncludeTax: false, lines, customer,
+      cashierRef: SEED_CASHIER,
       subtotalMinor, taxMinor, totalMinor,
       payments: [{ clientPaymentId: `${clientOrderId}-payment`, method: 'cash', amountMinor: totalMinor }],
       display: { currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor, discountMinor: 0,

@@ -1058,7 +1058,7 @@ test.describe('on a narrow screen', () => {
     await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
     await expect(page.getByTestId('register-count')).toBeVisible();
     // Off the count's fields, so the listener takes the scan.
-    await page.getByTestId('signed-in-store').click();
+    await page.getByTestId('register-bar-name').click();
     await wedgeScan(page, MUG_BARCODE);
     await expect(page.getByTestId('scan-finish-closing')).toHaveText('Finish closing the register before scanning.');
     await expect(cartTab).toHaveText('Cart (1) · €9.52');
