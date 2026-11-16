@@ -28,7 +28,14 @@ it('uses the flagged billing address and drops empty address parts', () => {
     { fullName: 'Ada Lovelace', company: '', streetLine1: '12 Engine Row', streetLine2: '', city: 'London',
       province: null, postalCode: 'N1 9GU', country: { code: 'GB' }, defaultBillingAddress: true },
   ] })).toEqual({ id: 'c1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com', phone: '1234',
-    createdAt: customer.createdAt, billingAddress: ['Ada Lovelace', '12 Engine Row', 'London N1 9GU', 'GB'] });
+    createdAt: customer.createdAt, billingAddress: ['12 Engine Row', 'London N1 9GU, GB'] });
+});
+
+it('joins a second street line and keeps the country alone when the town is empty', () => {
+  expect(toCustomerRow({ ...customer, addresses: [
+    { streetLine1: 'Bombe Works', streetLine2: '7 Enigma Lane', city: '', province: null, postalCode: '',
+      country: { code: 'GB' }, defaultBillingAddress: true },
+  ] }).billingAddress).toEqual(['Bombe Works, 7 Enigma Lane', 'GB']);
 });
 
 it('does not fall back to another address and maps missing strings and phone', () => {
