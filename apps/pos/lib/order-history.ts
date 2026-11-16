@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import type { OrderHistoryRow } from '@tallyui/components';
 import { ConnectorUnauthorizedError } from '@tallyui/core';
 import { listVendureOrders, type VendureOrderSummary } from '@tallyui/connector-vendure';
@@ -43,26 +42,3 @@ export async function loadOrderHistory(session: Session): Promise<{ orders: Vend
   }
 }
 
-export function useOrderHistory(session: Session, open: boolean): {
-  orders: VendureOrderSummary[]; notice: OrderHistoryNotice | null; loading: boolean; reload(): void;
-} {
-  const [orders, setOrders] = useState<VendureOrderSummary[]>([]);
-  const [notice, setNotice] = useState<OrderHistoryNotice | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setLoading(true);
-    void loadOrderHistory(session).then(result => {
-      if (cancelled) return;
-      if ('orders' in result) {
-        setOrders(result.orders);
-        setNotice(null);
-      } else setNotice(result.notice);
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [open, session, attempt]);
-  return { orders, notice, loading, reload: () => setAttempt(value => value + 1) };
-}
