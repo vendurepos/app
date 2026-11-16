@@ -6,6 +6,10 @@ import {
 import { useCustomerList, type CustomerRow } from './customer-list';
 import type { Session } from './session';
 
+// Column widths for the wide table, header and cells alike: the avatar column fits its circle, and the email column is
+// twice as wide so an address does not wrap mid-word at 1280 (v2's table).
+const COLUMN_CLASS = ['w-16 flex-none', undefined, undefined, 'flex-[2]', undefined, undefined];
+
 function customerInitials({ firstName, lastName, email }: CustomerRow): string {
   return ((firstName[0] ?? '') + (lastName[0] ?? '') || email[0] || '').toUpperCase();
 }
@@ -33,8 +37,8 @@ export function CustomersPanel({ session, timezone }: { session: Session; timezo
       <ScrollView className="flex-1">
         <Table>
           {wide ? <TableHeader><TableRow>
-            {['', 'First name', 'Last name', 'Email', 'Billing address', 'Date created'].map(label => (
-              <TableHead key={label}><Text>{label}</Text></TableHead>
+            {['', 'First name', 'Last name', 'Email', 'Billing address', 'Date created'].map((label, index) => (
+              <TableHead key={label} className={COLUMN_CLASS[index]}><Text>{label}</Text></TableHead>
             ))}
           </TableRow></TableHeader> : null}
           <TableBody>
@@ -46,12 +50,12 @@ export function CustomersPanel({ session, timezone }: { session: Session; timezo
               const missingDate = !row.createdAt || Number.isNaN(Date.parse(row.createdAt));
               return <View key={row.id} testID={`customers-row-${row.id}`}><TableRow>
                 {wide ? <>
-                  <TableCell>{avatar}</TableCell>
+                  <TableCell className={COLUMN_CLASS[0]}>{avatar}</TableCell>
                   <TableCell><Text>{row.firstName}</Text></TableCell>
                   <TableCell><Text>{row.lastName}</Text></TableCell>
-                  <TableCell><Text>{row.email}</Text></TableCell>
+                  <TableCell className={COLUMN_CLASS[3]}><Text>{row.email}</Text></TableCell>
                   <TableCell>{row.billingAddress.length > 0
-                    ? <VStack>{row.billingAddress.map((line, index) => <Text key={index}>{line}</Text>)}</VStack>
+                    ? <VStack space="none">{row.billingAddress.map((line, index) => <Text key={index}>{line}</Text>)}</VStack>
                     : <Text className="text-muted-foreground">—</Text>}</TableCell>
                   <TableCell><Text className={missingDate ? 'text-muted-foreground' : undefined}>
                     {missingDate ? '—' : dateFormat.format(new Date(row.createdAt))}
