@@ -1,7 +1,9 @@
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { UI_THEMES } from '@tallyui/pos';
 import { loadTheme, saveTheme, THEME_KEY } from './theme-setting';
 import type { KeyValueStore } from './session';
+
+vi.mock('uniwind', () => ({ Uniwind: { setTheme: vi.fn() } }));
 
 let store: KeyValueStore;
 beforeEach(() => {

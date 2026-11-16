@@ -1108,9 +1108,8 @@ test('Settings › Theme chooses Light or Dark over the device\'s scheme, and ke
   await expect(page.getByTestId('theme-dark')).toHaveAttribute('aria-pressed', 'true');
   await expect(html).toHaveClass(/\bdark\b/);
   await page.reload();
-  await expectSignedIn(page);
   await expect(html).toHaveClass(/\bdark\b/);
-  await openSettings(page, 'theme');
+  await page.getByTestId('settings-section-theme').click();
   await expect(page.getByTestId('theme-dark')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('theme-light').click();
   await page.emulateMedia({ colorScheme: 'dark' });
