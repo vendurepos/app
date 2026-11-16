@@ -1,4 +1,4 @@
-export type SettingsSectionId = 'general' | 'register' | 'printing' | 'barcode' | 'sync-log';
+export type SettingsSectionId = 'general' | 'register' | 'printing' | 'barcode' | 'theme' | 'sync-log';
 export interface SettingsSection { id: SettingsSectionId; label: string }
 /**
  * The Settings sections in v2's order (General, …, Printing, …, Barcode Scanning), with this till's own Register and
@@ -10,6 +10,7 @@ export function settingsSections({ printing }: { printing: boolean }): SettingsS
     { id: 'register', label: 'Register' },
     ...(printing ? [{ id: 'printing' as const, label: 'Printing' }] : []),
     { id: 'barcode', label: 'Barcode scanning' },
+    { id: 'theme', label: 'Theme' },
     { id: 'sync-log', label: 'Sync log' },
   ];
 }
