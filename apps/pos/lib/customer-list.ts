@@ -41,9 +41,11 @@ export function customerListOptions(search: string, skip: number) {
 }
 export function toCustomerRow(item: VendureCustomerListItem): CustomerRow {
   const address = item.addresses?.find(address => address.defaultBillingAddress === true);
-  const billingAddress = address ? [address.fullName, address.company, address.streetLine1, address.streetLine2,
-    [address.city, address.province, address.postalCode].filter(Boolean).join(' '), address.country?.code]
-    .filter((line): line is string => !!line) : [];
+  // Two lines, as v2's customer table (Front desk, #245 polish): the street, then the town and postcode with the country.
+  const billingAddress = address ? [
+    [address.streetLine1, address.streetLine2].filter(Boolean).join(', '),
+    [[address.city, address.province, address.postalCode].filter(Boolean).join(' '), address.country?.code].filter(Boolean).join(', '),
+  ].filter((line): line is string => !!line) : [];
   return { id: item.id, firstName: item.firstName ?? '', lastName: item.lastName ?? '', email: item.emailAddress ?? '',
     phone: item.phoneNumber ?? null, billingAddress, createdAt: item.createdAt };
 }
