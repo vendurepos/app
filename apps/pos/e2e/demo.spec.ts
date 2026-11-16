@@ -1118,6 +1118,27 @@ test('Settings › Theme chooses Light or Dark over the device\'s scheme, and ke
   await expect(html).toHaveClass(/\bdark\b/);
 });
 
+test('Settings › Theme sets the scale, and keeps it after a reload', async ({ page }) => {
+  const textBase = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim());
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'theme');
+  await expect(page.getByTestId('scale-auto')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(textBase).toBe('14px');
+  await page.getByTestId('scale-compact').click();
+  await expect.poll(textBase).toBe('13px');
+  await page.getByTestId('scale-spacious').click();
+  await expect(page.getByTestId('scale-spacious')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(textBase).toBe('16px');
+  await page.reload();
+  await page.getByTestId('settings-section-theme').click();
+  await expect(page.getByTestId('scale-spacious')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(textBase).toBe('16px');
+  await page.getByTestId('scale-auto').click();
+  await expect.poll(textBase).toBe('14px');
+});
+
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
   await page.addInitScript(() => {
     window.printCalls = 0;
