@@ -3,7 +3,7 @@ import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import {
-  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OrdersList, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
+  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   SyncStatus, TabsTrigger, TenderPane, Text, VStack, type OrderHistoryRow,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
@@ -25,7 +25,7 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
-import { toOrderHistoryRow, useOrderHistory } from '../lib/order-history';
+import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { OrderReceipt } from '../lib/order-receipt';
 import { OrderSheet } from '../lib/order-sheet';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
@@ -94,10 +94,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const saleSettings = useSaleSettings(session, connector);
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
+  const [ordersScope, setOrdersScope] = useState<OrdersScope>('store');
   const [reportsOpen, setReportsOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
-  const history = useOrderHistory(session, ordersOpen);
-  const historyRows = useMemo(() => history.orders.map(toOrderHistoryRow), [history.orders]);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
   const [registerId] = useState(() => deviceId(defaultStore()));
@@ -201,7 +200,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
     else if (id === 'support') setSupportOpen(true);
-    else if (id === 'orders') { setReportsOpen(false); setOrdersOpen((open) => !open); }
+    else if (id === 'orders') { setReportsOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
     else if (id === 'reports') { setOrdersOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
     else if (id === 'register') setRegisterOpen(true);
     else closePanels();
@@ -233,7 +232,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text testID="register-closing-pending" className="text-xs text-muted-foreground">Closing — waiting for {countOrders(closingWaiting)}</Text>
           ) : null}
           {outbox.state.rejected ? (
-            <Button testID="orders-rejected" variant="ghost" size="sm" className="h-7 px-2" onPress={() => setOrdersOpen(true)}>
+            <Button testID="orders-rejected" variant="ghost" size="sm" className="h-7 px-2" onPress={() => { setOrdersScope('till'); setOrdersOpen(true); }}>
               <Text className="text-xs text-muted-foreground">
                 {countOrders(outbox.state.rejected)} {outbox.state.rejected === 1 ? 'needs' : 'need'} attention
               </Text>
@@ -288,27 +287,15 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {ordersOpen ? (
         <VStack testID="orders-panel" className="flex-1">
-          <HStack dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
-            <Button testID="orders-close" variant="secondary" size="sm" onPress={() => { setOrdersOpen(false); setOpenOrder(null); }}>
-              <Text>Back to sale</Text>
-            </Button>
-          </HStack>
-          {history.notice ? (
-            <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
-              <Text testID="orders-history-notice" className="flex-1 text-sm text-muted-foreground">{history.notice.text}</Text>
-              {history.notice.retry ? (
-                <Button testID="orders-history-retry" variant="secondary" size="sm" disabled={history.loading} onPress={history.reload}>
-                  <Text>Try again</Text>
-                </Button>
-              ) : null}
-            </HStack>
-          ) : null}
           {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} footer={(order, reload) => <RefundSheet order={order}
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
             capabilities={readSettingsCapabilities} onRefunded={reload} />}
-            receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back} />} /> : <OrdersList orders={outbox.recent}
-            onRetry={outbox.requeue} stuck={outbox.state.stuck} history={historyRows} formatDate={(iso) => new Date(iso).toLocaleString()}
-            onOpen={setOpenOrder} />}
+            receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back} />} /> : null}
+          <View className="flex-1" style={openOrder ? { display: 'none' } : undefined}>
+            <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
+              till={{ orders: outbox.recent, onRetry: outbox.requeue, stuck: outbox.state.stuck }}
+              registerId={registerId} cashier={identity} onOpen={setOpenOrder} />
+          </View>
         </VStack>
       ) : null}
       {reportsOpen ? <ReportsPanel orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}

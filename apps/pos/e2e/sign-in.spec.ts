@@ -451,19 +451,20 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
     .toHaveCount(2);
   await expect(panel.getByRole('button', { name: 'Retry' })).toHaveCount(1);
   await expect(cart).toBeHidden();
-  await page.getByTestId('orders-close').click();
+  await page.getByTestId('orders-open').click();
   await expect(panel).toHaveCount(0);
   // Only hidden, never unmounted: the new cart still holds its item.
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
   // Retried against the real store: requeue sends it under a new command id, and it applies.
   await page.unroute('**/tally/v1/commands');
   await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
   await panel.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByTestId('orders-rejected')).toHaveCount(0, { timeout: 30_000 });
   await expect(panel.getByRole('heading', { name: 'Needs attention' })).toHaveCount(0);
   await expect(panel.getByText(/· Synced$/)).toHaveCount(1);
   await expectOnStore(first);
-  await page.getByTestId('orders-close').click();
+  await page.getByTestId('orders-open').click();
   // The store refuses the whole batch: the outbox keeps it and pauses until Send again flushes.
   await page.route('**/tally/v1/commands', (route) => {
     if (route.request().method() !== 'POST') return route.continue();
@@ -1500,8 +1501,9 @@ test('signing in again in place keeps the cart and sells with the new session', 
   await expect(page.getByTestId('receipt')).toBeVisible();
   await page.getByTestId('new-sale').click();
   await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
   await expect(page.getByTestId('orders-panel').getByTestId(/^order-row-/).first()).toHaveText(/· Synced$/, { timeout: 60_000 });
-  await page.getByTestId('orders-close').click();
+  await page.getByTestId('orders-open').click();
   expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
@@ -1556,6 +1558,7 @@ test('a sale to a searched customer, and one to a new customer, land on those cu
       await page.getByTestId('new-sale').click();
     }
     await page.getByTestId('orders-open').click();
+    await page.getByTestId('orders-scope-till').click();
     await expect(page.getByTestId('orders-panel').getByText(/· Synced$/)).toHaveCount(2, { timeout: 60_000 });
     const orders = await page.request.post(`${STORE_URL}/admin-api`, {
       headers,
@@ -1660,7 +1663,7 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
   expect(historyBody.data.orders.items.map((order: { customFields: { tallyClientOrderId: string | null } }) => order.customFields.tallyClientOrderId))
     .toContain(command.payload.clientOrderId);
   await expect(page.getByTestId('orders-history-notice')).toHaveCount(0);
-  await page.getByTestId('orders-close').click();
+  await page.getByTestId('orders-open').click();
 
   await admin('mutation ($ids: [ID!]!) { deleteApiKeys(ids: $ids) { result } }', { ids: [key.entityId] });
   const violations = await cspViolations(page);
@@ -2060,6 +2063,7 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   await page.getByTestId('receipt').getByTestId('new-sale').click();
 
   await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
   const panel = page.getByTestId('orders-panel');
   await expect(panel.getByText(/· Synced$/)).toHaveCount(1, { timeout: 30_000 });
   await panel.getByTestId(/^order-open-/).first().click();
@@ -2121,7 +2125,7 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   expect(orders[0].payments.flatMap(({ refunds }) => refunds)).toEqual([{ total: 952, state: 'Settled' }, { total: 952, state: 'Settled' }]);
 
   // €100.00 float + €19.04 cash sale − €19.04 cash refunded.
-  await page.getByTestId('orders-close').click();
+  await page.getByTestId('orders-open').click();
   await page.getByTestId('register-open-panel').click();
   await expect(page.getByTestId('register-panel').getByTestId('register-panel-expected')).toContainText('€100.00');
   expect(await cspViolations(page)).toEqual([]);
@@ -2147,6 +2151,7 @@ test('a till refund tapped twice at once sends one refund and Vendure applies on
   await tender.getByTestId('tender-complete').click();
   await page.getByTestId('receipt').getByTestId('new-sale').click();
   await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
   const panel = page.getByTestId('orders-panel');
   await expect(panel.getByText(/· Synced$/)).toHaveCount(1, { timeout: 30_000 });
   await panel.getByTestId(/^order-open-/).first().click();
