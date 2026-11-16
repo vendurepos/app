@@ -65,6 +65,6 @@ it('groups consecutive days in row order with relative and dated labels', () => 
   const groups = groupOrdersByDay(rows, '2026-11-16');
   expect(groups.map(group => group.label)).toEqual(['Today', 'Yesterday', expect.stringContaining('2025')]);
   expect(groups.map(group => group.rows)).toEqual([rows.slice(0, 2), rows.slice(2, 3), rows.slice(3)]);
-  expect(groupOrdersByDay([rows[0], rows[2], rows[1]], '2026-11-16').map(group => group.rows)).toEqual([[rows[0]], [rows[2]], [rows[1]]);
+  expect(groupOrdersByDay([rows[0], rows[2], rows[1]], '2026-11-16').map(group => group.rows)).toEqual([[rows[0]], [rows[2]], [rows[1]]]);
   expect(groupOrdersByDay([{ ...rows[0], day: '2025-12-31' }], '2026-01-01')[0].label).toBe('Yesterday');
 });
