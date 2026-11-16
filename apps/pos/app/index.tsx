@@ -312,7 +312,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </VStack>
       ) : null}
       {reportsOpen ? <ReportsPanel orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}
-        timezone={TIMEZONE} onClose={() => setReportsOpen(false)} /> : null}
+        timezone={TIMEZONE} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>

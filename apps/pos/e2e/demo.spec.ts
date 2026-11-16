@@ -373,6 +373,14 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('reports-panel')).toBeVisible();
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
+  await expect(page.getByTestId('reports-close')).toHaveCount(0);
+  await expect(page.getByTestId('reports-panel')).not.toContainText('Back to sale');
+  await expect(page.getByTestId('sales-hero')).not.toContainText('—');
+  await expect(page.getByTestId('hero-compare')).toHaveCount(1);
+  await expect(page.getByTestId('hero-compare')).toContainText('vs yesterday');
+  await page.getByTestId('hero-compare').click();
+  await expect(page.getByTestId('hero-compare')).toHaveText(/vs last \w+day/);
+  await expect(page.getByTestId('hero-chart').locator('[data-testid^="hero-hour-bar-"]')).toHaveCount(24);
   await page.getByTestId('reports-open').click();
   await expect(page.getByTestId('reports-panel')).toHaveCount(0);
   await page.getByTestId('reports-open').click();

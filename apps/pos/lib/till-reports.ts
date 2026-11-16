@@ -1,7 +1,7 @@
 import type { SalesFilters, SalesOption } from '@tallyui/components';
 import {
-  comparisonRange, presetRange, reportOrderFromPosOrder, reportRefundFromPosRefund, salesFigures,
-  type PosOrder, type PosRefund, type SalesFigures,
+  comparisonRange, daysOf, inRange, presetRange, reportOrderFromPosOrder, reportRefundFromPosRefund, salesFigures,
+  type PosOrder, type PosRefund, type ReportOrder, type SalesFigures, type StoreDay,
 } from '@tallyui/pos';
 
 // The labels are the Orders panel's sync words.
@@ -29,13 +29,49 @@ export function reportOptions(orders: readonly PosOrder[]): { cashierOptions: Sa
   };
 }
 
-export function tillSalesFigures({ orders, refunds, filters, timezone }: {
-  orders: readonly PosOrder[]; refunds: readonly PosRefund[]; filters: SalesFilters; timezone: string;
-}): SalesFigures {
-  const kept = orders.filter((order) => order.syncStatus !== 'rejected'
+export function keptTillOrders(orders: readonly PosOrder[], filters: SalesFilters): PosOrder[] {
+  return orders.filter((order) => order.syncStatus !== 'rejected'
     && (filters.status === 'all' || order.syncStatus === filters.status)
     && (!filters.cashierId || order.cashierRef === filters.cashierId)
     && (!filters.registerId || order.registerId === filters.registerId));
+}
+
+export function isOneDay(filters: SalesFilters): boolean {
+  return filters.preset === 'today' || filters.preset === 'yesterday' || (filters.preset === 'custom' && filters.range.from === filters.range.to);
+}
+
+// The by-hour counterpart of the daily series' gross, from the same orders' totalMinor.
+export function hourlyGross(orders: readonly ReportOrder[], day: StoreDay, timezone: string): number[] {
+  const hours = Array<number>(24).fill(0);
+  const hour = new Intl.DateTimeFormat('en-GB', { timeZone: timezone === 'device' ? undefined : timezone, hour: '2-digit', hourCycle: 'h23' });
+  for (const order of orders) {
+    if (inRange(order.at, { from: day, to: day }, timezone)) hours[Number(hour.format(new Date(order.at)))] += order.totalMinor;
+  }
+  return hours;
+}
+
+export function tillHourly({ orders, filters, timezone }: {
+  orders: readonly PosOrder[]; filters: SalesFilters; timezone: string;
+}): { hours: number[]; compareHours: number[] } | null {
+  if (!isOneDay(filters)) return null;
+  const kept = keptTillOrders(orders, filters).map((order) => reportOrderFromPosOrder(order));
+  const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
+  return { hours: hourlyGross(kept, filters.range.from, timezone), compareHours: hourlyGross(kept, compare.from, timezone) };
+}
+
+export function compareLabel(filters: SalesFilters): string {
+  const days = filters.preset === 'custom' ? daysOf(filters.range).length : 0;
+  if (filters.preset === 'thisWeek' || filters.preset === 'lastWeek' || (days > 1 && days <= 7)) return 'vs the week before';
+  if (filters.preset === 'thisMonth' || filters.preset === 'lastMonth' || days > 7) return 'vs the month before';
+  if (filters.compare === 'previous') return 'vs yesterday';
+  const weekday = new Intl.DateTimeFormat('en-GB', { weekday: 'long', timeZone: 'UTC' }).format(new Date(`${filters.range.from}T00:00:00Z`));
+  return `vs last ${weekday}`;
+}
+
+export function tillSalesFigures({ orders, refunds, filters, timezone }: {
+  orders: readonly PosOrder[]; refunds: readonly PosRefund[]; filters: SalesFilters; timezone: string;
+}): SalesFigures {
+  const kept = keptTillOrders(orders, filters);
   const keptIds = new Set(kept.map((order) => order.id));
   const keptRefunds = refunds.flatMap((refund) => {
     const report = reportRefundFromPosRefund(refund);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
-import type { PosOrder, PosRefund } from '@tallyui/pos';
-import { initialSalesFilters, reportOptions, tillSalesFigures } from './till-reports';
+import { presetRange, type PosOrder, type PosRefund, type ReportOrder } from '@tallyui/pos';
+import { compareLabel, hourlyGross, initialSalesFilters, reportOptions, tillHourly, tillSalesFigures } from './till-reports';
 
 const timezone = 'Europe/Madrid';
 const today = '2026-11-16T12:00:00.000Z';
@@ -80,4 +80,49 @@ it('initialises today in the given timezone, comparing previous, with all status
   expect(initialSalesFilters(new Date('2026-11-16T00:30:00.000Z'), 'America/New_York')).toEqual({
     preset: 'today', range: { from: '2026-11-15', to: '2026-11-15' }, compare: 'previous', status: 'all', cashierId: null, registerId: null,
   });
+});
+
+it('hourlyGross sums same-hour gross into 24 buckets and excludes other days', () => {
+  const orders = [
+    { at: '2026-11-16T15:30:00Z', totalMinor: 952 },
+    { at: '2026-11-16T15:10:00Z', totalMinor: 100 },
+    { at: '2026-11-17T15:30:00Z', totalMinor: 952 },
+  ] as unknown as ReportOrder[];
+  const hours = hourlyGross(orders, '2026-11-16', 'America/New_York');
+  expect(hours).toHaveLength(24);
+  expect(hours[10]).toBe(1052);
+  expect(hours.reduce((sum, gross) => sum + gross, 0)).toBe(1052);
+});
+
+it('hourlyGross takes the hour from the requested timezone', () => {
+  const orders = [{ at: '2026-11-16T15:30:00Z', totalMinor: 952 }] as unknown as ReportOrder[];
+  expect(hourlyGross(orders, '2026-11-16', 'Europe/Berlin')[16]).toBe(952);
+});
+
+it('tillHourly separates today and yesterday and excludes rejected orders from the gross', () => {
+  const timezone = 'America/New_York';
+  const selected = { ...filters, range: presetRange('today', new Date(today), timezone) };
+  const orders = [
+    order('today', { createdAt: '2026-11-16T15:30:00Z' }),
+    order('yesterday', { createdAt: '2026-11-15T14:30:00Z' }),
+    order('rejected', { createdAt: '2026-11-16T15:10:00Z', syncStatus: 'rejected' }),
+  ];
+  const result = tillHourly({ orders, filters: selected, timezone })!;
+  expect(result.hours[10]).toBe(952);
+  expect(result.compareHours[9]).toBe(952);
+  expect(result.hours[9]).toBe(0);
+  expect(result.hours.reduce((sum, gross) => sum + gross, 0)).toBe(tillSalesFigures({ orders, refunds: [], filters: selected, timezone }).totals.grossMinor);
+});
+
+it('tillHourly returns null for thisWeek even when its range is one day', () => {
+  const selected: SalesFilters = { ...filters, preset: 'thisWeek', range: presetRange('thisWeek', new Date(today), timezone) };
+  expect(tillHourly({ orders: [order('today')], filters: selected, timezone })).toBeNull();
+});
+
+it('compareLabel names yesterday, last weekday, the week before and the month before', () => {
+  const selected = { ...filters, range: presetRange('today', new Date(today), timezone) };
+  expect(compareLabel(selected)).toBe('vs yesterday');
+  expect(compareLabel({ ...selected, compare: 'week' })).toBe('vs last Monday');
+  expect(compareLabel({ ...selected, preset: 'thisWeek', range: presetRange('thisWeek', new Date(today), timezone) })).toBe('vs the week before');
+  expect(compareLabel({ ...selected, preset: 'thisMonth', range: presetRange('thisMonth', new Date(today), timezone) })).toBe('vs the month before');
 });
