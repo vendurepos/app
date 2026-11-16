@@ -6,6 +6,7 @@ import { signIn } from '../sign-in';
 import { sessionContext, type Session } from '../session';
 import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
+import { loadOrderPage } from '../order-list';
 import { orderDetailView } from '../order-detail';
 import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
@@ -675,4 +676,67 @@ it('refunds an uneven line a unit at a time in shares that add up to the line to
   }
   expect(totals).toEqual([912, 913, 912]);
   expect(totals.reduce((sum, total) => sum + total, 0)).toBe(2737);
+});
+
+it('lists full order details newest first through the real connector', async () => {
+  const session = await signedIn();
+  const result = await loadOrderPage(session, { search: '', filters: {} }, 'UTC', 0);
+  expect('orders' in result).toBe(true);
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  expect(result.orders.map(order => order.id)).toEqual(['3', '2', '1']);
+  expect(result.totalItems).toBe(3);
+  expect(result.orders.find(order => order.id === '2')).toEqual(await getVendureOrder(sessionContext(session), '2'));
+});
+
+it.each([['demo-000002', ['2']], ['LOVELACE', ['3']], ['zzz', []]] as const)('searches order codes and customer names: %s', async (search, ids) => {
+  const result = await loadOrderPage(await signedIn(), { search, filters: {} }, 'UTC', 0);
+  expect('orders' in result).toBe(true);
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  expect(result.orders.map(order => order.id)).toEqual(ids);
+  expect(result.totalItems).toBe(ids.length);
+});
+
+it.each([['PaymentSettled', 3], ['Cancelled', 0]] as const)('filters orders by status: %s', async (status, count) => {
+  const result = await loadOrderPage(await signedIn(), { search: '', filters: { status } }, 'UTC', 0);
+  expect(result).toMatchObject({ orders: expect.any(Array), totalItems: count });
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  expect(result.orders).toHaveLength(count);
+});
+
+it.each([['c1', ['3']], ['c999', []]] as const)('lists orders for customer: %s', async (customerId, ids) => {
+  const result = await loadOrderPage(await signedIn(), { search: '', filters: { customerId } }, 'UTC', 0);
+  expect('orders' in result).toBe(true);
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  expect(result.orders.map(order => order.id)).toEqual(ids);
+  expect(result.totalItems).toBe(ids.length);
+});
+
+it('filters orders by the inclusive store date range', async () => {
+  const result = await loadOrderPage(await signedIn(), { search: '', filters: { dateRange: { from: '2025-12-29', to: '2025-12-29' } } }, 'UTC', 0);
+  expect('orders' in result).toBe(true);
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  expect(result.orders.map(order => order.id)).toEqual(['2']);
+});
+
+it('pages orders with the total count before slicing', async () => {
+  const result = await loadOrderPage(await signedIn(), { search: '', filters: {} }, 'UTC', 2);
+  expect('orders' in result).toBe(true);
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  expect(result.orders.map(order => order.id)).toEqual(['1']);
+  expect(result.totalItems).toBe(3);
+});
+
+it('filters a posted sale by register and cashier custom fields', async () => {
+  const session = await signedIn();
+  expect((await send(session, { ...ORDER, payload: { ...ORDER.payload, cashierRef: 'cashier-1' } }))[0].status).toBe('applied');
+  for (const [filters, ids] of [
+    [{ registerId: 'register' }, ['4']], [{ registerId: 'other' }, []],
+    [{ cashierId: 'cashier-1' }, ['4']], [{ cashierId: 'other' }, []],
+  ] as const) {
+    const result = await loadOrderPage(session, { search: '', filters }, 'UTC', 0);
+    expect('orders' in result).toBe(true);
+    if (!('orders' in result)) throw new Error(result.notice.text);
+    expect(result.orders.map(order => order.id)).toEqual(ids);
+    expect(result.totalItems).toBe(ids.length);
+  }
 });

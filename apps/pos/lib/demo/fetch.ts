@@ -14,7 +14,7 @@
  * VariantStock — reconcile/stock.ts.
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.
- * Orders — orders.ts; apps/pos/lib/order-history.ts.
+ * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
  * POST /tally/v1/commands (order.create) — apps/pos/lib/order-transport.ts.
  * POST /tally/v1/commands (register.session.open) — apps/pos/app/index.tsx via order-transport.ts.
@@ -81,11 +81,17 @@ function selected(value: any, fields: Selection): any {
 }
 
 function page(items: Record<string, any>[], options: any = {}) {
-  const filtered = items.filter(item => Object.entries(options.filter ?? {}).every(([field, condition]) => {
-    const rule = condition as { eq?: string; in?: string[]; after?: string; before?: string };
-    return (rule.eq === undefined || item[field] === rule.eq) && (!rule.in || rule.in.includes(item[field]))
-      && (!rule.after || Date.parse(item[field]) > Date.parse(rule.after)) && (!rule.before || Date.parse(item[field]) < Date.parse(rule.before));
-  }));
+  const fieldValue = (item: Record<string, any>, field: string) => field === 'customerLastName' ? item.customer?.lastName ?? null
+    : !(field in item) && field in (item.customFields ?? {}) ? item.customFields[field] : item[field];
+  const matches = (item: Record<string, any>, filter: Record<string, any>): boolean => Object.entries(filter).every(([field, rule]) => {
+    if (field === '_or') return rule.some((part: Record<string, any>) => matches(item, part));
+    const value = fieldValue(item, field);
+    return (rule.eq === undefined || value === rule.eq) && (!rule.in || rule.in.includes(value))
+      && (!rule.after || Date.parse(value) > Date.parse(rule.after)) && (!rule.before || Date.parse(value) < Date.parse(rule.before))
+      && (rule.contains === undefined || String(value ?? '').toLowerCase().includes(rule.contains.toLowerCase()))
+      && (rule.isNull !== false || value != null);
+  });
+  const filtered = items.filter(item => matches(item, options.filter ?? {}));
   filtered.sort((a, b) => {
     for (const [field, direction] of Object.entries(options.sort ?? { id: 'ASC' })) {
       const difference = String(a[field]).localeCompare(String(b[field]), 'en', { numeric: true });
@@ -129,7 +135,13 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'activeAdministrator': data = { activeAdministrator: request.headers.get('Authorization') === `Bearer ${DEMO_AUTH_TOKEN}` ? { id: ADMINISTRATOR_ID } : null }; break;
       case 'logout': data = { logout: { success: true } }; break;
       case 'Search': case 'customers': data = { customers: store.customers(variables) }; break;
-      case 'Orders': case 'orders': data = { orders: page(store.orderSummaries(), variables.options) }; break;
+      case 'Orders': case 'orders':
+        // Detail list queries select lines and payments as well as the summary fields.
+        data = { orders: page(store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) })), variables.options) }; break;
+      case 'CustomerOrders':
+        data = { customer: store.customer(variables.customerId) === null ? null : { orders: page(
+          store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) }))
+            .filter(row => (row.customer as { id: string } | null)?.id === variables.customerId), variables.options) } }; break;
       case 'Order': case 'order': data = { order: store.order(String(variables.id)) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
       case 'One': case 'customer': data = { customer: store.customer(variables.id) }; break;
