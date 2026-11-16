@@ -704,6 +704,7 @@ it('lists, searches and pages the store\'s customers through the demo', async ()
   expect(result.totalItems).toBe(8);
   expect(result.customers.map(customer => customer.lastName)).toEqual(['Hopper', 'Johnson', 'Knuth', 'Liskov', 'Lovelace', 'Mead', 'Turing', 'Vaughan']);
   expect(result.customers.find(customer => customer.lastName === 'Lovelace')?.billingAddress).toEqual(['Ada Lovelace', '12 Engine Row', 'London N1 9GU', 'GB']);
+  expect(result.customers.find(customer => customer.lastName === 'Hopper')?.billingAddress).toEqual(['Grace Hopper', '40 Compiler Court', 'Arlington VA 22202', 'US']);
   expect(result.customers.find(customer => customer.lastName === 'Mead')?.billingAddress).toEqual([]);
   const searched = await loadCustomerPage(session, 'MEAD', 0);
   if (!('customers' in searched)) throw new Error(searched.notice.text);
