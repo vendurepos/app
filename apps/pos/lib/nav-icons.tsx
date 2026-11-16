@@ -12,6 +12,11 @@ export const OrdersIcon = createSvgIcon('OrdersIcon', () => (
   <><Path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" /><Line x1={9} y1={7} x2={15} y2={7} /><Line x1={9} y1={11} x2={15} y2={11} /><Line x1={9} y1={15} x2={13} y2={15} /></>
 ));
 
+// Reports: tabler's `chart-bar` outline.
+export const ReportsIcon = createSvgIcon('ReportsIcon', () => (
+  <Path d="M3 12m0 1a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M10 8m0 1a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1z M17 4m0 1a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1z M4 21h16" />
+));
+
 export const CashIcon = createSvgIcon('CashIcon', () => (
   <>
     <Path d="M7 11a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z" />

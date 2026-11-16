@@ -2,14 +2,14 @@ import type { JSX, ReactNode } from 'react';
 import { View } from 'react-native';
 import { Link } from 'expo-router';
 import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Text, VStack, type ShellNavItem } from '@tallyui/components';
-import { CashIcon, OrdersIcon, PosIcon, SettingsIcon, SupportIcon } from './nav-icons';
+import { CashIcon, OrdersIcon, PosIcon, ReportsIcon, SettingsIcon, SupportIcon } from './nav-icons';
 import type { TillNavEntry, TillNavId } from './till-nav';
 
 const GLYPH: Record<TillNavId, typeof PosIcon> = {
-  pos: PosIcon, orders: OrdersIcon, register: CashIcon, settings: SettingsIcon, support: SupportIcon,
+  pos: PosIcon, orders: OrdersIcon, reports: ReportsIcon, register: CashIcon, settings: SettingsIcon, support: SupportIcon,
 };
 // The ids the e2e specs press for the doors the nav took over. Register's stays on the bar's door, which phones show too.
-const DOOR_TEST_ID: Partial<Record<TillNavId, string>> = { orders: 'orders-open', settings: 'settings-open', support: 'support-open' };
+const DOOR_TEST_ID: Partial<Record<TillNavId, string>> = { orders: 'orders-open', reports: 'reports-open', settings: 'settings-open', support: 'support-open' };
 // The quick-start guide on the marketing site's docs (the demo banner's Quick start link).
 const SUPPORT_QUICKSTART_URL = 'https://vendurepos.com/docs/quick-start';
 // The app repo's GitHub issues, where a merchant reports a problem.
