@@ -164,17 +164,20 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
   The plugin's sales report endpoint is on `main` (#213). *App:* the screen.
 
-  Partly done (spec B13): Reports sits in the rail after Orders and opens a panel over the sale with TallyUI 3.20.0's `SalesRoom`. The panel works from this till's own sales: the local orders, without refused ones, and the applied refunds. It has:
-  - the period, compare, status, cashier and register filters;
-  - the hero with orders, average and items against yesterday or last week;
+  Partly done (specs B13, B13b): Reports sits in the rail after Orders and opens a panel over the sale. It uses TallyUI 3.20.0's filters bar and cards around an app-local hero (`apps/pos/lib/till-sales-hero.tsx`). The panel works from this till's own sales: the local orders, without refused ones, and the applied refunds. It has:
+  - the period, status, cashier and register filters;
+  - the hero, as v2 has it:
+    - the total, with Orders, Average order and Items beside it (under it on a phone);
+    - one "⇄ vs yesterday" switcher;
+    - by-hour bars for a one-day period, and day bars for longer ones;
   - the Orders card (with discounts), and the Payments, Products, Categories, Taxes and Refunds cards.
 
   A scan closes the panel and adds (demo e2e "Reports shows the till's sale for today").
 
   *Left:*
   - the drawer card;
-  - the by-hour chart: TallyUI's hero draws one bar per day;
-  - the largest order in the Orders card;
+  - the median and largest order;
+  - Print summary;
   - store-wide figures from #213's endpoint;
   - the card panels.
 - [ ] **8.2 Closures history** with cash at open and close, the discrepancy, and a CSV export. *App + plugin.*
