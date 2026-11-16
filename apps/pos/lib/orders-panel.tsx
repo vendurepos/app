@@ -60,10 +60,10 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
           if (value === '') return;
           onScopeChange(value as OrdersScope);
         }}>
-          <ToggleGroupItem value="store" testID="orders-scope-store">
+          <ToggleGroupItem value="store" testID="orders-scope-store" className={scope === 'store' ? 'bg-secondary' : undefined}>
             <Text>All orders</Text>
           </ToggleGroupItem>
-          <ToggleGroupItem value="till" testID="orders-scope-till">
+          <ToggleGroupItem value="till" testID="orders-scope-till" className={scope === 'till' ? 'bg-secondary' : undefined}>
             <Text>This till</Text>
             {attention > 0 ? <Text testID="orders-scope-till-count" className="text-destructive font-semibold">{attention}</Text> : null}
           </ToggleGroupItem>
@@ -74,11 +74,11 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
       </HStack>
       {scope === 'till' ? <OrdersList orders={till.orders} onRetry={till.onRetry} stuck={till.stuck}
         formatDate={(iso) => new Date(iso).toLocaleString()} onOpen={onOpen} /> : <>
-        <ScrollView horizontal dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
+        <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
           <OrderFilterBar fields={VENDURE_ORDER_FILTER_FIELDS} value={filters} onChange={setFilters} initial={{}}
             timezone={timezone} onCustomerSearch={onCustomerSearch} options={{ status: ORDER_STATUS_OPTIONS,
               customer: customerOptions, cashier: cashierOptions, register: [{ value: registerId, label: 'This till' }] }} />
-        </ScrollView>
+        </View>
         {notice ? (
           <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
             <Text testID="orders-history-notice" className="flex-1 text-sm text-muted-foreground">{notice.text}</Text>
