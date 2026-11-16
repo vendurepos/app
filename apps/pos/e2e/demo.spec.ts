@@ -50,7 +50,7 @@ async function mugStock(page: Page) {
 
 async function expectSignedIn(page: Page) {
   await expect(page.getByTestId('demo-banner')).toContainText('Demo: everything stays in this browser');
-  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await expect(page.getByTestId('register-bar-cashier')).toBeVisible();
   // The grid renders its tiles lazily (at phone width the mug is past the first screenful), so wait for the first by name.
   await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 }
@@ -252,6 +252,7 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   const rows = await storeRows(page);
   await expect.poll(() => rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-testid'))))
     .toEqual(['orders-row-3', 'orders-row-2', 'orders-row-1']);
+  await expect(page.getByTestId('orders-row-1')).toContainText('cashier@demo.vendurepos.com');
   await expect(page.locator('[data-testid^="orders-day-"]')).toHaveCount(3);
   await expect(page.getByTestId('orders-count')).toHaveText('Showing 3 of 3 orders');
   await expect(page.getByTestId('orders-more')).toHaveCount(0);
@@ -624,7 +625,7 @@ test('one click from a fresh visit at phone width', async ({ page }) => {
   await expect(page.getByTestId('demo-enter')).toBeInViewport();
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await expect(page.getByTestId('signed-in-store')).toHaveText('Signed in to VendurePOS demo store');
+  await expect(page.getByTestId('signed-in-store')).toHaveCount(0);
   await page.getByTestId('tab-cart').click();
   await page.getByTestId('open-register-amount').fill('100.00');
   await page.getByTestId('open-register-button').click();

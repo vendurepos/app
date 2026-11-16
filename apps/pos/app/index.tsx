@@ -215,9 +215,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         onOpenPanel={() => setRegisterOpen(true)} cashier={{ name: identity, onPress: () => setCashierOpen(true) }}
         className="[&_[data-testid=register-bar-open-panel]]:hidden"
         syncStatus={<>
-          <Text testID="signed-in-store" numberOfLines={1} className="min-w-0 max-w-[45%] shrink text-xs text-muted-foreground">
+          {framePhone ? null : <Text testID="signed-in-store" numberOfLines={1} className="min-w-0 max-w-[45%] shrink text-xs text-muted-foreground">
             Signed in to {store}
-          </Text>
+          </Text>}
           {framePhone ? null : sync}
           {sessionStatus === 'open' ? (
             <Button testID="register-open-panel" variant="ghost" size="sm" className="px-2" accessibilityLabel="Open register panel"

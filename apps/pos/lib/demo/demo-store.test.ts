@@ -688,6 +688,14 @@ it('lists full order details newest first through the real connector', async () 
   expect(result.orders.find(order => order.id === '2')).toEqual(await getVendureOrder(sessionContext(session), '2'));
 });
 
+it('seeds every order with the demo cashier', async () => {
+  const session = await signedIn();
+  const result = await loadOrderPage(session, { search: '', filters: {} }, 'UTC', 0);
+  expect('orders' in result).toBe(true);
+  if (!('orders' in result)) throw new Error(result.notice.text);
+  for (const order of result.orders) expect(order.customFields?.tallyCashierRef).toBe(DEMO_CREDENTIALS.email);
+});
+
 it.each([['demo-000002', ['2']], ['LOVELACE', ['3']], ['zzz', []]] as const)('searches order codes and customer names: %s', async (search, ids) => {
   const result = await loadOrderPage(await signedIn(), { search, filters: {} }, 'UTC', 0);
   expect('orders' in result).toBe(true);
