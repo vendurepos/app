@@ -7,6 +7,12 @@ import { checkout, takePayment, typeAmount } from './checkout';
 import { openRegister } from './register';
 import { wedgeScan } from './wedge';
 
+/** Settings from the rail, on one of its sections (v2's tabs, parity 9.1). */
+async function openSettings(page: Page, section: string) {
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId(`settings-section-${section}`).click();
+}
+
 declare global {
   interface Window {
     printCalls: number; scanTones: number[];
@@ -143,7 +149,7 @@ test("Settings takes the scanner's prefix and suffix off each scan, and scan sou
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'barcode');
   await page.getByTestId('scanner-prefix').fill('*');
   await page.getByTestId('scanner-suffix').fill('#');
   await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: Off');
@@ -159,7 +165,7 @@ test("Settings takes the scanner's prefix and suffix off each scan, and scan sou
   await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "NO-SUCH-CODE".');
   expect(await page.evaluate(() => window.scanTones)).toEqual([880, 1320, 330, 220]);
   await page.reload();
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'barcode');
   await expect(page.getByTestId('scanner-prefix')).toHaveValue('*');
   await expect(page.getByTestId('scanner-suffix')).toHaveValue('#');
   await expect(page.getByTestId('scan-sounds-toggle')).toHaveText('Scan sounds: On');
@@ -170,7 +176,7 @@ test("Settings' barcode test shows a scan and its last key, and adds nothing to 
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'barcode');
   await page.getByTestId('scanner-prefix').fill('*');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
@@ -743,7 +749,7 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expect(page.getByTestId('signed-in-store')).toBeVisible();
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'barcode');
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByTestId('scanner-min-length')).toHaveValue('8');
   await page.getByTestId('scanner-min-length').fill('3');
@@ -756,9 +762,10 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await page.getByTestId('settings-back').click();
   await expect(page.getByTestId('signed-in-store')).toHaveCount(1);
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'barcode');
   await expect(page).toHaveURL(/\/settings$/);
   await page.reload();
+  await page.getByTestId('settings-section-barcode').click();
   await expect(page.getByTestId('scanner-min-length')).toHaveValue('5');
   await expect(page.getByTestId('settings-barcode-field')).toContainText('Barcode custom field:');
   await page.getByTestId('settings-back').click();
@@ -767,11 +774,32 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
 });
 
+test('Settings shows one section at a time, General first, and stacks behind Menu at phone width', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tile-size-auto')).toBeVisible();
+  await expect(page.getByTestId('scanner-min-length')).toHaveCount(0);
+  await expect(page.getByTestId('variance-limit')).toHaveCount(0);
+  await page.getByTestId('settings-section-register').click();
+  await expect(page.getByTestId('variance-limit')).toBeVisible();
+  await expect(page.getByTestId('tile-size-auto')).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId('variance-limit')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  await page.getByText('Menu', { exact: true }).click();
+  await page.getByTestId('settings-section-barcode').click();
+  await page.getByText('Done', { exact: true }).click();
+  await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+});
+
 test('Settings keeps the tile size for this till, and the grid takes it at once', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'general');
   await expect(page.getByTestId('tile-size-auto')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('tile-size-3').click();
   await expect(page.getByTestId('tile-size-3')).toHaveAttribute('aria-pressed', 'true');
@@ -796,7 +824,7 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
     }).toPass();
   }
 
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'general');
   await page.getByTestId('tile-size-auto').click();
   await page.getByTestId('settings-back').click();
   await expect(tiles.nth(3)).toBeVisible();
@@ -813,7 +841,7 @@ test("the sync log in Settings keeps a till update's outcome, never its figures"
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page, '10.00');
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'sync-log');
   const log = page.getByTestId('sync-log');
   await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'Register command result' }).first()).toContainText('status=applied');
   // The open's result carries the session's expected cash, which a blind count hides from the cashier.
@@ -828,7 +856,7 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'register');
   await page.getByTestId('variance-limit').fill('1.00');
   await page.getByTestId('variance-save').click();
   await expect(page.getByTestId('variance-saved')).toBeVisible();
@@ -853,7 +881,7 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await expect(sheet.getByTestId('closure-approved-by')).toHaveText('Approved by Sam (typed)');
   await sheet.getByTestId('closure-done').click();
 
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'register');
   await page.getByTestId('variance-limit').fill('');
   await page.getByTestId('variance-save').click();
   await expect(page.getByTestId('variance-saved')).toBeVisible();
@@ -971,7 +999,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'general');
   await expect(page.getByTestId('default-customer')).toHaveText('Default customer: none (guest sales)');
   await page.getByTestId('default-customer-choose').click();
   const picker = page.getByTestId('default-customer-picker');
@@ -1003,7 +1031,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect(page.getByTestId('receipt-customer')).toHaveCount(0);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'general');
   await page.getByTestId('default-customer-clear').click();
   await expect(page.getByTestId('default-customer')).toHaveText('Default customer: none (guest sales)');
   await page.getByTestId('settings-back').click();
@@ -1069,7 +1097,7 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'printing');
   await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
   await page.getByTestId('auto-print-toggle').click();
   await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: On');
@@ -1086,7 +1114,7 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await page.getByTestId('receipt-print').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(2);
   await page.getByTestId('new-sale').click();
-  await page.getByTestId('settings-open').click();
+  await openSettings(page, 'printing');
   await page.getByTestId('auto-print-toggle').click();
   await expect(page.getByTestId('auto-print-toggle')).toContainText('Print after each sale: Off');
   await page.getByTestId('settings-back').click();
