@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Platform, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, Text, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, Text, VStack,
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
@@ -12,6 +12,7 @@ import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-se
 import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { settingsSections, type SettingsSectionId } from '../lib/settings-sections';
 import { SyncLogCard } from '../lib/sync-log-card';
 import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
@@ -27,15 +28,33 @@ export default function SettingsScreen() {
   const [pickingCustomer, setPickingCustomer] = useState(false);
   const [autoPrint, setAutoPrint] = useState(() => loadAutoPrint());
   const connector = useCatalogueConnector(session);
+  const [section, setSection] = useState<SettingsSectionId>('general');
+  const sections = settingsSections({ printing: Platform.OS === 'web' });
 
   if (!session) return <Redirect href="/sign-in" />;
 
   return (
     <>
-    {/* The cards outgrow a short window; flexGrow keeps a short screen centred. */}
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ flexGrow: 1 }}>
-    <VStack className="flex-1 items-center justify-center bg-background p-6" space="lg">
-      <Stack.Screen options={{ title: 'Settings' }} />
+    <Stack.Screen options={{ title: 'Settings' }} />
+    <SettingsLayout navSlot={
+      <View className="gap-1 p-2">
+        {sections.map(({ id, label }) => {
+          const selected = section === id;
+          return (
+            <Pressable key={id} testID={`settings-section-${id}`} accessibilityRole="tab"
+              aria-selected={selected} className={`rounded-md px-3 py-2${selected ? ' bg-muted' : ''}`}
+              onPress={() => setSection(id)}>
+              <Text className={`text-sm text-foreground${selected ? ' font-medium' : ''}`}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    } contentSlot={
+    <ScrollView className="flex-1 bg-background"
+      // The chosen section's cards; the sections are v2's Settings tabs (parity 9.1).
+      contentContainerStyle={{ flexGrow: 1 }}>
+    <VStack className="flex-1 items-center bg-background p-6" space="lg">
+      {section === 'barcode' && <>
       <Card className="w-full max-w-[420px]">
         <CardHeader>
           <CardTitle aria-level={2}>Scanner</CardTitle>
@@ -63,6 +82,9 @@ export default function SettingsScreen() {
           </VStack>
         </CardContent>
       </Card>
+      <Text testID="settings-barcode-field">Barcode custom field: {session.barcodeField ?? 'none'}. Set when signing in.</Text>
+      </>}
+      {section === 'register' && (
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Register</CardTitle></CardHeader>
         <CardContent>
@@ -81,6 +103,8 @@ export default function SettingsScreen() {
           </VStack>
         </CardContent>
       </Card>
+      )}
+      {section === 'general' && <>
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Prices</CardTitle></CardHeader>
         <CardContent>
@@ -131,7 +155,8 @@ export default function SettingsScreen() {
           </CardContent>
         </Card>
       ) : null}
-      {Platform.OS === 'web' ? (
+      </>}
+      {section === 'printing' ? (
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Printing</CardTitle></CardHeader>
           <CardContent>
@@ -145,14 +170,14 @@ export default function SettingsScreen() {
           </CardContent>
         </Card>
       ) : null}
-      <SyncLogCard />
-      <Text testID="settings-barcode-field">Barcode custom field: {session.barcodeField ?? 'none'}. Set when signing in.</Text>
+      {section === 'sync-log' && <SyncLogCard />}
       {/* Back, never a push, because a second till can't open the order store the first one holds. */}
       <Button testID="settings-back" variant="secondary" onPress={() => router.canGoBack() ? router.back() : router.replace('/')}>
         <Text>Back to the till</Text>
       </Button>
     </VStack>
     </ScrollView>
+    } />
     </>
   );
 }

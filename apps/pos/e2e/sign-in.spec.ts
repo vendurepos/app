@@ -818,6 +818,7 @@ test('a till update the store rejects shows in the header', async ({ page }) => 
   // The notice sends the store owner to the sync log, which names the store's refusal.
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.getByTestId('settings-open').click();
+  await page.getByTestId('settings-section-sync-log').click();
   const log = page.getByTestId('sync-log');
   await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'register_session_already_open' }).first())
     .toContainText('status=rejected');
