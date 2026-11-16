@@ -21,9 +21,9 @@ export function ThemeSettings(): JSX.Element {
               applyTheme(theme);
               setTheme(theme);
             }}>
-            {UI_THEMES.map((theme) => (
-              <ToggleGroupItem key={theme} value={theme} testID={`theme-${theme}`}>
-                <Text>{theme === 'system' ? 'System' : theme === 'light' ? 'Light' : 'Dark'}</Text>
+            {UI_THEMES.map((item) => (
+              <ToggleGroupItem key={item} value={item} testID={`theme-${item}`} className={item === theme ? 'bg-secondary' : undefined}>
+                <Text>{item === 'system' ? 'System' : item === 'light' ? 'Light' : 'Dark'}</Text>
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
