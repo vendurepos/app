@@ -264,7 +264,7 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   await page.getByTestId('order-filter-status').click();
   await page.getByTestId('order-filter-status-Cancelled').click();
   await expect(page.getByTestId('orders-store-empty')).toHaveText('No orders match this search and these filters.');
-  await page.getByTestId('orders-filter-clear-all').click();
+  await page.getByTestId('order-filter-status-remove').click();
   await expect(rows).toHaveCount(3);
 
   await page.getByTestId('order-filter-customer').click();
