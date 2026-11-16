@@ -29,6 +29,7 @@ it. The camera is web only for now.
 | Cart tab (narrow), cart stage | Adds, line lit up. | `Sale`, `add` |
 | Wide layout, cart stage | Adds, line lit up. | `Sale`, `add` |
 | Orders panel open | Closes the panel; on narrow switches to the Cart tab; adds, line lit up. | `Sale`, `panelOpen` → `onClosePanels`, `setTab('cart')` |
+| Customers panel open, focus off its search | Closes the panel; on narrow switches to the Cart tab; adds, line lit up. | `Sale`, `panelOpen` → `onClosePanels`, `setTab('cart')` |
 | Register panel open (session open, not counting) | Closes the panel; on narrow switches to the Cart tab; adds, line lit up. | `Sale`, `panelOpen` → `onClosePanels`; `RegisterPanel` mounts only while open |
 | Cash-movement sheet open, focus off its fields | Closes the sheet and the Register panel under it (it does not come back when the panel is reopened), then as for the Register panel. | `Sale`, `onClosePanels`; `SignedInCatalogue` mounts `RegisterPanel` only while open |
 | Cash-movement sheet open, focus in the reason | The field keeps the keys (the code is typed into it); nothing is added. | `useWedgeScanner` leaves non-money inputs alone |
@@ -50,7 +51,7 @@ Settings › Scanner's prefix and suffix are taken off a wedge scan before the s
 A new surface inherits a row rather than getting its own ruling:
 
 - **It is a screen of its own** (a route pushed over the till, or one that replaces it): the Settings row. The cart takes nothing while it is in front.
-- Everything below is a surface on the till screen itself: the Orders panel, the Register panel and its sheets, the customer picker, the Support sheet (it closes like the Orders panel), and any modal over the till.
+- Everything below is a surface on the till screen itself: the Orders panel, the Customers panel, the Register panel and its sheets, the customer picker, the Support sheet (it closes like the Orders panel), and any modal over the till.
 
 - **It covers the sale and can be dismissed without losing anything** (a panel, a sheet, a dialog): the Orders panel
   row. Close it (add it to `panelOpen` / `onClosePanels`), then add with the line lit up.

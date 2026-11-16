@@ -204,11 +204,11 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
 | WCPOS | VendurePOS |
 |---|---|
-| ![](demo-pairs/06c-customers-wcpos.webp) | — |
+| ![](demo-pairs/06c-customers-wcpos.webp) | ![](demo-pairs/06c-customers-vendurepos.webp) |
 | ![](demo-pairs/08-products-wcpos.webp) | — |
 | ![](demo-pairs/13d-store-health-wcpos.webp) | — |
 
-- [ ] **10.1 Customers screen:** list, search, edit. *App.*
+- [ ] **10.1 Customers screen:** list, search, edit. List and search done (specs B15a, B15b, B15b2): a Customers door between Orders and Reports opens the store's customers from Vendure's `customers` list, by surname, in v2's table (avatar, first and last name, email, default billing address, date created; a stacked row on a phone), 25 at a time with Show more and "Showing N of M customers", searched by name, email or phone. The walk-in customer is left out. A scan closes the panel and adds. Demo e2e "the Customers panel lists the store's customers by surname, searches them, and a scan closes it and adds". Still to do: opening a customer (details and order history) and editing one. *App.*
 - [ ] **10.2 Products screen:** stock and price edited inline, with a manage-stock switch. *Plugin + app.*
 - [ ] **10.3 Store health:** "Ready to sell", changes waiting to send, records that need attention (Fix / Retry), per-collection coverage. VendurePOS has Settings › Sync log and "Last synced / Sync now". *App.*
 - N/A **10.4 Coupons screen.** Vendure promotions are managed in the Vendure admin (`AUDIT.md` §19). A coupon-code field in the cart is a separate row once one is found in WCPOS's cart.
