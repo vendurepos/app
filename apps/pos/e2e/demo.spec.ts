@@ -355,6 +355,41 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await expect(page.getByTestId('order-receipt').getByTestId('order-receipt-total')).toHaveText('€23.52');
 });
 
+test("Reports shows the till's sale for today, and a scan closes it and adds", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  await page.getByTestId('reports-open').click();
+  await expect(page.getByTestId('reports-panel')).toBeVisible();
+  await expect(page.getByTestId('hero-total')).toContainText('€9.52');
+  await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
+  await expect(page.getByTestId('reports-close')).toHaveCount(0);
+  await expect(page.getByTestId('reports-panel')).not.toContainText('Back to sale');
+  await expect(page.getByTestId('sales-hero')).not.toContainText('—');
+  await expect(page.getByTestId('hero-compare')).toHaveCount(1);
+  await expect(page.getByTestId('hero-compare')).toContainText('vs yesterday');
+  await page.getByTestId('hero-compare').click();
+  await expect(page.getByTestId('hero-compare')).toHaveText(/vs last \w+day/);
+  await expect(page.getByTestId('hero-chart').locator('[data-testid^="hero-hour-bar-"]')).toHaveCount(24);
+  await page.getByTestId('reports-open').click();
+  await expect(page.getByTestId('reports-panel')).toHaveCount(0);
+  await page.getByTestId('reports-open').click();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('reports-panel')).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test('a demo cashier refunds a mug from the order sheet; stock comes back and expected cash drops', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

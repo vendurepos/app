@@ -33,7 +33,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 |---|---|
 | ![](demo-pairs/02-sell-empty-wcpos.webp) | ![](demo-pairs/02-sell-empty-vendurepos.webp) |
 
-- [ ] **1.1 Navigation rail.** Wide screens show a left icon rail (POS, Products, Orders, Customers, Reports; Store health, Settings and Support at the foot; the version number), and phones get a drawer. Done (spec B1, TallyUI 3.18.0 `AppShell`): the rail on wide screens and the drawer on phones, with POS, Orders (badged with orders that need attention), Register and Settings. Support is at the foot too (11.2, spec B11). *Left:* Products, Customers, Reports and Store health have no screens in VendurePOS yet, and the rail shows no version number (the Support sheet does).
+- [ ] **1.1 Navigation rail.** Wide screens show a left icon rail (POS, Products, Orders, Customers, Reports; Store health, Settings and Support at the foot; the version number), and phones get a drawer. Done (spec B1, TallyUI 3.18.0 `AppShell`): the rail on wide screens and the drawer on phones, with POS, Orders (badged with orders that need attention), Register and Settings. Support is at the foot too (11.2, spec B11), and Reports follows Orders (8.1, spec B13). *Left:* Products, Customers and Store health have no screens in VendurePOS yet, and the rail shows no version number (the Support sheet does).
 - [x] **1.2 Compact header.** One slim bar reading "Store · Register", with a bell and the cashier's avatar. Done (spec B1): one `RegisterBar` row (the name, the register pill, the signed-in store, last synced and Sync now on wide screens, the Register door, the avatar); the avatar opens a cashier sheet with Closures and Sign out (the X report moved to the register panel, 6.2); the demo banner is one slim row. A single-register store shows no register name, as in v2. No bell: VendurePOS has no notifications yet.
 - [x] **1.3 Product images on tiles.** *App/shared:* the Vendure connector needs `featuredAsset`, and the tile needs an image slot. Done (checked in round 7, no code change): TallyUI's `Catalogue` grid tile renders the product image, the Vendure connector reads `featuredAsset` and then `assets[0]`, and the till's CSP allows `https:` images. On demo.vendurepos.com on 2026-11-12, 30 of 30 tiles showed a loaded picture, at both wide and phone width.
 - [x] **1.4 In-cart quantity badge on a tile.** *Shared:* the tile. Done (spec B2): the till passes its cart lines to TallyUI 3.18.0's `Catalogue`, whose grid tiles show the count.
@@ -154,7 +154,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
 | WCPOS | VendurePOS |
 |---|---|
-| ![](demo-pairs/10-reports-wcpos.webp) | — |
+| ![](demo-pairs/10-reports-wcpos.webp) | ![](demo-pairs/10-reports-vendurepos.webp) |
 | ![](demo-pairs/10b-reports-closures-wcpos.webp) | — |
 
 - [ ] **8.1 Reports screen.** It has:
@@ -163,6 +163,23 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
   - a by-hour chart, the payment-method split and top products.
 
   The plugin's sales report endpoint is on `main` (#213). *App:* the screen.
+
+  Partly done (specs B13, B13b): Reports sits in the rail after Orders and opens a panel over the sale. It uses TallyUI 3.20.0's filters bar and cards around an app-local hero (`apps/pos/lib/till-sales-hero.tsx`). The panel works from this till's own sales: the local orders, without refused ones, and the applied refunds. It has:
+  - the period, status, cashier and register filters;
+  - the hero, as v2 has it:
+    - the total, with Orders, Average order and Items beside it (under it on a phone);
+    - one "⇄ vs yesterday" switcher;
+    - by-hour bars for a one-day period, and day bars for longer ones;
+  - the Orders card (with discounts), and the Payments, Products, Categories, Taxes and Refunds cards.
+
+  A scan closes the panel and adds (demo e2e "Reports shows the till's sale for today").
+
+  *Left:*
+  - the drawer card;
+  - the median and largest order;
+  - Print summary;
+  - store-wide figures from #213's endpoint;
+  - the card panels.
 - [ ] **8.2 Closures history** with cash at open and close, the discrepancy, and a CSV export. *App + plugin.*
 
 ## 9. Settings and look
