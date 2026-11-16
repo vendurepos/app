@@ -42,7 +42,7 @@ export default function SettingsScreen() {
           const selected = section === id;
           return (
             <Pressable key={id} testID={`settings-section-${id}`} accessibilityRole="tab"
-              accessibilityState={{ selected }} className={`rounded-md px-3 py-2${selected ? ' bg-muted' : ''}`}
+              aria-selected={selected} className={`rounded-md px-3 py-2${selected ? ' bg-muted' : ''}`}
               onPress={() => setSection(id)}>
               <Text className={`text-sm text-foreground${selected ? ' font-medium' : ''}`}>{label}</Text>
             </Pressable>
