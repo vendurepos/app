@@ -20,10 +20,11 @@ export function TileSizeSettings(): JSX.Element {
               saveTileSize(size);
               setTileSize(size);
             }}>
-            {TILE_SIZES.map((size) => (
-              <ToggleGroupItem key={size} value={String(size)} testID={`tile-size-${size}`}
-                accessibilityLabel={size === 'auto' ? 'Auto' : `${size} a row`}>
-                <Text>{size === 'auto' ? 'Auto' : size}</Text>
+            {TILE_SIZES.map((item) => (
+              <ToggleGroupItem key={item} value={String(item)} testID={`tile-size-${item}`}
+                className={item === tileSize ? 'bg-secondary' : undefined}
+                accessibilityLabel={item === 'auto' ? 'Auto' : `${item} a row`}>
+                <Text>{item === 'auto' ? 'Auto' : item}</Text>
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
