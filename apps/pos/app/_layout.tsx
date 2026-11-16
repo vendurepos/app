@@ -11,9 +11,13 @@ import { DEMO_MODE } from '../lib/demo/mode';
 import { printInLightScheme } from '../lib/print-light';
 import { SessionProvider } from '../lib/session-context';
 import { useStackColors } from '../lib/theme-colors';
+import { applyTheme, loadTheme } from '../lib/theme-setting';
 
 // The money-path loggers write nowhere until a sink is installed.
 installLogSinks();
+// Apply this device's stored appearance before any screen renders.
+const startTheme = loadTheme();
+if (startTheme !== 'system') applyTheme(startTheme);
 
 export default function RootLayout() {
   const stackColors = useStackColors();

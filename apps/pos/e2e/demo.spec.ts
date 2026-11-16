@@ -1095,6 +1095,29 @@ test('the till follows the device\'s dark scheme and prints its receipt in light
   await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
 });
 
+test('Settings › Theme chooses Light or Dark over the device\'s scheme, and keeps it after a reload', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const html = page.locator('html');
+  await openSettings(page, 'theme');
+  await expect(page.getByTestId('theme-system')).toHaveAttribute('aria-pressed', 'true');
+  await expect(html).not.toHaveClass(/\bdark\b/);
+  await page.getByTestId('theme-dark').click();
+  await expect(page.getByTestId('theme-dark')).toHaveAttribute('aria-pressed', 'true');
+  await expect(html).toHaveClass(/\bdark\b/);
+  await page.reload();
+  await expect(html).toHaveClass(/\bdark\b/);
+  await page.getByTestId('settings-section-theme').click();
+  await expect(page.getByTestId('theme-dark')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('theme-light').click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(html).not.toHaveClass(/\bdark\b/);
+  await page.getByTestId('theme-system').click();
+  await expect(html).toHaveClass(/\bdark\b/);
+});
+
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
   await page.addInitScript(() => {
     window.printCalls = 0;

@@ -14,6 +14,7 @@ import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { settingsSections, type SettingsSectionId } from '../lib/settings-sections';
 import { SyncLogCard } from '../lib/sync-log-card';
+import { ThemeSettings } from '../lib/theme-settings';
 import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
@@ -162,6 +163,7 @@ export default function SettingsScreen() {
           </CardContent>
         </Card>
       ) : null}
+      {section === 'theme' && <ThemeSettings />}
       {section === 'sync-log' && <SyncLogCard />}
       {/* Back, never a push, because a second till can't open the order store the first one holds. */}
       <Button testID="settings-back" variant="secondary" onPress={() => router.canGoBack() ? router.back() : router.replace('/')}>
