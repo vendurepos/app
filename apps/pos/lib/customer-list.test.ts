@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import { CUSTOMERS_FAILED_TEXT, CUSTOMERS_FORBIDDEN_TEXT, customerListNotice, customerListOptions,
-  listVendureCustomerPage, toCustomerRow, type VendureCustomerListItem } from './customer-list';
+  customersReadable, listVendureCustomerPage, toCustomerRow, type VendureCustomerListItem } from './customer-list';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,6 +45,30 @@ it('maps an HTTP 200 GraphQL FORBIDDEN error to unauthorized status 403', async 
   const request = listVendureCustomerPage({ baseUrl: 'https://store.test', headers: {} } as SyncContext, customerListOptions('', 0));
   await expect(request).rejects.toBeInstanceOf(ConnectorUnauthorizedError);
   await expect(request).rejects.toMatchObject({ status: 403, message: 'You are not currently authorized' });
+});
+
+it('a role without Read customer gets no Customers door and no customer data', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ errors: [
+    { message: 'You are not currently authorized', extensions: { code: 'FORBIDDEN' } },
+  ] }), { status: 200 })));
+  await expect(customersReadable({ baseUrl: 'https://store.test', headers: {} } as SyncContext)).resolves.toBe(false);
+});
+
+it('the readability probe asks for no customers', async () => {
+  const fetchStub = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ data: { customers: { totalItems: 8, items: [] } } }), { status: 200 }));
+  vi.stubGlobal('fetch', fetchStub);
+  await expect(customersReadable({ baseUrl: 'https://store.test', headers: {} } as SyncContext)).resolves.toBe(true);
+  expect(fetchStub).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(fetchStub.mock.calls[0][1]!.body as string).variables.options.take).toBe(0);
+});
+
+it('an ended session or a failure keeps the door', async () => {
+  for (const status of [401, 500]) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status })));
+    await expect(customersReadable({ baseUrl: 'https://store.test', headers: {} } as SyncContext)).resolves.toBe(true);
+  }
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+  await expect(customersReadable({ baseUrl: 'https://store.test', headers: {} } as SyncContext)).resolves.toBe(true);
 });
 
 it('distinguishes a missing permission, an ended session and a retryable failure', () => {

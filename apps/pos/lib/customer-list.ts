@@ -72,6 +72,31 @@ export async function listVendureCustomerPage(context: SyncContext, options: Ret
   }
   return body.data.customers;
 }
+/**
+ * Whether this till's role may read the store's customers (Front desk ruling on #245: a role without Read customer
+ * sees no Customers door). Asks for an empty page through the panel's own query: only Vendure's FORBIDDEN hides the
+ * door. A 401 is an ended session the catalogue sync signs out, and a failure is the panel's notice to show.
+ */
+export async function customersReadable(context: SyncContext): Promise<boolean> {
+  try {
+    await listVendureCustomerPage(context, { ...customerListOptions('', 0), take: 0 });
+    return true;
+  } catch (error) {
+    return !(error instanceof ConnectorUnauthorizedError && error.status === 403);
+  }
+}
+
+/** `customersReadable` for the signed-in session: false until it answers, so a refused role never sees the door. */
+export function useCustomersReadable(session: Session): boolean {
+  const [readable, setReadable] = useState(false);
+  useEffect(() => {
+    setReadable(false);
+    let cancelled = false;
+    customersReadable(sessionContext(session)).then(result => { if (!cancelled) setReadable(result); });
+    return () => { cancelled = true; };
+  }, [session]);
+  return readable;
+}
 export function customerListNotice(error: unknown): OrderHistoryNotice {
   if (error instanceof ConnectorUnauthorizedError) {
     return { text: error.status === 403 ? CUSTOMERS_FORBIDDEN_TEXT : SESSION_ENDED_TEXT, retry: false };

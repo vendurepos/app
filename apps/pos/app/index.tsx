@@ -27,6 +27,7 @@ import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
+import { useCustomersReadable } from '../lib/customer-list';
 import { OrderReceipt } from '../lib/order-receipt';
 import { OrderSheet } from '../lib/order-sheet';
 import { openOrderStore, orderDrafts, ordersDatabaseName, outboxStoreKey, registerCollections } from '../lib/orders-db';
@@ -91,6 +92,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const framePhone = !wide || height < FRAME_WIDE_MIN_HEIGHT;
   const router = useRouter();
   const catalogue = useCatalogue(session);
+  const customersShown = useCustomersReadable(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
   const [pending, setPending] = useState(false);
@@ -249,7 +251,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   return (
     // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
     // rail, which takes no dataSet, is hidden by the shell's print variant.
-    <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, registerShown: sessionStatus === 'open',
+    <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
       rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, customersOpen, reportsOpen, registerOpen: registerPanelShown })}
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
