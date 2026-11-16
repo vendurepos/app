@@ -291,6 +291,41 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   await expect(page.getByTestId('orders-search')).toHaveCount(0);
 });
 
+test("the Customers panel lists the store's customers by surname, searches them, and a scan closes it and adds", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const rows = page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]');
+  await expect.poll(() => rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-testid')))).toEqual([
+    'customers-row-c2', 'customers-row-c4', 'customers-row-c6', 'customers-row-c5',
+    'customers-row-c1', 'customers-row-c7', 'customers-row-c3', 'customers-row-c8',
+  ]);
+  await expect(page.getByTestId('customers-row-c1')).toContainText('ada@demo.vendurepos.com');
+  await expect(page.getByTestId('customers-row-c1')).toContainText('12 Engine Row');
+  await expect(page.getByTestId('customers-row-c1')).toContainText('AL');
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 8 of 8 customers');
+  await expect(page.getByTestId('customers-more')).toHaveCount(0);
+
+  await page.getByTestId('customers-search').fill('MEAD');
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toHaveAttribute('data-testid', 'customers-row-c7');
+  await page.getByTestId('customers-search').fill('nobody');
+  await expect(page.getByTestId('customers-empty')).toHaveText('No customers match this search.');
+  await page.getByTestId('customers-search').fill('');
+  await expect(rows).toHaveCount(8);
+
+  await page.getByTestId('customers-open').click();
+  await expect(page.getByTestId('customers-panel')).toHaveCount(0);
+  await page.getByTestId('customers-open').click();
+  await expect(page.getByTestId('customers-panel')).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('customers-panel')).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
