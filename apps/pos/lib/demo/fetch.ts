@@ -86,7 +86,7 @@ function page(items: Record<string, any>[], options: any = {}) {
   const matches = (item: Record<string, any>, filter: Record<string, any>): boolean => Object.entries(filter).every(([field, rule]) => {
     if (field === '_or') return rule.some((part: Record<string, any>) => matches(item, part));
     const value = fieldValue(item, field);
-    return (rule.eq === undefined || value === rule.eq) && (!rule.in || rule.in.includes(value))
+    return (rule.eq === undefined || value === rule.eq) && (rule.notEq === undefined || value !== rule.notEq) && (!rule.in || rule.in.includes(value))
       && (!rule.after || Date.parse(value) > Date.parse(rule.after)) && (!rule.before || Date.parse(value) < Date.parse(rule.before))
       && (rule.contains === undefined || String(value ?? '').toLowerCase().includes(rule.contains.toLowerCase()))
       && (rule.isNull !== false || value != null);
@@ -135,6 +135,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'activeAdministrator': data = { activeAdministrator: request.headers.get('Authorization') === `Bearer ${DEMO_AUTH_TOKEN}` ? { id: ADMINISTRATOR_ID } : null }; break;
       case 'logout': data = { logout: { success: true } }; break;
       case 'Search': case 'customers': data = { customers: store.customers(variables) }; break;
+      case 'CustomerList': data = { customers: page(store.customerList(), variables.options) }; break;
       case 'Orders': case 'orders':
         // Detail list queries select lines and payments as well as the summary fields.
         data = { orders: page(store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) })), variables.options) }; break;

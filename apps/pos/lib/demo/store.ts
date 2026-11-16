@@ -54,7 +54,13 @@ export type DemoStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Command = { id: string; type: string; version: number; payload: any };
 type Session = RegisterSessionOpenPayload & { status: 'open' | 'counting' | 'closed' };
 type Movement = { movementId: string; sessionId: string; type: string; amountMinor: number; voids?: string };
-type Customer = { __typename: 'Customer'; id: string; firstName: string; lastName: string; emailAddress: string; phoneNumber: string | null };
+type Customer = { __typename: 'Customer'; id: string; firstName: string; lastName: string; emailAddress: string; phoneNumber: string | null;
+  createdAt: string; addresses: DemoAddress[] };
+type DemoAddress = {
+  id: string; fullName: string; company: string | null; streetLine1: string; streetLine2: string | null;
+  city: string; province: string | null; postalCode: string; country: { code: string };
+  defaultBillingAddress: boolean; defaultShippingAddress: boolean;
+};
 // One Vendure Refund on one payment; paymentIndex is the order's payment, method its till method.
 type DemoRefund = {
   id: string; orderId: string; paymentIndex: number; total: number; shipping: number;
@@ -84,16 +90,19 @@ function seed(): State {
     if (product.trackInventory) stock[String(index)] = { quantity: variant.shopFloorStock, updatedAt: SEED_TIME };
   }
   const customers: Customer[] = [
-    ['Ada', 'Lovelace', 'ada@demo.vendurepos.com'],
-    ['Grace', 'Hopper', 'grace@demo.vendurepos.com'],
-    ['Alan', 'Turing', 'alan@demo.vendurepos.com'],
-    ['Katherine', 'Johnson', 'katherine@demo.vendurepos.com'],
-    ['Barbara', 'Liskov', 'barbara@demo.vendurepos.com'],
-    ['Donald', 'Knuth', 'donald@demo.vendurepos.com'],
-    ['Margaret', 'Mead', 'margaret@demo.vendurepos.com'],
-    ['Dorothy', 'Vaughan', 'dorothy@demo.vendurepos.com'],
-  ].map(([firstName, lastName, emailAddress], index) => ({
-    __typename: 'Customer', id: `c${index + 1}`, firstName, lastName, emailAddress, phoneNumber: null,
+    ['Ada', 'Lovelace', 'ada@demo.vendurepos.com', '2026-02-03T10:00:00.000Z', '12 Engine Row', 'London', null, 'N1 9GU', 'GB', null],
+    ['Grace', 'Hopper', 'grace@demo.vendurepos.com', '2026-03-14T10:00:00.000Z', '40 Compiler Court', 'Arlington', 'VA', '22202', 'US', null],
+    ['Alan', 'Turing', 'alan@demo.vendurepos.com', '2026-04-21T10:00:00.000Z', '7 Enigma Lane', 'Wilmslow', null, 'SK9 1AA', 'GB', 'Bombe Works'],
+    ['Katherine', 'Johnson', 'katherine@demo.vendurepos.com', '2026-05-09T10:00:00.000Z', '500 Orbit Drive', 'Hampton', 'VA', '23681', 'US', null],
+    ['Barbara', 'Liskov', 'barbara@demo.vendurepos.com', '2026-06-30T10:00:00.000Z', '32 Substitution Street', 'Cambridge', 'MA', '02139', 'US', null],
+    ['Donald', 'Knuth', 'donald@demo.vendurepos.com', '2026-08-12T10:00:00.000Z', '353 Volume Way', 'Stanford', 'CA', '94305', 'US', null],
+    ['Margaret', 'Mead', 'margaret@demo.vendurepos.com', '2026-09-05T10:00:00.000Z'],
+    ['Dorothy', 'Vaughan', 'dorothy@demo.vendurepos.com', '2026-10-18T10:00:00.000Z'],
+  ].map(([firstName, lastName, emailAddress, createdAt, streetLine1, city, province, postalCode, code, company], index) => ({
+    __typename: 'Customer', id: `c${index + 1}`, firstName: firstName!, lastName: lastName!, emailAddress: emailAddress!, phoneNumber: null,
+    createdAt: createdAt!, addresses: streetLine1 ? [{ id: `a${index + 1}`, fullName: `${firstName} ${lastName}`, company,
+      streetLine1, streetLine2: null, city: city!, province, postalCode: postalCode!, country: { code: code! },
+      defaultBillingAddress: true, defaultShippingAddress: true }] : [],
   }));
   const variants = CATALOGUE.flatMap(product => product.variants.map(variant => ({
     ...variant, title: [product.name, ...variant.options].join(' '),
@@ -181,11 +190,14 @@ export class DemoStore {
     return this.state.customers.find(customer => customer.id === id) ?? null;
   }
 
+  customerList(): Customer[] { return this.state.customers; }
+
   createCustomer(input: { firstName: string; lastName: string; emailAddress: string; phoneNumber?: string }) {
     if (this.state.customers.some(customer => customer.emailAddress === input.emailAddress)) return {
       __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
     };
-    const customer: Customer = { ...input, __typename: 'Customer', id: `c${this.state.customers.length + 1}`, phoneNumber: input.phoneNumber ?? null };
+    const customer: Customer = { ...input, __typename: 'Customer', id: `c${this.state.customers.length + 1}`, phoneNumber: input.phoneNumber ?? null,
+      createdAt: new Date().toISOString(), addresses: [] };
     this.state.customers.push(customer);
     this.save();
     return customer;

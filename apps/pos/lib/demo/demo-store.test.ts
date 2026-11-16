@@ -7,6 +7,7 @@ import { sessionContext, type Session } from '../session';
 import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
 import { loadOrderPage } from '../order-list';
+import { loadCustomerPage } from '../customer-list';
 import { orderDetailView } from '../order-detail';
 import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
@@ -694,6 +695,24 @@ it('seeds every order with the demo cashier', async () => {
   expect('orders' in result).toBe(true);
   if (!('orders' in result)) throw new Error(result.notice.text);
   for (const order of result.orders) expect(order.customFields?.tallyCashierRef).toBe(DEMO_CREDENTIALS.email);
+});
+
+it('lists, searches and pages the store\'s customers through the demo', async () => {
+  const session = await signedIn();
+  const result = await loadCustomerPage(session, '', 0);
+  if (!('customers' in result)) throw new Error(result.notice.text);
+  expect(result.totalItems).toBe(8);
+  expect(result.customers.map(customer => customer.lastName)).toEqual(['Hopper', 'Johnson', 'Knuth', 'Liskov', 'Lovelace', 'Mead', 'Turing', 'Vaughan']);
+  expect(result.customers.find(customer => customer.lastName === 'Lovelace')?.billingAddress).toEqual(['Ada Lovelace', '12 Engine Row', 'London N1 9GU', 'GB']);
+  expect(result.customers.find(customer => customer.lastName === 'Mead')?.billingAddress).toEqual([]);
+  const searched = await loadCustomerPage(session, 'MEAD', 0);
+  if (!('customers' in searched)) throw new Error(searched.notice.text);
+  expect(searched.totalItems).toBe(1);
+  expect(searched.customers.map(customer => customer.lastName)).toEqual(['Mead']);
+  const later = await loadCustomerPage(session, '', 5);
+  if (!('customers' in later)) throw new Error(later.notice.text);
+  expect(later.totalItems).toBe(8);
+  expect(later.customers.map(customer => customer.lastName)).toEqual(['Mead', 'Turing', 'Vaughan']);
 });
 
 it.each([['demo-000002', ['2']], ['LOVELACE', ['3']], ['zzz', []]] as const)('searches order codes and customer names: %s', async (search, ids) => {
