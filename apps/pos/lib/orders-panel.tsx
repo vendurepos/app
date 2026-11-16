@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
 import {
   Button, HStack, OrderFilterBar, OrdersList, OrderStatusBadge, SearchInput,
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, ToggleGroup, ToggleGroupItem, VStack,
   type OrderFilterOption, type OrderHistoryRow,
 } from '@tallyui/components';
 import { searchVendureCustomers } from '@tallyui/connector-vendure';
@@ -56,15 +56,18 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
   return (
     <VStack className="flex-1">
       <HStack dataSet={{ print: 'hide' }} className="flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-        <Button testID="orders-scope-store" size="sm" variant={scope === 'store' ? 'secondary' : 'ghost'}
-          accessibilityState={{ selected: scope === 'store' }} onPress={() => onScopeChange('store')}>
-          <Text>All orders</Text>
-        </Button>
-        <Button testID="orders-scope-till" size="sm" variant={scope === 'till' ? 'secondary' : 'ghost'}
-          accessibilityState={{ selected: scope === 'till' }} onPress={() => onScopeChange('till')}>
-          <Text>This till</Text>
-          {attention > 0 ? <Text testID="orders-scope-till-count" className="text-destructive font-semibold">{attention}</Text> : null}
-        </Button>
+        <ToggleGroup type="single" accessibilityLabel="Orders scope" value={scope} onValueChange={(value) => {
+          if (value === '') return;
+          onScopeChange(value as OrdersScope);
+        }}>
+          <ToggleGroupItem value="store" testID="orders-scope-store">
+            <Text>All orders</Text>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="till" testID="orders-scope-till">
+            <Text>This till</Text>
+            {attention > 0 ? <Text testID="orders-scope-till-count" className="text-destructive font-semibold">{attention}</Text> : null}
+          </ToggleGroupItem>
+        </ToggleGroup>
         {scope === 'store' ? <View className="min-w-[200px] flex-1">
           <SearchInput testID="orders-search" value={search} onChangeText={setSearch} placeholder="Order number or customer surname" />
         </View> : null}

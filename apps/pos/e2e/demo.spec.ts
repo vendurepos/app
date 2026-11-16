@@ -285,7 +285,7 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   await expect(page.getByTestId('orders-search')).toHaveCount(0);
   await page.getByTestId('orders-open').click();
   await page.getByTestId('orders-open').click();
-  await expect(page.getByTestId('orders-scope-till')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('orders-scope-till')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('orders-empty')).toBeVisible();
   await expect(page.getByTestId('orders-search')).toHaveCount(0);
 });
