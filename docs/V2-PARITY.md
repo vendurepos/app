@@ -97,7 +97,7 @@ Quoted test names are Playwright tests in `apps/pos/e2e/demo.spec.ts` unless a r
 | Open with float, cash in/out, count, close, Z report | 2.0 (RG, CMP) | Has | Register commands v1 (ADR 0003); `apps/pos/e2e/sign-in.spec.ts` "a register day" | — |
 | Resume after a lost till; take-over by another till | 2.0 (RG) | Has | vendurepos/app#167 (ADR 0006) and `@tallyui/*` 3.8.0 (vendurepos/app#175); `apps/pos/e2e/sign-in.spec.ts` "a till that lost its local state resumes its own open session" and "another till takes the register over; …" | — |
 | Approval of an over-variance close | 2.0 (RG) | Partial | The approver is typed and recorded, but the server does not check it (ADR 0003 "Not built: c2c"). The design is medusapos ADR 0023: an approval route that checks the manager's credential and `ApproveTallyPosVariance`, and a single-use proof on `register.closure.submit` at register contract 3. It waits on TallyUI's contract 3 | TallyUI contract + plugin |
-| Reports: sales, closure history | Free/Pro, still moving (RC) | Missing | Only the Z print (`apps/pos/lib/z-report.ts`); no `GET /tally/v1/registers/{id}` | plugin + TallyUI |
+| Reports: sales, closure history | Free/Pro, still moving (RC) | Partial | Sales: the Reports panel over the till's own sales (`apps/pos/lib/reports-panel.tsx`, TallyUI `SalesRoom`), not yet store-wide from the plugin's `/tally/v1/reports/sales`. Closures: the Z print (`apps/pos/lib/z-report.ts`) and the till's closure list; no `GET /tally/v1/registers/{id}` | plugin + TallyUI |
 
 ## Offline and sync
 
