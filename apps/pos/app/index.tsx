@@ -15,7 +15,9 @@ import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
+import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { useCameraScanner } from '../lib/camera-scan';
+import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { ClosureHistory } from '../lib/closure-history-sheet';
@@ -25,8 +27,10 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
+import { loadOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
+import { ProductsPanel } from '../lib/products-panel';
 import { useCustomersReadable } from '../lib/customer-list';
 import { OrderReceipt } from '../lib/order-receipt';
 import { OrderSheet } from '../lib/order-sheet';
@@ -53,9 +57,13 @@ import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
+import { StoreHealthPanel } from '../lib/store-health-panel';
+import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health';
 import { SyncNowControl } from '../lib/sync-now-control';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
+import { NotificationsSheet } from '../lib/notifications-sheet';
+import { tillNotices } from '../lib/notices';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
 import { useTypedApproval } from '../lib/typed-approval';
@@ -99,11 +107,15 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const customersShown = useCustomersReadable(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
+  const notices = tillNotices({ capabilities: saleSettings.capabilities });
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [ordersScope, setOrdersScope] = useState<OrdersScope>('store');
   const [reportsOpen, setReportsOpen] = useState(false);
   const [customersOpen, setCustomersOpen] = useState(false);
+  const [productsOpen, setProductsOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
@@ -202,15 +214,18 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setProductsOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); setNotificationsOpen(false); };
   // A scan (onClosePanels) and the rail's Sale tap close what covers the sale and drop the open order (Front desk, 2026-11-15).
   const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
     else if (id === 'support') setSupportOpen(true);
-    else if (id === 'orders') { setReportsOpen(false); setCustomersOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
-    else if (id === 'customers') { setOrdersOpen(false); setReportsOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
-    else if (id === 'reports') { setOrdersOpen(false); setCustomersOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
+    else if (id === 'notifications') setNotificationsOpen(true);
+    else if (id === 'products') { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setProductsOpen((open) => !open); }
+    else if (id === 'orders') { setProductsOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
+    else if (id === 'customers') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setHealthOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
+    else if (id === 'reports') { setProductsOpen(false); setOrdersOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
+    else if (id === 'health') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setOpenOrder(null); setHealthOpen((open) => !open); }
     else if (id === 'register') setRegisterOpen(true);
     else closePanels();
   };
@@ -256,17 +271,19 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
     // rail, which takes no dataSet, is hidden by the shell's print variant.
     <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
-      rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, customersOpen, reportsOpen, registerOpen: registerPanelShown })}
+      rejected: outbox.state.rejected ?? 0, notices: notices.length }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown, notificationsOpen })}
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
-        pending={pending} onSignOut={handleSignOut}>
-        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)} />
+        openedAt={register.session?.status === 'open' ? register.session.opened_at_gmt : null} pending={pending} onSignOut={handleSignOut}>
+        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)}
+          orders={outbox.orders} refunds={registerStore?.refunds ?? null} cashierRef={identity} timezone={TIMEZONE} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
       <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
+      <NotificationsSheet open={notificationsOpen} onOpenChange={setNotificationsOpen} notices={notices} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
         <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
@@ -313,8 +330,16 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
+      {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} /> : null}
+      {healthOpen ? <StoreHealthPanel
+        attention={attentionRows(outbox.recent, outbox.state.stuck)}
+        onRetry={outbox.requeue}
+        onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
+        ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
+        waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
+        collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
-      <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen ? { display: 'none' } : undefined}>
+      <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
           {saleSettings.status === 'ready' ? (
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
@@ -323,7 +348,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
@@ -429,6 +454,7 @@ function Sale({
   async function switchTo(id: string | null) {
     setSwitchError((await sale.switchSale(id)) ?? '');
   }
+  const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
@@ -460,6 +486,17 @@ function Sale({
   const onProducts = !wide && tab === 'products';
   // v2's "<name> added to cart" toast, for an add the sale took (never a refused one).
   const toast = useAddToast();
+  // Auto-show receipt off (CHECKLIST 9.10): a finished sale goes straight to the next one, confirmed by a toast. The
+  // receipt still mounts for one commit, so SaleReceipt's auto-print (a child's effect, run before this one; window.print()
+  // returns once its dialog closes) prints it first.
+  const saleDone = useAddToast();
+  const skippedReceipt = useRef<string | null>(null);
+  useEffect(() => {
+    if (stage.kind !== 'receipt' || stage.order.id === skippedReceipt.current || loadAutoShowReceipt()) return;
+    skippedReceipt.current = stage.order.id;
+    saleDone.show(stage.order.id);
+    sale.newSale();
+  }, [stage, sale, saleDone]);
   function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts, scanned = false) {
     // Only the cart takes new lines: a tender or a receipt is for the sale as it stands (a scan has just left them).
     if (stage.kind !== 'cart' && !scanned) return;
@@ -474,8 +511,17 @@ function Sale({
   }
   const highlightSku = typeof highlight === 'object' ? highlight?.sku : undefined;
   const tenderPane = <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>;
+  // v2 cart/tabs.tsx: every open sale is a tab at the foot (or, by Settings, the top) of the cart; switching parks the current one (CHECKLIST 2.1, 9.10).
+  const openSaleTabs = drafts ? (
+    <>
+      {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
+      <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
+        onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
+    </>
+  ) : null;
   const cart = (payGate?: ReactNode) => (
     <>
+      {openOrdersPosition === 'top' ? openSaleTabs : null}
       {drafts ? (
         <Button testID="parked-open" variant="secondary" onPress={() => setParkedOpen(true)}>
           <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
@@ -484,14 +530,7 @@ function Sale({
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={highlightSku} />
-      {drafts ? (
-        // v2 cart/tabs.tsx: every open sale is a tab at the foot of the cart; switching parks the current one (CHECKLIST 2.1).
-        <>
-          {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
-          <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
-            onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
-        </>
-      ) : null}
+      {openOrdersPosition === 'bottom' ? openSaleTabs : null}
     </>
   );
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
@@ -518,9 +557,14 @@ function Sale({
   }
   // The till stays mounted under Settings (router.push), and a scan there must not add to a sale nobody can see: the
   // wedge listens only while the till screen is focused.
+  const [cartSide, setCartSide] = useState(() => loadCartSide());
   const [focused, setFocused] = useState(true);
   useFocusEffect(useCallback(() => {
     setFocused(true);
+    // Settings is pushed over the till, so the cart side chosen there applies on the way back.
+    setCartSide(loadCartSide());
+    // Settings is pushed over the till, so the open-orders position chosen there applies on the way back.
+    setOpenOrdersPosition(loadOpenOrdersPosition());
     return () => setFocused(false);
   }, []));
   useWedgeScanner(onScan, focused);
@@ -536,7 +580,7 @@ function Sale({
     <Text testID="scan-not-found" className="text-sm text-muted-foreground">{`No products match "${scanNotice.notFound}".`}</Text>
   ) : null;
   return (
-    <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
+    <View className={wide ? (cartSide === 'left' ? 'flex-1 flex-row-reverse' : 'flex-1 flex-row') : 'flex-1'}>
       {wide ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
           <TabsList dataSet={{ print: 'hide' }} className="m-2 flex-row">
@@ -557,7 +601,7 @@ function Sale({
         </Portal>
       ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
-      <View dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
+      <View testID="till-catalogue" dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
@@ -587,7 +631,7 @@ function Sale({
           {tenderPane}
         </View>
       ) : null}
-      <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
+      <View testID="till-cart" className={wide ? (cartSide === 'left' ? 'w-96 border-r border-border' : 'w-96 border-l border-border') : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind === 'tender' ? (wide ? (
           <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
             highlightSku={highlightSku} />
@@ -614,6 +658,7 @@ function Sale({
         currency={session.settings.currency} open={parkedOpen} onOpenChange={setParkedOpen} />
       {/* A line removed meanwhile shows nothing. */}
       <AddToast name={sale.order.lineItems.find((line) => line.id === toast.lineId)?.name ?? null} />
+      <AddToast name={saleDone.lineId} title="Sale complete" testID="sale-complete-toast" />
     </View>
   );
 }

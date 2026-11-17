@@ -30,15 +30,15 @@ export function useAddToast(): { show(lineId: string): void; lineId: string | nu
   return { show: (id) => timer.current!.show(id), lineId };
 }
 
-/** v2's add toast: over the top centre of the till, never in the way of a tap or a scan, and never printed. */
-export function AddToast({ name }: { name: string | null }) {
+/** v2's add toast (or, with `title`, another short confirmation): over the top centre of the till, never in the way of a tap or a scan, and never printed. */
+export function AddToast({ name, title = `${name} added to cart`, testID = 'add-toast' }: { name: string | null; title?: string; testID?: string }) {
   if (name === null) return null;
   return (
     <View pointerEvents="none" dataSet={{ print: 'hide' }} className="absolute left-0 right-0 top-4 z-50 items-center px-4">
       {/* TallyUI's Toast takes taps itself (pointer-events-auto): this one must let them through. */}
-      <Toast variant="success" testID="add-toast" pointerEvents="none" role="status" aria-live="polite" accessibilityLiveRegion="polite"
+      <Toast variant="success" testID={testID} pointerEvents="none" role="status" aria-live="polite" accessibilityLiveRegion="polite"
         className="w-auto max-w-md px-4 py-3">
-        <ToastTitle>{`${name} added to cart`}</ToastTitle>
+        <ToastTitle>{title}</ToastTitle>
       </Toast>
     </View>
   );
