@@ -58,7 +58,8 @@ See the [plugin reference](packages/vendure-plugin/README.md).
 ## Known limitations
 
 - An open till picks up a price change made in Vendure within about a minute, and a stock change within about five minutes (the stock reconcile interval), or at once when the till comes back to the foreground or back online.
-- Sales take stock from the channel's default stock location. The till cannot
+- Sales take stock where the store's stock location strategy allocates it, and
+  any remainder from the channel's default stock location. The till cannot
   pick a location (vendurepos/app#35).
 - One browser tab per till: a second tab is told to close the first.
 - Private browser windows that give a site no storage, such as Safari's,
