@@ -260,8 +260,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
-        pending={pending} onSignOut={handleSignOut}>
-        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)} />
+        openedAt={register.session?.status === 'open' ? register.session.opened_at_gmt : null} pending={pending} onSignOut={handleSignOut}>
+        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)}
+          orders={outbox.orders} refunds={registerStore?.refunds ?? null} cashierRef={identity} timezone={TIMEZONE} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>

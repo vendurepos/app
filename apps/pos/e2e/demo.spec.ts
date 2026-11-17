@@ -970,17 +970,26 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await expect(page.getByTestId('cashier-sheet')).toHaveCount(0);
 });
 
-test('the cashier sheet shows the shift: register and since, session sales, the drawer, Pay in and Close register', async ({ page }) => {
+test('the cashier sheet shows the register and since in its header, your sales today and the drawer, Pay in and Close register', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page);
 
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
   await page.getByTestId('register-bar-cashier').click();
   const sheet = page.getByTestId('cashier-sheet');
   await expect(sheet.getByTestId('cashier-shift-since')).toHaveText(/^Register · open since \d{2}:\d{2}$/);
-  await expect(sheet.getByTestId('cashier-shift-sales')).toHaveText('Session sales €0.00 · 0 sales');
-  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €100.00');
+  await expect(sheet.getByTestId('cashier-shift-sales-today')).toHaveText('€9.52');
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('€109.52');
 
   await sheet.getByTestId('cashier-shift-pay-in').click();
   const movement = page.getByTestId('movement-sheet');
@@ -988,7 +997,8 @@ test('the cashier sheet shows the shift: register and since, session sales, the 
   await movement.getByTestId('movement-reason').fill('Change');
   await movement.getByTestId('movement-confirm').click();
   await expect(movement).toHaveCount(0);
-  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €105.00');
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('€114.52');
+  await expect(sheet.getByTestId('cashier-shift-sales-today')).toHaveText('€9.52');
 
   await sheet.getByTestId('cashier-shift-close-register').click();
   await expect(sheet).toHaveCount(0);
