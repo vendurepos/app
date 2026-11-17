@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `GET /tally/v1/reports/sales/v2`, beside the unchanged v1: v1's figures plus `orders.itemCount`, `refunds.orderCount`, `orderCount` and `refundCount` per method, `byHour` rows in the query's time zone, the top 100 `products` (with `productsTruncated`) and `taxes` rows summed from Vendure's own tax summary. An optional `cashierId` filters every figure by the sale's till cashier (a till refund by its own cashier). It needs `TallyPosSell` and `ReadOrder`, as v1 does.
+
 - `order.refund` v1 at `POST /tally/v1/commands` (ADR 0007): a till refunds a till sale through Vendure's own `refundOrder`, attributed to its open register session, and restocks through stock cancellations. `GET /tally/v1/info` advertises `order.refund: [1]`. Register figures count the session's refunds: expected cash and external fall, and `perpetualRefundsTotalMinor` is no longer 0. A refund is priced as each line's share of its line total, so a whole line refunds exactly its total.
 - **Behaviour change:** the `tally-pos` payment handler settles every refund at once. An admin refund of a POS order used to stay `Pending` until someone settled it by hand; it is now `Settled` when made, carries no till metadata and counts in no register session.
 - An `order.refund` whose `clientRefundId` a refund that is not `Failed` already carries is refused `invalid_payload`.
