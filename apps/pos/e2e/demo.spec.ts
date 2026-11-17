@@ -332,6 +332,26 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Store health shows Ready to sell, nothing waiting and the products on this device, and a scan closes it and adds', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
+  await expect(page.getByTestId('store-health-waiting')).toHaveText('0');
+  await expect(page.getByTestId('store-health-count-products')).toHaveText(String(CATALOGUE.length));
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
