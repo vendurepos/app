@@ -864,6 +864,25 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
   }).toPass();
 });
 
+test('Settings keeps the product sort for this till, and the grid takes it on return', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const firstTile = page.locator('[data-testid^="product-tile-"]').first();
+  await expect(firstTile).toHaveAttribute('data-testid', 'product-tile-Canvas Apron');
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('product-sort-name-asc')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('product-sort-price-desc').click();
+  await expect(page.getByTestId('product-sort-price-desc')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-back').click();
+  // The demo store's dearest product: the hoodie at €49.99.
+  await expect(firstTile).toHaveAttribute('data-testid', 'product-tile-Tally Hoodie');
+  await openSettings(page, 'general');
+  await page.getByTestId('product-sort-name-asc').click();
+  await page.getByTestId('settings-back').click();
+  await expect(firstTile).toHaveAttribute('data-testid', 'product-tile-Canvas Apron');
+});
+
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
