@@ -1217,6 +1217,34 @@ test('the ⋮ beside Checkout opens Order details, and Void drops the sale', asy
   await expect(page.getByTestId('order-details-error')).toHaveCount(0);
 });
 
+test('Order details keeps a customer note on the sale and sends it to the store with the order', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await page.getByTestId('order-details-open').click();
+  await expect(page.getByTestId('order-details')).toContainText('Customer note');
+  await page.getByTestId('order-details-note').fill('Gift wrap, please');
+  await page.getByTestId('order-details-close').click();
+  await expect(page.getByTestId('order-details')).toHaveCount(0);
+  await page.getByTestId('order-details-open').click();
+  await expect(page.getByTestId('order-details-note')).toHaveValue('Gift wrap, please');
+  await page.getByTestId('order-details-close').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await expect.poll(async () => ((await demoState(page))?.orders.at(-1) as { note?: string } | undefined)?.note).toBe('Gift wrap, please');
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('order-details-open').click();
+  await expect(page.getByTestId('order-details-note')).toHaveValue('');
+});
+
 test('the till follows the device\'s dark scheme and prints its receipt in light', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/demo');

@@ -112,9 +112,9 @@ it('signs in through the app, checks the barcode field and reads the seeded tax 
 });
 
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
-  expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5], 'order.refund': [1] }, maxShippingLines: 1, lineTax: { none: true, classes: true } });
+  expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], 'order.refund': [1] }, maxShippingLines: 1, lineTax: { none: true, classes: true } });
   expect(await readCapabilities(await signedIn(), createVendureConnector())).toEqual({
-    orderCreate: 5, orderRefund: 1, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
+    orderCreate: 7, orderRefund: 1, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
     lineTax: { none: true, classes: true },
   });
 });
@@ -357,6 +357,14 @@ it('applies v5 charges and custom lines once, decrementing only the mug stock', 
   expect(state.stock).not.toHaveProperty('undefined');
 });
 
+it('keeps a v7 sale\'s note on the demo order', async () => {
+  const command = { ...ORDER, version: 7, payload: { ...ORDER.payload, note: 'Gift wrap, please' } } as CommandEnvelope<OrderCreatePayload>;
+  expect((await send(await signedIn(), command))[0].status).toBe('applied');
+  const state = JSON.parse(values.get(DEMO_STORAGE_KEY)!);
+  expect(state.orders.slice(3)).toEqual([command.payload]);
+  expect(state.orders[3].note).toBe('Gift wrap, please');
+});
+
 it('refuses a second shipping charge before checking tax classes and records the refusal', async () => {
   const session = await signedIn();
   const command = { ...V5_ORDER, payload: { ...V5_ORDER.payload,
@@ -433,8 +441,8 @@ it('applies register commands in array order, enforces one open session and clos
 
 it('supports all order versions and refuses unsupported versions without claiming their ids', async () => {
   const session = await signedIn();
-  const unsupported = { ...ORDER, version: 6 } as unknown as AnyCommandEnvelope;
-  expect((await send(session, unsupported))[0].error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 5 } });
+  const unsupported = { ...ORDER, version: 8 } as unknown as AnyCommandEnvelope;
+  expect((await send(session, unsupported))[0].error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 7 } });
   expect((await send(session, ORDER))[0].status).toBe('applied');
   for (const version of [1, 2, 3] as const) {
     const payload = { ...ORDER.payload, clientOrderId: `order-${version}` };

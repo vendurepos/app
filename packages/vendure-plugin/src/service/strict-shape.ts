@@ -17,16 +17,17 @@ export function refundEnvelopeStrictErrors(command: Record<string, unknown>, ver
 
 const PAYLOAD = {
   ...since(1, 'clientOrderId createdAt currency pricesIncludeTax lines subtotalMinor taxMinor totalMinor payments customer registerId cashierRef locationId'),
-  discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'),
+  discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'), ...since(6, 'coupons'), note: 7,
 };
-const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5 };
+const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5,
+  ...since(6, 'regularUnitPriceMinor attributes anyAttributes') };
 const FEE = since(1, 'clientFeeId name amountMinor taxStatus taxClass taxMinor');
 const SHIPPING = since(1, 'clientShippingId name methodId amountMinor taxStatus taxClass taxMinor');
 const LINE_CUSTOM = since(1, 'name sku taxClass taxStatus');
 const PAYMENT = since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference');
 const CUSTOMER = { email: 1, customerId: 3 };
 // Inside v3's `display` and `taxByRate` (their parents carry the version).
-const DISPLAY = { ...since(1, 'currency exponent taxInclusive subtotalMinor discountMinor taxMinor totalMinor orderDiscountMinor lines'), fees: 5, shipping: 5 };
+const DISPLAY = { ...since(1, 'currency exponent taxInclusive subtotalMinor discountMinor taxMinor totalMinor orderDiscountMinor lines'), fees: 5, shipping: 5, coupons: 6 };
 const DISPLAY_FEE = since(1, 'clientFeeId amountMinor');
 const DISPLAY_SHIPPING = since(1, 'clientShippingId amountMinor');
 const DISPLAY_LINE = since(1, 'clientLineId amountMinor discounts');
@@ -60,6 +61,15 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   // Front desk ruling 19: an instruction field, refused in every version until it is honoured: vendurepos/app#35
   // (ADR 0002 "Stock", §5).
   if (Object.hasOwn(payload, 'locationId') && !full()) errors.push('payload.locationId: not supported by this server yet');
+  // P2.11a: coupons and Any picks (order.create 6) are refused until this server honours them; v6's regular prices and
+  // line attributes are display only (value-ranges.ts checks them, nothing reads them), so no amount depends on them.
+  const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+  const unsupported = (path: string) => { if (!full()) errors.push(`${path}: not supported by this server`); };
+  if (Object.hasOwn(payload, 'coupons')) unsupported('coupons');
+  if (isObject(payload.display) && Object.hasOwn(payload.display, 'coupons')) unsupported('display.coupons');
+  (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
+    if (isObject(line) && Object.hasOwn(line, 'anyAttributes')) unsupported(`lines[${index}].anyAttributes`);
+  });
   each(payload.lines, LINE, 'lines', (line, at) => check(line.custom, LINE_CUSTOM, `${at}.custom`));
   each(payload.fees, FEE, 'fees');
   each(payload.shipping, SHIPPING, 'shipping');
