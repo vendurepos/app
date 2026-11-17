@@ -27,6 +27,7 @@ import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
+import { ProductsPanel } from '../lib/products-panel';
 import { useCustomersReadable } from '../lib/customer-list';
 import { OrderReceipt } from '../lib/order-receipt';
 import { OrderSheet } from '../lib/order-sheet';
@@ -106,6 +107,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [ordersScope, setOrdersScope] = useState<OrdersScope>('store');
   const [reportsOpen, setReportsOpen] = useState(false);
   const [customersOpen, setCustomersOpen] = useState(false);
+  const [productsOpen, setProductsOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
@@ -205,16 +207,17 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setProductsOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
   // A scan (onClosePanels) and the rail's Sale tap close what covers the sale and drop the open order (Front desk, 2026-11-15).
   const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
     else if (id === 'support') setSupportOpen(true);
-    else if (id === 'orders') { setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
-    else if (id === 'customers') { setOrdersOpen(false); setReportsOpen(false); setHealthOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
-    else if (id === 'reports') { setOrdersOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
-    else if (id === 'health') { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setOpenOrder(null); setHealthOpen((open) => !open); }
+    else if (id === 'products') { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setProductsOpen((open) => !open); }
+    else if (id === 'orders') { setProductsOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
+    else if (id === 'customers') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setHealthOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
+    else if (id === 'reports') { setProductsOpen(false); setOrdersOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
+    else if (id === 'health') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setOpenOrder(null); setHealthOpen((open) => !open); }
     else if (id === 'register') setRegisterOpen(true);
     else closePanels();
   };
@@ -260,7 +263,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
     // rail, which takes no dataSet, is hidden by the shell's print variant.
     <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
-      rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown })}
+      rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown })}
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
@@ -317,12 +320,13 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
+      {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} /> : null}
       {healthOpen ? <StoreHealthPanel
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
-      <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || healthOpen ? { display: 'none' } : undefined}>
+      <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
           {saleSettings.status === 'ready' ? (
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
@@ -331,7 +335,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || healthOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
                   onClosePanels={closePanels}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />

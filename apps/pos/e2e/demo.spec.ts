@@ -332,6 +332,33 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("the Products panel lists the catalogue's variants with SKU, price and stock, searches them, and a scan closes it and adds", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  const variants = CATALOGUE.flatMap(product => product.variants).length;
+  await expect(page.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants} products`);
+  const mug = panel.getByTestId(`product-row-${MUG_VARIANT_ID}`);
+  for (const text of ['Tally Fixture Mug', 'TALLY-MUG', '€8.00', String(MUG_SEED_STOCK)]) await expect(mug).toContainText(text);
+
+  await page.getByTestId('products-search').fill('TALLY-MUG');
+  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
+  await expect(page.getByTestId('products-count')).toHaveText('Showing 1 of 1 products');
+  await expect(mug).toBeVisible();
+
+  await page.getByTestId('products-open').click();
+  await expect(panel).toHaveCount(0);
+  await page.getByTestId('products-open').click();
+  await expect(panel).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test('Store health shows Ready to sell, nothing waiting and the products on this device, and a scan closes it and adds', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
