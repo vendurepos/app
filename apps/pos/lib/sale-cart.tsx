@@ -4,10 +4,11 @@ import {
   Button, CartColumnHeads, CartLine, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, LinePopover, PriceForm, Text, VStack,
 } from '@tallyui/components';
 import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
-import { lineActionIds, QUICK_DISCOUNTS } from './cart-line-actions';
+import { lineActionIds } from './cart-line-actions';
 import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
 import { MIN_ORDER_CREATE_CHARGES } from './use-sale-settings';
+import { loadQuickDiscounts } from './quick-discounts-setting';
 
 // Vendure keeps one ShippingLine per order, and the plugin refuses a second as `shipping_single` (docs/adr/0005-order-create-v5.md).
 const MAX_SHIPPING_LINES = 1;
@@ -65,6 +66,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
   const row = (label: string, amount: number, testID: string, strong = false) =>
     <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
   const empty = !order.lineItems.length; // Checkout stays disabled: the plugin refuses a fees-only order (ADR 0005).
+  const quickDiscounts = loadQuickDiscounts();
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_CHARGES;
   const [removeError, setRemoveError] = useState<string | null>(null);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
@@ -143,7 +145,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
                 }
               })} />}
             priceSlot={!locked && canEditPrice ? <LinePopover kind="price" lineName={line.name} currency={order.currency} value={line.unitPriceMinor}
-              regularValue={line.regularUnitPriceMinor} quickDiscounts={QUICK_DISCOUNTS} textClassName="text-right text-muted-foreground"
+              regularValue={line.regularUnitPriceMinor} quickDiscounts={quickDiscounts} textClassName="text-right text-muted-foreground"
               onApply={(minor) => sale.setUnitPrice(line.id, minor)} /> : undefined} />
           {line.discounts.length ? (
             <View testID={`line-discounts-${line.sku || line.id}`} className="pb-2" pointerEvents={locked ? 'none' : undefined}>
