@@ -1121,6 +1121,18 @@ test('Settings › Theme sets the scale, and keeps it after a reload', async ({ 
   await expect.poll(textBase).toBe('14px');
 });
 
+test("Settings › Tax shows the channel's tax, read-only: prices without tax and the zone's rates", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'tax');
+  await expect(page.getByTestId('settings-section-tax')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tax-prices-include')).toHaveText('Prices include tax: No');
+  await expect(page.getByTestId('tax-based-on')).toHaveText("Tax based on: the channel's default tax zone");
+  await expect(page.getByTestId('tax-rate-1')).toHaveText('Standard DE · 19 %');
+  await expect(page.getByTestId('tax-rate-2')).toHaveText('Reduced DE · 7 %');
+});
+
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
   await page.addInitScript(() => {
     window.printCalls = 0;
