@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Platform, ScrollView, View } from 'react-native';
 import { Button, Dialog, DialogContent, DialogTitle, Text } from '@tallyui/components';
 import { formatClosureDate, watchFresh, type Closure, type ClosureCollection, type useRegisterSession } from '@tallyui/pos';
-import { closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
+import { closureCsvFileName, closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
 import { printLines } from './print-lines';
 
 export function ClosureHistory({ closures, register, registerId, storeKey, store, currency, timezone, open, onOpenChange }: {
@@ -28,7 +28,7 @@ export function ClosureHistory({ closures, register, registerId, storeKey, store
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `closures-${today}.csv`;
+      anchor.download = closureCsvFileName(found, { registerId, storeKey, timezone, today });
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (e) {
