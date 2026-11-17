@@ -1019,6 +1019,45 @@ test('Settings › General puts the cart on the left or the right of the till', 
   await expect.poll(cartLeft).toBe(false);
 });
 
+test('Settings › General picks the register this device is at, and the till follows it', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const bound = () => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'));
+  const own = await bound();
+  expect(own).toBeTruthy();
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('register-choice-own')).toContainText('This device');
+  await expect(page.getByTestId('register-choice-own')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('register-choice-demo-front-counter')).toContainText('Front counter');
+  await page.getByTestId('register-choice-demo-front-counter').click();
+  await expect(page.getByTestId('register-choice-demo-front-counter')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(bound).toBe('demo-front-counter');
+  // Front counter has no session: the till offers to open it.
+  await expect(page.getByTestId('open-register-card')).toBeVisible();
+  await openSettings(page, 'general');
+  await page.getByTestId('register-choice-own').click();
+  await expect(page.getByTestId('register-choice-own')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(bound).toBe(own);
+  await openSettings(page, 'general');
+  await page.getByTestId('register-choice-demo-front-counter').click();
+  await page.getByTestId('settings-back').click();
+  await expect.poll(bound).toBe('demo-front-counter');
+  // The till opens the register it is now bound to.
+  await openRegister(page);
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('register-choice-demo-front-counter-status')).toContainText('Open since');
+  await expect(page.getByTestId('register-choice-own-status')).toHaveCount(0);
+  // A live session holds the till to its register.
+  await page.getByTestId('register-choice-own').click();
+  await expect(page.getByTestId('register-choice-refused')).toHaveText('Close the register first');
+  await expect(page.getByTestId('register-choice-demo-front-counter')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(bound).toBe('demo-front-counter');
+});
+
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

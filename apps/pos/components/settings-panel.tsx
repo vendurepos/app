@@ -13,6 +13,7 @@ import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
 import { formatQuickDiscounts, loadQuickDiscounts, parseQuickDiscounts, saveQuickDiscounts } from '../lib/quick-discounts-setting';
 import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
+import { RegisterChoiceSettings } from '../lib/register-choice-settings';
 import { sessionContext, type Session } from '../lib/session';
 import { settingsSections, type SettingsSectionId } from '../lib/settings-sections';
 import { SyncLogCard } from '../lib/sync-log-card';
@@ -109,6 +110,7 @@ export function SettingsPanel({ session, onClose }: { session: Session; onClose(
       </Card>
       )}
       {section === 'general' && <>
+      <RegisterChoiceSettings session={session} />
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Prices</CardTitle></CardHeader>
         <CardContent>

@@ -3,6 +3,7 @@ import type {
 } from '@tallyui/core';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { demoProductImage } from './product-images';
+import type { ListedRegister } from '../register-choice';
 
 // All mutable demo data is saved together, including the command ledger.
 export const DEMO_STORAGE_KEY = 'vendurepos.demo-store.v1';
@@ -13,6 +14,8 @@ export const DEMO_INFO = {
   lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
 };
+/** The demo's second register (CHECKLIST 6.6), listed by GET /tally/v1/registers so the register picker has another to choose. */
+export const DEMO_FRONT_COUNTER = { id: 'demo-front-counter', name: 'Front counter' } as const;
 // The demo exposes the seed's tax-exclusive EUR shop-floor channel.
 export const DEMO_CHANNEL = { defaultCurrencyCode: 'EUR', pricesIncludeTax: false, defaultTaxZone: { id: 'DE' } };
 // Category ids shared by settings, rates and variant reads.
@@ -192,6 +195,26 @@ export class DemoStore {
   }
 
   customerList(): Customer[] { return this.state.customers; }
+
+  /** GET /tally/v1/registers: one row per register seen in a session, newest first, then Front counter if it has none. */
+  registers(): ListedRegister[] {
+    const sessions = Object.values(this.state.sessions).reverse();
+    const items: ListedRegister[] = [];
+    for (const { registerId, openedAt, deviceName } of sessions) {
+      if (items.some(item => item.id === registerId)) continue;
+      const live = sessions.find(session => session.registerId === registerId && session.status !== 'closed');
+      items.push({
+        id: registerId, receivedAt: openedAt,
+        lastDeviceName: deviceName ?? (registerId === DEMO_FRONT_COUNTER.id ? DEMO_FRONT_COUNTER.name : null),
+        session: live && live.status !== 'closed'
+          ? { status: live.status, openedAt: live.openedAt, openedBy: live.openedBy ?? null, deviceName: live.deviceName ?? null } : null,
+      });
+    }
+    if (!items.some(item => item.id === DEMO_FRONT_COUNTER.id)) {
+      items.push({ id: DEMO_FRONT_COUNTER.id, receivedAt: '2026-01-01T00:00:00.000Z', lastDeviceName: DEMO_FRONT_COUNTER.name, session: null });
+    }
+    return items;
+  }
 
   createCustomer(input: { firstName: string; lastName: string; emailAddress: string; phoneNumber?: string }) {
     if (this.state.customers.some(customer => customer.emailAddress === input.emailAddress)) return {
