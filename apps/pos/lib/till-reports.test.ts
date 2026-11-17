@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
 import { presetRange, type PosOrder, type PosRefund, type ReportOrder } from '@tallyui/pos';
-import { compareLabel, hourlyGross, initialSalesFilters, reportOptions, tillHourly, tillSalesFigures } from './till-reports';
+import { compareLabel, hourlyGross, initialSalesFilters, reportOptions, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
 
 const timezone = 'Europe/Madrid';
 const today = '2026-11-16T12:00:00.000Z';
@@ -62,6 +62,37 @@ describe('tillSalesFigures', () => {
     const result = figures([order('yesterday', { createdAt: '2026-11-15T12:00:00.000Z' })]);
     expect(result.totals.orderCount).toBe(0);
     expect(result.comparison?.totals.orderCount).toBe(1);
+  });
+});
+
+describe('tillOrderSpread', () => {
+  const spreadOf = (orders: PosOrder[]) => tillOrderSpread({ orders, filters, timezone });
+  const totals = (...minors: number[]) => minors.map((totalMinor, i) => order(`o${i}`, { totalMinor }));
+
+  it('takes the middle total for an odd count, and the largest', () => {
+    expect(spreadOf(totals(2000, 500, 952)).current).toEqual({ medianMinor: 952, largestMinor: 2000 });
+  });
+
+  it('averages the two middle totals for an even count', () => {
+    expect(spreadOf(totals(2000, 100, 500, 300)).current).toEqual({ medianMinor: 400, largestMinor: 2000 });
+  });
+
+  it('rounds the even-count median', () => {
+    expect(spreadOf(totals(101, 200)).current.medianMinor).toBe(151);
+  });
+
+  it('leaves rejected orders and other days out of current, and puts yesterday in the comparison', () => {
+    const result = spreadOf([
+      ...totals(500, 952),
+      order('rejected', { syncStatus: 'rejected', totalMinor: 9999 }),
+      order('yesterday', { createdAt: '2026-11-15T12:00:00.000Z', totalMinor: 5000 }),
+    ]);
+    expect(result.current).toEqual({ medianMinor: 726, largestMinor: 952 });
+    expect(result.comparison).toEqual({ medianMinor: 5000, largestMinor: 5000 });
+  });
+
+  it('gives zeros and no comparison with no orders', () => {
+    expect(spreadOf([])).toEqual({ current: { medianMinor: 0, largestMinor: 0 }, comparison: undefined });
   });
 });
 

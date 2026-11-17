@@ -2,14 +2,15 @@ import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { Card, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import type { SalesFigures } from '@tallyui/pos';
-import { compareLabel, isOneDay } from './till-reports';
+import { compareLabel, isOneDay, type OrderSpread } from './till-reports';
 
 const signed = (diff: number, format: (n: number) => string) =>
   diff === 0 ? '±0' : `${diff > 0 ? '+' : '−'}${format(Math.abs(diff))}`;
 
-export function TillSalesHero({ figures, filters, onFiltersChange, currency, hourly }: {
+export function TillSalesHero({ figures, filters, onFiltersChange, currency, hourly, spread }: {
   figures: SalesFigures; filters: SalesFilters; onFiltersChange(next: SalesFilters): void; currency: string;
   hourly: { hours: number[]; compareHours: number[] } | null;
+  spread: { current: OrderSpread; comparison: OrderSpread | undefined };
 }) {
   const wide = useWindowDimensions().width >= 640;
   const money = (minor: number) => formatMoney({ amount: minor, currency }) ?? '';
@@ -21,6 +22,8 @@ export function TillSalesHero({ figures, filters, onFiltersChange, currency, hou
   const companions = [
     { id: 'orders', name: 'Orders', value: totals.orderCount, prev: before?.orderCount, format: String },
     { id: 'average', name: 'Average order', value: totals.averageMinor, prev: before?.averageMinor, format: money },
+    { id: 'median', name: 'Median order', value: spread.current.medianMinor, prev: before ? spread.comparison?.medianMinor : undefined, format: money },
+    { id: 'largest', name: 'Largest order', value: spread.current.largestMinor, prev: before ? spread.comparison?.largestMinor : undefined, format: money },
     { id: 'items', name: 'Items', value: totals.items, prev: before?.items, format: String },
   ];
   const values = hourly ? hourly.hours : series.map((point) => point.grossMinor);

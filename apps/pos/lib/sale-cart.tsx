@@ -7,6 +7,7 @@ import { capturedMinor, useCurrencyFormatter, type useSale } from '@tallyui/pos'
 import { lineActionIds, QUICK_DISCOUNTS } from './cart-line-actions';
 import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
+import { OrderDetailsSheet } from './order-details-sheet';
 import { MIN_ORDER_CREATE_CHARGES } from './use-sale-settings';
 
 // Vendure keeps one ShippingLine per order, and the plugin refuses a second as `shipping_single` (docs/adr/0005-order-create-v5.md).
@@ -67,6 +68,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
   const empty = !order.lineItems.length; // Checkout stays disabled: the plugin refuses a fees-only order (ADR 0005).
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_CHARGES;
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
   // As TallyUI's own Cart: the open discount form, a line's or the order's (lineId null); useSale applies it or says
   // why not. The order discounts are one display figure, so only a single one's chip carries an amount.
@@ -173,14 +175,22 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
           {/* v2's checkout summary ends Total / Paid / Remaining (CHECKLIST 3.1); captured legs only, as v2's countsTowardPaid. */}
           {locked && row('Paid', capturedMinor(order.payments), 'cart-paid')}
           {locked && row('Remaining', Math.max(0, totals.totalMinor - capturedMinor(order.payments)), 'cart-remaining', true)}
-          {!locked && (payGate ?? (
-            <Button testID="checkout" className="mt-2" disabled={empty} onPress={onCheckout}>
-              <Text>{`Checkout ${money(totals.totalMinor)}`}</Text>
-            </Button>
-          ))}
+          {!locked && (
+            <HStack space="sm" className="mt-2 items-center">
+              <Button testID="order-details-open" variant="outline" accessibilityLabel="Order details" onPress={() => setDetailsOpen(true)}>
+                <Text>⋮</Text>
+              </Button>
+              <View className="flex-1">{payGate ?? (
+                <Button testID="checkout" disabled={empty} onPress={onCheckout}>
+                  <Text>{`Checkout ${money(totals.totalMinor)}`}</Text>
+                </Button>
+              )}</View>
+            </HStack>
+          )}
         </VStack>
       }
     />
+    <OrderDetailsSheet open={detailsOpen} onOpenChange={setDetailsOpen} onVoid={() => sale.closeSale()} />
     </View>
   );
 }

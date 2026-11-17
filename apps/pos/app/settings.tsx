@@ -14,6 +14,7 @@ import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { settingsSections, type SettingsSectionId } from '../lib/settings-sections';
 import { SyncLogCard } from '../lib/sync-log-card';
+import { TaxSettings } from '../lib/tax-settings-card';
 import { ThemeSettings } from '../lib/theme-settings';
 import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
@@ -153,6 +154,7 @@ export default function SettingsScreen() {
         </Card>
       ) : null}
       </>}
+      {section === 'tax' && <TaxSettings settings={session.settings} />}
       {section === 'printing' ? (
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Printing</CardTitle></CardHeader>

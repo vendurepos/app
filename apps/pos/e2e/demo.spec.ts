@@ -461,6 +461,8 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('reports-panel')).toBeVisible();
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
+  await expect(page.getByTestId('hero-median')).toHaveText('€9.52');
+  await expect(page.getByTestId('hero-largest')).toHaveText('€9.52');
   await expect(page.getByTestId('reports-close')).toHaveCount(0);
   await expect(page.getByTestId('reports-panel')).not.toContainText('Back to sale');
   await expect(page.getByTestId('sales-hero')).not.toContainText('—');
@@ -476,6 +478,36 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await wedgeScan(page, 'TALLY-MUG');
   await expect(page.getByTestId('reports-panel')).toHaveCount(0);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test('Reports opens on the drawer card: since, float + cash sales = expected, Print X-report and the register panel', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  await page.getByTestId('reports-open').click();
+  const drawer = page.getByTestId('reports-drawer');
+  await expect(drawer.getByTestId('reports-drawer-status')).toHaveText(/^Register · Open since \d{2}:\d{2} · .+$/);
+  await expect(drawer.getByTestId('reports-drawer-float')).toHaveText('Opening float €100.00');
+  await expect(drawer.getByTestId('reports-drawer-cash-sales')).toHaveText('Cash sales · 1 €9.52');
+  await expect(drawer.getByTestId('reports-drawer-expected')).toHaveText('Expected in drawer €109.52');
+
+  await drawer.getByTestId('reports-drawer-print-x').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed).toEqual(expect.arrayContaining(['X report · Register open', 'Opening float €100.00']));
+  await expect(drawer.getByTestId('reports-drawer-print-error')).toHaveCount(0);
+
+  await drawer.getByTestId('reports-drawer-open-register').click();
+  await expect(page.getByTestId('register-panel')).toBeVisible();
 });
 
 test('a demo cashier refunds a mug from the order sheet; stock comes back and expected cash drops', async ({ page }) => {
@@ -938,6 +970,31 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await expect(page.getByTestId('cashier-sheet')).toHaveCount(0);
 });
 
+test('the cashier sheet shows the shift: register and since, session sales, the drawer, Pay in and Close register', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('register-bar-cashier').click();
+  const sheet = page.getByTestId('cashier-sheet');
+  await expect(sheet.getByTestId('cashier-shift-since')).toHaveText(/^Register · open since \d{2}:\d{2}$/);
+  await expect(sheet.getByTestId('cashier-shift-sales')).toHaveText('Session sales €0.00 · 0 sales');
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €100.00');
+
+  await sheet.getByTestId('cashier-shift-pay-in').click();
+  const movement = page.getByTestId('movement-sheet');
+  await movement.getByTestId('movement-amount').fill('5.00');
+  await movement.getByTestId('movement-reason').fill('Change');
+  await movement.getByTestId('movement-confirm').click();
+  await expect(movement).toHaveCount(0);
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €105.00');
+
+  await sheet.getByTestId('cashier-shift-close-register').click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('register-count')).toBeVisible();
+});
+
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -1055,6 +1112,28 @@ test("a demo cashier sees Guest in the cart's customer chip and a toast when an 
   await expect(toast).toBeVisible();
 });
 
+test('the ⋮ beside Checkout opens Order details, and Void drops the sale', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await page.getByTestId('order-details-open').click();
+  await expect(page.getByTestId('order-details')).toBeVisible();
+  await expect(page.getByTestId('order-details')).toContainText('Order details');
+  await page.getByTestId('order-details-close').click();
+  await expect(page.getByTestId('order-details')).toHaveCount(0);
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await page.getByTestId('order-details-open').click();
+  await page.getByTestId('order-details-void').click();
+  await expect(page.getByTestId('order-details')).toHaveCount(0);
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await expect(page.getByTestId('cart-total')).toHaveText('€0.00');
+  await expect(page.getByTestId('order-details-error')).toHaveCount(0);
+});
+
 test('the till follows the device\'s dark scheme and prints its receipt in light', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/demo');
@@ -1128,6 +1207,18 @@ test('Settings › Theme sets the scale, and keeps it after a reload', async ({ 
   await expect.poll(textBase).toBe('16px');
   await page.getByTestId('scale-auto').click();
   await expect.poll(textBase).toBe('14px');
+});
+
+test("Settings › Tax shows the channel's tax, read-only: prices without tax and the zone's rates", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'tax');
+  await expect(page.getByTestId('settings-section-tax')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tax-prices-include')).toHaveText('Prices include tax: No');
+  await expect(page.getByTestId('tax-based-on')).toHaveText("Tax based on: the channel's default tax zone");
+  await expect(page.getByTestId('tax-rate-1')).toHaveText('Standard DE · 19 %');
+  await expect(page.getByTestId('tax-rate-2')).toHaveText('Reduced DE · 7 %');
 });
 
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
@@ -1468,6 +1559,35 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await page.getByTestId('view-toggle-grid').click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
+});
+
+test('a demo cashier keeps two sales open as tabs under the cart and switches between them', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await expect(page.getByTestId('open-sale-tabs')).toBeVisible();
+  await expect(page.getByTestId('new-sale-tab-label')).toHaveText('New');
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const mugTab = page.getByRole('tab', { name: /Tally Fixture Mug/ });
+  await expect(mugTab).toBeVisible();
+  await expect(mugTab).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByTestId('new-sale-tab').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await expect(mugTab).toHaveAttribute('aria-selected', 'false');
+
+  await page.getByTestId('product-tile-Filter Coffee').click();
+  await expect(page.getByTestId('cart-line-FIL-500')).toBeVisible();
+  const coffeeTab = page.getByRole('tab', { name: /Filter Coffee/ });
+  await expect(coffeeTab).toHaveAttribute('aria-selected', 'true');
+
+  await mugTab.click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(page.getByTestId('cart-line-FIL-500')).toHaveCount(0);
+  await expect(coffeeTab).toHaveAttribute('aria-selected', 'false');
 });
 
 test("the In Stock pill is on by default, hides the shelf's sold-out products and shows them when tapped off", async ({ page }) => {

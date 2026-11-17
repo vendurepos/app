@@ -3,12 +3,12 @@ import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import {
-  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
+  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OpenSaleTabs, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   SyncStatus, TabsTrigger, TenderPane, Text, VStack, type OrderHistoryRow,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  catalogueEntries, CurrencyProvider, findEntryByCode, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
+  catalogueEntries, CurrencyProvider, findEntryByCode, openSales, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
   useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type PosOrder, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
@@ -41,6 +41,7 @@ import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
+import { ReportsDrawerCard } from '../lib/reports-drawer-card';
 import { ReportsPanel } from '../lib/reports-panel';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
@@ -53,7 +54,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { SyncNowControl } from '../lib/sync-now-control';
-import { CashierSheet, SupportSheet, tillNavItems } from '../lib/till-frame';
+import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
@@ -260,6 +261,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
         pending={pending} onSignOut={handleSignOut}>
+        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
@@ -306,7 +308,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </VStack>
       ) : null}
       {reportsOpen ? <ReportsPanel orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}
-        timezone={TIMEZONE} /> : null}
+        timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
+          onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
+          onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen ? { display: 'none' } : undefined}>
@@ -418,6 +422,11 @@ function Sale({
     const subscription = parkedOrderSummaries$(drafts).subscribe(setParked);
     return () => subscription.unsubscribe();
   }, [drafts]);
+  // A refused switch (partly paid, payment in motion, tender) says why under the strip, like ParkedSales' resume.
+  const [switchError, setSwitchError] = useState('');
+  async function switchTo(id: string | null) {
+    setSwitchError((await sale.switchSale(id)) ?? '');
+  }
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
@@ -473,6 +482,14 @@ function Sale({
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={highlightSku} />
+      {drafts ? (
+        // v2 cart/tabs.tsx: every open sale is a tab at the foot of the cart; switching parks the current one (CHECKLIST 2.1).
+        <>
+          {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
+          <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
+            onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
+        </>
+      ) : null}
     </>
   );
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same

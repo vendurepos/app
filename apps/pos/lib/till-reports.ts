@@ -83,3 +83,24 @@ export function tillSalesFigures({ orders, refunds, filters, timezone }: {
   const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
   return salesFigures({ orders: kept.map((order) => reportOrderFromPosOrder(order)), refunds: keptRefunds, range: filters.range, compare, timezone });
 }
+
+export type OrderSpread = { medianMinor: number; largestMinor: number };
+
+function spread(totals: number[]): OrderSpread {
+  const sorted = [...totals].sort((a, b) => a - b);
+  if (sorted.length === 0) return { medianMinor: 0, largestMinor: 0 };
+  const mid = Math.floor(sorted.length / 2);
+  const medianMinor = sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  return { medianMinor, largestMinor: sorted[sorted.length - 1] };
+}
+
+/** The median and largest order total in the range and in its comparison range, on salesFigures' basis (each order's totalMinor). */
+export function tillOrderSpread({ orders, filters, timezone }: {
+  orders: readonly PosOrder[]; filters: SalesFilters; timezone: string;
+}): { current: OrderSpread; comparison: OrderSpread | undefined } {
+  const kept = keptTillOrders(orders, filters).map((order) => reportOrderFromPosOrder(order));
+  const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
+  const current = kept.filter((order) => inRange(order.at, filters.range, timezone)).map((order) => order.totalMinor);
+  const before = kept.filter((order) => inRange(order.at, compare, timezone)).map((order) => order.totalMinor);
+  return { current: spread(current), comparison: before.length > 0 ? spread(before) : undefined };
+}
