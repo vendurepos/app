@@ -5,6 +5,7 @@ describe('tillNavEntries', () => {
   it('shows POS and Settings alone before the orders store opens and with no open session', () => {
     expect(tillNavEntries({ ordersShown: false, customersShown: true, registerShown: false, rejected: 0 })).toEqual([
       { id: 'pos', label: 'POS' },
+      { id: 'health', label: 'Store health', group: 'bottom' },
       { id: 'settings', label: 'Settings', group: 'bottom' },
       { id: 'support', label: 'Support', group: 'bottom' },
     ]);
@@ -17,6 +18,7 @@ describe('tillNavEntries', () => {
       { id: 'customers', label: 'Customers' },
       { id: 'reports', label: 'Reports' },
       { id: 'register', label: 'Register' },
+      { id: 'health', label: 'Store health', group: 'bottom' },
       { id: 'settings', label: 'Settings', group: 'bottom' },
       { id: 'support', label: 'Support', group: 'bottom' },
     ]);
@@ -25,7 +27,7 @@ describe('tillNavEntries', () => {
 
   it('leaves Customers out for a role that cannot read customers', () => {
     expect(tillNavEntries({ ordersShown: true, customersShown: false, registerShown: false, rejected: 0 }).map(entry => entry.id))
-      .toEqual(['pos', 'orders', 'reports', 'settings', 'support']);
+      .toEqual(['pos', 'orders', 'reports', 'health', 'settings', 'support']);
   });
 });
 
@@ -33,6 +35,7 @@ describe('activeTillNav', () => {
   it('lights the open panel, Orders then Customers then Reports then Register, else POS', () => {
     expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: false })).toBe('pos');
     expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: true })).toBe('register');
+    expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: true, healthOpen: true })).toBe('health');
     expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: false, registerOpen: true })).toBe('orders');
     expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: true, registerOpen: true })).toBe('reports');
     expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: true, registerOpen: true })).toBe('orders');
