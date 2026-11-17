@@ -1102,6 +1102,7 @@ test("a demo cashier sees Guest in the cart's customer chip and a toast when an 
   const toast = page.getByTestId('add-toast');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+  await expect(page.getByTestId('cart').getByTestId('cart-paid')).toHaveCount(0);
   await expect(toast).toBeVisible();
   await expect(toast).toHaveText('Tally Fixture Mug added to cart');
   await expect(toast).toBeHidden({ timeout: 5000 });
@@ -1408,11 +1409,16 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
+  const cart = page.getByTestId('cart');
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€0.00');
+  await expect(cart.getByTestId('cart-remaining')).toHaveText('€9.52');
   await page.getByTestId('tender-method-cash').click();
   // The keypad has no decimal key: digits shift in from the right, so 5, 0, 0 is €5.00.
   for (const key of ['5', '0', '0']) await page.getByTestId(`tender-keypad-key-${key}`).click();
   await page.getByTestId('tender-take').click();
   await expect(page.getByTestId('tender-complete')).toBeDisabled();
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
+  await expect(cart.getByTestId('cart-remaining')).toHaveText('€4.52');
   await page.getByTestId('tender-method-external').click();
   // The pane pre-types the remaining balance after the cash payment is taken.
   await page.getByTestId('tender-take').click();
@@ -1438,6 +1444,7 @@ test('a demo cashier pays cash with a quick amount: the cart is locked beside th
   await expect(cart.getByTestId('quantity-popover-trigger')).toHaveCount(0);
   await expect(cart.getByTestId('price-popover-trigger')).toHaveCount(0);
   await expect(cart.getByTestId('checkout')).toHaveCount(0);
+  await expect(cart.getByTestId('cart-remaining')).toBeVisible();
   await expect(cart.getByTestId('add-charge')).toHaveCount(0);
   await page.getByTestId('tender-quick-5000').click();
   await takePayment(page);
