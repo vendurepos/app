@@ -1054,6 +1054,28 @@ test("a demo cashier sees Guest in the cart's customer chip and a toast when an 
   await expect(toast).toBeVisible();
 });
 
+test('the ⋮ beside Checkout opens Order details, and Void drops the sale', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await page.getByTestId('order-details-open').click();
+  await expect(page.getByTestId('order-details')).toBeVisible();
+  await expect(page.getByTestId('order-details')).toContainText('Order details');
+  await page.getByTestId('order-details-close').click();
+  await expect(page.getByTestId('order-details')).toHaveCount(0);
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await page.getByTestId('order-details-open').click();
+  await page.getByTestId('order-details-void').click();
+  await expect(page.getByTestId('order-details')).toHaveCount(0);
+  await expect(cart.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await expect(page.getByTestId('cart-total')).toHaveText('€0.00');
+  await expect(page.getByTestId('order-details-error')).toHaveCount(0);
+});
+
 test('the till follows the device\'s dark scheme and prints its receipt in light', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/demo');
