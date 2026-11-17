@@ -55,7 +55,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { StoreHealthPanel } from '../lib/store-health-panel';
-import { changesWaiting, readyToSell } from '../lib/store-health';
+import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health';
 import { SyncNowControl } from '../lib/sync-now-control';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
@@ -320,6 +320,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
       {healthOpen ? <StoreHealthPanel
+        attention={attentionRows(outbox.recent, outbox.state.stuck)}
+        onRetry={outbox.requeue}
+        onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}

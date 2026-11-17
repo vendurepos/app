@@ -1,4 +1,4 @@
-import { summarizeOutboxHealth, type OutboxState } from '@tallyui/pos';
+import { isRequeueable, needsAttention, summarizeOutboxHealth, type OutboxState, type PosOrder } from '@tallyui/pos';
 
 export type ReadyToSell = { ready: true } | { ready: false; reason: string };
 
@@ -20,4 +20,23 @@ export function changesWaiting(sales: OutboxState, tillUpdates: OutboxState): nu
 /** Records on this device: the sum of the counts, a count not read yet (null) as 0. */
 export function recordsOnDevice(counts: readonly (number | null)[]): number {
   return counts.reduce<number>((total, count) => total + (count ?? 0), 0);
+}
+
+export type AttentionRow = { order: PosOrder; reason: string; retry: boolean };
+
+/** Store health's "needs attention" records (CHECKLIST 10.3): the orders the Orders panel counts (needsAttention), each with
+ * the outbox's reason, and Retry exactly where TallyUI's OrdersList offers it (a refused sale with a requeueable code). */
+export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck']): AttentionRow[] {
+  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => {
+    let reason: string;
+    if (order.syncStatus === 'rejected') {
+      reason = 'Refused by the store' + (order.error?.code ? ` — ${order.error.code}` : '');
+    } else if (order.syncStatus === 'pending') {
+      const entry = stuck?.orders.find((entry) => entry.commandId === order.commandId);
+      reason = "Can't reach the store" + (entry ? ` — ${entry.reason}` : '');
+    } else {
+      reason = order.lateSessionId !== undefined ? 'Taken after the register closed' : 'Synced with a warning';
+    }
+    return { order, reason, retry: order.syncStatus === 'rejected' && isRequeueable(order.error?.code) };
+  });
 }
