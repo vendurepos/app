@@ -6,10 +6,11 @@ import {
 import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
-import { recordsOnDevice, type AttentionRow, type ReadyToSell } from './store-health';
+import { sessionContext, type Session } from './session';
+import { coveragePercent, readServerTotals, recordsOnDevice, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
-export function StoreHealthPanel({ ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen }: {
-  ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
+export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen }: {
+  session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
   collections: { orders: RxCollection | null; refunds: RxCollection | null; parked: RxCollection | null; closures: RxCollection | null };
   attention: AttentionRow[]; onRetry: (orderIds: string[]) => Promise<number>; onOpen: (order: PosOrder) => void;
 }): JSX.Element {
@@ -22,12 +23,20 @@ export function StoreHealthPanel({ ready, waiting, productCount, catalogueSynced
       sources[key]?.count().$.subscribe(count => setCounts(current => ({ ...current, [key]: count }))));
     return () => subscriptions.forEach(subscription => subscription?.unsubscribe());
   }, [orders, refunds, parked, closures]);
+  const [totals, setTotals] = useState<ServerTotals>({ products: null, orders: null });
+  useEffect(() => {
+    let cancelled = false;
+    void readServerTotals(sessionContext(session)).then(result => { if (!cancelled) setTotals(result); });
+    return () => { cancelled = true; };
+  }, [session]);
   const rows = [
-    { key: 'products', name: 'Products', note: 'the whole catalogue, kept in step with the store', count: productCount },
-    { key: 'orders', name: 'Orders', note: 'sales taken on this till', count: counts.orders },
-    { key: 'refunds', name: 'Refunds', note: 'refunds taken on this till', count: counts.refunds },
-    { key: 'parked', name: 'Parked sales', note: 'carts parked on this till', count: counts.parked },
-    { key: 'closures', name: 'Closures', note: "this register's Z reports", count: counts.closures },
+    { key: 'products', name: 'Products', note: 'the whole catalogue, kept in step with the store', count: productCount,
+      server: totals.products, coverage: coveragePercent(productCount, totals.products) ?? (catalogueSynced ? 100 : 0) },
+    { key: 'orders', name: 'Orders', note: "this till's sales on the device · the store's orders on the server", count: counts.orders,
+      server: totals.orders, coverage: coveragePercent(counts.orders, totals.orders) },
+    { key: 'refunds', name: 'Refunds', note: 'refunds taken on this till', count: counts.refunds, server: null, coverage: null },
+    { key: 'parked', name: 'Parked sales', note: 'carts parked on this till', count: counts.parked, server: null, coverage: null },
+    { key: 'closures', name: 'Closures', note: "this register's Z reports", count: counts.closures, server: null, coverage: null },
   ];
   return (
     <VStack testID="store-health-panel" className="flex-1">
@@ -74,6 +83,7 @@ export function StoreHealthPanel({ ready, waiting, productCount, catalogueSynced
               <TableHeader><TableRow>
                 <TableHead><Text>Collection</Text></TableHead>
                 <TableHead className="w-28"><Text className="text-right">On device</Text></TableHead>
+                <TableHead className="w-28"><Text className="text-right">On server</Text></TableHead>
                 <TableHead className="w-28"><Text className="text-right">Coverage</Text></TableHead>
               </TableRow></TableHeader>
               <TableBody>{rows.map(row => <View key={row.key} testID={`store-health-row-${row.key}`}><TableRow>
@@ -82,9 +92,11 @@ export function StoreHealthPanel({ ready, waiting, productCount, catalogueSynced
                   <Text className="text-xs text-muted-foreground">{row.note}</Text>
                 </VStack></TableCell>
                 <TableCell className="w-28"><Text testID={`store-health-count-${row.key}`} className="text-right">{row.count ?? '—'}</Text></TableCell>
-                <TableCell className="w-28 items-end">{row.key === 'products'
-                  ? <Progress value={catalogueSynced ? 100 : 0} className="h-2 w-20" />
-                  : <Text className="text-muted-foreground">this till</Text>}</TableCell>
+                <TableCell className="w-28"><Text testID={`store-health-server-${row.key}`} className="text-right text-muted-foreground">{row.server ?? '—'}</Text></TableCell>
+                {/* TallyUI's Progress drops value from its Root, so aria-valuenow is passed itself. */}
+                <TableCell className="w-28 items-end">{row.coverage === null
+                  ? <Text className="text-muted-foreground">this till</Text>
+                  : <Progress testID={`store-health-coverage-${row.key}`} value={row.coverage} aria-valuenow={row.coverage} className="h-2 w-20" />}</TableCell>
               </TableRow></View>)}</TableBody>
             </Table>
           </CardContent>

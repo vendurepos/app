@@ -344,6 +344,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
       {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} session={session} /> : null}
       {healthOpen ? <StoreHealthPanel
+        session={session}
         attention={attentionRows(outbox.recent, outbox.state.stuck)}
         onRetry={outbox.requeue}
         onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}

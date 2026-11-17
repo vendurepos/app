@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionRows, changesWaiting, readyToSell, recordsOnDevice } from './store-health';
+import { attentionRows, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice } from './store-health';
 
 describe('readyToSell', () => {
   const ready = { catalogueSynced: true, signedOut: false, settingsReady: true, ordersOpen: true };
@@ -28,6 +29,20 @@ it('counts pending sales and till updates', () => {
 it('sums records with unread counts as zero', () => {
   expect(recordsOnDevice([3, null, 2])).toBe(5);
   expect(recordsOnDevice([])).toBe(0);
+});
+
+it('gives coverage as on device over on server, capped at 100, and null when a figure is unknown', () => {
+  expect([[30, 30], [0, 3], [1, 3], [5, 3], [0, 0]].map(([device, server]) => coveragePercent(device, server))).toEqual([100, 0, 33, 100, 100]);
+  expect(coveragePercent(null, 3)).toBeNull();
+  expect(coveragePercent(3, null)).toBeNull();
+});
+
+it('reads no server totals while offline', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+  try {
+    expect(await readServerTotals({ connectorId: 'vendure', baseUrl: 'https://store.invalid', headers: {} } as SyncContext))
+      .toEqual({ products: null, orders: null });
+  } finally { vi.unstubAllGlobals(); }
 });
 
 describe('attentionRows', () => {
