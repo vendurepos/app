@@ -117,7 +117,7 @@ describe('ruling 17: order.create is validated strictly per version', () => {
   it('an unknown field at every level is an unstored invalid_payload naming its full path', async () => {
     const cases: Array<[string, (input: Envelope & Record<string, unknown>) => void]> = [
       ['envelope.priority', input => { input.priority = 1; }],
-      ['note', input => { Object.assign(input.payload, { note: 'x' }); }],
+      ['notes', input => { Object.assign(input.payload, { notes: 'x' }); }],
       ['lines[0].discountMinr', input => { Object.assign(input.payload.lines[0], { discountMinr: 100 }); }],
       ['payments[0].tip', input => { Object.assign(input.payload.payments[0], { tip: 50 }); }],
       ['customer.phone', input => { Object.assign(input.payload.customer!, { phone: '555' }); }],
