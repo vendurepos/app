@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
 import { In, IsNull, Not } from 'typeorm';
 import type { FindOptionsWhere, ObjectType } from 'typeorm';
-import type { TallyClosureRead, TallyRegisterRead } from '../api/registers.controller';
+import type { TallyClosureRead, TallyRegisterListItem, TallyRegisterRead } from '../api/registers.controller';
 import {
   TallyRegister, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
 } from '../entities/register.entities';
@@ -163,6 +163,33 @@ export class RegisterService {
         session,
         closures: { items: rows.map(closureRead), totalItems, skip: page.skip, take: page.take },
       };
+    });
+  }
+
+  /** `GET /tally/v1/registers`: the channel's registers, newest session first (a register with no session by its own
+   * receivedAt), at most 100, each with its last device's name and its live session. One transaction, no register lock. */
+  async list(ctx: RequestContext): Promise<TallyRegisterListItem[]> {
+    return this.connection.withTransaction(ctx, async tx => {
+      const channelId = String(tx.channelId);
+      const registers = await this.connection.getRepository(tx, TallyRegister).findBy({ channelId });
+      const rows: { register: TallyRegister; newest: TallyRegisterSession | null }[] = [];
+      for (const register of registers) {
+        const newest = await this.connection.getRepository(tx, TallyRegisterSession).findOne({
+          where: { channelId, registerId: register.id }, order: { receivedAt: 'DESC' },
+        });
+        rows.push({ register, newest });
+      }
+      rows.sort((a, b) => (b.newest?.receivedAt ?? b.register.receivedAt).getTime()
+        - (a.newest?.receivedAt ?? a.register.receivedAt).getTime());
+      const items: TallyRegisterListItem[] = [];
+      for (const { register, newest } of rows.slice(0, 100)) {
+        const live = await this.openSessionOf(tx, register.id);
+        const state = live ? await this.sessionState(tx, live) : undefined;
+        items.push({ id: register.id, receivedAt: register.receivedAt.toISOString(), lastDeviceName: newest?.deviceName ?? null,
+          session: live && state && !state.closed ? { status: state.status as 'open' | 'counting', openedAt: live.openedAt,
+            openedBy: live.openedBy, deviceName: live.deviceName } : null });
+      }
+      return items;
     });
   }
 

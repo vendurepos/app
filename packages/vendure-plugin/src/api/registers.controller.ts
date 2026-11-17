@@ -26,6 +26,12 @@ export type TallyClosureRead = {
   orderIds: string[]; movementIds: string[]; receivedAt: string;
 };
 
+/** One row of `GET /tally/v1/registers`. A register has no name of its own (the plugin's rows, not a Vendure entity): the app labels it by `lastDeviceName`. */
+export type TallyRegisterListItem = {
+  id: string; receivedAt: string; lastDeviceName: string | null;
+  session: null | { status: 'open' | 'counting'; openedAt: string; openedBy: string | null; deviceName: string | null };
+};
+
 type StatusResponse = { status(code: number): unknown };
 
 // A query value: the fallback when absent, the number for a plain digit string, otherwise NaN (parseInt would accept "5x").
@@ -35,10 +41,17 @@ const queryInt = (value: unknown, fallback: number) => value === undefined ? fal
 /**
  * `GET /tally/v1/registers/:id`: one register of the active channel, its live session and a page of its closures, newest
  * first. Read-only, behind the command route's permission; bodies other than 200 go through the response, as there.
+ * `GET /tally/v1/registers` lists the channel's registers, newest session first, at most 100.
  */
 @Controller('tally/v1')
 export class TallyRegistersController {
   constructor(private registers: RegisterService) {}
+
+  @Get('registers')
+  @Allow(tallyPosSell.Permission, Permission.CreateOrder)
+  async list(@Ctx() ctx: RequestContext): Promise<{ items: TallyRegisterListItem[] }> {
+    return { items: await this.registers.list(ctx) };
+  }
 
   @Get('registers/:id')
   @Allow(tallyPosSell.Permission, Permission.CreateOrder)
