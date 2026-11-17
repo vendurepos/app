@@ -1,4 +1,4 @@
-/** WCPOS v2's default cart quick-discount presets (−5 / −10 / −15 %); a per-till setting is checklist row 9.10. */
+/** WCPOS v2's default cart quick-discount presets (−5 / −10 / −15 %); a till may change them in Settings › General (lib/quick-discounts-setting.ts). */
 export const QUICK_DISCOUNTS = [5, 10, 15] as const;
 
 export type LineActionId = 'discount' | 'price' | 'remove';

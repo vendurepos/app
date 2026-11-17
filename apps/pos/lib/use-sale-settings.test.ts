@@ -79,7 +79,7 @@ describe('useSaleSettings', () => {
     await vi.advanceTimersByTimeAsync(0);
     for (const attempt of [1, 2, 3, 4]) {
       expect(capabilities).toHaveBeenCalledTimes(attempt);
-      expect(states.at(-1)).toEqual({ status: 'plugin', attempt });
+      expect(states.at(-1)).toEqual({ status: 'plugin', attempt, capabilities: below });
       await vi.advanceTimersByTimeAsync(retryDelayMs(attempt));
     }
     expect(ready()).toEqual([]);

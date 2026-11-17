@@ -8,6 +8,16 @@ export const PosIcon = createSvgIcon('PosIcon', () => (
   <><Rect x={3} y={9} width={18} height={12} rx={2} /><Line x1={7} y1={4} x2={17} y2={4} /><Line x1={12} y1={4} x2={12} y2={9} /><Line x1={7} y1={15} x2={17} y2={15} /></>
 ));
 
+// Products: tabler's `gift` outline (v2's Products door).
+export const ProductsIcon = createSvgIcon('ProductsIcon', () => (
+  <>
+    <Path d="M3 9a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z" />
+    <Path d="M12 8v13" />
+    <Path d="M19 12v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-7" />
+    <Path d="M7.5 8a2.5 2.5 0 0 1 0 -5a4.8 8 0 0 1 4.5 5a4.8 8 0 0 1 4.5 -5a2.5 2.5 0 0 1 0 5" />
+  </>
+));
+
 export const OrdersIcon = createSvgIcon('OrdersIcon', () => (
   <><Path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" /><Line x1={9} y1={7} x2={15} y2={7} /><Line x1={9} y1={11} x2={15} y2={11} /><Line x1={9} y1={15} x2={13} y2={15} /></>
 ));
@@ -33,6 +43,14 @@ export const CashIcon = createSvgIcon('CashIcon', () => (
     <Path d="M12 14a2 2 0 1 0 4 0a2 2 0 1 0-4 0" />
     <Path d="M17 9V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
   </>
+));
+
+// Store health: tabler's `activity` outline (v2's Store health door).
+export const HealthIcon = createSvgIcon('HealthIcon', () => <Path d="M3 12h4l3 8l4 -16l3 8h4" />);
+
+// Notifications: tabler's `bell` outline (v2's Notifications door).
+export const BellIcon = createSvgIcon('BellIcon', () => (
+  <><Path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" /><Path d="M9 17v1a3 3 0 0 0 6 0v-1" /></>
 ));
 
 export const SettingsIcon = createSvgIcon('SettingsIcon', () => (

@@ -4,7 +4,7 @@ import { sessionContext, sessionKey, type Session } from './session';
 
 export type SaleSettings = { settings: StoreSettings; capabilities?: ServerCapabilities };
 export type SaleSettingsState =
-  | { status: 'resolving' | 'retrying' | 'plugin'; attempt: number; lastError?: unknown }
+  | { status: 'resolving' | 'retrying' | 'plugin'; attempt: number; lastError?: unknown; capabilities?: ServerCapabilities }
   | ({ status: 'ready' } & SaleSettings);
 
 // A read that has not settled by then is a failed read, so a hung request is retried rather than waited on forever.
@@ -79,7 +79,7 @@ export function useSaleSettings(session: Session, connector: TallyConnector): Sa
           if (capabilities === undefined) throw new Error("The store's capabilities read was inconclusive");
           // Written so a missing or non-numeric orderCreate or register waits too.
           if (!(capabilities.orderCreate >= MIN_ORDER_CREATE) || !((capabilities.register ?? 0) >= MIN_REGISTER)) {
-            waiting = { status: 'plugin', attempt: count };
+            waiting = { status: 'plugin', attempt: count, capabilities };
           }
         } catch (error) {
           waiting = { status: 'retrying', attempt: count, lastError: error };
