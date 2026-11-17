@@ -1,3 +1,5 @@
+import { listVendureOrders } from '@tallyui/connector-vendure';
+import type { SyncContext } from '@tallyui/core';
 import { isRequeueable, needsAttention, summarizeOutboxHealth, type OutboxState, type PosOrder } from '@tallyui/pos';
 
 export type ReadyToSell = { ready: true } | { ready: false; reason: string };
@@ -20,6 +22,33 @@ export function changesWaiting(sales: OutboxState, tillUpdates: OutboxState): nu
 /** Records on this device: the sum of the counts, a count not read yet (null) as 0. */
 export function recordsOnDevice(counts: readonly (number | null)[]): number {
   return counts.reduce<number>((total, count) => total + (count ?? 0), 0);
+}
+
+/** Coverage (CHECKLIST 10.3): on device ÷ on server as a whole percent, at most 100, and 100 when the store has none;
+ * null when either figure is unknown. */
+export function coveragePercent(onDevice: number | null, onServer: number | null): number | null {
+  if (onDevice === null || onServer === null) return null;
+  return onServer === 0 ? 100 : Math.min(100, Math.round(onDevice / onServer * 100));
+}
+
+export type ServerTotals = { products: number | null; orders: number | null };
+
+// Unnamed, so the demo store (lib/demo/fetch.ts) answers it as `products`.
+const PRODUCT_TOTAL_QUERY = 'query ($options: ProductListOptions) { products(options: $options) { totalItems } }';
+
+/** Store health's On server column: one read of the store's product total and order total (the Orders panel's
+ * `orders` list total). Each is null when its read fails: offline, refused or an unexpected answer. */
+export async function readServerTotals(context: SyncContext): Promise<ServerTotals> {
+  const products = fetch(`${context.baseUrl}/admin-api`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers }, signal: context.signal,
+    body: JSON.stringify({ query: PRODUCT_TOTAL_QUERY, variables: { options: { take: 1 } } }),
+  }).then(async response => {
+    const total = response.ok ? (await response.json())?.data?.products?.totalItems : undefined;
+    return typeof total === 'number' ? total : null;
+  }).catch(() => null);
+  const orders = listVendureOrders(context, { take: 1 }).then(list => list.totalItems).catch(() => null);
+  const [productTotal, orderTotal] = await Promise.all([products, orders]);
+  return { products: productTotal, orders: orderTotal };
 }
 
 export type AttentionRow = { order: PosOrder; reason: string; retry: boolean };

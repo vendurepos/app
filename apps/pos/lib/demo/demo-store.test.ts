@@ -13,6 +13,7 @@ import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
 import { buildRefundEnvelope, type RefundTill } from '../till-refund';
 import { logout } from '../logout';
+import { readServerTotals } from '../store-health';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
@@ -703,6 +704,11 @@ it('seeds every order with the demo cashier', async () => {
   expect('orders' in result).toBe(true);
   if (!('orders' in result)) throw new Error(result.notice.text);
   for (const order of result.orders) expect(order.customFields?.tallyCashierRef).toBe(DEMO_CREDENTIALS.email);
+});
+
+it("the demo store answers Store health's server totals", async () => {
+  const session = await signedIn();
+  expect(await readServerTotals(sessionContext(session))).toEqual({ products: CATALOGUE.length, orders: new DemoStore().orderSummaries().length });
 });
 
 it('lists, searches and pages the store\'s customers through the demo', async () => {
