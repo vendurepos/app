@@ -2190,3 +2190,130 @@ test('a till refund tapped twice at once sends one refund and Vendure applies on
   expect(refunds.map(({ total }) => total)).toEqual([952]);
   expect(cspConsole).toEqual([]);
 });
+
+// The superadmin's Admin API in the till's channel, for the Products panel tests' store reads and writes.
+async function superadmin(page: Page) {
+  const login = await page.request.post(`${STORE_URL}/admin-api`, {
+    data: {
+      query: 'mutation ($username: String!, $password: String!) { login(username: $username, password: $password) { __typename } }',
+      variables: { username: USERNAME, password: PASSWORD },
+    },
+  });
+  expect(login.ok()).toBe(true);
+  const token = login.headers()['vendure-auth-token'];
+  expect(token).toBeTruthy();
+  return async (query: string, variables: Record<string, unknown> = {}) => {
+    const response = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN }, data: { query, variables },
+    });
+    expect(response.ok()).toBe(true);
+    const result = await response.json();
+    expect(result.errors).toBeUndefined();
+    return result.data;
+  };
+}
+type StoreVariant = {
+  id: string; price: number; priceWithTax: number; useGlobalOutOfStockThreshold: boolean; outOfStockThreshold: number;
+  stockLevels: { stockLocationId: string; stockOnHand: number; stockAllocated: number }[];
+};
+const STORE_VARIANT = `query ($sku: String!) { productVariants(options: { filter: { sku: { eq: $sku } } }) { items {
+  id price priceWithTax useGlobalOutOfStockThreshold outOfStockThreshold stockLevels { stockLocationId stockOnHand stockAllocated } } }
+  globalSettings { outOfStockThreshold } }`;
+const UPDATE_VARIANTS = 'mutation ($input: [UpdateProductVariantInput!]!) { updateProductVariants(input: $input) { id } }';
+const UPDATE_CHANNEL = 'mutation ($input: UpdateChannelInput!) { updateChannel(input: $input) { __typename ... on Channel { pricesIncludeTax } } }';
+
+async function openProductsRow(page: Page, sku: string, variantId: string) {
+  await signIn(page);
+  await page.getByTestId('products-open').click();
+  await page.getByTestId('products-search').fill(sku);
+  const panel = page.getByTestId('products-panel');
+  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
+  return { price: panel.getByTestId(`product-price-${variantId}`), stock: panel.getByTestId(`product-stock-${variantId}`) };
+}
+const productSave = (page: Page) => page.waitForResponse((response) => response.request().method() === 'POST'
+  && response.url().endsWith('/admin-api') && (response.request().postData() ?? '').includes('UpdateProductVariants'));
+
+test('the Products panel writes a one-cent price edit as the price the merchant means, in both channel tax modes', async ({ browser, page }) => {
+  test.setTimeout(4 * 60_000);
+  const admin = await superadmin(page);
+  // Espresso Cup: one tracked variant, Standard tax (19 % in the POS channel's zone, Germany).
+  const sku = 'DRK-ESPRESSO';
+  const read = async (): Promise<StoreVariant> => (await admin(STORE_VARIANT, { sku })).productVariants.items[0];
+  const { activeChannel: channel } = await admin('{ activeChannel { id pricesIncludeTax } }');
+  const seeded = await read();
+  expect(seeded.priceWithTax).toBeGreaterThan(seeded.price);
+  try {
+    for (const mode of [false, true]) {
+      const { updateChannel } = await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: mode } });
+      expect(updateChannel).toEqual({ __typename: 'Channel', pricesIncludeTax: mode });
+      // A new context is a new till: it signs in and reads the channel's tax mode afresh.
+      const context = await browser.newContext();
+      try {
+        const till = await context.newPage();
+        const { price } = await openProductsRow(till, sku, seeded.id);
+        const before = await read();
+        const shown = (mode ? before.priceWithTax : before.price) / 100;
+        await expect(price).toHaveValue(shown.toFixed(2));
+        const saved = productSave(till);
+        await price.fill((shown + 0.01).toFixed(2));
+        await price.press('Enter');
+        expect((await saved).ok()).toBe(true);
+        await expect(till.getByTestId('products-save-error')).toHaveCount(0);
+        const after = await read();
+        expect(Math.abs(after.price - before.price)).toBeLessThanOrEqual(1);
+        if (!mode) expect(after.price).toBe(before.price + 1);
+        else expect(after.priceWithTax).toBe(before.priceWithTax + 1);
+        expect(after.priceWithTax).toBeGreaterThan(after.price);
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
+    // Mode first: Vendure reads a written price in the channel's mode, and the seeded price was read in the seeded mode.
+    await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: channel.pricesIncludeTax } });
+    await admin(UPDATE_VARIANTS, { input: [{ id: seeded.id, price: channel.pricesIncludeTax ? seeded.priceWithTax : seeded.price }] });
+  }
+  expect(await read()).toEqual(seeded);
+});
+
+test('the Products panel refuses a stock edit when another till changed the stock since the sync, and saves it after the refresh', async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  const admin = await superadmin(page);
+  // Water Bottle: one tracked variant with one stock level in the POS channel.
+  const sku = 'DRK-BOTTLE';
+  const readAll = async () => admin(STORE_VARIANT, { sku });
+  const read = async (): Promise<StoreVariant> => (await readAll()).productVariants.items[0];
+  const seeded = await read();
+  expect(seeded.stockLevels).toHaveLength(1);
+  const [level] = seeded.stockLevels;
+  const setOnHand = (stockOnHand: number) => admin(UPDATE_VARIANTS, {
+    input: [{ id: seeded.id, stockLevels: [{ stockLocationId: level.stockLocationId, stockOnHand }] }] });
+  try {
+    const { stock } = await openProductsRow(page, sku, seeded.id);
+    await expect(stock).toHaveValue(/^\d+$/);
+    const shown = Number(await stock.inputValue());
+    expect(shown).toBeGreaterThan(2);
+    // Another till sells two units behind this till's back.
+    await setOnHand(level.stockOnHand - 2);
+    await stock.fill(String(shown + 5));
+    await stock.press('Enter');
+    await expect(page.getByTestId('products-save-error')).toHaveText('Stock changed in the store. Check the new figure and try again.');
+    expect((await read()).stockLevels[0].stockOnHand).toBe(level.stockOnHand - 2);
+    await expect(stock).toHaveValue(String(shown - 2), { timeout: 30_000 });
+
+    const saved = productSave(page);
+    await stock.fill(String(shown + 5));
+    await stock.press('Enter');
+    expect((await saved).ok()).toBe(true);
+    await expect(page.getByTestId('products-save-error')).toHaveCount(0);
+    const { productVariants, globalSettings } = await readAll();
+    const after: StoreVariant = productVariants.items[0];
+    const threshold = after.useGlobalOutOfStockThreshold ? globalSettings.outOfStockThreshold : after.outOfStockThreshold;
+    expect(after.stockLevels[0].stockOnHand).toBe(shown + 5 + after.stockLevels[0].stockAllocated + threshold);
+    await expect(stock).toHaveValue(String(shown + 5), { timeout: 30_000 });
+  } finally {
+    await setOnHand(level.stockOnHand);
+  }
+  expect(await read()).toEqual(seeded);
+  expect(cspConsole).toEqual([]);
+});
