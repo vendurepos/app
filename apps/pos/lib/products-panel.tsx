@@ -1,23 +1,68 @@
-import { useMemo, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { View } from 'react-native';
-import { Button, HStack, ProductTable, SearchInput, Text, VStack, type ProductTableColumn } from '@tallyui/components';
-import type { ProductTraits } from '@tallyui/core';
+import { Button, HStack, Input, InputField, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
+import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { productRows, type ProductRow } from './product-rows';
+import { refreshCatalogue } from './catalogue';
+import { sessionContext, type Session } from './session';
+import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
 
 // Rows shown at a time, as the Customers panel's page.
 const PAGE_SIZE = 25;
 
-const COLUMNS: ProductTableColumn<ProductRow>[] = [
-  { id: 'name', header: 'Name', flex: 3, render: row => <Text>{row.name}</Text> },
-  { id: 'sku', header: 'SKU', render: row => <Text>{row.sku}</Text> },
-  { id: 'price', header: 'Price', align: 'right', render: row => <Text>{row.price}</Text> },
-  { id: 'stock', header: 'Stock', align: 'center', render: row => <Text>{row.stock}</Text> },
-];
+function EditField({ testID, label, value, prefix, keyboardType, disabled, onSave }: {
+  testID: string; label: string; value: string; prefix?: string; keyboardType: 'decimal-pad' | 'number-pad'; disabled?: boolean; onSave(text: string): Promise<boolean>;
+}): JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null);
+  const sent = useRef<string | null>(null);
+  useEffect(() => { setDraft(null); sent.current = null; }, [value]);
+  function commit() {
+    if (draft === null || draft === value || draft === sent.current) return;
+    sent.current = draft;
+    void onSave(draft).then(saved => { if (!saved) { sent.current = null; setDraft(null); } });
+  }
+  return <Input disabled={disabled} className="h-9 w-24">
+    {prefix ? <Input.Left><Text className="mr-1 text-sm text-muted-foreground">{prefix}</Text></Input.Left> : null}
+    {/* min-w-0: a web <input> has an intrinsic ~20ch width and will not shrink into the 96 px box without it. */}
+    <InputField testID={testID} accessibilityLabel={label} value={draft ?? value} onChangeText={setDraft}
+      onBlur={commit} onSubmitEditing={commit} keyboardType={keyboardType} className="min-w-0 text-right" />
+  </Input>;
+}
 
-export function ProductsPanel({ products, traits, currency }: { products: any[]; traits: ProductTraits; currency: string }): JSX.Element {
+export function ProductsPanel({ products, traits, currency, session }: { products: any[]; traits: ProductTraits; currency: string; session: Session }): JSX.Element {
+  const { editable, priceEditable } = useCatalogueEditable(session, currency);
+  const [error, setError] = useState<string | null>(null);
+  const save = useCallback(async (row: ProductRow, edit: ProductEdit): Promise<boolean> => {
+    let input = variantUpdateInput(row.id, edit, currency);
+    if (input && edit.field === 'stock') {
+      const checked = await checkStockEdit(sessionContext(session), row.id, edit, row.stockText);
+      if (typeof checked === 'string') { setError(checked); if (checked === STOCK_CHANGED_TEXT) refreshCatalogue(); return false; }
+      input = checked;
+    }
+    if (!input) { setError(edit.field === 'price' ? PRICE_INVALID_TEXT : STOCK_INVALID_TEXT); return false; }
+    const failure = await saveVariantUpdate(sessionContext(session), input); setError(failure);
+    if (failure) return false;
+    refreshCatalogue(); return true;
+  }, [currency, session]);
+  const COLUMNS = useMemo<ProductTableColumn<ProductRow>[]>(() => [
+    { id: 'name', header: 'Name', flex: 3, render: row => <Text>{row.name}</Text> },
+    { id: 'sku', header: 'SKU', render: row => <Text>{row.sku}</Text> },
+    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable && row.editable ?
+      <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
+        keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
+    { id: 'stock', header: 'Stock', align: 'center', flex: 1, render: row => editable && row.editable ? <VStack className="items-center gap-1">
+      <EditField testID={`product-stock-${row.id}`} label={`Stock of ${row.name}`} value={row.stockText} keyboardType="number-pad"
+        disabled={!row.managed || !row.stockTarget}
+        onSave={text => row.stockTarget ? save(row, { field: 'stock', text, target: row.stockTarget }) : Promise.resolve(false)} />
+      <HStack className="items-center gap-1"><Switch size="sm" testID={`product-manage-${row.id}`} accessibilityLabel={`Manage stock of ${row.name}`}
+        checked={row.managed} onCheckedChange={on => { void save(row, { field: 'manage', on }); }} />
+        <Text className="text-xs text-muted-foreground">Manage</Text></HStack>
+    </VStack> : <Text>{row.stock}</Text> },
+  ], [editable, priceEditable, save, currency]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
-  const rows = useMemo(() => productRows(products, search, traits, currency), [products, search, traits, currency]);
+  const threshold = session.stock.outOfStockThreshold;
+  const rows = useMemo(() => productRows(products, search, traits, currency, threshold), [products, search, traits, currency, threshold]);
   const shown = rows.slice(0, limit);
   return (
     <VStack testID="products-panel" className="flex-1">
@@ -31,6 +76,7 @@ export function ProductsPanel({ products, traits, currency }: { products: any[];
           {search.trim() ? 'No products match this search.' : 'No products on this device yet.'}
         </Text>
       } />
+      {error ? <Text testID="products-save-error" className="border-t border-border px-4 py-2 text-sm text-destructive">{error}</Text> : null}
       {rows.length > 0 ? <HStack className="items-center justify-between border-t border-border px-4 py-3">
         <Text testID="products-count">{`Showing ${shown.length} of ${rows.length} products`}</Text>
         {shown.length < rows.length ? <Button testID="products-more" variant="secondary" size="sm" onPress={() => setLimit((n) => n + PAGE_SIZE)}>

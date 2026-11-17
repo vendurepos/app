@@ -83,6 +83,7 @@ type State = {
   orders: OrderCreatePayload[]; sessions: Record<string, Session>;
   movements: Movement[]; closures: RegisterClosureSubmitPayload[];
   refunds: DemoRefund[];
+  variants: Record<string, { price?: number; trackInventory?: 'TRUE' | 'FALSE'; updatedAt: string }>;
 };
 
 function seed(): State {
@@ -136,7 +137,7 @@ function seed(): State {
       taxByRate: [{ ratePpm, netMinor: subtotalMinor, taxMinor, grossMinor: totalMinor }],
     };
   });
-  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers, refunds: [] };
+  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers, refunds: [], variants: {} };
 }
 
 /** A stock entry's next updatedAt: now, and always later than the last. */
@@ -171,9 +172,9 @@ export class DemoStore {
   constructor(private storage?: DemoStorage) {
     const saved = storage?.getItem(DEMO_STORAGE_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones; before refunds, none.
+      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones; before refunds, none; before variant edits, none.
       this.state = { ...parsed, customers: Array.isArray(parsed.customers) ? parsed.customers : seed().customers,
-        refunds: Array.isArray(parsed.refunds) ? parsed.refunds : [] };
+        refunds: Array.isArray(parsed.refunds) ? parsed.refunds : [], variants: parsed.variants && typeof parsed.variants === 'object' ? parsed.variants : {} };
     } else this.state = seed();
   }
 
@@ -239,12 +240,15 @@ export class DemoStore {
         const id = String(++variantIndex);
         const category = DEMO_CATEGORIES.find(category => category.name === product.taxCategory)!;
         const rate = zoneRate(category.id);
+        const edit = this.state.variants[id];
+        const stockAt = this.state.stock[id]?.updatedAt ?? SEED_TIME, editAt = edit?.updatedAt ?? SEED_TIME;
+        const price = edit?.price ?? variant.priceMinor;
         return {
-          id, productId: String(index + 1), updatedAt: this.state.stock[id]?.updatedAt ?? SEED_TIME,
+          id, productId: String(index + 1), updatedAt: editAt > stockAt ? editAt : stockAt,
           name: [product.name, ...variant.options].join(' '), sku: variant.sku,
-          price: variant.priceMinor, priceWithTax: Math.round(variant.priceMinor * (PERCENT + rate) / PERCENT),
+          price, priceWithTax: Math.round(price * (PERCENT + rate) / PERCENT),
           currencyCode: DEMO_CHANNEL.defaultCurrencyCode, enabled: true, featuredAsset: null,
-          trackInventory: product.trackInventory ? 'TRUE' : 'FALSE', outOfStockThreshold: 0, useGlobalOutOfStockThreshold: true,
+          trackInventory: edit?.trackInventory ?? (product.trackInventory ? 'TRUE' : 'FALSE'), outOfStockThreshold: 0, useGlobalOutOfStockThreshold: true,
           stockLevels: [{ stockLocationId: STOCK_LOCATION_ID, stockOnHand: this.state.stock[id]?.quantity ?? variant.shopFloorStock, stockAllocated: 0 }],
           options: variant.options.map((name, optionIndex) => ({
             id: `${index + 1}-${optionIndex}-${name}`, name, code: name.toLowerCase().replace(/\s+/g, '-'),
@@ -253,6 +257,21 @@ export class DemoStore {
         };
       }),
     }));
+  }
+  /** Vendure's updateProductVariants: sets a variant's price, stock on hand and stock tracking, and bumps its updatedAt so the variant feed re-delivers it. */
+  updateVariants(inputs: { id: string; price?: number; stockLevels?: { stockLocationId: string; stockOnHand: number }[]; trackInventory?: 'TRUE' | 'FALSE' }[]) {
+    // The demo has one stock location, nothing allocated and threshold 0, so the stock it stores is stockLevels[0].stockOnHand.
+    const current = new Map(this.products().flatMap(product => product.variants).map(variant => [variant.id, variant]));
+    for (const { id, price, stockLevels, trackInventory } of inputs) {
+      const variant = current.get(id);
+      if (!variant) continue;
+      const updatedAt = nextUpdatedAt(variant.updatedAt);
+      this.state.variants[id] = { ...this.state.variants[id], ...(price !== undefined ? { price } : {}), ...(trackInventory ? { trackInventory } : {}), updatedAt };
+      if (stockLevels?.[0]) this.state.stock[id] = { quantity: stockLevels[0].stockOnHand, updatedAt };
+    }
+    this.save();
+    const updated = new Map(this.products().flatMap(product => product.variants).map(variant => [variant.id, variant]));
+    return inputs.flatMap(({ id }) => updated.get(id) ?? []);
   }
 
   /** The store's orders in the connector's VendureOrderSummary shape (TallyUI 3.9.0 listVendureOrders). */

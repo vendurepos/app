@@ -14,6 +14,7 @@
  * VariantStock — reconcile/stock.ts.
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.
+ * CataloguePermissions, VariantStockLevel, UpdateProductVariants — apps/pos/lib/product-edit.ts.
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
  * GET /tally/v1/registers — apps/pos/lib/register-choice.ts.
@@ -40,6 +41,10 @@ export const DEMO_CHANNEL_TOKEN = undefined;
 const DEMO_AUTH_TOKEN = 'demo-session';
 // Stable administrator identity for the login and session probe.
 const ADMINISTRATOR_ID = '1';
+// The demo's one channel, as the catalogue permissions query names it.
+const DEMO_CHANNEL_ID = '1';
+// The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
+const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'ReadOrder'];
 // Vendure's Admin GraphQL route.
 const ADMIN_PATH = '/admin-api';
 // The plugin's capability discovery route.
@@ -161,6 +166,11 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { products: page(store.products(), variables.options) }; break;
       case 'GetVariants': case 'VariantStock': case 'GetVariantPrices': case 'productVariants':
         data = { productVariants: page(store.products().flatMap(product => product.variants), variables.options) }; break;
+      case 'CataloguePermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: {
+        id: DEMO_CHANNEL_ID, defaultCurrencyCode: DEMO_CHANNEL.defaultCurrencyCode, pricesIncludeTax: DEMO_CHANNEL.pricesIncludeTax } }; break;
+      case 'VariantStockLevel': data = { globalSettings: { outOfStockThreshold: 0 },
+        productVariant: store.products().flatMap(product => product.variants).find(variant => variant.id === variables.id) ?? null }; break;
+      case 'UpdateProductVariants': data = { updateProductVariants: store.updateVariants(variables.input) }; break;
       default: return reply({ errors: [{ message: `Unknown operation: ${operation}` }] });
     }
     return reply({ data: selected(data, fields) }, headers);
