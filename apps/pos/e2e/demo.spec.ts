@@ -940,6 +940,31 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await expect(page.getByTestId('cashier-sheet')).toHaveCount(0);
 });
 
+test('the cashier sheet shows the shift: register and since, session sales, the drawer, Pay in and Close register', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('register-bar-cashier').click();
+  const sheet = page.getByTestId('cashier-sheet');
+  await expect(sheet.getByTestId('cashier-shift-since')).toHaveText(/^Register · open since \d{2}:\d{2}$/);
+  await expect(sheet.getByTestId('cashier-shift-sales')).toHaveText('Session sales €0.00 · 0 sales');
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €100.00');
+
+  await sheet.getByTestId('cashier-shift-pay-in').click();
+  const movement = page.getByTestId('movement-sheet');
+  await movement.getByTestId('movement-amount').fill('5.00');
+  await movement.getByTestId('movement-reason').fill('Change');
+  await movement.getByTestId('movement-confirm').click();
+  await expect(movement).toHaveCount(0);
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €105.00');
+
+  await sheet.getByTestId('cashier-shift-close-register').click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('register-count')).toBeVisible();
+});
+
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

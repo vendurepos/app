@@ -1,7 +1,11 @@
-import type { JSX, ReactNode } from 'react';
+import { useState, type JSX, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { Link } from 'expo-router';
-import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Text, VStack, type ShellNavItem } from '@tallyui/components';
+import {
+  Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, HStack, MovementSheet, Text, VStack, type ShellNavItem,
+} from '@tallyui/components';
+import { formatMoney } from '@tallyui/core';
+import type { MovementType, useRegisterSession } from '@tallyui/pos';
 import { CashIcon, CustomersIcon, OrdersIcon, PosIcon, ReportsIcon, SettingsIcon, SupportIcon } from './nav-icons';
 import type { TillNavEntry, TillNavId } from './till-nav';
 
@@ -47,6 +51,49 @@ export function CashierSheet({ open, onOpenChange, name, store, children, locked
         </Button>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** v2's avatar sheet's shift block (CHECKLIST 6.1): the register and since, the session's sales, the drawer, and its actions. */
+export function CashierShift({ register, currency, onClosing }: {
+  register: ReturnType<typeof useRegisterSession>; currency: string; onClosing(): void;
+}): JSX.Element | null {
+  const [type, setType] = useState<MovementType | null>(null);
+  const [error, setError] = useState('');
+  if (register.session?.status !== 'open') return null;
+  const opened = new Date(register.session.opened_at_gmt);
+  const since = `${String(opened.getHours()).padStart(2, '0')}:${String(opened.getMinutes()).padStart(2, '0')}`;
+  const money = (amount: number) => formatMoney({ amount, currency }) ?? '';
+  const close = async () => {
+    try {
+      await register.actions.startCounting();
+      onClosing();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <VStack testID="cashier-shift" space="sm">
+      <Text testID="cashier-shift-since">{`Register · open since ${since}`}</Text>
+      {!register.blind && register.terms ? (
+        <>
+          <Text testID="cashier-shift-sales">
+            {`Session sales ${money(register.terms.sessionSalesMinor)} · ${register.salesCount} sale${register.salesCount === 1 ? '' : 's'}`}
+          </Text>
+          <Text testID="cashier-shift-drawer">{`In the drawer ${money(register.terms.expected.cash ?? 0)}`}</Text>
+        </>
+      ) : null}
+      <HStack space="sm">
+        <Button testID="cashier-shift-pay-in" variant="outline" onPress={() => setType('paid_in')}><Text>Pay in</Text></Button>
+        <Button testID="cashier-shift-pay-out" variant="outline" onPress={() => setType('paid_out')}><Text>Pay out</Text></Button>
+        <Button testID="cashier-shift-close-register" variant="outline" onPress={close}><Text>Close register</Text></Button>
+      </HStack>
+      {error ? <Text testID="cashier-shift-error" className="text-sm text-destructive">{error}</Text> : null}
+      {type ? (
+        <MovementSheet register={register} type={type} currency={currency}
+          onOpenChange={(open) => { if (!open) setType(null); }} onDone={() => setType(null)} />
+      ) : null}
+    </VStack>
   );
 }
 

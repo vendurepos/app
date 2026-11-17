@@ -53,7 +53,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { SyncNowControl } from '../lib/sync-now-control';
-import { CashierSheet, SupportSheet, tillNavItems } from '../lib/till-frame';
+import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
@@ -260,6 +260,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
         pending={pending} onSignOut={handleSignOut}>
+        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
