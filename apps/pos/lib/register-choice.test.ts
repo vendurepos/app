@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickRefusal, registerChoices, registerLabel, registerStatus, setTillHoldsSession, type ListedRegister } from './register-choice';
+import { holdsRegister, pickRefusal, registerChoices, registerLabel, registerStatus, setTillHoldsSession, type ListedRegister } from './register-choice';
 
 const now = new Date(2026, 10, 17, 18, 0);
 const at = new Date(2026, 10, 17, 14, 38).toISOString();
@@ -48,5 +48,22 @@ describe('pickRefusal', () => {
     setTillHoldsSession(true);
     expect(pickRefusal('b', 'a')).toBe('Close the register first');
     setTillHoldsSession(false);
+  });
+});
+
+describe('holdsRegister', () => {
+  it.each([
+    ['open', false, true],
+    ['open', true, true],
+    ['counting', false, true],
+    ['closed', false, true],
+    ['closed', true, false],
+    ['counting', true, false],
+    [undefined, false, false],
+    ['conflict', false, false],
+    ['superseded', false, false],
+    ['abandoned', false, false],
+  ] as const)('%s, closure written %s → %s', (status, closureWritten, expected) => {
+    expect(holdsRegister(status, closureWritten)).toBe(expected);
   });
 });

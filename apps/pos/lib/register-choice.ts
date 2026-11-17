@@ -1,4 +1,5 @@
 import { openSince } from './open-since';
+import { isClosingStatus } from './register-conflict';
 import { sessionContext, type Session } from './session';
 
 /** One row of the plugin's GET /tally/v1/registers (packages/vendure-plugin/src/api/registers.controller.ts). */
@@ -37,6 +38,11 @@ let tillHoldsSession = false;
 /** Set by app/index.tsx, which stays mounted under the Settings panel: the till holds a live session on its bound register. */
 export function setTillHoldsSession(held: boolean): void {
   tillHoldsSession = held;
+}
+
+/** The till holds its register (Settings refuses another) while its session is open, or counting or closed until that session's closure is written (isClosingStatus). */
+export function holdsRegister(status: string | undefined, closureWritten: boolean): boolean {
+  return status === 'open' || (isClosingStatus(status) && !closureWritten);
 }
 
 /** Picking another register while this till holds a live session is refused; picking the bound one again never is. */
