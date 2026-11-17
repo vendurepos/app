@@ -1939,6 +1939,39 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
       await contextB.close();
     }
   });
+
+  test('a till that picks a register open on another till in Settings gets the conflict card, never a second drawer', async ({ browser, page: a }) => {
+    test.setTimeout(180_000);
+    const contextB = await browser.newContext();
+    try {
+      const aCapture = captureCommands(a);
+      await signIn(a);
+      await a.getByTestId('product-tile-Tally Fixture Mug').click();
+      await openRegister(a, '100.00');
+      await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
+      const boundId = await a.evaluate((key) => localStorage.getItem(key)!, BOUND_REGISTER_ID_KEY);
+      const b = await contextB.newPage();
+      const bCapture = captureCommands(b);
+      await signIn(b);
+      await b.getByTestId('settings-open').click();
+      await b.getByTestId('settings-section-general').click();
+      await expect(b.getByTestId(`register-choice-${boundId}-status`)).toContainText('Open since');
+      await b.getByTestId(`register-choice-${boundId}`).click();
+      await expect(b.getByTestId(`register-choice-${boundId}`)).toHaveAttribute('aria-checked', 'true');
+      await b.getByTestId('settings-back').click();
+      await b.getByTestId('product-tile-Tally Fixture Mug').click();
+      await b.getByTestId('open-register-amount').fill('20.00');
+      await b.getByTestId('open-register-button').click();
+      await expect(b.getByTestId('register-conflict')).toBeVisible();
+      await expect(b.getByTestId('register-conflict')).toContainText('This register is open on');
+      await expect(b.getByTestId('register-open-panel')).toHaveCount(0);
+      await expect.poll(() => bCapture.results.get(bCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? ''), { timeout: 30_000 }).toMatchObject({
+        status: 'rejected', error: { code: 'register_session_already_open' },
+      });
+    } finally {
+      await contextB.close();
+    }
+  });
 });
 
 test('a password account without POS access is refused at sign-in and keeps no session', async ({ page }) => {

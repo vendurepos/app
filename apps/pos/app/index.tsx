@@ -44,7 +44,7 @@ import { printLines } from '../lib/print-lines';
 import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
-import { setTillHoldsSession } from '../lib/register-choice';
+import { holdsRegister, setTillHoldsSession } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
@@ -195,10 +195,10 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
-  // Settings refuses another register while this till holds a live session (lib/register-choice.ts pickRefusal).
-  useEffect(() => { setTillHoldsSession(sessionStatus === 'open' || sessionStatus === 'counting'); }, [sessionStatus]);
   useEffect(() => { if (sessionId && isClosingStatus(sessionStatus)) setClosingSessionId(sessionId); }, [sessionId, sessionStatus]);
   const closureShown = !!closingSessionId && register.lastClosure?.id === closingSessionId;
+  // Settings refuses another register while this till holds its session, a closing one until its closure is written (lib/register-choice.ts holdsRegister).
+  useEffect(() => { setTillHoldsSession(holdsRegister(sessionStatus, closureShown)); }, [sessionStatus, closureShown]);
   const registerPanelShown = registerOpen && sessionStatus === 'open';
   const printZ = async () => {
     const closure = register.lastClosure;
