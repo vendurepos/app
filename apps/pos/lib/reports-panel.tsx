@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
-import { SalesCards, SalesFiltersBar, VStack } from '@tallyui/components';
+import { Button, SalesCards, SalesFiltersBar, Text, VStack } from '@tallyui/components';
 import { watchFresh, type PosOrder, type PosRefund, type PosRefundCollection } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
+import { printLines } from './print-lines';
+import { salesSummaryLines } from './sales-summary-lines';
 import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, tillSalesFigures } from './till-reports';
 import { TillSalesHero } from './till-sales-hero';
 
@@ -12,6 +14,7 @@ export function ReportsPanel({ orders, refunds, currency, timezone, drawer }: {
   const [orderList, setOrderList] = useState<PosOrder[]>([]);
   const [refundList, setRefundList] = useState<PosRefund[]>([]);
   const [filters, setFilters] = useState(() => initialSalesFilters(new Date(), timezone));
+  const [printFailed, setPrintFailed] = useState(false);
   useEffect(() => {
     setOrderList([]);
     if (!orders) return;
@@ -34,6 +37,13 @@ export function ReportsPanel({ orders, refunds, currency, timezone, drawer }: {
           <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone={timezone}
             statusOptions={REPORT_STATUS_OPTIONS} {...reportOptions(orderList)} />
           <TillSalesHero figures={figures} filters={filters} onFiltersChange={setFilters} currency={currency} hourly={hourly} />
+          <View dataSet={{ print: 'hide' }} className="gap-1">
+            <Button testID="reports-print-summary" variant="secondary" onPress={() => {
+              setPrintFailed(false);
+              printLines('Sales summary', salesSummaryLines(figures, currency)).catch(() => setPrintFailed(true));
+            }}><Text>Print summary</Text></Button>
+            {printFailed ? <Text testID="reports-print-error" className="text-sm text-destructive">Printing failed. Try again.</Text> : null}
+          </View>
           <SalesCards figures={figures} currency={currency} />
         </View>
       </ScrollView>
