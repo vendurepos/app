@@ -1260,6 +1260,40 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
 });
 
+test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'printing');
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('sale-complete-toast')).toBeVisible();
+  await expect(page.getByTestId('sale-complete-toast')).toHaveText('Sale complete');
+  await expect(page.getByTestId('receipt')).toHaveCount(0);
+  await expect(page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+
+  await openSettings(page, 'printing');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('settings-back').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await page.getByTestId('new-sale').click();
+});
+
 test('a second tab is told the till is open in another tab, and opens after the first closes and it reloads', async ({ page, context }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

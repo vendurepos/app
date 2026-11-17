@@ -15,6 +15,7 @@ import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
+import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { useCameraScanner } from '../lib/camera-scan';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
@@ -458,6 +459,17 @@ function Sale({
   const onProducts = !wide && tab === 'products';
   // v2's "<name> added to cart" toast, for an add the sale took (never a refused one).
   const toast = useAddToast();
+  // Auto-show receipt off (CHECKLIST 9.10): a finished sale goes straight to the next one, confirmed by a toast. The
+  // receipt still mounts for one commit, so SaleReceipt's auto-print (a child's effect, run before this one; window.print()
+  // returns once its dialog closes) prints it first.
+  const saleDone = useAddToast();
+  const skippedReceipt = useRef<string | null>(null);
+  useEffect(() => {
+    if (stage.kind !== 'receipt' || stage.order.id === skippedReceipt.current || loadAutoShowReceipt()) return;
+    skippedReceipt.current = stage.order.id;
+    saleDone.show(stage.order.id);
+    sale.newSale();
+  }, [stage, sale, saleDone]);
   function add(entry: Parameters<typeof sale.add>[0], showLine = !onProducts, scanned = false) {
     // Only the cart takes new lines: a tender or a receipt is for the sale as it stands (a scan has just left them).
     if (stage.kind !== 'cart' && !scanned) return;
@@ -611,6 +623,7 @@ function Sale({
         currency={session.settings.currency} open={parkedOpen} onOpenChange={setParkedOpen} />
       {/* A line removed meanwhile shows nothing. */}
       <AddToast name={sale.order.lineItems.find((line) => line.id === toast.lineId)?.name ?? null} />
+      <AddToast name={saleDone.lineId} title="Sale complete" testID="sale-complete-toast" />
     </View>
   );
 }
