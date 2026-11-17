@@ -342,12 +342,11 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   const variants = CATALOGUE.flatMap(product => product.variants).length;
   await expect(page.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants} products`);
   const mug = panel.getByTestId(`product-row-${MUG_VARIANT_ID}`);
-  for (const text of ['Tally Fixture Mug', 'TALLY-MUG', '€8.00', String(MUG_SEED_STOCK)]) await expect(mug).toContainText(text);
 
   await page.getByTestId('products-search').fill('TALLY-MUG');
   await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
   await expect(page.getByTestId('products-count')).toHaveText('Showing 1 of 1 products');
-  await expect(mug).toBeVisible();
+  for (const text of ['Tally Fixture Mug', 'TALLY-MUG', '€8.00', String(MUG_SEED_STOCK)]) await expect(mug).toContainText(text);
 
   await page.getByTestId('products-open').click();
   await expect(panel).toHaveCount(0);
