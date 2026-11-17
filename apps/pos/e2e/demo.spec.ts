@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
@@ -953,13 +954,18 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   await page.getByTestId('closure-history-open').click();
   const history = page.getByTestId('closure-history');
   await expect(history.getByTestId('closure-history-row-1')).toContainText('Closure #1');
-  await expect(history.getByTestId('closure-history-row-1')).toContainText('Sales €0.00 · Exact');
+  await expect(history.getByTestId('closure-history-row-1')).toContainText('Sales €0.00 · Cash at open €100.00 · Cash at close €100.00 · Exact');
   await history.getByTestId('closure-history-print-1').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(printed[0]).toBe('Z report · Closure #1');
   expect(printed[1]).toMatch(/^Copy · printed /);
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
+  const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
+  expect(download.suggestedFilename()).toMatch(/^closures-\d{4}-\d{2}-\d{2}\.csv$/);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  expect(csv.startsWith('"Business day","Closure","Register","Store","Opened","Closed","Closed by",')).toBe(true);
+  expect(csv).toContain('"100.00","100.00","0.00 Exact"');
   await history.getByTestId('closure-history-close').click();
   await expect(page.getByTestId('closure-history')).toHaveCount(0);
 });

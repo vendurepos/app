@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Platform, ScrollView, View } from 'react-native';
 import { Button, Dialog, DialogContent, DialogTitle, Text } from '@tallyui/components';
 import { formatClosureDate, watchFresh, type Closure, type ClosureCollection, type useRegisterSession } from '@tallyui/pos';
-import { closureHistoryRows, zCopyLines } from './closure-history';
+import { closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
 import { printLines } from './print-lines';
 
 export function ClosureHistory({ closures, register, registerId, storeKey, store, currency, timezone, open, onOpenChange }: {
@@ -19,10 +19,22 @@ export function ClosureHistory({ closures, register, registerId, storeKey, store
   }, [closures, registerId, open]);
   if (!closures || !registerId || !register.lastClosure) return null;
 
-  const rows = closureHistoryRows(found, {
-    registerId, storeKey, currency, timezone,
-    today: formatClosureDate(new Date().toISOString(), { timezone, locale: 'en' }).date_ymd, blind: register.blind,
-  });
+  const today = formatClosureDate(new Date().toISOString(), { timezone, locale: 'en' }).date_ymd;
+  const rows = closureHistoryRows(found, { registerId, storeKey, currency, timezone, today, blind: register.blind });
+  const exportCsv = () => {
+    setError('');
+    try {
+      const csv = closureHistoryCsv(found, { registerId, storeKey, currency, timezone, today, store });
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `closures-${today}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const printCopy = async (id: string) => {
     setError('');
     const closure = found.find((row) => row.id === id);
@@ -45,7 +57,9 @@ export function ClosureHistory({ closures, register, registerId, storeKey, store
               {rows.map((row) => (
                 <View key={row.id}>
                   <Text testID={`closure-history-row-${row.number}`}>
-                    {`Closure #${row.number} · ${row.closedAt}${row.salesTotal ? ` · Sales ${row.salesTotal}` : ''}${row.variance ? ` · ${row.variance}` : ''}`}
+                    {`Closure #${row.number} · ${row.closedAt}${row.salesTotal ? ` · Sales ${row.salesTotal}` : ''}`
+                      + `${row.cashAtOpen ? ` · Cash at open ${row.cashAtOpen}` : ''}${row.cashAtClose ? ` · Cash at close ${row.cashAtClose}` : ''}`
+                      + `${row.variance ? ` · ${row.variance}` : ''}`}
                   </Text>
                   {!register.blind ? (
                     <Button testID={`closure-history-print-${row.number}`} variant="secondary"
@@ -58,6 +72,9 @@ export function ClosureHistory({ closures, register, registerId, storeKey, store
               {rows.length === 0 ? <Text testID="closure-history-empty">No closures on this till in the last 92 days.</Text> : null}
             </ScrollView>
             {error ? <Text testID="closure-history-print-error" className="text-destructive">{error}</Text> : null}
+            {Platform.OS === 'web' && !register.blind && rows.length > 0 ? (
+              <Button testID="closure-history-export" variant="secondary" onPress={exportCsv}><Text>Export CSV</Text></Button>
+            ) : null}
             <Button testID="closure-history-close" onPress={() => onOpenChange(false)}><Text>Close</Text></Button>
           </DialogContent>
         </Dialog>

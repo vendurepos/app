@@ -1,6 +1,6 @@
 import type { Closure } from '@tallyui/pos';
 import { expect, it } from 'vitest';
-import { closureHistoryRows, zCopyLines } from './closure-history';
+import { closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
 import { zReportLines } from './z-report';
 
 // A closure as writeClosure freezes it: a float of 100.00, a cash and a card sale of 9.52 at 19 %, a paid out of 5.00,
@@ -36,8 +36,8 @@ it("lists this till's closures newest first", () => {
     previous, { ...closure, id: 'other-register', register_id: 'drawer-2' },
     { ...closure, id: 'other-store', store_key: 'vendurepos_orders_ffff0000' }, closure,
   ], options)).toEqual([
-    { id: 'session-1', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '€19.04', variance: 'Exact' },
-    { id: 'session-2', number: 2, closedAt: 'Sep 29, 2026, 17:00', salesTotal: '€0.00', variance: '€5.00 short' },
+    { id: 'session-1', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '€19.04', cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: 'Exact' },
+    { id: 'session-2', number: 2, closedAt: 'Sep 29, 2026, 17:00', salesTotal: '€0.00', cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: '€5.00 short' },
   ]);
 });
 
@@ -52,8 +52,24 @@ it('words an over and a missing cash variance', () => {
 
 it('shows no figures while the count is blind', () => {
   expect(closureHistoryRows([closure], { ...options, blind: true })).toEqual([
-    { id: 'session-1', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '', variance: '' },
+    { id: 'session-1', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '', cashAtOpen: '', cashAtClose: '', variance: '' },
   ]);
+});
+
+it('leaves out a missing cash at open and close', () => {
+  const { opening_float: _float, ...breakdowns } = closure.breakdowns;
+  expect(closureHistoryRows([{ ...closure, counted: {}, breakdowns } as Closure], options)[0])
+    .toMatchObject({ cashAtOpen: '', cashAtClose: '' });
+});
+
+it("exports v2's closures CSV of this till's closures", () => {
+  const lines = closureHistoryCsv([closure, { ...closure, id: 'other-register', register_id: 'drawer-2' }], { ...options, store: 'Demo store' })
+    .split('\r\n').filter(Boolean);
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toBe('"Business day","Closure","Register","Store","Opened","Closed","Closed by","Expected (cash)","Counted (cash)",'
+    + '"Variance (cash)","Expected (external)","Counted (external)","Variance (external)","Status"');
+  expect(lines[1].startsWith('"2026-09-30","3","drawer-1","Demo store",')).toBe(true);
+  expect(lines[1]).toContain('"104.52","104.52","0.00 Exact"');
 });
 
 it('marks a reprinted Z as a copy', () => {
