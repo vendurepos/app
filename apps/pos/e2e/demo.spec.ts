@@ -1044,7 +1044,7 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
   const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
-  expect(download.suggestedFilename()).toMatch(/^closures-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/^closures-(\d{4}-\d{2}-\d{2})-to-\1\.csv$/);
   const csv = fs.readFileSync(await download.path(), 'utf8');
   expect(csv.startsWith('"Business day","Closure","Register","Store","Opened","Closed","Closed by",')).toBe(true);
   expect(csv).toContain('"100.00","100.00","0.00 Exact"');
