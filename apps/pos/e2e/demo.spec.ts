@@ -1127,6 +1127,29 @@ test('the cashier sheet shows the register and since in its header, your sales t
   await expect(page.getByTestId('register-count')).toBeVisible();
 });
 
+test('Hand over in the cashier sheet signs this account out and leaves the register open for the next', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('register-bar-cashier').click();
+  const sheet = page.getByTestId('cashier-sheet');
+  await sheet.getByTestId('hand-over').click();
+  const confirm = page.getByTestId('switch-confirm');
+  await expect(confirm.getByTestId('switch-confirm-title')).toHaveText('Hand the till to another account?');
+  await expect(confirm.getByTestId('switch-confirm-description')).toHaveText('The drawer stays open on Register.');
+  await expect(confirm.getByTestId('switch-confirm-warnings')).toHaveCount(0);
+  await expect(confirm.getByTestId('switch-confirm-handover')).toBeVisible();
+
+  await confirm.getByTestId('switch-confirm-confirm').click();
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await expect(page.getByTestId('register-open-panel')).toBeVisible();
+});
+
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
