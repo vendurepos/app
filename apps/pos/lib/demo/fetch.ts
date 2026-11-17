@@ -11,6 +11,7 @@
  * GetProduct — sync/products.ts.
  * GetVariants — replication/variant-feed.ts.
  * GetProductIds — reconcile/ids.ts.
+ * products (unnamed total) — apps/pos/lib/store-health.ts.
  * VariantStock — reconcile/stock.ts.
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.

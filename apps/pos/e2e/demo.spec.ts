@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
-import { DEMO_STORAGE_KEY } from '../lib/demo/store';
+import { DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 import { openRegister } from './register';
@@ -377,7 +377,7 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
-test('Store health shows Ready to sell, nothing waiting and the products on this device, and a scan closes it and adds', async ({ page }) => {
+test("Store health shows Ready to sell, nothing waiting, the products on this device and the store's totals, and a scan closes it and adds", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
@@ -387,6 +387,12 @@ test('Store health shows Ready to sell, nothing waiting and the products on this
   await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
   await expect(page.getByTestId('store-health-waiting')).toHaveText('0');
   await expect(page.getByTestId('store-health-count-products')).toHaveText(String(CATALOGUE.length));
+  // The simulated store's own totals (lib/demo/store.ts), fresh demo: every product, the seeded orders.
+  const demoStore = new DemoStore();
+  await expect(page.getByTestId('store-health-server-products')).toHaveText(String(demoStore.products().length));
+  await expect(page.getByTestId('store-health-server-orders')).toHaveText(String(demoStore.orderSummaries().length));
+  await expect(page.getByTestId('store-health-coverage-products')).toHaveAttribute('aria-valuenow', '100');
+  await expect(page.getByTestId('store-health-server-refunds')).toHaveText('—');
   await page.getByTestId('store-health-open').click();
   await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
   await page.getByTestId('store-health-open').click();
