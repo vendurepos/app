@@ -1635,3 +1635,25 @@ test("the In Stock pill is on by default, hides the shelf's sold-out products an
   await pill.click();
   await expect(carafe).toHaveCount(0);
 });
+
+test('Settings › Products shows out-of-stock products: the In Stock pill starts off and follows the setting', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const toggle = page.getByTestId('show-out-of-stock-toggle');
+  const pill = page.getByTestId('filter-chip-inStock');
+  const carafe = page.getByTestId('product-tile-Glass Carafe');
+  await page.getByTestId('settings-open').click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'false');
+  await expect(carafe).toBeVisible();
+  await page.getByTestId('settings-open').click();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('settings-back').click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'true');
+  await expect(carafe).toHaveCount(0);
+});
