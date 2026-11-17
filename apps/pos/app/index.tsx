@@ -54,6 +54,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { SyncNowControl } from '../lib/sync-now-control';
+import { TenderSplit } from '../lib/tender-split';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
@@ -471,7 +472,13 @@ function Sale({
     highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
   const highlightSku = typeof highlight === 'object' ? highlight?.sku : undefined;
-  const tenderPane = <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>;
+  // v2's Split chip (CHECKLIST 3.1): TenderPane has no slot for it, so it sits above the pane.
+  const tenderPane = (
+    <ScrollView>
+      <TenderSplit sale={sale} state={tender.state} dispatch={tender.dispatch} />
+      <TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} />
+    </ScrollView>
+  );
   const cart = (payGate?: ReactNode) => (
     <>
       {drafts ? (
