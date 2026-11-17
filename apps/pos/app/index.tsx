@@ -17,6 +17,7 @@ import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
 import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { useCameraScanner } from '../lib/camera-scan';
+import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { ClosureHistory } from '../lib/closure-history-sheet';
@@ -56,7 +57,7 @@ import { signOutLockReason } from '../lib/sign-out-lock';
 import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-failure';
 import { storeLabel } from '../lib/store-label';
 import { StoreHealthPanel } from '../lib/store-health-panel';
-import { changesWaiting, readyToSell } from '../lib/store-health';
+import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health';
 import { SyncNowControl } from '../lib/sync-now-control';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
@@ -269,8 +270,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
-        pending={pending} onSignOut={handleSignOut}>
-        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)} />
+        openedAt={register.session?.status === 'open' ? register.session.opened_at_gmt : null} pending={pending} onSignOut={handleSignOut}>
+        <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)}
+          orders={outbox.orders} refunds={registerStore?.refunds ?? null} cashierRef={identity} timezone={TIMEZONE} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
@@ -323,6 +325,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
       {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} /> : null}
       {healthOpen ? <StoreHealthPanel
+        attention={attentionRows(outbox.recent, outbox.state.stuck)}
+        onRetry={outbox.requeue}
+        onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
@@ -542,9 +547,12 @@ function Sale({
   }
   // The till stays mounted under Settings (router.push), and a scan there must not add to a sale nobody can see: the
   // wedge listens only while the till screen is focused.
+  const [cartSide, setCartSide] = useState(() => loadCartSide());
   const [focused, setFocused] = useState(true);
   useFocusEffect(useCallback(() => {
     setFocused(true);
+    // Settings is pushed over the till, so the cart side chosen there applies on the way back.
+    setCartSide(loadCartSide());
     return () => setFocused(false);
   }, []));
   useWedgeScanner(onScan, focused);
@@ -560,7 +568,7 @@ function Sale({
     <Text testID="scan-not-found" className="text-sm text-muted-foreground">{`No products match "${scanNotice.notFound}".`}</Text>
   ) : null;
   return (
-    <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
+    <View className={wide ? (cartSide === 'left' ? 'flex-1 flex-row-reverse' : 'flex-1 flex-row') : 'flex-1'}>
       {wide ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
           <TabsList dataSet={{ print: 'hide' }} className="m-2 flex-row">
@@ -581,7 +589,7 @@ function Sale({
         </Portal>
       ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
-      <View dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
+      <View testID="till-catalogue" dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
@@ -611,7 +619,7 @@ function Sale({
           {tenderPane}
         </View>
       ) : null}
-      <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
+      <View testID="till-cart" className={wide ? (cartSide === 'left' ? 'w-96 border-r border-border' : 'w-96 border-l border-border') : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind === 'tender' ? (wide ? (
           <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
             highlightSku={highlightSku} />

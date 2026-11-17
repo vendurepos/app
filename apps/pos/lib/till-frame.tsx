@@ -2,12 +2,16 @@ import { useState, type JSX, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { Link } from 'expo-router';
 import {
-  Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, HStack, MovementSheet, Text, VStack, type ShellNavItem,
+  Button, Card, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, HStack, MovementSheet, Text, VStack, type ShellNavItem,
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import type { MovementType, useRegisterSession } from '@tallyui/pos';
+import type { MovementType, PosOrder, PosRefundCollection, useRegisterSession } from '@tallyui/pos';
+import type { RxCollection } from 'rxdb';
 import { CashIcon, CustomersIcon, HealthIcon, OrdersIcon, PosIcon, ProductsIcon, ReportsIcon, SettingsIcon, SupportIcon } from './nav-icons';
 import type { TillNavEntry, TillNavId } from './till-nav';
+import { openSince } from './open-since';
+import { useFreshList } from './use-fresh-list';
+import { cashierSalesToday } from './till-reports';
 
 const GLYPH: Record<TillNavId, typeof PosIcon> = {
   pos: PosIcon, products: ProductsIcon, orders: OrdersIcon, customers: CustomersIcon, reports: ReportsIcon, health: HealthIcon, register: CashIcon, settings: SettingsIcon, support: SupportIcon,
@@ -29,10 +33,10 @@ export function tillNavItems(entries: TillNavEntry[]): ShellNavItem[] {
 
 /**
  * The cashier's menu, opened from the bar's avatar: a side sheet as Tally Woo's `cashier-sheet.tsx` (v2's user sheet),
- * holding the shift's actions and Sign out with its lock message.
+ * its header carries the register and since; the body holds the shift's actions and Sign out with its lock message.
  */
-export function CashierSheet({ open, onOpenChange, name, store, children, locked, pending, onSignOut }: {
-  open: boolean; onOpenChange(open: boolean): void; name: string; store: string; children: ReactNode;
+export function CashierSheet({ open, onOpenChange, name, store, openedAt, children, locked, pending, onSignOut }: {
+  open: boolean; onOpenChange(open: boolean): void; name: string; store: string; openedAt: string | null; children: ReactNode;
   locked: string | null | undefined; pending: boolean; onSignOut(): void;
 }): JSX.Element {
   return (
@@ -42,6 +46,7 @@ export function CashierSheet({ open, onOpenChange, name, store, children, locked
         <DialogHeader className="text-left">
           <DialogTitle>{name}</DialogTitle>
           <DialogDescription>{store}</DialogDescription>
+          {openedAt ? <Text testID="cashier-shift-since" className="text-sm text-muted-foreground">{`Register · open since ${openSince(new Date(openedAt), new Date())}`}</Text> : null}
         </DialogHeader>
         <VStack className="items-start" space="sm">{children}</VStack>
         {/* A record() not yet settled would be lost with the sale, and a close with its Z; the outbox closes its store at unmount. */}
@@ -54,15 +59,16 @@ export function CashierSheet({ open, onOpenChange, name, store, children, locked
   );
 }
 
-/** v2's avatar sheet's shift block (CHECKLIST 6.1): the register and since, the session's sales, the drawer, and its actions. */
-export function CashierShift({ register, currency, onClosing }: {
+/** v2's avatar sheet's shift block (CHECKLIST 6.1): the cashier's sales today, the drawer, and its actions. */
+export function CashierShift({ register, currency, orders, refunds, cashierRef, timezone, onClosing }: {
   register: ReturnType<typeof useRegisterSession>; currency: string; onClosing(): void;
+  orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; cashierRef: string; timezone: string;
 }): JSX.Element | null {
   const [type, setType] = useState<MovementType | null>(null);
   const [error, setError] = useState('');
+  const orderList = useFreshList(orders);
+  const refundList = useFreshList(refunds);
   if (register.session?.status !== 'open') return null;
-  const opened = new Date(register.session.opened_at_gmt);
-  const since = `${String(opened.getHours()).padStart(2, '0')}:${String(opened.getMinutes()).padStart(2, '0')}`;
   const money = (amount: number) => formatMoney({ amount, currency }) ?? '';
   const close = async () => {
     try {
@@ -73,14 +79,19 @@ export function CashierShift({ register, currency, onClosing }: {
     }
   };
   return (
-    <VStack testID="cashier-shift" space="sm">
-      <Text testID="cashier-shift-since">{`Register · open since ${since}`}</Text>
+    <VStack testID="cashier-shift" className="w-full" space="sm">
       {!register.blind && register.terms ? (
         <>
-          <Text testID="cashier-shift-sales">
-            {`Session sales ${money(register.terms.sessionSalesMinor)} · ${register.salesCount} sale${register.salesCount === 1 ? '' : 's'}`}
-          </Text>
-          <Text testID="cashier-shift-drawer">{`In the drawer ${money(register.terms.expected.cash ?? 0)}`}</Text>
+          <HStack className="w-full items-center justify-between">
+            <Text className="text-sm text-muted-foreground">Your sales today</Text>
+            <Text testID="cashier-shift-sales-today" className="font-semibold">
+              {money(cashierSalesToday({ orders: orderList, refunds: refundList, cashierRef, now: new Date(), timezone }))}
+            </Text>
+          </HStack>
+          <Card testID="cashier-shift-drawer-card" className="w-full flex-row items-center justify-between p-3">
+            <Text className="text-sm text-muted-foreground">In the drawer</Text>
+            <Text testID="cashier-shift-drawer" className="text-lg font-semibold">{money(register.terms.expected.cash ?? 0)}</Text>
+          </Card>
         </>
       ) : null}
       <HStack space="sm">

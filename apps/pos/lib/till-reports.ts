@@ -84,6 +84,13 @@ export function tillSalesFigures({ orders, refunds, filters, timezone }: {
   return salesFigures({ orders: kept.map((order) => reportOrderFromPosOrder(order)), refunds: keptRefunds, range: filters.range, compare, timezone });
 }
 
+/** The signed-in cashier's own sales today (CHECKLIST 6.1): the Reports hero's figure for Today with that cashier picked. */
+export function cashierSalesToday({ orders, refunds, cashierRef, now, timezone }: {
+  orders: readonly PosOrder[]; refunds: readonly PosRefund[]; cashierRef: string; now: Date; timezone: string;
+}): number {
+  return tillSalesFigures({ orders, refunds, filters: { ...initialSalesFilters(now, timezone), cashierId: cashierRef }, timezone }).totals.grossMinor;
+}
+
 export type OrderSpread = { medianMinor: number; largestMinor: number };
 
 function spread(totals: number[]): OrderSpread {

@@ -1,32 +1,21 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, SalesCards, SalesFiltersBar, Text, VStack } from '@tallyui/components';
-import { watchFresh, type PosOrder, type PosRefund, type PosRefundCollection } from '@tallyui/pos';
+import type { PosOrder, PosRefundCollection } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { printLines } from './print-lines';
 import { salesSummaryLines } from './sales-summary-lines';
 import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
 import { TillSalesHero } from './till-sales-hero';
+import { useFreshList } from './use-fresh-list';
 
 export function ReportsPanel({ orders, refunds, currency, timezone, drawer }: {
   orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode;
 }) {
-  const [orderList, setOrderList] = useState<PosOrder[]>([]);
-  const [refundList, setRefundList] = useState<PosRefund[]>([]);
+  const orderList = useFreshList(orders);
+  const refundList = useFreshList(refunds);
   const [filters, setFilters] = useState(() => initialSalesFilters(new Date(), timezone));
   const [printFailed, setPrintFailed] = useState(false);
-  useEffect(() => {
-    setOrderList([]);
-    if (!orders) return;
-    const subscription = watchFresh(orders, { selector: {} }).subscribe(setOrderList);
-    return () => subscription.unsubscribe();
-  }, [orders]);
-  useEffect(() => {
-    setRefundList([]);
-    if (!refunds) return;
-    const subscription = watchFresh(refunds, { selector: {} }).subscribe(setRefundList);
-    return () => subscription.unsubscribe();
-  }, [refunds]);
   const figures = useMemo(() => tillSalesFigures({ orders: orderList, refunds: refundList, filters, timezone }), [orderList, refundList, filters, timezone]);
   const hourly = useMemo(() => tillHourly({ orders: orderList, filters, timezone }), [orderList, filters, timezone]);
   const spread = useMemo(() => tillOrderSpread({ orders: orderList, filters, timezone }), [orderList, filters, timezone]);
