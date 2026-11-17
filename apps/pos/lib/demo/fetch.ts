@@ -14,7 +14,7 @@
  * VariantStock — reconcile/stock.ts.
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.
- * CataloguePermissions, UpdateProductVariants — apps/pos/lib/product-edit.ts.
+ * CataloguePermissions, VariantStockLevel, UpdateProductVariants — apps/pos/lib/product-edit.ts.
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
  * POST /tally/v1/commands (order.create) — apps/pos/lib/order-transport.ts.
@@ -162,7 +162,10 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { products: page(store.products(), variables.options) }; break;
       case 'GetVariants': case 'VariantStock': case 'GetVariantPrices': case 'productVariants':
         data = { productVariants: page(store.products().flatMap(product => product.variants), variables.options) }; break;
-      case 'CataloguePermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: { id: DEMO_CHANNEL_ID } }; break;
+      case 'CataloguePermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: {
+        id: DEMO_CHANNEL_ID, defaultCurrencyCode: DEMO_CHANNEL.defaultCurrencyCode, pricesIncludeTax: DEMO_CHANNEL.pricesIncludeTax } }; break;
+      case 'VariantStockLevel': data = { globalSettings: { outOfStockThreshold: 0 },
+        productVariant: store.products().flatMap(product => product.variants).find(variant => variant.id === variables.id) ?? null }; break;
       case 'UpdateProductVariants': data = { updateProductVariants: store.updateVariants(variables.input) }; break;
       default: return reply({ errors: [{ message: `Unknown operation: ${operation}` }] });
     }

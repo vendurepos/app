@@ -5,7 +5,7 @@ import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { productRows, type ProductRow } from './product-rows';
 import { refreshCatalogue } from './catalogue';
 import { sessionContext, type Session } from './session';
-import { PRICE_INVALID_TEXT, STOCK_INVALID_TEXT, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
+import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
 
 // Rows shown at a time, as the Customers panel's page.
 const PAGE_SIZE = 25;
@@ -30,10 +30,15 @@ function EditField({ testID, label, value, prefix, keyboardType, disabled, onSav
 }
 
 export function ProductsPanel({ products, traits, currency, session }: { products: any[]; traits: ProductTraits; currency: string; session: Session }): JSX.Element {
-  const editable = useCatalogueEditable(session);
+  const { editable, priceEditable } = useCatalogueEditable(session, currency);
   const [error, setError] = useState<string | null>(null);
   const save = useCallback(async (row: ProductRow, edit: ProductEdit): Promise<boolean> => {
-    const input = variantUpdateInput(row.id, edit, currency);
+    let input = variantUpdateInput(row.id, edit, currency);
+    if (input && edit.field === 'stock') {
+      const checked = await checkStockEdit(sessionContext(session), row.id, edit, row.stockText);
+      if (typeof checked === 'string') { setError(checked); if (checked === STOCK_CHANGED_TEXT) refreshCatalogue(); return false; }
+      input = checked;
+    }
     if (!input) { setError(edit.field === 'price' ? PRICE_INVALID_TEXT : STOCK_INVALID_TEXT); return false; }
     const failure = await saveVariantUpdate(sessionContext(session), input); setError(failure);
     if (failure) return false;
@@ -42,7 +47,7 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   const COLUMNS = useMemo<ProductTableColumn<ProductRow>[]>(() => [
     { id: 'name', header: 'Name', flex: 3, render: row => <Text>{row.name}</Text> },
     { id: 'sku', header: 'SKU', render: row => <Text>{row.sku}</Text> },
-    { id: 'price', header: 'Price', align: 'right', render: row => editable && row.editable ?
+    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable && row.editable ?
       <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
         keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
     { id: 'stock', header: 'Stock', align: 'center', flex: 1, render: row => editable && row.editable ? <VStack className="items-center gap-1">
@@ -53,7 +58,7 @@ export function ProductsPanel({ products, traits, currency, session }: { product
         checked={row.managed} onCheckedChange={on => { void save(row, { field: 'manage', on }); }} />
         <Text className="text-xs text-muted-foreground">Manage</Text></HStack>
     </VStack> : <Text>{row.stock}</Text> },
-  ], [editable, save, currency]);
+  ], [editable, priceEditable, save, currency]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
   const threshold = session.stock.outOfStockThreshold;
