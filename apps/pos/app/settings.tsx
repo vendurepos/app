@@ -5,6 +5,7 @@ import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, VStack,
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
+import { CartSideSettings } from '../lib/cart-side-settings';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
 import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
@@ -116,6 +117,7 @@ export default function SettingsScreen() {
         </CardContent>
       </Card>
       <TileSizeSettings />
+      <CartSideSettings />
       {connector?.searchCustomers ? (
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Customers</CardTitle></CardHeader>

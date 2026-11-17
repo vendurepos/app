@@ -16,6 +16,7 @@ import type { RxCollection } from 'rxdb';
 import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
 import { useCameraScanner } from '../lib/camera-scan';
+import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { ClosureHistory } from '../lib/closure-history-sheet';
@@ -516,9 +517,12 @@ function Sale({
   }
   // The till stays mounted under Settings (router.push), and a scan there must not add to a sale nobody can see: the
   // wedge listens only while the till screen is focused.
+  const [cartSide, setCartSide] = useState(() => loadCartSide());
   const [focused, setFocused] = useState(true);
   useFocusEffect(useCallback(() => {
     setFocused(true);
+    // Settings is pushed over the till, so the cart side chosen there applies on the way back.
+    setCartSide(loadCartSide());
     return () => setFocused(false);
   }, []));
   useWedgeScanner(onScan, focused);
@@ -534,7 +538,7 @@ function Sale({
     <Text testID="scan-not-found" className="text-sm text-muted-foreground">{`No products match "${scanNotice.notFound}".`}</Text>
   ) : null;
   return (
-    <View className={wide ? 'flex-1 flex-row' : 'flex-1'}>
+    <View className={wide ? (cartSide === 'left' ? 'flex-1 flex-row-reverse' : 'flex-1 flex-row') : 'flex-1'}>
       {wide ? null : (
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'cart' ? 'cart' : 'products')}>
           <TabsList dataSet={{ print: 'hide' }} className="m-2 flex-row">
@@ -555,7 +559,7 @@ function Sale({
         </Portal>
       ) : notice ? <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">{notice}</View> : null}
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
-      <View dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
+      <View testID="till-catalogue" dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
@@ -584,7 +588,7 @@ function Sale({
           {tenderPane}
         </View>
       ) : null}
-      <View className={wide ? 'w-96 border-l border-border' : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
+      <View testID="till-cart" className={wide ? (cartSide === 'left' ? 'w-96 border-r border-border' : 'w-96 border-l border-border') : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind === 'tender' ? (wide ? (
           <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
             highlightSku={highlightSku} />
