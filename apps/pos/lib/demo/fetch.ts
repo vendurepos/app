@@ -16,6 +16,7 @@
  * Search, Create, One — customers.ts.
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
+ * GET /tally/v1/registers — apps/pos/lib/register-choice.ts.
  * POST /tally/v1/commands (order.create) — apps/pos/lib/order-transport.ts.
  * POST /tally/v1/commands (register.session.open) — apps/pos/app/index.tsx via order-transport.ts.
  * POST /tally/v1/commands (register.session.transition) — apps/pos/app/index.tsx via order-transport.ts.
@@ -43,6 +44,8 @@ const ADMINISTRATOR_ID = '1';
 const ADMIN_PATH = '/admin-api';
 // The plugin's capability discovery route.
 const INFO_PATH = '/tally/v1/info';
+// The plugin's register list (CHECKLIST 6.6).
+const REGISTERS_PATH = '/tally/v1/registers';
 // Unrecognised REST routes return the server's not-found status.
 const NOT_FOUND = 404;
 // Memory storage is shared across installations when localStorage is absent.
@@ -114,6 +117,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
     const reply = (body: unknown, headers?: Record<string, string>, status?: number) =>
       new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
     if (route === INFO_PATH) return reply(DEMO_INFO);
+    if (route === REGISTERS_PATH) return reply({ items: store.registers() });
     if (route === COMMANDS_PATH) {
       const { commands } = await request.json();
       return reply({ results: commands.map((command: Parameters<DemoStore['apply']>[0]) => store.apply(command)) });

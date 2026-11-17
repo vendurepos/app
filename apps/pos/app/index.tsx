@@ -43,6 +43,7 @@ import { printLines } from '../lib/print-lines';
 import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
+import { setTillHoldsSession } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
@@ -165,6 +166,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const rejectedRegisterCommands = useRejectedRegisterCommands(registerStore?.commands ?? null);
   const registerNotice = registerSyncNotice(registerOutbox.state, rejectedRegisterCommands);
   const [boundRegisterId, setBoundRegisterId] = useState(() => mintBoundRegisterId(defaultStore()));
+  // Settings › General may bind this till to another register (CHECKLIST 6.6): re-read it when the Settings panel closes.
+  useEffect(() => { if (!settingsOpen) setBoundRegisterId(mintBoundRegisterId(defaultStore())); }, [settingsOpen]);
   const [tenderInProgress, setTenderInProgress] = useState(false);
   // A device is not a person; M7 cashier switching will set the chosen cashier here when there is one.
   const identity = tillIdentity(session);
@@ -187,6 +190,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
   const { id: sessionId, status: sessionStatus } = register.session ?? {};
+  // Settings refuses another register while this till holds a live session (lib/register-choice.ts pickRefusal).
+  useEffect(() => { setTillHoldsSession(sessionStatus === 'open' || sessionStatus === 'counting'); }, [sessionStatus]);
   useEffect(() => { if (sessionId && isClosingStatus(sessionStatus)) setClosingSessionId(sessionId); }, [sessionId, sessionStatus]);
   const closureShown = !!closingSessionId && register.lastClosure?.id === closingSessionId;
   const registerPanelShown = registerOpen && sessionStatus === 'open';
