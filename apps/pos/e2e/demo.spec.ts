@@ -1804,6 +1804,42 @@ test('a demo cashier pays a fixed amount first and the rest after', async ({ pag
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
 
+test('a demo cashier pays for one item first and the rest after', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Canvas Apron').click();
+  await checkout(page);
+  const cart = page.getByTestId('cart');
+  const tender = page.getByTestId('tender-pane');
+  await page.getByTestId('tender-split-open').click();
+  const lines = page.getByTestId('tender-split-line');
+  const mug = lines.filter({ hasText: 'Tally Fixture Mug' });
+  const apron = lines.filter({ hasText: 'Canvas Apron' });
+  await expect(lines).toHaveCount(2);
+  await expect(mug).toContainText('€9.52');
+  await expect(apron).toContainText('€41.64');
+  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
+  await mug.click();
+  await expect(page.getByTestId('tender-split-items-set')).toBeEnabled();
+  await apron.click();
+  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
+  await apron.click();
+  await page.getByTestId('tender-split-items-set').click();
+  await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.52');
+  await takePayment(page);
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€9.52');
+  await expect(cart.getByTestId('cart-remaining')).toHaveText('€41.64');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€41.64');
+  await expect(tender.getByTestId('tender-complete')).toBeDisabled();
+  await page.getByTestId('tender-split-open').click();
+  await expect(mug).toContainText('Paid');
+  await expect(mug).toBeDisabled();
+});
+
 test('a demo cashier pays cash with a quick amount: the cart is locked beside the checkout', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
