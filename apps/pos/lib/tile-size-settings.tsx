@@ -1,12 +1,14 @@
 import { useState, type JSX } from 'react';
 import {
-  Card, CardContent, CardHeader, CardTitle, Text, ToggleGroup, ToggleGroupItem, VStack,
+  Card, CardContent, CardHeader, CardTitle, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
+import { loadShowOutOfStock, saveShowOutOfStock } from './show-out-of-stock-setting';
 import { loadTileSize, saveTileSize, TILE_SIZES } from './tile-size-setting';
 
-/** Settings › Products: the tile size for this till. */
+/** Settings › Products: the tile size and whether out-of-stock products show, for this till. */
 export function TileSizeSettings(): JSX.Element {
   const [tileSize, setTileSize] = useState(() => loadTileSize());
+  const [showOutOfStock, setShowOutOfStock] = useState(() => loadShowOutOfStock());
   return (
     <Card className="w-full max-w-[420px]">
       <CardHeader><CardTitle aria-level={2}>Products</CardTitle></CardHeader>
@@ -28,6 +30,9 @@ export function TileSizeSettings(): JSX.Element {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          <SettingsRow label="Show out-of-stock products" description="Start the In Stock filter off, so sold-out products show in the grid."
+            action={<Switch testID="show-out-of-stock-toggle" accessibilityLabel="Show out-of-stock products" checked={showOutOfStock}
+              onCheckedChange={(on) => { saveShowOutOfStock(on); setShowOutOfStock(on); }} />} />
         </VStack>
       </CardContent>
     </Card>
