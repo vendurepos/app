@@ -58,6 +58,8 @@ import { changesWaiting, readyToSell } from '../lib/store-health';
 import { SyncNowControl } from '../lib/sync-now-control';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
+import { NotificationsSheet } from '../lib/notifications-sheet';
+import { tillNotices } from '../lib/notices';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
 import { useTypedApproval } from '../lib/typed-approval';
@@ -101,12 +103,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const customersShown = useCustomersReadable(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
+  const notices = tillNotices({ capabilities: saleSettings.capabilities });
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [ordersScope, setOrdersScope] = useState<OrdersScope>('store');
   const [reportsOpen, setReportsOpen] = useState(false);
   const [customersOpen, setCustomersOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
@@ -205,12 +209,13 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); setNotificationsOpen(false); };
   // A scan (onClosePanels) and the rail's Sale tap close what covers the sale and drop the open order (Front desk, 2026-11-15).
   const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
     if (id === 'settings') router.push('/settings');
     else if (id === 'support') setSupportOpen(true);
+    else if (id === 'notifications') setNotificationsOpen(true);
     else if (id === 'orders') { setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
     else if (id === 'customers') { setOrdersOpen(false); setReportsOpen(false); setHealthOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
     else if (id === 'reports') { setOrdersOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
@@ -260,7 +265,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
     // rail, which takes no dataSet, is hidden by the shell's print variant.
     <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
-      rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown })}
+      rejected: outbox.state.rejected ?? 0, notices: notices.length }))} activeId={activeTillNav({ ordersOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown, notificationsOpen })}
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
@@ -271,6 +276,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         {framePhone ? sync : null}
       </CashierSheet>
       <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
+      <NotificationsSheet open={notificationsOpen} onOpenChange={setNotificationsOpen} notices={notices} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
         <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
@@ -331,7 +337,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || healthOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || healthOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
