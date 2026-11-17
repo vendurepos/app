@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- order.create versions 6 and 7 (ADR-077, ADR-083): `GET /tally/v1/info` advertises order.create 1–7. A v7 sale's `note` is kept as one public order note in the order's history (Vendure's `addNoteToOrder`, in the sale's transaction; a replay adds none). v6's coupons and Any picks are refused `invalid_payload`; its regular prices and line attributes are accepted as display only and change no amount.
 - `GET /tally/v1/registers` lists the active channel's registers, newest session first, at most 100: each register's id and `receivedAt`, its last session's `deviceName` as `lastDeviceName`, and its live session (`status`, `openedAt`, `openedBy`, `deviceName`) or `null`. It needs `TallyPosSell` or `CreateOrder`, as `GET /tally/v1/registers/:id` does. No migration.
 - `order.refund` v1 at `POST /tally/v1/commands` (ADR 0007): a till refunds a till sale through Vendure's own `refundOrder`, attributed to its open register session, and restocks through stock cancellations. `GET /tally/v1/info` advertises `order.refund: [1]`. Register figures count the session's refunds: expected cash and external fall, and `perpetualRefundsTotalMinor` is no longer 0. A refund is priced as each line's share of its line total, so a whole line refunds exactly its total.
 - **Behaviour change:** the `tally-pos` payment handler settles every refund at once. An admin refund of a POS order used to stay `Pending` until someone settled it by hand; it is now `Settled` when made, carries no till metadata and counts in no register session.

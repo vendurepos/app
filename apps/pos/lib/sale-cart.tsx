@@ -8,7 +8,7 @@ import { lineActionIds } from './cart-line-actions';
 import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
 import { OrderDetailsSheet } from './order-details-sheet';
-import { MIN_ORDER_CREATE_CHARGES } from './use-sale-settings';
+import { MIN_ORDER_CREATE_CHARGES, MIN_ORDER_CREATE_NOTE } from './use-sale-settings';
 import { loadQuickDiscounts } from './quick-discounts-setting';
 
 // Vendure keeps one ShippingLine per order, and the plugin refuses a second as `shipping_single` (docs/adr/0005-order-create-v5.md).
@@ -69,6 +69,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
   const empty = !order.lineItems.length; // Checkout stays disabled: the plugin refuses a fees-only order (ADR 0005).
   const quickDiscounts = loadQuickDiscounts();
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_CHARGES;
+  const noteOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_NOTE;
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
@@ -192,7 +193,8 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
         </VStack>
       }
     />
-    <OrderDetailsSheet open={detailsOpen} onOpenChange={setDetailsOpen} onVoid={() => sale.closeSale()} />
+    <OrderDetailsSheet open={detailsOpen} onOpenChange={setDetailsOpen} onVoid={() => sale.closeSale()}
+      note={order.note} onNote={noteOffered ? (note) => sale.setNote(note) : undefined} />
     </View>
   );
 }

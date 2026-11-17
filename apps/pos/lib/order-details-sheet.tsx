@@ -1,12 +1,14 @@
 import { useState, type JSX } from 'react';
-import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, HStack, Text } from '@tallyui/components';
+import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, HStack, Label, Text, Textarea } from '@tallyui/components';
+import { ORDER_NOTE_MAX } from '@tallyui/core';
 
 /**
  * v2's Order details dialog (CHECKLIST 2.11), opened by the ⋮ beside Checkout: a side sheet from the left with Void and Close.
  * Void is `useSale().closeSale()`, which refuses a sale that is saving, partly paid or in tender; the refusal shows in the sheet.
+ * The Customer note (v2's, CHECKLIST 2.11) is useSale().setNote, offered only when the store accepts order.create 7 (onNote set).
  */
-export function OrderDetailsSheet({ open, onOpenChange, onVoid }: {
-  open: boolean; onOpenChange(open: boolean): void; onVoid(): string | null;
+export function OrderDetailsSheet({ open, onOpenChange, onVoid, note, onNote }: {
+  open: boolean; onOpenChange(open: boolean): void; onVoid(): string | null; note: string; onNote?(note: string): void;
 }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   return (
@@ -17,6 +19,11 @@ export function OrderDetailsSheet({ open, onOpenChange, onVoid }: {
           <DialogTitle>Order details</DialogTitle>
           <DialogDescription>Void drops this sale from the till. Nothing has been sent to the store.</DialogDescription>
         </DialogHeader>
+        {onNote && <HStack space="md" className="items-start">
+          <Label nativeID="order-details-note-label" className="w-28 pt-2">Customer note</Label>
+          <Textarea testID="order-details-note" className="flex-1" value={note} onChangeText={onNote} maxLength={ORDER_NOTE_MAX}
+            placeholder="Add customer note" accessibilityLabel="Customer note" accessibilityLabelledBy="order-details-note-label" />
+        </HStack>}
         {error ? <Text testID="order-details-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text> : null}
         <HStack space="sm" className="mt-auto justify-between">
           <Button testID="order-details-void" variant="outline" className="border-destructive" onPress={() => {
