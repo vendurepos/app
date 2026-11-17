@@ -12,9 +12,11 @@ const products = [
 
 describe('productRows', () => {
   it('lists each variant in catalogue order with its name, SKU, price and tracked stock', () => {
-    const rows = productRows(products, '', vendureProductTraits, 'EUR');
+    const rows = productRows(products, '', vendureProductTraits, 'EUR', 0);
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
-    expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50' });
+    expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
+      priceText: '8.00', stockText: '50', managed: true, editable: true, stockTarget: null });
+    expect([rows[1].editable, rows[3].managed, rows[3].stockText]).toEqual([false, false, '']);
     expect(rows[1].name).toBe('Espresso Beans · 250 g');
     expect(rows[1].stock).toBe('20');
     expect(rows[2].stock).toBe('0');
@@ -27,6 +29,6 @@ describe('productRows', () => {
     ['mug tally', ['11']],
     ['nothing', []],
   ])('filters by %s, keeping an exact SKU alone', (term, ids) => {
-    expect(productRows(products, term, vendureProductTraits, 'EUR').map(row => row.id)).toEqual(ids);
+    expect(productRows(products, term, vendureProductTraits, 'EUR', 0).map(row => row.id)).toEqual(ids);
   });
 });

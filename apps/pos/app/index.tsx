@@ -342,7 +342,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
-      {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} /> : null}
+      {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} session={session} /> : null}
       {healthOpen ? <StoreHealthPanel
         session={session}
         attention={attentionRows(outbox.recent, outbox.state.stuck)}
