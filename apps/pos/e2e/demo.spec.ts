@@ -378,6 +378,19 @@ test('Store health shows Ready to sell, nothing waiting and the products on this
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Notifications at the foot of the rail shows the empty state and closes', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('notifications-open').click();
+  await expect(page.getByTestId('notifications-sheet')).toBeVisible();
+  await expect(page.getByTestId('notifications-empty')).toContainText('No notifications');
+  await expect(page.getByTestId('notifications-empty')).toContainText('Plugin updates and notices about VendurePOS arrive here.');
+  await page.getByTestId('notifications-close').click();
+  await expect(page.getByTestId('notifications-sheet')).toHaveCount(0);
+});
+
 test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
