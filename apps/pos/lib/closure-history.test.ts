@@ -1,6 +1,6 @@
 import type { Closure } from '@tallyui/pos';
 import { expect, it } from 'vitest';
-import { closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
+import { closureCsvFileName, closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
 import { zReportLines } from './z-report';
 
 // A closure as writeClosure freezes it: a float of 100.00, a cash and a card sale of 9.52 at 19 %, a paid out of 5.00,
@@ -70,6 +70,26 @@ it("exports v2's closures CSV of this till's closures", () => {
     + '"Variance (cash)","Expected (external)","Counted (external)","Variance (external)","Status"');
   expect(lines[1].startsWith('"2026-09-30","3","drawer-1","Demo store",')).toBe(true);
   expect(lines[1]).toContain('"104.52","104.52","0.00 Exact"');
+});
+
+it("names the closures CSV by the listed closures' dates", () => {
+  expect(closureCsvFileName([], options)).toBe('closures-2026-09-30.csv');
+  expect(closureCsvFileName([closure], options)).toBe('closures-2026-09-30-to-2026-09-30.csv');
+  const older = {
+    ...closure, id: 'session-1b', number: 1, business_day: '2026-09-01',
+    opened_at: '2026-09-01T07:00:00.000Z', closed_at: '2026-09-01T17:00:00.000Z',
+  };
+  const middle = {
+    ...closure, id: 'session-2', number: 2, business_day: '2026-09-29',
+    opened_at: '2026-09-29T07:00:00.000Z', closed_at: '2026-09-29T17:00:00.000Z',
+  };
+  expect(closureCsvFileName([
+    middle, closure, older, { ...older, id: 'other-register', register_id: 'drawer-2', business_day: '2026-08-15',
+      opened_at: '2026-08-15T07:00:00.000Z', closed_at: '2026-08-15T17:00:00.000Z' },
+  ], options)).toBe('closures-2026-09-01-to-2026-09-30.csv');
+  expect(closureCsvFileName([{ ...closure, closed_at: '2026-09-30T23:30:00.000Z' }], {
+    ...options, timezone: 'Europe/Berlin', today: '2026-10-01',
+  })).toBe('closures-2026-10-01-to-2026-10-01.csv');
 });
 
 it('marks a reprinted Z as a copy', () => {
