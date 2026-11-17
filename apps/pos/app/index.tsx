@@ -61,6 +61,7 @@ import { storeLabel } from '../lib/store-label';
 import { StoreHealthPanel } from '../lib/store-health-panel';
 import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health';
 import { SyncNowControl } from '../lib/sync-now-control';
+import { TenderSplit } from '../lib/tender-split';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { NotificationsSheet } from '../lib/notifications-sheet';
@@ -514,7 +515,13 @@ function Sale({
     highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
   const highlightSku = typeof highlight === 'object' ? highlight?.sku : undefined;
-  const tenderPane = <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>;
+  // v2's Split chip (CHECKLIST 3.1): TenderPane has no slot for it, so it sits above the pane.
+  const tenderPane = (
+    <ScrollView>
+      <TenderSplit sale={sale} state={tender.state} dispatch={tender.dispatch} />
+      <TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} />
+    </ScrollView>
+  );
   // v2 cart/tabs.tsx: every open sale is a tab at the foot (or, by Settings, the top) of the cart; switching parks the current one (CHECKLIST 2.1, 9.10).
   const openSaleTabs = drafts ? (
     <>
