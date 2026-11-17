@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { initTenderState, tenderReducer } from '@tallyui/pos';
-import { evenSplitPlan, fixedSplitPlan, SPLIT_WAYS } from './tender-split';
+import { evenSplitPlan, fixedSplitPlan, itemsSplitPlan, lineGrossMinor, SPLIT_WAYS } from './tender-split';
 
 vi.mock('@tallyui/components', () => ({}));
 
@@ -69,4 +69,46 @@ it('lets the reducer pre-type the fixed amount, then the rest', () => {
     type: 'tender-recorded', rowsSinceFrom: [{ title: 'cash', amountMinor: 500 }], balanceMinor: 452,
   });
   expect(next.entryMinor).toBe(452);
+});
+
+it("totals a line's gross the way TallyUI does, in the line's own tax mode", () => {
+  expect(lineGrossMinor({ netMinor: 800, taxMicros: '152000000', taxInclusive: false })).toBe(952);
+  expect(lineGrossMinor({ netMinor: 3499, taxMicros: '664810000', taxInclusive: false })).toBe(4164);
+  expect(lineGrossMinor({ netMinor: 952, taxMicros: '152000000', taxInclusive: true })).toBe(952);
+});
+
+const mug = { id: 'a', netMinor: 800, taxMicros: '152000000', taxInclusive: false };
+const apron = { id: 'b', netMinor: 3499, taxMicros: '664810000', taxInclusive: false };
+
+it('builds an items plan from the picked lines', () => {
+  expect(itemsSplitPlan([], [mug, apron], ['a'], 5116)).toEqual({ kind: 'items', lineIds: ['a'], firstMinor: 952, ways: 1, from: 0 });
+});
+
+it("keeps the cart's line order, not the pick order", () => {
+  expect(itemsSplitPlan([], [mug, apron], ['b', 'a'], 6000)).toMatchObject({ lineIds: ['a', 'b'], firstMinor: 5116 });
+});
+
+it('starts an items plan after the captured legs only', () => {
+  expect(itemsSplitPlan([{ status: 'captured' }, { status: 'voided' }, {}], [mug, apron], ['a'], 5116)?.from).toBe(2);
+});
+
+it('has no items plan without a pick, for an unknown line, or when the pick is the whole balance', () => {
+  expect(itemsSplitPlan([], [mug, apron], [], 5116)).toBeNull();
+  expect(itemsSplitPlan([], [mug, apron], ['z'], 5116)).toBeNull();
+  expect(itemsSplitPlan([], [mug, apron], ['a', 'b'], 5116)).toBeNull();
+  expect(itemsSplitPlan([], [mug, apron], ['a'], 952)).toBeNull();
+});
+
+it('lets the reducer pre-type the picked items, then the rest', () => {
+  const state = tenderReducer(initTenderState({ methodId: 'cash', balanceMinor: 5116 }), { type: 'toggle-split-line', lineId: 'a' });
+  expect(state.pickedLineIds).toEqual(['a']);
+  const split = tenderReducer(state, { type: 'set-plan', plan: itemsSplitPlan([], [mug, apron], ['a'], 5116)!, balanceMinor: 5116 });
+  expect(split.entryMinor).toBe(952);
+  expect(split.splitView).toBe(false);
+  expect(split.pickedLineIds).toEqual([]);
+  const next = tenderReducer(split, {
+    type: 'tender-recorded', rowsSinceFrom: [{ title: 'cash', amountMinor: 952 }], balanceMinor: 4164,
+  });
+  expect(next.entryMinor).toBe(4164);
+  expect(next.linesPaidBy).toEqual({ a: ['cash'] });
 });
