@@ -41,6 +41,7 @@ import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
+import { ReportsDrawerCard } from '../lib/reports-drawer-card';
 import { ReportsPanel } from '../lib/reports-panel';
 import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
@@ -306,7 +307,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </VStack>
       ) : null}
       {reportsOpen ? <ReportsPanel orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}
-        timezone={TIMEZONE} /> : null}
+        timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
+          onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
+          onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
       {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen ? { display: 'none' } : undefined}>

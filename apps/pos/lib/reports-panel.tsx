@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
 import { SalesCards, SalesFiltersBar, VStack } from '@tallyui/components';
 import { watchFresh, type PosOrder, type PosRefund, type PosRefundCollection } from '@tallyui/pos';
@@ -6,8 +6,8 @@ import type { RxCollection } from 'rxdb';
 import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, tillSalesFigures } from './till-reports';
 import { TillSalesHero } from './till-sales-hero';
 
-export function ReportsPanel({ orders, refunds, currency, timezone }: {
-  orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string;
+export function ReportsPanel({ orders, refunds, currency, timezone, drawer }: {
+  orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode;
 }) {
   const [orderList, setOrderList] = useState<PosOrder[]>([]);
   const [refundList, setRefundList] = useState<PosRefund[]>([]);
@@ -30,6 +30,7 @@ export function ReportsPanel({ orders, refunds, currency, timezone }: {
     <VStack testID="reports-panel" className="flex-1">
       <ScrollView contentContainerClassName="p-4">
         <View testID="sales-room" className="gap-4">
+          {drawer}
           <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone={timezone}
             statusOptions={REPORT_STATUS_OPTIONS} {...reportOptions(orderList)} />
           <TillSalesHero figures={figures} filters={filters} onFiltersChange={setFilters} currency={currency} hourly={hourly} />

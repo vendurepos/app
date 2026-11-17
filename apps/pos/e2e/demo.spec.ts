@@ -478,6 +478,36 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Reports opens on the drawer card: since, float + cash sales = expected, Print X-report and the register panel', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  await page.getByTestId('reports-open').click();
+  const drawer = page.getByTestId('reports-drawer');
+  await expect(drawer.getByTestId('reports-drawer-status')).toHaveText(/^Register · Open since \d{2}:\d{2} · .+$/);
+  await expect(drawer.getByTestId('reports-drawer-float')).toHaveText('Opening float €100.00');
+  await expect(drawer.getByTestId('reports-drawer-cash-sales')).toHaveText('Cash sales · 1 €9.52');
+  await expect(drawer.getByTestId('reports-drawer-expected')).toHaveText('Expected in drawer €109.52');
+
+  await drawer.getByTestId('reports-drawer-print-x').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed).toEqual(expect.arrayContaining(['X report · Register open', 'Opening float €100.00']));
+  await expect(drawer.getByTestId('reports-drawer-print-error')).toHaveCount(0);
+
+  await drawer.getByTestId('reports-drawer-open-register').click();
+  await expect(page.getByTestId('register-panel')).toBeVisible();
+});
+
 test('a demo cashier refunds a mug from the order sheet; stock comes back and expected cash drops', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
