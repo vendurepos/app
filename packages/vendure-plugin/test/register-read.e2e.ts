@@ -157,4 +157,31 @@ describe('GET /tally/v1/registers/:id', () => {
     expect((await get(r, {})).status).toBe(403);
     expect((await get(r, await tokenWith(['TallyPosSell']))).status).toBe(200);
   });
+
+  describe('GET /tally/v1/registers', () => {
+    const list = async (headers: Record<string, string> = admin()) => {
+      const response = await fetch(`${base}/tally/v1/registers`, { headers });
+      return { status: response.status, body: await response.json() };
+    };
+
+    it('lists the channel\'s registers, newest session first, with their device names', async () => {
+      const [r1, r2, foreign] = [uuid(), uuid(), uuid()];
+      const first = open(uuid(), r1, { deviceName: '  Till one  ' }, 2);
+      await applied(first);
+      const second = open(uuid(), r2, { deviceName: 'Till two' }, 2);
+      await applied(second);
+      await server.app.get(TransactionalConnection).rawConnection.getRepository(TallyRegister).insert({ channelId: 'not-this-channel', id: foreign });
+      const { status, body } = await list();
+      expect(status).toBe(200);
+      const item = (id: string, name: string, opening: ReturnType<typeof open>) => ({
+        id, receivedAt: expect.any(String), lastDeviceName: name,
+        session: { status: 'open', openedAt: opening.payload.openedAt, openedBy: null, deviceName: name },
+      });
+      expect(body.items.slice(0, 2)).toEqual([item(r2, 'Till two', second), item(r1, 'Till one', first)]);
+      expect(body.items.map((entry: { id: string }) => entry.id)).not.toContain(foreign);
+      expect(body.items.length).toBeLessThanOrEqual(100);
+      expect((await list({})).status).toBe(403);
+      expect((await list(await tokenWith(['TallyPosSell']))).status).toBe(200);
+    });
+  });
 });
