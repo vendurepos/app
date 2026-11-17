@@ -8,7 +8,7 @@ import {
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  catalogueEntries, CurrencyProvider, findEntryByCode, openSales, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
+  capturedMinor, catalogueEntries, CurrencyProvider, findEntryByCode, openSales, parkedOrderSummaries$, registerCommandsLogger, summarizeOutboxHealth, TaxProvider, taxProviderProps, useCurrencyFormatter,
   useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type PosOrder, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
@@ -24,6 +24,7 @@ import { useDefaultCustomer } from '../lib/default-customer';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
+import { HandOverConfirm } from '../lib/hand-over';
 import { logout } from '../lib/logout';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
@@ -170,6 +171,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [registerOpen, setRegisterOpen] = useState(false);
   const [closuresOpen, setClosuresOpen] = useState(false);
   const [cashierOpen, setCashierOpen] = useState(false);
+  const [handOverOpen, setHandOverOpen] = useState(false);
+  // What the sale leaves behind on a hand-over (switchWarnings): parked sales and the paid part of the sale in progress.
+  const [saleHolds, setSaleHolds] = useState({ parkedSales: 0, paidMinor: 0 });
   const [supportOpen, setSupportOpen] = useState(false);
   // The session being counted or closed: once its closure (whose id is the session's) is written, it shows as the Z.
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
@@ -202,7 +206,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setHandOverOpen(false); setSupportOpen(false); };
   // A scan (onClosePanels) and the rail's Sale tap close what covers the sale and drop the open order (Front desk, 2026-11-15).
   const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
@@ -261,11 +265,17 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
+        onHandOver={sessionStatus === 'open' ? () => { setCashierOpen(false); setHandOverOpen(true); } : undefined}
         pending={pending} onSignOut={handleSignOut}>
         <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)} />
         <ClosureHistory closures={registerStore?.closures ?? null} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>
+      {handOverOpen && sessionStatus === 'open' ? (
+        <HandOverConfirm register={register} outbox={summarizeOutboxHealth(outbox.state, registerOutbox.state)} {...saleHolds}
+          store={store} currency={currency} timezone={TIMEZONE} cashier={identity} disabled={pending || !!signOutLocked}
+          onCancel={() => setHandOverOpen(false)} onSignOut={handleSignOut} />
+      ) : null}
       <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
@@ -322,8 +332,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
+                  onHolds={setSaleHolds}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen}
                   onClosePanels={closePanels}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
@@ -390,7 +401,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing, overSheet, drafts, taxClasses, onRebindRegister,
+  registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -398,6 +409,7 @@ function Sale({
   taxClasses: { id: string; label: string }[];
   boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
   onRebindRegister(): void;
+  onHolds(holds: { parkedSales: number; paidMinor: number }): void;
   /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
   panelOpen: boolean; onClosePanels(): void;
   /** The register is counting, closing or showing its Z. */
@@ -424,6 +436,8 @@ function Sale({
     const subscription = parkedOrderSummaries$(drafts).subscribe(setParked);
     return () => subscription.unsubscribe();
   }, [drafts]);
+  const paidMinor = capturedMinor(sale.order.payments);
+  useEffect(() => onHolds({ parkedSales: parked.length, paidMinor }), [parked.length, paidMinor, onHolds]);
   // A refused switch (partly paid, payment in motion, tender) says why under the strip, like ParkedSales' resume.
   const [switchError, setSwitchError] = useState('');
   async function switchTo(id: string | null) {

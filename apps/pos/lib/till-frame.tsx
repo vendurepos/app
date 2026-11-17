@@ -29,11 +29,11 @@ export function tillNavItems(entries: TillNavEntry[]): ShellNavItem[] {
 
 /**
  * The cashier's menu, opened from the bar's avatar: a side sheet as Tally Woo's `cashier-sheet.tsx` (v2's user sheet),
- * holding the shift's actions and Sign out with its lock message.
+ * holding the shift's actions, Hand over and Sign out with its lock message.
  */
-export function CashierSheet({ open, onOpenChange, name, store, children, locked, pending, onSignOut }: {
+export function CashierSheet({ open, onOpenChange, name, store, children, locked, pending, onHandOver, onSignOut }: {
   open: boolean; onOpenChange(open: boolean): void; name: string; store: string; children: ReactNode;
-  locked: string | null | undefined; pending: boolean; onSignOut(): void;
+  locked: string | null | undefined; pending: boolean; onHandOver?(): void; onSignOut(): void;
 }): JSX.Element {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,9 +46,12 @@ export function CashierSheet({ open, onOpenChange, name, store, children, locked
         <VStack className="items-start" space="sm">{children}</VStack>
         {/* A record() not yet settled would be lost with the sale, and a close with its Z; the outbox closes its store at unmount. */}
         {locked && !pending ? <Text testID="sign-out-locked" className="text-sm text-muted-foreground">{locked}</Text> : null}
-        <Button testID="sign-out" variant="destructive" className="self-end" disabled={pending || !!locked} onPress={onSignOut}>
-          <Text>Sign out</Text>
-        </Button>
+        <HStack className="self-end" space="sm">
+          {onHandOver ? <Button testID="hand-over" variant="outline" disabled={pending || !!locked} onPress={onHandOver}><Text>Hand over</Text></Button> : null}
+          <Button testID="sign-out" variant="destructive" disabled={pending || !!locked} onPress={onSignOut}>
+            <Text>Sign out</Text>
+          </Button>
+        </HStack>
       </DialogContent>
     </Dialog>
   );
