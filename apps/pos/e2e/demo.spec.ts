@@ -1133,6 +1133,29 @@ test('the cashier sheet shows the register and since in its header, your sales t
   await expect(page.getByTestId('register-count')).toBeVisible();
 });
 
+test('Hand over in the cashier sheet signs this account out and leaves the register open for the next', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('register-bar-cashier').click();
+  const sheet = page.getByTestId('cashier-sheet');
+  await sheet.getByTestId('hand-over').click();
+  const confirm = page.getByTestId('switch-confirm');
+  await expect(confirm.getByTestId('switch-confirm-title')).toHaveText('Hand the till to another account?');
+  await expect(confirm.getByTestId('switch-confirm-description')).toHaveText('The drawer stays open on Register.');
+  await expect(confirm.getByTestId('switch-confirm-warnings')).toHaveCount(0);
+  await expect(confirm.getByTestId('switch-confirm-handover')).toBeVisible();
+
+  await confirm.getByTestId('switch-confirm-confirm').click();
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  await expect(page.getByTestId('register-open-panel')).toBeVisible();
+});
+
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -1656,6 +1679,32 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€5.00');
   await expect(receipt.getByTestId('receipt-payment-external')).toBeVisible();
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.00');
+});
+
+test('a demo cashier splits a sale evenly two ways and pays one part in cash', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const cart = page.getByTestId('cart');
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.52');
+  await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
+  await page.getByTestId('tender-split-open').click();
+  await expect(page.getByTestId('tender-split-ways')).toBeVisible();
+  await page.getByTestId('tender-split-ways-2').click();
+  await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
+  await expect(tender.getByTestId('tender-plan')).toHaveText('1 of 2');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€4.76');
+  await takePayment(page);
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€4.76');
+  await expect(cart.getByTestId('cart-remaining')).toHaveText('€4.76');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€4.76');
+  await expect(tender.getByTestId('tender-plan')).toHaveText('2 of 2');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€4.76');
+  await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
 
 test('a demo cashier pays cash with a quick amount: the cart is locked beside the checkout', async ({ page }) => {
