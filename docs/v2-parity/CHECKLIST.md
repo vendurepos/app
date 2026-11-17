@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **24 / 56** rows at parity (round 14, 2026-11-17). The two rows marked N/A are not counted.
+**Score:** **27 / 56** rows at parity (round 15, 2026-11-17). The two rows marked N/A are not counted.
 
 ---
 
@@ -38,7 +38,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [x] **1.3 Product images on tiles.** *App/shared:* the Vendure connector needs `featuredAsset`, and the tile needs an image slot. Done (checked in round 7, no code change): TallyUI's `Catalogue` grid tile renders the product image, the Vendure connector reads `featuredAsset` and then `assets[0]`, and the till's CSP allows `https:` images. On demo.vendurepos.com on 2026-11-12, 30 of 30 tiles showed a loaded picture, at both wide and phone width.
 - [x] **1.4 In-cart quantity badge on a tile.** *Shared:* the tile. Done (spec B2): the till passes its cart lines to TallyUI 3.18.0's `Catalogue`, whose grid tiles show the count.
 - [ ] **1.5 Browse by category.** Coloured category poster tiles with counts, a breadcrumb ("Categories › All products"), then the products. VendurePOS shows every product, with category chips. *Left:* all of it. TallyUI 3.20.0's `Catalogue` has no browse-by-category mode: its `CategoryTile` is unused, and `categories` takes only an id and a name. *Shared* first, then *app;* Vendure way: collections. TallyUI merged the browse mode (`categoryBrowse="tiles"`, tallyui#823, 16 Nov); it waits on the next `@tallyui` release.
-- [ ] **1.6 Filter pills.** In stock, On sale, Featured, Tag and Brand, with a searchable picker per pill. *Vendure way:* in stock, on sale, plus one pill per facet. *Shared:* `FilterChipGroup` exists in 3.12.0, so the work is the *app* wiring and the facet reads. *Round 7 finding:* TallyUI 3.20.0's `Catalogue` takes `showFilterBar` and `filterChips`, but it applies only the In stock chip itself. It never passes `ProductFilterBar` an `onTermPress`, so the term pills cannot open a picker. Facet pills therefore need a TallyUI change first (shared), and On sale needs a ruling on what "on sale" means for Vendure, which has no compare-at price. *Left:* the till shows no filter bar yet. The In stock pill alone is *app* wiring (`showFilterBar`, `filterChips: ['inStock']`); facet pills are *shared;* On sale and Featured wait on a ruling.
+- [ ] **1.6 Filter pills.** In stock, On sale, Featured, Tag and Brand, with a searchable picker per pill. *Vendure way:* in stock, on sale, plus one pill per facet. *Shared:* `FilterChipGroup` exists in 3.12.0, so the work is the *app* wiring and the facet reads. *Round 7 finding:* TallyUI 3.20.0's `Catalogue` takes `showFilterBar` and `filterChips`, but it applies only the In stock chip itself. It never passes `ProductFilterBar` an `onTermPress`, so the term pills cannot open a picker. Facet pills therefore need a TallyUI change first (shared), and On sale needs a ruling on what "on sale" means for Vendure, which has no compare-at price. *Left:* the till shows no filter bar yet. The In stock pill alone is *app* wiring (`showFilterBar`, `filterChips: ['inStock']`); facet pills are *shared;* On sale and Featured wait on a ruling. *Round 15:* the till shows the In stock pill, on by default (#258), and Settings › General can show or hide out-of-stock products (#268, 9.9). *Left:* facet pills (*shared*), On sale and Featured (a ruling).
 - [x] **1.7 Camera scan button next to search.** Search itself is at parity. *App.* Done (spec B6): on web the Products search has TallyUI 3.20.0's camera button and inline `CameraScannerPanel`, with a resizable height that is remembered. Every accepted read goes through the same scan handler as a wedge scan (`docs/scan-policy.md`). An item resting in view is added once. The camera is let go while the catalogue is hidden. *Left:* native (iOS/Android) has no camera viewfinder yet, so the button shows on web only.
 - [ ] **1.8 "Showing n of N" and infinite load at the foot of the grid.** VendurePOS's grid holds the whole local catalogue, virtualised, so infinite load has nothing to do. *Left:* the "Showing n of N" line. TallyUI 3.20.0's `Catalogue` and `ProductGrid` have no foot slot for it. *Shared.*
 - [ ] **1.9 Grid and table toggle.** Both demos have one. *Left:* comparing the columns. WCPOS's table capture (02e) shows category rows, so its product columns are not captured yet. VendurePOS's are TallyUI's fixed Name, SKU, Barcode, Price, Stock and Category, and `Catalogue` takes no columns prop, so a column change is *shared*.
@@ -53,7 +53,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 |---|---|
 | ![](demo-pairs/04-cart-3-items-wcpos.webp) | ![](demo-pairs/04-cart-3-items-vendurepos.webp) |
 
-- [ ] **2.1 Open carts as tabs.** Every cart stays open by itself, and a strip under the cart shows "Guest $83.03 …", a count and "+ New"; one tap switches. VendurePOS has one sale and an explicit Park dialog. *Left:* the strip and the live carts. TallyUI 3.20.0 has the pieces (`OpenSaleTabs`, `openSales()`, `useSale().switchSale()`), so this is *app* work.
+- [x] **2.1 Open carts as tabs.** Every cart stays open by itself, and a strip under the cart shows "Guest $83.03 …", a count and "+ New"; one tap switches. Done (#259): every open sale is a tab at the foot of the cart (TallyUI 3.20.0's `OpenSaleTabs`), with a New cell; a tap parks the current sale and opens the chosen one, and a refused switch (partly paid, payment in motion) says why. The Park dialog stays, as the place a parked sale is discarded. Demo e2e "opens two sales as tabs". *App.*
 - [x] **2.2 One "Checkout €total" button** opening the checkout screen (section 3). Done (spec B3): the cart foot has one "Checkout €total" button in place of Pay cash, Pay by card and Split.
 - [x] **2.3 Customer chip in the cart header** ("GU Guest", with an address pin). Done (spec B9): the cart header reads "Customer" and a chip with an initials avatar and the customer's name, or Guest; the chip opens the customer picker and a small × removes the customer (demo e2e "sees Guest in the cart's customer chip"). The address pin opens v2's per-order address editor, so it moves to 5.2. *App.*
 - [x] **2.4 Line table with column heads** QTY / ITEM / PRICE / TOTAL. *Shared:* `CartPanel`. Done (spec B2): TallyUI 3.18.0's `CartColumnHeads` and `CartLine` in the till's own cart; the Price column folds on a narrow cart or a phone, as in v2. The price popover followed in spec B4 (2.7).
@@ -63,8 +63,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [x] **2.8 Quiet lines.** WCPOS shows Edit / Remove on hover. Done (spec B4): the line shows only quantity, name, price and total. Discount and Remove are actions in the line's quantity keypad, one tap away, the touch-first equivalent of v2's hover (a till tablet has no hover).
 - [x] **2.9 Itemised tax lines in the totals.** VendurePOS shows "incl. Reduced DE 7 %" and "incl. Standard DE 19 %", Vendure's way.
 - [ ] **2.10 "+" menu:** misc product, fee, shipping, discount, new customer. VendurePOS's "Add charge" covers fee, shipping and custom item. *Left:* a percentage fee and an "amount includes tax" switch. TallyUI 3.20.0's `ChargeForm` and `ChargeInput` take a fixed amount only. *Shared* first, then *app.*
-- [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. *Left:*
-  - the dialog and Void (*app:* the sale can already be dropped);
+- [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. Partly done (#265): a ⋮ beside Checkout opens Order details with Void. *Left:*
   - the customer note: `useSale().setNote` sends it in order.create v7, and the plugin takes up to v5 (*plugin*);
   - tax exempt: TallyUI has no support for it (*shared + plugin*).
 - [x] **2.12 Toast when an item is added.** Done (spec B9): every add the sale takes, by tap or scan, shows "<item> added to cart" at the top of the till for 2.5 s; a refused add shows none, and the toast never takes a tap (demo e2e "a toast when an item is added"). *App.*
@@ -89,7 +88,8 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
   Mostly done (spec B3): Checkout opens TallyUI 3.19.0's `TenderPane` in the catalogue's place, with "Remaining €x", method tiles, quick amounts, a keypad and the Payments list; the cart stays on the right, locked, with its totals. On a phone the pane fills the Cart tab. *Left:*
   - the Split chip. TallyUI 3.20.0's tender state takes a split plan (even, fixed amounts, items), but `TenderPane` draws no chip or sheet for it. The app can draw them beside the pane and dispatch the plan (*app*); a chip inside the "TO PAY" headline needs a slot (*shared*).
-  - Paid / Remaining sit in the pane rather than in the locked cart's totals on the right (*app*).
+
+  Paid and Remaining now sit under Total in the locked cart, as v2 (#266). An even Split chip beside the pane is in progress (3.1c).
 - [ ] **3.2 Payment-method list on one screen:** Cash, Card, and the store's other methods. Mostly done (spec B3): Cash and Card terminal are tiles on the one checkout screen. *Left, Vendure way:* the tiles are the till's fixed pair, not the channel's own payment methods. TallyUI 3.20.0's `TenderPane` offers only the `cash` and `external` methods, and the plugin stores every tender as `tally-pos`. *Shared + plugin.*
 - [x] **3.3 Split payments shown as a Payments list** with Paid and Remaining. Done (spec B3): each leg is a ledger row (method, amount, Captured, Cancel payment) under "Remaining €x" and "€x of €y paid"; the next leg pre-fills the remaining balance.
 - [x] **3.4 Quick cash amounts complete the sale.** Done (spec B3): tapping €50.00 and Take enables Complete sale and shows the change; e2e "a demo cashier pays cash with a quick amount" proves it.
@@ -131,10 +131,8 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
   - hand the till to another account;
   - Sign out.
 
-  VendurePOS's avatar opens a cashier sheet with the name, the store, Closures and Sign out (1.2). *Left* (*app*):
-  - the register and "since" in its header;
-  - "Your sales today" and "In the drawer";
-  - Pay in, Pay out and Close register (the register panel has them, 6.2);
+  VendurePOS's avatar opens a cashier sheet with the name, the store, Closures and Sign out (1.2). Since #262 it also shows the shift while the register is open: the register and since when, session sales and the drawer (hidden during a blind count), and Pay in, Pay out and Close register. *Left* (*app*):
+  - "Your sales today" for the signed-in cashier, and the day on "since" for a register left open overnight (in progress, 6.1b);
   - handing the till to another account (TallyUI 3.20.0 has `switchWarnings` and `handoverSlip`).
 
   Store and register switching need *plugin* support (6.6).
@@ -185,13 +183,12 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
   A scan closes the panel and adds (demo e2e "Reports shows the till's sale for today").
 
-  *Left* (all *app:* the hero is the app's own, `SalesCards` takes `onOpenCard`, and the app does not read #213's endpoint yet):
-  - the drawer card;
-  - the median and largest order;
-  - Print summary;
-  - store-wide figures from #213's endpoint;
-  - the card panels.
-- [ ] **8.2 Closures history** with cash at open and close, the discrepancy, and a CSV export. VendurePOS's cashier sheet has Closures: this till's closures from the last 92 days, each with its sales and variance, and Print again. *Left:* cash at open and close on each row (the stored closure has both), and a CSV export (TallyUI 3.20.0 has `exportCsv`). *App.* Other registers' closures wait on 6.6.
+  Round 15: the panel opens on v2's drawer card (float + cash sales = expected, Print X-report; #264), the hero shows the median and largest order (#261), and Print summary prints the period's figures (#269).
+
+  *Left:*
+  - store-wide figures. #213's `GET /tally/v1/reports/sales` returns totals, refunds, per-method amounts and day bars only, with no items, by-hour figures, median or largest order, products, categories or taxes, and no cashier filter. The hero and cards cannot switch to it without a report v2 (*plugin*).
+  - the card panels. `SalesCards` takes `onOpenCard`, but TallyUI 3.20.0 ships no card detail panel (*shared*).
+- [x] **8.2 Closures history** with cash at open and close, the discrepancy, and a CSV export. VendurePOS's cashier sheet has Closures: this till's closures from the last 92 days, each with its sales and variance, and Print again. Done (#260): each row shows cash at open and cash at close (blank during a blind count), and Export CSV (web) downloads the listed closures through TallyUI 3.20.0's `exportCsv` as `closures-<today>.csv`. *App.* Other registers' closures wait on 6.6.
 
 ## 9. Settings and look
 
@@ -206,11 +203,11 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [ ] **9.3 Language.** *Left:* all of it. TallyUI 3.20.0 has an `I18nProvider` with English only; other languages, the app's own strings and a Language setting are missing. *Shared + app.*
 - [x] **9.4 Barcode settings with a test area.** Done (spec B10): Settings › Scanner ends with v2's "Barcode scanning test": the last key the scanner sent with its gap in ms, and the code detected after the prefix, suffix and shortest length, with the scan sound as set (web). A scan on Settings no longer adds to the sale hidden under it (demo e2e "Settings' barcode test"). v2's average-time threshold is not a setting: the 24 ms key gap is fixed in code (`WEDGE_KEY_GAP_MS`), and the test area shows each key's gap against it. *App.*
 - [ ] **9.5 Printing: printers and receipt templates.** VendurePOS has "Print after each sale". *Left:* printers and receipt templates. TallyUI 3.20.0's `@tallyui/pos` has printer profiles, ESC/POS and receipt templates, but no settings screen for them. *Shared + app.*
-- [ ] **9.6 Tax display options and "Tax based on: shop base / customer".** *Left:* all of it. TallyUI 3.20.0's `TaxCalculationSettings` offers WooCommerce's choices; Vendure picks the zone on the server, so a read-only Tax section is *app* work. Vendure way: the zone.
+- [x] **9.6 Tax display options and "Tax based on: shop base / customer".** Done Vendure's way (#263): Settings › Tax, after General, is read-only, because in Vendure tax is not a till setting. It shows whether the channel's prices include tax, "Tax based on: the channel's default tax zone", one row per tax category with its rate, and where to change them in the Vendure admin. TallyUI 3.20.0's `TaxCalculationSettings` is not used: it holds WooCommerce's choices. *App.*
 - [ ] **9.7 Card readers.** *Shared + plugin,* Vendure way.
 - [ ] **9.8 Customer display pairing.** *Left:* TallyUI 3.20.0 has `CustomerDisplaySettings`, `CustomerDisplayPairing` and `CustomerDisplayScreen`, but their pairing calls a service the plugin does not have. *Plugin + app.*
-- [ ] **9.9 Product-grid settings sheet:** tile fields, browse by, sort, show out-of-stock. VendurePOS has Grid / Table and products per row. *Left:* show out-of-stock and sort as settings (*app:* `Catalogue`'s filters and view state); tile fields (*shared:* no prop); browse by and Variations follow 1.5 and 4.1.
-- [ ] **9.10 Cart settings:** panel side, open-orders position, columns, quick-discount presets, auto-show and auto-print receipt. VendurePOS has "Print after each sale". *Left:* panel side, quick-discount presets and auto-show receipt (*app*); cart columns (*shared:* `CartLine` folds only Price); open-orders position follows 2.1.
+- [ ] **9.9 Product-grid settings sheet:** tile fields, browse by, sort, show out-of-stock. VendurePOS has Grid / Table and products per row, and Settings › General › "Show out-of-stock products" (#268). *Left:* sort as a setting (*app:* `Catalogue`'s view state); tile fields (*shared:* no prop); browse by and Variations follow 1.5 and 4.1.
+- [ ] **9.10 Cart settings:** panel side, open-orders position, columns, quick-discount presets, auto-show and auto-print receipt. VendurePOS has "Print after each sale", and Settings › General sets the price keypad's quick-discount presets (#267). *Left:* panel side and auto-show receipt (*app*, both in progress as 9.10c and 9.10b); cart columns (*shared:* `CartLine` folds only Price); open-orders position follows 2.1.
 
 ## 10. Back office
 
@@ -255,3 +252,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 12 | 2026-11-12 | 20 / 56 | B11 rail: 11.2 Support with the quick start, GitHub issues and the version. |
 | 13 | 2026-11-12 | 21 / 56 | B12 register: 6.2 the panel is v2's side sheet with the session header and Print X-report. |
 | 14 | 2026-11-17 | 24 / 56 | refresh: no new ticks; the score recounted (7.1, 7.2 and 9.2 were ticked after round 13); 1.2's banner line fixed (#256); retagged 1.5, 1.8, 1.9, 2.5, 2.10, 4.1, 5.1, 6.3 to shared, 2.1 and 8.2 to app, 3.2 and 5.2 to shared + plugin, 9.8 to plugin + app. |
+| 15 | 2026-11-17 | 27 / 56 | 2.1 open sales as tabs (#259), 8.2 closures cash and CSV (#260), 9.6 read-only Tax (#263). Parts done in 1.6 (#258), 2.11 (#265), 3.1 (#266), 6.1 (#262), 8.1 (#261, #264, #269), 9.9 (#268), 9.10 (#267); 8.1's store-wide figures retagged to plugin, its card panels to shared. |
