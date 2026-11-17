@@ -77,6 +77,8 @@ const FRAME_WIDE_MIN_HEIGHT = 480;
 // How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70), and a cart line
 // when an add lands where the cart shows.
 const CART_HIGHLIGHT_MS = 600;
+/** The one filter pill the till shows (CHECKLIST 1.6). */
+const IN_STOCK_PILL = ['inStock'] as const;
 
 export default function HomeScreen() {
   const { session, signOut } = useSession();
@@ -546,6 +548,9 @@ function Sale({
           cameraScanner={catalogueHidden ? undefined : { ...camera, height: cameraHeight, onHeightChange: (height) => saveCameraPanelHeight(height) }}
           showCategoryNav
           showViewToggle
+          // v2's filter row with its In Stock pill alone, on by default (TallyUI's default filters); the other pills need TallyUI or a ruling (CHECKLIST 1.6).
+          showFilterBar
+          filterChips={IN_STOCK_PILL}
           loading={!lastSyncedAt && !error}
           products={products}
           traits={connector.traits.product}

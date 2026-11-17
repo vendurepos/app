@@ -1412,6 +1412,8 @@ test('a stock change made in Vendure shows on the open till when it comes back t
     && response.url().endsWith('/admin-api') && (response.request().postData() ?? '').includes('VariantStock'));
   await page.getByTestId('sign-in-submit').click();
   const tile = page.getByTestId('product-tile-Travel Tumbler');
+  // The In Stock pill is on by default and would hide the tile once it sells out; this test watches the tile itself.
+  await page.getByTestId('filter-chip-inStock').click();
   await expect(tile).toContainText('In Stock');
   const initialStock = await stockResponse;
   expect(initialStock.ok()).toBe(true);
