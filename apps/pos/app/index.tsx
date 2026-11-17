@@ -3,12 +3,12 @@ import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import {
-  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
+  AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OpenSaleTabs, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   SyncStatus, TabsTrigger, TenderPane, Text, VStack, type OrderHistoryRow,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
-  catalogueEntries, CurrencyProvider, findEntryByCode, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
+  catalogueEntries, CurrencyProvider, findEntryByCode, openSales, parkedOrderSummaries$, registerCommandsLogger, TaxProvider, taxProviderProps, useCurrencyFormatter,
   useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type PosOrder, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
@@ -416,6 +416,11 @@ function Sale({
     const subscription = parkedOrderSummaries$(drafts).subscribe(setParked);
     return () => subscription.unsubscribe();
   }, [drafts]);
+  // A refused switch (partly paid, payment in motion, tender) says why under the strip, like ParkedSales' resume.
+  const [switchError, setSwitchError] = useState('');
+  async function switchTo(id: string | null) {
+    setSwitchError((await sale.switchSale(id)) ?? '');
+  }
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
@@ -471,6 +476,14 @@ function Sale({
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={highlightSku} />
+      {drafts ? (
+        // v2 cart/tabs.tsx: every open sale is a tab at the foot of the cart; switching parks the current one (CHECKLIST 2.1).
+        <>
+          {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
+          <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
+            onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
+        </>
+      ) : null}
     </>
   );
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same

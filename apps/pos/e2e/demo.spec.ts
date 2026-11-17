@@ -1454,3 +1454,32 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
+
+test('a demo cashier keeps two sales open as tabs under the cart and switches between them', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await expect(page.getByTestId('open-sale-tabs')).toBeVisible();
+  await expect(page.getByTestId('new-sale-tab-label')).toHaveText('New');
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const mugTab = page.getByRole('tab', { name: /Tally Fixture Mug/ });
+  await expect(mugTab).toBeVisible();
+  await expect(mugTab).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByTestId('new-sale-tab').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await expect(mugTab).toHaveAttribute('aria-selected', 'false');
+
+  await page.getByTestId('product-tile-Filter Coffee').click();
+  await expect(page.getByTestId('cart-line-FIL-500')).toBeVisible();
+  const coffeeTab = page.getByRole('tab', { name: /Filter Coffee/ });
+  await expect(coffeeTab).toHaveAttribute('aria-selected', 'true');
+
+  await mugTab.click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(page.getByTestId('cart-line-FIL-500')).toHaveCount(0);
+  await expect(coffeeTab).toHaveAttribute('aria-selected', 'false');
+});
