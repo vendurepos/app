@@ -1733,6 +1733,29 @@ test('a demo cashier keeps two sales open as tabs under the cart and switches be
   await expect(coffeeTab).toHaveAttribute('aria-selected', 'false');
 });
 
+test('Settings › General puts the open orders at the top or the foot of the cart', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const tabsOnTop = async () => {
+    const tabs = await page.getByTestId('open-sale-tabs').boundingBox();
+    const customer = await page.getByTestId('customer-row').boundingBox();
+    return tabs && customer ? tabs.y < customer.y : null;
+  };
+  await expect.poll(tabsOnTop).toBe(false);
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('open-orders-bottom')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('open-orders-top').click();
+  await expect(page.getByTestId('open-orders-top')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(tabsOnTop).toBe(true);
+  await openSettings(page, 'general');
+  await page.getByTestId('open-orders-bottom').click();
+  await page.getByTestId('settings-back').click();
+  await expect.poll(tabsOnTop).toBe(false);
+});
+
 test("the In Stock pill is on by default, hides the shelf's sold-out products and shows them when tapped off", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

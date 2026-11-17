@@ -27,6 +27,7 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { logout } from '../lib/logout';
+import { loadOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
 import { ProductsPanel } from '../lib/products-panel';
@@ -447,6 +448,7 @@ function Sale({
   async function switchTo(id: string | null) {
     setSwitchError((await sale.switchSale(id)) ?? '');
   }
+  const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
@@ -503,8 +505,17 @@ function Sale({
   }
   const highlightSku = typeof highlight === 'object' ? highlight?.sku : undefined;
   const tenderPane = <ScrollView><TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} /></ScrollView>;
+  // v2 cart/tabs.tsx: every open sale is a tab at the foot (or, by Settings, the top) of the cart; switching parks the current one (CHECKLIST 2.1, 9.10).
+  const openSaleTabs = drafts ? (
+    <>
+      {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
+      <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
+        onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
+    </>
+  ) : null;
   const cart = (payGate?: ReactNode) => (
     <>
+      {openOrdersPosition === 'top' ? openSaleTabs : null}
       {drafts ? (
         <Button testID="parked-open" variant="secondary" onPress={() => setParkedOpen(true)}>
           <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
@@ -513,14 +524,7 @@ function Sale({
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={highlightSku} />
-      {drafts ? (
-        // v2 cart/tabs.tsx: every open sale is a tab at the foot of the cart; switching parks the current one (CHECKLIST 2.1).
-        <>
-          {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
-          <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
-            onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
-        </>
-      ) : null}
+      {openOrdersPosition === 'bottom' ? openSaleTabs : null}
     </>
   );
   // A scan outside a text field, on either tab: the catalogue search's own barcode-then-SKU lookup over the same
@@ -553,6 +557,8 @@ function Sale({
     setFocused(true);
     // Settings is pushed over the till, so the cart side chosen there applies on the way back.
     setCartSide(loadCartSide());
+    // Settings is pushed over the till, so the open-orders position chosen there applies on the way back.
+    setOpenOrdersPosition(loadOpenOrdersPosition());
     return () => setFocused(false);
   }, []));
   useWedgeScanner(onScan, focused);
