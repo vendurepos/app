@@ -1838,6 +1838,48 @@ test('a demo cashier pays for one item first and the rest after', async ({ page 
   await page.getByTestId('tender-split-open').click();
   await expect(mug).toContainText('Paid');
   await expect(mug).toBeDisabled();
+  await expect(page.getByTestId('tender-split-items-note')).toHaveCount(0);
+});
+
+test('a demo cashier pays for one item first under an order discount', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Canvas Apron').click();
+  const cart = page.getByTestId('cart');
+  const tender = page.getByTestId('tender-pane');
+  // TallyUI's DiscountForm, as in sign-in.spec.ts: a €1.00 order discount.
+  await cart.getByTestId('order-discount').click();
+  const form = cart.getByRole('group', { name: 'Order discount' });
+  await form.getByRole('button', { name: 'Amount' }).click();
+  await form.getByLabel('Discount value').fill('1.00');
+  await form.getByRole('button', { name: 'Apply' }).click();
+  await expect(form).toHaveCount(0);
+  await checkout(page);
+  await page.getByTestId('tender-split-open').click();
+  // Shares 19 / 81 of the €1.00: nets 781 / 3418, tax 148 / 649 per line, the order's tax 797.81 -> 798, so €49.97.
+  await expect(page.getByTestId('tender-split-items-note')).toHaveText("Each item's share includes its part of the order discount.");
+  const lines = page.getByTestId('tender-split-line');
+  const mug = lines.filter({ hasText: 'Tally Fixture Mug' });
+  const apron = lines.filter({ hasText: 'Canvas Apron' });
+  await expect(mug).toContainText('€9.29');
+  await expect(apron).toContainText('€40.67');
+  await mug.click();
+  await apron.click();
+  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
+  await apron.click();
+  await page.getByTestId('tender-split-items-set').click();
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.29');
+  await takePayment(page);
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€9.29');
+  await expect(cart.getByTestId('cart-remaining')).toHaveText('€40.68');
+  await page.getByTestId('tender-split-open').click();
+  await expect(mug).toContainText('Paid');
+  await expect(mug).toBeDisabled();
+  await apron.click();
+  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
 });
 
 test('a demo cashier pays cash with a quick amount: the cart is locked beside the checkout', async ({ page }) => {

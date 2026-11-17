@@ -1,5 +1,10 @@
-import { expect, it, vi } from 'vitest';
-import { initTenderState, tenderReducer } from '@tallyui/pos';
+import { createVendureConnector } from '@tallyui/connector-vendure';
+import type { StoreSettings } from '@tallyui/core';
+import { addEntryToCart, catalogueEntries, createOrderBuilder, initTenderState, TaxProvider, taxProviderProps, tenderReducer, useTax, type TaxContext, type TaxProviderProps } from '@tallyui/pos';
+import { createElement } from 'react';
+// @ts-expect-error The app has react-dom (for the web build) but not @types/react-dom.
+import { renderToString } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
 import { evenSplitPlan, fixedSplitPlan, itemsSplitPlan, lineGrossMinor, SPLIT_WAYS } from './tender-split';
 
 vi.mock('@tallyui/components', () => ({}));
@@ -85,7 +90,7 @@ it('builds an items plan from the picked lines', () => {
 });
 
 it("keeps the cart's line order, not the pick order", () => {
-  expect(itemsSplitPlan([], [mug, apron], ['b', 'a'], 6000)).toMatchObject({ lineIds: ['a', 'b'], firstMinor: 5116 });
+  expect(itemsSplitPlan([], [mug, apron], ['b', 'a'], 6000, { hasCharges: true })).toMatchObject({ lineIds: ['a', 'b'], firstMinor: 5116 });
 });
 
 it('starts an items plan after the captured legs only', () => {
@@ -111,4 +116,69 @@ it('lets the reducer pre-type the picked items, then the rest', () => {
   });
   expect(next.entryMinor).toBe(4164);
   expect(next.linesPaidBy).toEqual({ a: ['cash'] });
+});
+
+// The demo store (lib/cart-totals.test.ts): EUR, prices excluding tax, Standard 19 %, per_rate_group_items / half_up.
+const settings: StoreSettings = {
+  currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 190_000, '1': 190_000 },
+  taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' }, taxRateCodes: { default: 'Standard DE', '1': 'Standard DE' },
+};
+const variant = (id: string, sku: string, price: number) =>
+  ({ id, name: sku, sku, price, currencyCode: 'EUR', enabled: true, trackInventory: 'FALSE', taxCategory: { id: '1' } });
+const products = [
+  { id: 'mug', name: 'Tally Fixture Mug', variants: [variant('11', 'TALLY-MUG', 800)] },
+  { id: 'apron', name: 'Canvas Apron', variants: [variant('41', 'APRON', 3499)] },
+];
+const traits = createVendureConnector({ pricesIncludeTax: false }).traits.product;
+const entry = (sku: string) => catalogueEntries(products, traits).find((item) => item.variant.sku === sku)!;
+
+/** The context the app's `<TaxProvider {...taxProviderProps(settings)}>` gives the sale. */
+function saleTaxContext(): TaxContext {
+  let context: TaxContext | undefined;
+  const Probe = () => { context = useTax(); return null; };
+  renderToString(createElement(TaxProvider, taxProviderProps(settings) as TaxProviderProps, createElement(Probe)));
+  return context!;
+}
+
+describe('the items plan under an order discount', () => {
+  // A €1.00 order discount: shares 19 / 81, line nets 781 / 3418, taxes 148.39 -> 148 and 649.42 -> 649; the order's tax 797.81 -> 798.
+  const discounted = (fee = false) => {
+    const builder = createOrderBuilder({ currency: settings.currency, taxContext: saleTaxContext() });
+    const mugId = addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
+    const apronId = addEntryToCart(builder, entry('APRON'), traits, 'EUR');
+    builder.applyOrderDiscount({ type: 'fixed', value: 100 });
+    if (fee) builder.addFee({ name: 'Gift wrap', amountMinor: 200 });
+    const order = builder.getSnapshot();
+    const line = (id: string) => order.lineItems.find((item) => item.id === id)!;
+    return { order, mugId, apronId, mug: line(mugId), apron: line(apronId) };
+  };
+
+  it("gives each line its share after the order discount, and that share is the plan's first amount", () => {
+    const { order, mugId, mug, apron } = discounted();
+    expect(lineGrossMinor(mug)).toBeLessThan(952);
+    expect([lineGrossMinor(mug), lineGrossMinor(apron), order.balanceDueMinor]).toEqual([929, 4067, 4997]);
+    expect(itemsSplitPlan([], order.lineItems, [mugId], order.balanceDueMinor)).toMatchObject({ kind: 'items', firstMinor: lineGrossMinor(mug) });
+  });
+
+  it('never asks for the whole balance or more', () => {
+    const { order, mugId, apronId } = discounted();
+    for (const pick of [[mugId], [apronId], [mugId, apronId]]) {
+      const plan = itemsSplitPlan([], order.lineItems, pick, order.balanceDueMinor);
+      expect(plan === null || (plan.kind === 'items' && plan.firstMinor < order.balanceDueMinor)).toBe(true);
+    }
+  });
+
+  it('refuses a pick that leaves no line unpaid when the order has no fees or shipping', () => {
+    const { order, mugId, apronId, mug } = discounted();
+    expect(itemsSplitPlan([], order.lineItems, [mugId, apronId], order.balanceDueMinor)).toBeNull();
+    const rest = order.balanceDueMinor - lineGrossMinor(mug);
+    expect(itemsSplitPlan([{ status: 'captured' }], order.lineItems, [apronId], rest)).not.toBeNull();
+    expect(itemsSplitPlan([{ status: 'captured' }], order.lineItems, [apronId], rest, { paidLineIds: [mugId] })).toBeNull();
+  });
+
+  it('lets every line go first when the order has a charge to pay after', () => {
+    const { order, mugId, apronId, mug, apron } = discounted(true);
+    expect(itemsSplitPlan([], order.lineItems, [mugId, apronId], order.balanceDueMinor, { hasCharges: true }))
+      .toMatchObject({ kind: 'items', firstMinor: lineGrossMinor(mug) + lineGrossMinor(apron) });
+  });
 });
