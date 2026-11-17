@@ -2,7 +2,7 @@ import { Controller, Get, Query, Res } from '@nestjs/common';
 import { Allow, Ctx, Permission, RequestContext } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
 import { ReportService } from '../service/report.service';
-import type { SalesQuery } from '../service/report.service';
+import type { SalesQuery, SalesQueryV2 } from '../service/report.service';
 
 type StatusResponse = { status(code: number): unknown };
 
@@ -46,6 +46,17 @@ export function validateSalesQuery(raw: Record<string, unknown>): SalesQuery | {
   return { from, to, timezone, ...(registerId !== undefined ? { registerId } : {}) };
 }
 
+/** v2's query: v1's, checked first and unchanged, then an optional `cashierId` (a sale's tallyCashierRef). */
+export function validateSalesQueryV2(raw: Record<string, unknown>): SalesQueryV2 | { message: string } {
+  const query = validateSalesQuery(raw);
+  if ('message' in query) return query;
+  const { cashierId } = raw;
+  if (cashierId !== undefined && (typeof cashierId !== 'string' || !cashierId.length || cashierId.length > 64)) {
+    return { message: 'cashierId must be 1 to 64 characters' };
+  }
+  return { ...query, ...(cashierId !== undefined ? { cashierId } : {}) };
+}
+
 /**
  * `GET /tally/v1/reports/sales`: the channel's POS sales and refunds in a range. Answers other than 200 are written
  * through the Express response, never thrown, as in the command route.
@@ -68,5 +79,22 @@ export class TallyReportsController {
       return { code: 'invalid_query', message: query.message };
     }
     return await this.reports.sales(ctx, query);
+  }
+
+  /** `GET /tally/v1/reports/sales/v2`: v1's figures plus hours, items, products, taxes and counts, with a cashier filter. */
+  @Get('reports/sales/v2')
+  @Allow(tallyPosSell.Permission)
+  async salesV2(@Ctx() ctx: RequestContext, @Query() raw: Record<string, unknown>, @Res({ passthrough: true }) res: StatusResponse) {
+    // As v1: every till's figures, so ReadOrder as well as the till permission.
+    if (!ctx.userHasAllPermissions([tallyPosSell.Permission as Permission, Permission.ReadOrder])) {
+      res.status(403);
+      return { code: 'forbidden', message: 'The sales report needs TallyPosSell and ReadOrder' };
+    }
+    const query = validateSalesQueryV2(raw);
+    if ('message' in query) {
+      res.status(400);
+      return { code: 'invalid_query', message: query.message };
+    }
+    return await this.reports.salesV2(ctx, query);
   }
 }

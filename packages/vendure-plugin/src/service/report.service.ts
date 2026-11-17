@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
+import { Order, ProductVariant, RequestContext, TransactionalConnection, translateEntity } from '@vendure/core';
+import type { ID } from '@vendure/core';
+import { In } from 'typeorm';
 import { channelRefunds } from './channel-refunds';
 import { TALLY_DISCOUNT_SKU } from './constants';
+import { OrderCreateService } from './order-create.service';
 
 /** The plugin's own sales report shape, versioned; it moves into TallyUI once TallyUI has a report contract. */
 export type TallySalesReport = {
@@ -16,6 +19,28 @@ export type TallySalesReport = {
   byDay: Array<{ day: string; orderCount: number; salesMinor: number; refundsMinor: number }>; // 'YYYY-MM-DD' ascending, only days with an order or a refund
 };
 export type SalesQuery = { from: string; to: string; registerId?: string; timezone: string };
+
+/** GET /tally/v1/reports/sales/v2: v1's fields plus the figures TallyUI's SalesFigures needs. Every figure is integer minor units. */
+export type TallySalesReportV2 = Omit<TallySalesReport, 'version' | 'orders' | 'refunds' | 'byMethod'> & {
+  version: 2;
+  cashierId: string | null;
+  orders: TallySalesReport['orders'] & { itemCount: number };       // itemCount: the sum of order-line quantities
+  refunds: TallySalesReport['refunds'] & { orderCount: number };   // orderCount: distinct sale orders refunded in the range
+  // orderCount: distinct orders with a settled payment of the method; refundCount: refunds by the method. Sorted by method.
+  byMethod: Array<TallySalesReport['byMethod'][number] & { orderCount: number; refundCount: number }>;
+  byHour: Array<{ hour: string; orderCount: number; salesMinor: number; refundsMinor: number }>; // 'YYYY-MM-DDTHH' ascending, only active hours
+  // Lines sold, by variant: the line total with tax, before the till's order discount (a TALLY_DISCOUNT_SKU surcharge,
+  // in orders.discountsMinor). Refunded quantities are not netted. salesMinor descending, then sku; at most 100 rows.
+  products: Array<{ productVariantId: string; sku: string; name: string; quantity: number; salesMinor: number }>;
+  productsTruncated: boolean;
+  // Vendure's own Order.taxSummary (lines, shipping and surcharges), summed by (description, rate); by rate, then description.
+  taxes: Array<{ description: string; ratePercent: number; baseMinor: number; taxMinor: number }>;
+};
+export type SalesQueryV2 = SalesQuery & { cashierId?: string };
+const hourKey = (instant: string) => `to_char(${instant} AT TIME ZONE :timezone, 'YYYY-MM-DD"T"HH24')`;
+const MAX_PRODUCTS = 100;
+// Orders are loaded for products and taxes (OrderLine prices and Order.taxSummary are getters, not columns) this many at a time.
+const ORDER_PAGE = 500;
 
 // tallySaleAt is timestamp without time zone holding the Node process's wall time (node-pg writes a Date in local time);
 // Refund.createdAt holds the Postgres session's wall time (now()). Both become real instants before any comparison.
@@ -33,7 +58,7 @@ export class ReportService {
   // The zone node-pg wrote tallySaleAt in, read once.
   private readonly writerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  constructor(private connection: TransactionalConnection) {}
+  constructor(private connection: TransactionalConnection, private ids: OrderCreateService) {}
 
   async sales(ctx: RequestContext, query: SalesQuery): Promise<TallySalesReport> {
     const params = { timezone: query.timezone };
@@ -121,5 +146,153 @@ export class ReportService {
     return query.registerId === undefined ? builder : builder.andWhere(
       "COALESCE(CAST(refund.metadata AS jsonb) ->> 'tallyRegisterId', sale.customFields.tallyRegisterId) = :registerId",
       { registerId: query.registerId });
+  }
+
+  /** GET /tally/v1/reports/sales/v2. Every figure is built on posOrdersV2/posRefundsV2, so every filter applies to all of them. */
+  async salesV2(ctx: RequestContext, query: SalesQueryV2): Promise<TallySalesReportV2> {
+    const params = { timezone: query.timezone };
+    const hours = await this.posOrdersV2(ctx, query)
+      .select(hourKey(SALE_AT), 'hour')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('SUM(o.subTotalWithTax + o.shippingWithTax)', 'sales')
+      .addSelect('SUM(o.subTotalWithTax - o.subTotal + o.shippingWithTax - o.shipping)', 'tax')
+      .setParameters(params).groupBy(hourKey(SALE_AT))
+      .getRawMany<{ hour: string; count: string; sales: string | null; tax: string | null }>();
+    const [items] = await this.posOrdersV2(ctx, query).innerJoin('o.lines', 'l')
+      .select('SUM(l.quantity)', 'items').getRawMany<{ items: string | null }>();
+    const [discounts] = await this.posOrdersV2(ctx, query)
+      .innerJoin('o.surcharges', 's')
+      .andWhere('s.sku = :discountSku', { discountSku: TALLY_DISCOUNT_SKU })
+      .select('SUM(0 - s.listPrice)', 'discounts')
+      .getRawMany<{ discounts: string | null }>();
+    const methods = await this.posOrdersV2(ctx, query)
+      .innerJoin('o.payments', 'p')
+      .andWhere("p.state = 'Settled'")
+      .select(SALE_METHOD, 'method')
+      .addSelect('SUM(p.amount)', 'sales')
+      .addSelect('COUNT(DISTINCT o.id)', 'orders')
+      .groupBy(SALE_METHOD)
+      .getRawMany<{ method: string; sales: string | null; orders: string }>();
+    const refunds = await this.posRefundsV2(ctx, query)
+      .select(hourKey(REFUND_AT), 'hour')
+      .addSelect(REFUND_METHOD, 'method')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('SUM(refund.total)', 'total')
+      .setParameters(params).groupBy(hourKey(REFUND_AT)).addGroupBy(REFUND_METHOD)
+      .getRawMany<{ hour: string; method: string; count: string; total: string | null }>();
+    const [refunded] = await this.posRefundsV2(ctx, query)
+      .select('COUNT(DISTINCT sale.id)', 'orders').getRawMany<{ orders: string }>();
+
+    type Row = { orderCount: number; salesMinor: number; refundsMinor: number };
+    const bucket = <T extends Row>(map: Map<string, T>, key: string, make: () => T) => map.get(key) ?? map.set(key, make()).get(key)!;
+    const byHour = new Map<string, TallySalesReportV2['byHour'][number]>();
+    const hourOf = (hour: string) => bucket(byHour, hour, () => ({ hour, orderCount: 0, salesMinor: 0, refundsMinor: 0 }));
+    const byMethod = new Map<string, TallySalesReportV2['byMethod'][number]>();
+    const methodOf = (method: string) => bucket(byMethod, method,
+      () => ({ method, salesMinor: 0, refundsMinor: 0, orderCount: 0, refundCount: 0 }));
+    const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: minor(discounts?.discounts), itemCount: minor(items?.items) };
+    for (const row of hours) {
+      const entry = hourOf(row.hour);
+      entry.orderCount += minor(row.count);
+      entry.salesMinor += minor(row.sales);
+      orders.count += minor(row.count);
+      orders.salesMinor += minor(row.sales);
+      orders.taxMinor += minor(row.tax);
+    }
+    for (const row of methods) Object.assign(methodOf(row.method), { salesMinor: minor(row.sales), orderCount: minor(row.orders) });
+    const refundTotals = { count: 0, totalMinor: 0, orderCount: minor(refunded?.orders) };
+    for (const row of refunds) {
+      hourOf(row.hour).refundsMinor += minor(row.total);
+      const method = methodOf(row.method);
+      method.refundsMinor += minor(row.total);
+      method.refundCount += minor(row.count);
+      refundTotals.count += minor(row.count);
+      refundTotals.totalMinor += minor(row.total);
+    }
+    // A day is its hours' date in the same zone, so the day and hour rows always add up alike.
+    const byDay = new Map<string, TallySalesReport['byDay'][number]>();
+    for (const hour of byHour.values()) {
+      const day = bucket(byDay, hour.hour.slice(0, 10), () => ({ day: hour.hour.slice(0, 10), orderCount: 0, salesMinor: 0, refundsMinor: 0 }));
+      day.orderCount += hour.orderCount;
+      day.salesMinor += hour.salesMinor;
+      day.refundsMinor += hour.refundsMinor;
+    }
+    const ascending = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    const { products, productsTruncated, taxes } = await this.linesAndTaxes(ctx, query, ascending);
+    return {
+      version: 2, from: query.from, to: query.to, timezone: query.timezone, currencyCode: ctx.channel.defaultCurrencyCode,
+      registerId: query.registerId ?? null, cashierId: query.cashierId ?? null, orders, refunds: refundTotals,
+      byMethod: [...byMethod.values()].sort((a, b) => ascending(a.method, b.method)),
+      byDay: [...byDay.values()].sort((a, b) => ascending(a.day, b.day)),
+      byHour: [...byHour.values()].sort((a, b) => ascending(a.hour, b.hour)),
+      products, productsTruncated, taxes,
+    };
+  }
+
+  /** Products and tax rows from the matching orders, loaded ORDER_PAGE at a time by id. */
+  private async linesAndTaxes(ctx: RequestContext, query: SalesQueryV2, ascending: (a: string, b: string) => number) {
+    const products = new Map<string, TallySalesReportV2['products'][number] & { id: ID }>();
+    const taxes = new Map<string, TallySalesReportV2['taxes'][number]>();
+    let after: ID | undefined;
+    for (;;) {
+      const page = this.posOrdersV2(ctx, query).select('o.id', 'id').orderBy('o.id', 'ASC').limit(ORDER_PAGE);
+      const ids = (await (after === undefined ? page : page.andWhere('o.id > :after', { after })).getRawMany<{ id: ID }>()).map(row => row.id);
+      if (!ids.length) break;
+      // Only the relations Order.taxSummary reads (lines, surcharges, shipping lines), plus each line's variant for its sku.
+      const loaded = await this.connection.getRepository(ctx, Order).find({
+        where: { id: In(ids) }, relations: { lines: { productVariant: true }, surcharges: true, shippingLines: true },
+      });
+      for (const order of loaded) {
+        for (const line of order.lines) {
+          const product = products.get(String(line.productVariantId)) ?? products.set(String(line.productVariantId), {
+            id: line.productVariantId, productVariantId: this.ids.encodeId(line.productVariantId), sku: line.productVariant.sku,
+            name: '', quantity: 0, salesMinor: 0,
+          }).get(String(line.productVariantId))!;
+          product.quantity += line.quantity;
+          product.salesMinor += line.proratedLinePriceWithTax;
+        }
+        for (const row of order.taxSummary) {
+          const key = `${row.description}\u0000${row.taxRate}`;
+          const tax = taxes.get(key) ?? taxes.set(key, { description: row.description, ratePercent: row.taxRate, baseMinor: 0, taxMinor: 0 }).get(key)!;
+          tax.baseMinor += row.taxBase;
+          tax.taxMinor += row.taxTotal;
+        }
+      }
+      if (ids.length < ORDER_PAGE) break;
+      after = ids[ids.length - 1];
+    }
+    const sorted = [...products.values()].sort((a, b) => b.salesMinor - a.salesMinor || ascending(a.sku, b.sku)
+      || ascending(a.productVariantId, b.productVariantId));
+    const kept = sorted.slice(0, MAX_PRODUCTS);
+    // Names only for the rows kept, in the request's language, else the channel's.
+    const variants = kept.length ? await this.connection.getRepository(ctx, ProductVariant).find({
+      where: { id: In(kept.map(row => row.id)) }, relations: { translations: true },
+    }) : [];
+    const names = new Map(variants.map(variant => [String(variant.id),
+      translateEntity(variant, [ctx.languageCode, ctx.channel.defaultLanguageCode]).name]));
+    return {
+      products: kept.map(({ id, ...row }) => ({ ...row, name: names.get(String(id)) ?? '' })),
+      productsTruncated: sorted.length > MAX_PRODUCTS,
+      taxes: [...taxes.values()].sort((a, b) => a.ratePercent - b.ratePercent || ascending(a.description, b.description)),
+    };
+  }
+
+  /** posOrders, plus the sale's own till cashier when the query names one. */
+  private posOrdersV2(ctx: RequestContext, query: SalesQueryV2) {
+    const builder = this.posOrders(ctx, query);
+    return query.cashierId === undefined ? builder
+      : builder.andWhere('o.customFields.tallyCashierRef = :cashierId', { cashierId: query.cashierId });
+  }
+
+  /**
+   * posRefunds, plus the cashier when the query names one: the refund's own till cashier (tallyCashierRef in the refund
+   * metadata, written by withTallyRefund when the refund command carried cashierRef), else its sale's tallyCashierRef,
+   * as v1's register rule.
+   */
+  private posRefundsV2(ctx: RequestContext, query: SalesQueryV2) {
+    const builder = this.posRefunds(ctx, query);
+    return query.cashierId === undefined ? builder : builder.andWhere(
+      "COALESCE(CAST(refund.metadata AS jsonb) ->> 'tallyCashierRef', sale.customFields.tallyCashierRef) = :cashierId",
+      { cashierId: query.cashierId });
   }
 }
