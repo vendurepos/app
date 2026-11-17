@@ -554,6 +554,8 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   expect(await page.getByTestId('sign-in-email').count()).toBe(0);
+  // The whole seed is on the till: the In Stock pill (on by default) is tapped off to show the shelf's sold-out products too.
+  await page.getByTestId('filter-chip-inStock').click();
   for (const { name } of CATALOGUE) await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
   expect(CATALOGUE).toHaveLength(30);
 
@@ -1453,4 +1455,24 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await page.getByTestId('view-toggle-grid').click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
+});
+
+test("the In Stock pill is on by default, hides the shelf's sold-out products and shows them when tapped off", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const pill = page.getByTestId('filter-chip-inStock');
+  const carafe = page.getByTestId('product-tile-Glass Carafe');
+  await expect(pill).toHaveAttribute('aria-pressed', 'true');
+  // The demo seed gives the carafe 0 on the shop floor.
+  await expect(carafe).toHaveCount(0);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+
+  await pill.click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'false');
+  await expect(carafe).toBeVisible();
+  await expect(carafe).toContainText('Out of Stock');
+
+  await pill.click();
+  await expect(carafe).toHaveCount(0);
 });
