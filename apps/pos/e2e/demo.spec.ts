@@ -1324,6 +1324,32 @@ test('a demo cashier takes 10 % off a line on its price keypad, and lines keep t
   await expect(line).toHaveCount(0);
 });
 
+test('Settings › General sets the quick discounts the price keypad offers', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('quick-discounts')).toHaveValue('5, 10, 15');
+  await page.getByTestId('quick-discounts').fill('0, 10');
+  await page.getByTestId('quick-discounts-save').click();
+  await expect(page.getByTestId('quick-discounts-error')).toBeVisible();
+  await page.getByTestId('quick-discounts').fill('50 20');
+  await page.getByTestId('quick-discounts-save').click();
+  await expect(page.getByTestId('quick-discounts-saved')).toBeVisible();
+  await expect(page.getByTestId('quick-discounts')).toHaveValue('50, 20');
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const line = page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG');
+  await line.getByTestId('price-popover-trigger').click();
+  await expect(page.getByTestId('price-discount-50')).toBeVisible();
+  await expect(page.getByTestId('price-discount-20')).toBeVisible();
+  await expect(page.getByTestId('price-discount-10')).toHaveCount(0);
+  await page.getByTestId('price-discount-50').click();
+  await page.getByTestId('price-popover-apply').click();
+  await expect(line).toContainText('€4.00');
+});
+
 test('at phone width the price keypad folds into the line\'s quantity keypad', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/demo');
