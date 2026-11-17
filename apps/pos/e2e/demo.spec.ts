@@ -194,6 +194,25 @@ test("Settings' barcode test shows a scan and its last key, and adds nothing to 
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Settings opens beside the rail, and a scan there adds nothing to the sale', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('nav-rail')).toBeVisible();
+  await expect(page.getByTestId('nav-item-settings')).toHaveAttribute('aria-current', 'page');
+  await expect(page).not.toHaveURL(/\/settings$/);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+  await wedgeScan(page, 'TALLY-MUG');
+  await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('nav-item-settings')).not.toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('cart')).toBeVisible();
+  await expect(page.getByTestId('cart')).not.toContainText('Tally Fixture Mug');
+});
+
 test('Support at the foot of the rail opens the quick start, GitHub issues and the version, and a scan closes it and adds', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -831,7 +850,6 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await page.getByTestId('demo-enter').click();
   await expect(page.getByTestId('signed-in-store')).toBeVisible();
   await openSettings(page, 'barcode');
-  await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByTestId('scanner-min-length')).toHaveValue('8');
   await page.getByTestId('scanner-min-length').fill('3');
   await page.getByTestId('settings-save').click();
@@ -844,9 +862,8 @@ test("Settings keeps the scanner's shortest code for this till", async ({ page }
   await expect(page.getByTestId('signed-in-store')).toHaveCount(1);
   await expect(page.getByTestId('open-register-card').getByTestId('open-register-amount')).toBeEditable();
   await openSettings(page, 'barcode');
-  await expect(page).toHaveURL(/\/settings$/);
   await page.reload();
-  await page.getByTestId('settings-section-barcode').click();
+  await openSettings(page, 'barcode');
   await expect(page.getByTestId('scanner-min-length')).toHaveValue('5');
   await expect(page.getByTestId('settings-barcode-field')).toContainText('Barcode custom field:');
   await page.getByTestId('settings-back').click();
@@ -1175,6 +1192,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await picker.getByText('Ada Lovelace', { exact: true }).click();
   await expect(page.getByTestId('default-customer')).toContainText('Ada Lovelace');
   await page.reload();
+  await openSettings(page, 'general');
   await expect(page.getByTestId('default-customer')).toContainText('Ada Lovelace');
   await page.getByTestId('settings-back').click();
   await openRegister(page);
@@ -1294,7 +1312,7 @@ test('Settings › Theme chooses Light or Dark over the device\'s scheme, and ke
   await expect(html).toHaveClass(/\bdark\b/);
   await page.reload();
   await expect(html).toHaveClass(/\bdark\b/);
-  await page.getByTestId('settings-section-theme').click();
+  await openSettings(page, 'theme');
   await expect(page.getByTestId('theme-dark')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('theme-light').click();
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -1317,7 +1335,7 @@ test('Settings › Theme sets the scale, and keeps it after a reload', async ({ 
   await expect(page.getByTestId('scale-spacious')).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(textBase).toBe('16px');
   await page.reload();
-  await page.getByTestId('settings-section-theme').click();
+  await openSettings(page, 'theme');
   await expect(page.getByTestId('scale-spacious')).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(textBase).toBe('16px');
   await page.getByTestId('scale-auto').click();

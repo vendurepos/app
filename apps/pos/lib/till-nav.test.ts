@@ -50,4 +50,10 @@ describe('activeTillNav', () => {
     expect(activeTillNav({ ordersOpen: false, customersOpen: true, reportsOpen: true, registerOpen: true })).toBe('customers');
     expect(activeTillNav({ ordersOpen: true, customersOpen: true, reportsOpen: false, registerOpen: false })).toBe('orders');
   });
+
+  it('lights Settings while its panel is open, under Notifications only', () => {
+    expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: true, settingsOpen: true })).toBe('settings');
+    expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: false, settingsOpen: true, notificationsOpen: true })).toBe('notifications');
+    expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: false, registerOpen: false, settingsOpen: false })).toBe('orders');
+  });
 });
