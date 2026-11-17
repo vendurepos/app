@@ -346,7 +346,9 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   await page.getByTestId('products-search').fill('TALLY-MUG');
   await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
   await expect(page.getByTestId('products-count')).toHaveText('Showing 1 of 1 products');
-  for (const text of ['Tally Fixture Mug', 'TALLY-MUG', '€8.00', String(MUG_SEED_STOCK)]) await expect(mug).toContainText(text);
+  for (const text of ['Tally Fixture Mug', 'TALLY-MUG']) await expect(mug).toContainText(text);
+  await expect(mug.getByTestId(`product-price-${MUG_VARIANT_ID}`)).toHaveValue('8.00');
+  await expect(mug.getByTestId(`product-stock-${MUG_VARIANT_ID}`)).toHaveValue(String(MUG_SEED_STOCK));
 
   await page.getByTestId('products-open').click();
   await expect(panel).toHaveCount(0);
@@ -356,6 +358,36 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   await wedgeScan(page, 'TALLY-MUG');
   await expect(panel).toHaveCount(0);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test("the Products panel edits the mug's price and stock inline, and the sell screen sells it at the new price", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  await page.getByTestId('products-search').fill('TALLY-MUG');
+  const price = panel.getByTestId(`product-price-${MUG_VARIANT_ID}`);
+  const stock = panel.getByTestId(`product-stock-${MUG_VARIANT_ID}`);
+
+  await expect(price).toHaveValue('8.00');
+  await price.fill('abc');
+  await price.press('Tab');
+  await expect(page.getByTestId('products-save-error')).toHaveText('Enter a price such as 9.50.');
+  await expect(price).toHaveValue('8.00');
+
+  await price.fill('9.50');
+  await price.press('Tab');
+  await stock.fill('12');
+  await stock.press('Enter');
+  await expect.poll(async () => (await demoState(page))?.stock[MUG_VARIANT_ID].quantity).toBe(12);
+  await expect(price).toHaveValue('9.50');
+  await expect(stock).toHaveValue('12');
+  await expect(page.getByTestId('products-save-error')).toHaveCount(0);
+
+  await page.getByTestId('products-open').click();
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toContainText('€9.50');
 });
 
 test('Store health shows Ready to sell, nothing waiting and the products on this device, and a scan closes it and adds', async ({ page }) => {
