@@ -27,7 +27,7 @@ export default function DemoScreen() {
         </CardHeader>
         <CardContent>
           <VStack space="lg">
-            <Text>A public demo store. Everything stays in this browser, and Reset demo starts it over.</Text>
+            <Text>A public demo store. Everything stays in this browser.</Text>
             <VStack testID="demo-try" space="sm">
               <Text className="font-semibold">What to try</Text>
               <Text className="text-sm">• Sell the mug for cash, then find the order under Orders.</Text>

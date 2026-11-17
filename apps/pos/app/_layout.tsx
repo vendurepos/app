@@ -9,8 +9,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { ScopedVariables } from 'uniwind';
-import { DemoBanner } from '../lib/demo/demo-banner';
-import { DEMO_MODE } from '../lib/demo/mode';
 import { printInLightScheme } from '../lib/print-light';
 import { useStoredScale } from '../lib/scale-setting';
 import { SessionProvider } from '../lib/session-context';
@@ -33,7 +31,6 @@ export default function RootLayout() {
     <ScaleProvider scale={scale} scope={Platform.OS === 'web' ? undefined : ScopedVariables}>
       <SessionProvider>
         <StatusBar style="auto" />
-        {DEMO_MODE ? <DemoBanner /> : null}
         <Stack screenOptions={stackColors} />
         {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
         <PortalHost />

@@ -55,7 +55,6 @@ async function mugStock(page: Page) {
 }
 
 async function expectSignedIn(page: Page) {
-  await expect(page.getByTestId('demo-banner')).toContainText('Demo: everything stays in this browser');
   await expect(page.getByTestId('register-bar-cashier')).toBeVisible();
   // The grid renders its tiles lazily (at phone width the mug is past the first screenful), so wait for the first by name.
   await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
@@ -627,23 +626,6 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expect(page.getByTestId('open-register-card')).toBeVisible();
   await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
 
-  // Reset demo: a fresh visit, then one click, with no orders, the register closed and the seed's stock.
-  await Promise.all([page.waitForEvent('load'), page.getByTestId('demo-reset').click()]);
-  await expect(page).toHaveURL(/\/demo$/);
-  await expect(page.getByTestId('signed-in-store')).toHaveCount(0);
-  await expect(page.getByTestId('demo-enter')).toBeVisible();
-  await page.getByTestId('demo-enter').click();
-  await expectSignedIn(page);
-  expect(await demoState(page)).toBeNull();
-  expect(await mugStock(page)).toBe(MUG_SEED_STOCK);
-  await expect(page.getByTestId('open-register-card')).toBeVisible();
-  await expect(page.getByTestId('register-open-panel')).toHaveCount(0);
-  await expect(page.getByTestId('orders-open')).toBeVisible();
-  await expect(await orderEntries(page)).toHaveCount(0);
-  // No sales on this till, and the store's 3 seeded orders.
-  await expect(await storeRows(page)).toHaveText(SEEDED_ORDERS);
-  await expect(page.getByTestId('orders-empty')).toHaveCount(0);
-
   // Nothing left the page's own origin, and nothing broke the CSP.
   expect(requests.length).toBeGreaterThan(0);
   expect(requests.filter((url) => new URL(url).origin !== origin && url !== DEMO_CAPTURE_URL)).toEqual([]);
@@ -1069,14 +1051,14 @@ test('the till follows the device\'s dark scheme and prints its receipt in light
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
-  const banner = page.getByTestId('demo-banner');
+  const shell = page.getByTestId('app-shell');
   const html = page.locator('html');
-  await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
+  await expect(shell).toHaveCSS('background-color', 'rgb(13, 17, 23)');
   await expect(html).toHaveClass(/\bdark\b/);
   await page.emulateMedia({ colorScheme: 'light' });
-  await expect(banner).toHaveCSS('background-color', 'rgb(248, 249, 250)');
+  await expect(shell).toHaveCSS('background-color', 'rgb(248, 249, 250)');
   await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
+  await expect(shell).toHaveCSS('background-color', 'rgb(13, 17, 23)');
 
   await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -1089,10 +1071,10 @@ test('the till follows the device\'s dark scheme and prints its receipt in light
 
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   await expect(html).toHaveClass(/\blight\b/);
-  await expect(banner).toHaveCSS('background-color', 'rgb(248, 249, 250)');
+  await expect(shell).toHaveCSS('background-color', 'rgb(248, 249, 250)');
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
   await expect(html).toHaveClass(/\bdark\b/);
-  await expect(banner).toHaveCSS('background-color', 'rgb(13, 17, 23)');
+  await expect(shell).toHaveCSS('background-color', 'rgb(13, 17, 23)');
 });
 
 test('Settings › Theme chooses Light or Dark over the device\'s scheme, and keeps it after a reload', async ({ page }) => {
@@ -1317,28 +1299,6 @@ test('the demo page says what to try and links to the site and the quick start',
   await expect(page.getByTestId('demo-link-site')).toHaveAttribute('href', /^https:\/\/vendurepos\.com\/?$/);
   await expect(page.getByTestId('demo-link-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
   await expect(page.getByTestId('demo-links')).toHaveCount(0);
-  expect(cspConsole).toEqual([]);
-});
-
-test('signed in, the demo banner links to the site, the quick start and GitHub, and hides them without touching Reset demo', async ({ page }) => {
-  const cspConsole: string[] = [];
-  page.on('console', (message) => {
-    if (/Content Security Policy/i.test(message.text())) cspConsole.push(message.text());
-  });
-  await page.goto('/demo');
-  await page.getByTestId('demo-enter').click();
-  await expectSignedIn(page);
-  await expect(page.getByTestId('demo-links')).toBeVisible();
-  await expect(page.getByTestId('demo-links-site')).toHaveAttribute('href', 'https://vendurepos.com');
-  await expect(page.getByTestId('demo-links-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
-  await expect(page.getByTestId('demo-links-github')).toHaveAttribute('href', 'https://github.com/vendurepos/app');
-  await page.getByTestId('demo-links-dismiss').click();
-  await expect(page.getByTestId('demo-links')).toHaveCount(0);
-  await expect(page.getByTestId('demo-banner')).toContainText('Demo: everything stays in this browser');
-  await expect(page.getByTestId('demo-reset')).toBeVisible();
-  await expect(page.getByTestId('demo-reset')).toBeEnabled();
-  await Promise.all([page.waitForEvent('load'), page.getByTestId('demo-reset').click()]);
-  await expect(page).toHaveURL(/\/demo$/);
   expect(cspConsole).toEqual([]);
 });
 
