@@ -60,6 +60,7 @@ import { tenderTyped, useTillTender } from '../lib/till-tender';
 import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
 import { useCatalogueView } from '../lib/use-catalogue-view';
+import { useCatalogueFilters } from '../lib/use-catalogue-filters';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { unsyncedNote, zReportLines } from '../lib/z-report';
@@ -403,6 +404,7 @@ function Sale({
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const catalogueView = useCatalogueView();
+  const catalogueFilters = useCatalogueFilters();
   const typedApproval = useTypedApproval();
   const identity = tillIdentity(session);
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
@@ -557,6 +559,7 @@ function Sale({
         {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). */}
         <Catalogue
           {...catalogueView}
+          {...catalogueFilters}
           cameraScan={Platform.OS === 'web'}
           // The panel unmounts while the catalogue is hidden, so the camera is let go.
           cameraScanner={catalogueHidden ? undefined : { ...camera, height: cameraHeight, onHeightChange: (height) => saveCameraPanelHeight(height) }}
