@@ -3,7 +3,7 @@ import { useWindowDimensions, View } from 'react-native';
 import {
   Button, CartColumnHeads, CartLine, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, LinePopover, PriceForm, Text, VStack,
 } from '@tallyui/components';
-import { useCurrencyFormatter, type useSale } from '@tallyui/pos';
+import { capturedMinor, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { lineActionIds, QUICK_DISCOUNTS } from './cart-line-actions';
 import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
@@ -170,6 +170,9 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
             rates={totals.taxRows.map((tax) => ({ key: tax.label, name: tax.name, amount: money(tax.amountMinor) }))} />
           <HStack space="none" className="mt-1 border-t border-border pt-2" />
           {row('Total', totals.totalMinor, 'cart-total', true)}
+          {/* v2's checkout summary ends Total / Paid / Remaining (CHECKLIST 3.1); captured legs only, as v2's countsTowardPaid. */}
+          {locked && row('Paid', capturedMinor(order.payments), 'cart-paid')}
+          {locked && row('Remaining', Math.max(0, totals.totalMinor - capturedMinor(order.payments)), 'cart-remaining', true)}
           {!locked && (payGate ?? (
             <Button testID="checkout" className="mt-2" disabled={empty} onPress={onCheckout}>
               <Text>{`Checkout ${money(totals.totalMinor)}`}</Text>
