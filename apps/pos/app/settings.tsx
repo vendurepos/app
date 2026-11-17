@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
+import { loadOpenOrdersPosition, saveOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
 import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
   const [defaultCustomer, setDefaultCustomer] = useState(() => session ? loadDefaultCustomer(session) : null);
   const [pickingCustomer, setPickingCustomer] = useState(false);
   const [autoPrint, setAutoPrint] = useState(() => loadAutoPrint());
+  const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
   const connector = useCatalogueConnector(session);
   const [section, setSection] = useState<SettingsSectionId>('general');
   const sections = settingsSections({ printing: Platform.OS === 'web' });
@@ -132,6 +134,19 @@ export default function SettingsScreen() {
         </CardContent>
       </Card>
       <TileSizeSettings />
+      <Card className="w-full max-w-[420px]">
+        <CardHeader><CardTitle aria-level={2}>Open orders</CardTitle></CardHeader>
+        <CardContent>
+          <ToggleGroup type="single" accessibilityLabel="Open orders position" testID="open-orders-position" value={openOrdersPosition}
+            onValueChange={(value) => { if (value === 'top' || value === 'bottom') { saveOpenOrdersPosition(value); setOpenOrdersPosition(value); } }}>
+            {(['top', 'bottom'] as const).map((item) => (
+              <ToggleGroupItem key={item} value={item} testID={`open-orders-${item}`} className={item === openOrdersPosition ? 'flex-1 bg-secondary' : 'flex-1'}>
+                <Text>{item === 'top' ? 'Top' : 'Bottom'}</Text>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </CardContent>
+      </Card>
       {connector?.searchCustomers ? (
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Customers</CardTitle></CardHeader>
