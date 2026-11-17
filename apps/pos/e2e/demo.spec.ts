@@ -1035,6 +1035,21 @@ test('Settings › General picks the register this device is at, and the till fo
   await expect(page.getByTestId('register-choice-own')).toHaveAttribute('aria-selected', 'true');
   await page.getByTestId('settings-back').click();
   await expect.poll(bound).toBe(own);
+  await openSettings(page, 'general');
+  await page.getByTestId('register-choice-demo-front-counter').click();
+  await page.getByTestId('settings-back').click();
+  await expect.poll(bound).toBe('demo-front-counter');
+  // The till opens the register it is now bound to.
+  await openRegister(page);
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('register-choice-demo-front-counter-status')).toContainText('Open since');
+  await expect(page.getByTestId('register-choice-own-status')).toHaveCount(0);
+  // A live session holds the till to its register.
+  await page.getByTestId('register-choice-own').click();
+  await expect(page.getByTestId('register-choice-refused')).toHaveText('Close the register first');
+  await expect(page.getByTestId('register-choice-demo-front-counter')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(bound).toBe('demo-front-counter');
 });
 
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
