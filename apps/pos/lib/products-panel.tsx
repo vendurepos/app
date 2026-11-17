@@ -23,8 +23,9 @@ function EditField({ testID, label, value, prefix, keyboardType, disabled, onSav
   }
   return <Input disabled={disabled} className="h-9 w-24">
     {prefix ? <Input.Left><Text className="mr-1 text-sm text-muted-foreground">{prefix}</Text></Input.Left> : null}
+    {/* min-w-0: a web <input> has an intrinsic ~20ch width and will not shrink into the 96 px box without it. */}
     <InputField testID={testID} accessibilityLabel={label} value={draft ?? value} onChangeText={setDraft}
-      onBlur={commit} onSubmitEditing={commit} keyboardType={keyboardType} className="text-right" />
+      onBlur={commit} onSubmitEditing={commit} keyboardType={keyboardType} className="min-w-0 text-right" />
   </Input>;
 }
 
