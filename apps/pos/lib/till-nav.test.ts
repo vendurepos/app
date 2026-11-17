@@ -6,6 +6,7 @@ describe('tillNavEntries', () => {
     expect(tillNavEntries({ ordersShown: false, customersShown: true, registerShown: false, rejected: 0 })).toEqual([
       { id: 'pos', label: 'POS' },
       { id: 'products', label: 'Products' },
+      { id: 'notifications', label: 'Notifications', group: 'bottom' },
       { id: 'health', label: 'Store health', group: 'bottom' },
       { id: 'settings', label: 'Settings', group: 'bottom' },
       { id: 'support', label: 'Support', group: 'bottom' },
@@ -20,6 +21,7 @@ describe('tillNavEntries', () => {
       { id: 'customers', label: 'Customers' },
       { id: 'reports', label: 'Reports' },
       { id: 'register', label: 'Register' },
+      { id: 'notifications', label: 'Notifications', group: 'bottom' },
       { id: 'health', label: 'Store health', group: 'bottom' },
       { id: 'settings', label: 'Settings', group: 'bottom' },
       { id: 'support', label: 'Support', group: 'bottom' },
@@ -29,7 +31,9 @@ describe('tillNavEntries', () => {
 
   it('leaves Customers out for a role that cannot read customers', () => {
     expect(tillNavEntries({ ordersShown: true, customersShown: false, registerShown: false, rejected: 0 }).map(entry => entry.id))
-      .toEqual(['pos', 'products', 'orders', 'reports', 'health', 'settings', 'support']);
+      .toEqual(['pos', 'products', 'orders', 'reports', 'notifications', 'health', 'settings', 'support']);
+    expect(tillNavEntries({ ordersShown: true, customersShown: false, registerShown: false, rejected: 0, notices: 1 }).find(entry => entry.id === 'notifications'))
+      .toEqual({ id: 'notifications', label: 'Notifications', group: 'bottom', badge: 1 });
   });
 });
 
@@ -39,10 +43,17 @@ describe('activeTillNav', () => {
     expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: true })).toBe('register');
     expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: true, healthOpen: true })).toBe('health');
     expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: false, registerOpen: true })).toBe('orders');
+    expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: false, registerOpen: true, notificationsOpen: true })).toBe('notifications');
     expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: true, registerOpen: true })).toBe('reports');
     expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: true, registerOpen: true })).toBe('orders');
     expect(activeTillNav({ ordersOpen: false, productsOpen: true, customersOpen: true, reportsOpen: false, registerOpen: true })).toBe('products');
     expect(activeTillNav({ ordersOpen: false, customersOpen: true, reportsOpen: true, registerOpen: true })).toBe('customers');
     expect(activeTillNav({ ordersOpen: true, customersOpen: true, reportsOpen: false, registerOpen: false })).toBe('orders');
+  });
+
+  it('lights Settings while its panel is open, under Notifications only', () => {
+    expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: true, settingsOpen: true })).toBe('settings');
+    expect(activeTillNav({ ordersOpen: false, customersOpen: false, reportsOpen: false, registerOpen: false, settingsOpen: true, notificationsOpen: true })).toBe('notifications');
+    expect(activeTillNav({ ordersOpen: true, customersOpen: false, reportsOpen: false, registerOpen: false, settingsOpen: false })).toBe('orders');
   });
 });

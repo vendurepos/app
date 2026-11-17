@@ -7,17 +7,17 @@ import {
 import { formatMoney } from '@tallyui/core';
 import type { MovementType, PosOrder, PosRefundCollection, useRegisterSession } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
-import { CashIcon, CustomersIcon, HealthIcon, OrdersIcon, PosIcon, ProductsIcon, ReportsIcon, SettingsIcon, SupportIcon } from './nav-icons';
+import { BellIcon, CashIcon, CustomersIcon, HealthIcon, OrdersIcon, PosIcon, ProductsIcon, ReportsIcon, SettingsIcon, SupportIcon } from './nav-icons';
 import type { TillNavEntry, TillNavId } from './till-nav';
 import { openSince } from './open-since';
 import { useFreshList } from './use-fresh-list';
 import { cashierSalesToday } from './till-reports';
 
 const GLYPH: Record<TillNavId, typeof PosIcon> = {
-  pos: PosIcon, products: ProductsIcon, orders: OrdersIcon, customers: CustomersIcon, reports: ReportsIcon, health: HealthIcon, register: CashIcon, settings: SettingsIcon, support: SupportIcon,
+  pos: PosIcon, products: ProductsIcon, orders: OrdersIcon, customers: CustomersIcon, reports: ReportsIcon, notifications: BellIcon, health: HealthIcon, register: CashIcon, settings: SettingsIcon, support: SupportIcon,
 };
 // The ids the e2e specs press for the doors the nav took over. Register's stays on the bar's door, which phones show too.
-const DOOR_TEST_ID: Partial<Record<TillNavId, string>> = { products: 'products-open', orders: 'orders-open', customers: 'customers-open', reports: 'reports-open', health: 'store-health-open', settings: 'settings-open', support: 'support-open' };
+const DOOR_TEST_ID: Partial<Record<TillNavId, string>> = { products: 'products-open', orders: 'orders-open', customers: 'customers-open', reports: 'reports-open', notifications: 'notifications-open', health: 'store-health-open', settings: 'settings-open', support: 'support-open' };
 // The quick-start guide on the marketing site's docs (the demo banner's Quick start link).
 const SUPPORT_QUICKSTART_URL = 'https://vendurepos.com/docs/quick-start';
 // The app repo's GitHub issues, where a merchant reports a problem.

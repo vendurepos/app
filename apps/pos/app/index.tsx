@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
-import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
+import { Redirect, Stack, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import {
   AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OpenSaleTabs, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
@@ -13,6 +13,7 @@ import {
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
+import { SettingsPanel } from '../components/settings-panel';
 import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
 import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
@@ -62,6 +63,8 @@ import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health'
 import { SyncNowControl } from '../lib/sync-now-control';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
+import { NotificationsSheet } from '../lib/notifications-sheet';
+import { tillNotices } from '../lib/notices';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
 import { useTypedApproval } from '../lib/typed-approval';
@@ -100,11 +103,11 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const { width, height } = useWindowDimensions();
   const wide = width >= WIDE_MIN_WIDTH;
   const framePhone = !wide || height < FRAME_WIDE_MIN_HEIGHT;
-  const router = useRouter();
   const catalogue = useCatalogue(session);
   const customersShown = useCustomersReadable(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
+  const notices = tillNotices({ capabilities: saleSettings.capabilities });
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [ordersScope, setOrdersScope] = useState<OrdersScope>('store');
@@ -112,6 +115,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [customersOpen, setCustomersOpen] = useState(false);
   const [productsOpen, setProductsOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
@@ -210,17 +215,18 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const store = storeLabel(session);
   const sync = <SyncNowControl lastSyncedAt={catalogue.lastSyncedAt} outboxes={[outbox, registerOutbox]} />;
-  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setProductsOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); };
+  const closeCoveringPanels = () => { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setProductsOpen(false); setHealthOpen(false); setRegisterOpen(false); setClosuresOpen(false); setCashierOpen(false); setSupportOpen(false); setNotificationsOpen(false); setSettingsOpen(false); };
   // A scan (onClosePanels) and the rail's Sale tap close what covers the sale and drop the open order (Front desk, 2026-11-15).
   const closePanels = () => { closeCoveringPanels(); setOpenOrder(null); };
   const navigate = (id: string) => {
-    if (id === 'settings') router.push('/settings');
+    if (id === 'settings') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setSettingsOpen((open) => !open); }
     else if (id === 'support') setSupportOpen(true);
-    else if (id === 'products') { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setProductsOpen((open) => !open); }
-    else if (id === 'orders') { setProductsOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
-    else if (id === 'customers') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setHealthOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
-    else if (id === 'reports') { setProductsOpen(false); setOrdersOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
-    else if (id === 'health') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setOpenOrder(null); setHealthOpen((open) => !open); }
+    else if (id === 'notifications') setNotificationsOpen(true);
+    else if (id === 'products') { setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setSettingsOpen(false); setOpenOrder(null); setProductsOpen((open) => !open); }
+    else if (id === 'orders') { setProductsOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setSettingsOpen(false); setOpenOrder(null); setOrdersOpen((open) => !open); }
+    else if (id === 'customers') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setHealthOpen(false); setSettingsOpen(false); setOpenOrder(null); setCustomersOpen((open) => !open); }
+    else if (id === 'reports') { setProductsOpen(false); setOrdersOpen(false); setCustomersOpen(false); setHealthOpen(false); setSettingsOpen(false); setOpenOrder(null); setReportsOpen((open) => !open); }
+    else if (id === 'health') { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setSettingsOpen(false); setOpenOrder(null); setHealthOpen((open) => !open); }
     else if (id === 'register') setRegisterOpen(true);
     else closePanels();
   };
@@ -251,7 +257,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             <Text testID="register-closing-pending" className="text-xs text-muted-foreground">Closing — waiting for {countOrders(closingWaiting)}</Text>
           ) : null}
           {outbox.state.rejected ? (
-            <Button testID="orders-rejected" variant="ghost" size="sm" className="h-7 px-2" onPress={() => { setOrdersScope('till'); setOrdersOpen(true); }}>
+            <Button testID="orders-rejected" variant="ghost" size="sm" className="h-7 px-2" onPress={() => { setOrdersScope('till'); setSettingsOpen(false); setOrdersOpen(true); }}>
               <Text className="text-xs text-muted-foreground">
                 {countOrders(outbox.state.rejected)} {outbox.state.rejected === 1 ? 'needs' : 'need'} attention
               </Text>
@@ -266,7 +272,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
     // rail, which takes no dataSet, is hidden by the shell's print variant.
     <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
-      rejected: outbox.state.rejected ?? 0 }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown })}
+      rejected: outbox.state.rejected ?? 0, notices: notices.length }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown, notificationsOpen, settingsOpen })}
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
@@ -278,6 +284,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         {framePhone ? sync : null}
       </CashierSheet>
       <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
+      <NotificationsSheet open={notificationsOpen} onOpenChange={setNotificationsOpen} notices={notices} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
         <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
@@ -332,8 +339,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
+      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
-      <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen ? { display: 'none' } : undefined}>
+      <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
           {saleSettings.status === 'ready' ? (
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
@@ -342,8 +350,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen}
-                  onClosePanels={closePanels}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || supportOpen || notificationsOpen}
+                  onClosePanels={closePanels} settingsOpen={settingsOpen}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} />
               </TaxProvider>
@@ -409,7 +417,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing, overSheet, drafts, taxClasses, onRebindRegister,
+  registerClosing, overSheet, drafts, taxClasses, onRebindRegister, settingsOpen,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -419,14 +427,16 @@ function Sale({
   onRebindRegister(): void;
   /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
   panelOpen: boolean; onClosePanels(): void;
+  /** The Settings panel covers the sale: no scan reaches it, and its close re-reads the till's settings. */
+  settingsOpen: boolean;
   /** The register is counting, closing or showing its Z. */
   registerClosing: boolean;
   /** The Z sheet shows: the scan notice goes over it. */
   overSheet: boolean;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
-  const catalogueView = useCatalogueView();
-  const catalogueFilters = useCatalogueFilters();
+  const catalogueView = useCatalogueView(settingsOpen);
+  const catalogueFilters = useCatalogueFilters(settingsOpen);
   const typedApproval = useTypedApproval();
   const identity = tillIdentity(session);
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
@@ -549,19 +559,22 @@ function Sale({
     add(entry, panelOpen || !onProducts, true);
     return true;
   }
-  // The till stays mounted under Settings (router.push), and a scan there must not add to a sale nobody can see: the
-  // wedge listens only while the till screen is focused.
+  // The wedge listens only while the till is focused and Settings does not cover it, so a scan in Settings adds nothing
+  // to a sale nobody can see. The settings chosen there apply when the till comes back into focus (the /settings route)
+  // or the Settings panel closes.
   const [cartSide, setCartSide] = useState(() => loadCartSide());
   const [focused, setFocused] = useState(true);
+  const rereadSettings = useCallback(() => {
+    setCartSide(loadCartSide());
+    setOpenOrdersPosition(loadOpenOrdersPosition());
+  }, []);
   useFocusEffect(useCallback(() => {
     setFocused(true);
-    // Settings is pushed over the till, so the cart side chosen there applies on the way back.
-    setCartSide(loadCartSide());
-    // Settings is pushed over the till, so the open-orders position chosen there applies on the way back.
-    setOpenOrdersPosition(loadOpenOrdersPosition());
+    rereadSettings();
     return () => setFocused(false);
-  }, []));
-  useWedgeScanner(onScan, focused);
+  }, [rereadSettings]));
+  useEffect(() => { if (!settingsOpen) rereadSettings(); }, [rereadSettings, settingsOpen]);
+  useWedgeScanner(onScan, focused && !settingsOpen);
   const camera = useCameraScanner(onScan);
   const catalogueHidden = (!wide && tab === 'cart') || (wide && stage.kind === 'tender');
   const [cameraHeight] = useState(() => loadCameraPanelHeight());
