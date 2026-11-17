@@ -332,6 +332,26 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Store health shows Ready to sell, nothing waiting and the products on this device, and a scan closes it and adds', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
+  await expect(page.getByTestId('store-health-waiting')).toHaveText('0');
+  await expect(page.getByTestId('store-health-count-products')).toHaveText(String(CATALOGUE.length));
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -463,6 +483,11 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
   await expect(page.getByTestId('hero-median')).toHaveText('€9.52');
   await expect(page.getByTestId('hero-largest')).toHaveText('€9.52');
+  await page.getByTestId('reports-print-summary').click();
+  const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(summary.slice(0, 1)).toEqual(['Sales summary']);
+  expect(summary).toEqual(expect.arrayContaining(['Total €9.52', 'Orders 1', 'Items 1', 'Payments']));
+  await expect(page.getByTestId('reports-print-error')).toHaveCount(0);
   await expect(page.getByTestId('reports-close')).toHaveCount(0);
   await expect(page.getByTestId('reports-panel')).not.toContainText('Back to sale');
   await expect(page.getByTestId('sales-hero')).not.toContainText('—');
@@ -1041,7 +1066,7 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
   const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
-  expect(download.suggestedFilename()).toMatch(/^closures-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/^closures-(\d{4}-\d{2}-\d{2})-to-\1\.csv$/);
   const csv = fs.readFileSync(await download.path(), 'utf8');
   expect(csv.startsWith('"Business day","Closure","Register","Store","Opened","Closed","Closed by",')).toBe(true);
   expect(csv).toContain('"100.00","100.00","0.00 Exact"');
@@ -1282,6 +1307,40 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
 });
 
+test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'printing');
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('sale-complete-toast')).toBeVisible();
+  await expect(page.getByTestId('sale-complete-toast')).toHaveText('Sale complete');
+  await expect(page.getByTestId('receipt')).toHaveCount(0);
+  await expect(page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+
+  await openSettings(page, 'printing');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('settings-back').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await page.getByTestId('new-sale').click();
+});
+
 test('a second tab is told the till is open in another tab, and opens after the first closes and it reloads', async ({ page, context }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -1344,6 +1403,32 @@ test('a demo cashier takes 10 % off a line on its price keypad, and lines keep t
   await expect(page.getByTestId('quantity-popover-action-price')).toHaveCount(0);
   await page.getByTestId('quantity-popover-action-remove').click();
   await expect(line).toHaveCount(0);
+});
+
+test('Settings › General sets the quick discounts the price keypad offers', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('quick-discounts')).toHaveValue('5, 10, 15');
+  await page.getByTestId('quick-discounts').fill('0, 10');
+  await page.getByTestId('quick-discounts-save').click();
+  await expect(page.getByTestId('quick-discounts-error')).toBeVisible();
+  await page.getByTestId('quick-discounts').fill('50 20');
+  await page.getByTestId('quick-discounts-save').click();
+  await expect(page.getByTestId('quick-discounts-saved')).toBeVisible();
+  await expect(page.getByTestId('quick-discounts')).toHaveValue('50, 20');
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const line = page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG');
+  await line.getByTestId('price-popover-trigger').click();
+  await expect(page.getByTestId('price-discount-50')).toBeVisible();
+  await expect(page.getByTestId('price-discount-20')).toBeVisible();
+  await expect(page.getByTestId('price-discount-10')).toHaveCount(0);
+  await page.getByTestId('price-discount-50').click();
+  await page.getByTestId('price-popover-apply').click();
+  await expect(line).toContainText('€4.00');
 });
 
 test('at phone width the price keypad folds into the line\'s quantity keypad', async ({ page }) => {
@@ -1629,5 +1714,27 @@ test("the In Stock pill is on by default, hides the shelf's sold-out products an
   await expect(carafe).toContainText('Out of Stock');
 
   await pill.click();
+  await expect(carafe).toHaveCount(0);
+});
+
+test('Settings › Products shows out-of-stock products: the In Stock pill starts off and follows the setting', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const toggle = page.getByTestId('show-out-of-stock-toggle');
+  const pill = page.getByTestId('filter-chip-inStock');
+  const carafe = page.getByTestId('product-tile-Glass Carafe');
+  await page.getByTestId('settings-open').click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'false');
+  await expect(carafe).toBeVisible();
+  await page.getByTestId('settings-open').click();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('settings-back').click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'true');
   await expect(carafe).toHaveCount(0);
 });

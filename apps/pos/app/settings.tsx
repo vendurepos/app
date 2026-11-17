@@ -5,11 +5,13 @@ import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, VStack,
 } from '@tallyui/components';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
+import { loadAutoShowReceipt, saveAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { CartSideSettings } from '../lib/cart-side-settings';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
 import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
+import { formatQuickDiscounts, loadQuickDiscounts, parseQuickDiscounts, saveQuickDiscounts } from '../lib/quick-discounts-setting';
 import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { sessionContext } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -26,10 +28,13 @@ export default function SettingsScreen() {
   const [saved, setSaved] = useState<boolean | null>(null);
   const [varianceText, setVarianceText] = useState(() => formatVarianceLimit(loadVarianceLimitMinor()));
   const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
+  const [quickText, setQuickText] = useState(() => formatQuickDiscounts(loadQuickDiscounts()));
+  const [quickSaved, setQuickSaved] = useState<boolean | null>(null);
   const [canEditPrice, setCanEditPrice] = useState(() => loadPriceEditAllowed());
   const [defaultCustomer, setDefaultCustomer] = useState(() => session ? loadDefaultCustomer(session) : null);
   const [pickingCustomer, setPickingCustomer] = useState(false);
   const [autoPrint, setAutoPrint] = useState(() => loadAutoPrint());
+  const [autoShowReceipt, setAutoShowReceipt] = useState(() => loadAutoShowReceipt());
   const connector = useCatalogueConnector(session);
   const [section, setSection] = useState<SettingsSectionId>('general');
   const sections = settingsSections({ printing: Platform.OS === 'web' });
@@ -114,6 +119,19 @@ export default function SettingsScreen() {
           <SettingsRow label="Price changes" description="Let cashiers change a line's price in the cart."
             action={<Switch testID="price-edit-toggle" accessibilityLabel="Price changes" checked={canEditPrice}
               onCheckedChange={(on) => { savePriceEditAllowed(on); setCanEditPrice(on); }} />} />
+          <VStack space="sm" className="mt-4">
+            <Label nativeID="quick-discounts-label">Quick discounts (%)</Label>
+            <Input><InputField testID="quick-discounts" value={quickText} onChangeText={setQuickText}
+              accessibilityLabel="Quick discounts (%)" accessibilityLabelledBy="quick-discounts-label" /></Input>
+            <Text className="text-sm text-muted-foreground">{"Offered on a line's price keypad, such as 5, 10, 15. Leave empty for none."}</Text>
+            <Button testID="quick-discounts-save" onPress={() => {
+              const result = parseQuickDiscounts(quickText);
+              if (result.ok) { saveQuickDiscounts(result.values); setQuickText(formatQuickDiscounts(result.values)); }
+              setQuickSaved(result.ok);
+            }}><Text>Save</Text></Button>
+            {quickSaved === true && <Text testID="quick-discounts-saved">Saved.</Text>}
+            {quickSaved === false && <Text testID="quick-discounts-error">Enter up to 6 whole percents from 1 to 100, such as 5, 10, 15.</Text>}
+          </VStack>
         </CardContent>
       </Card>
       <TileSizeSettings />
@@ -161,6 +179,9 @@ export default function SettingsScreen() {
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Printing</CardTitle></CardHeader>
           <CardContent>
+            <SettingsRow label="Show receipt after each sale" description="When off, a finished sale goes straight to a new one."
+              action={<Switch testID="auto-show-receipt-toggle" accessibilityLabel="Show receipt after each sale" checked={autoShowReceipt}
+                onCheckedChange={(on) => { saveAutoShowReceipt(on); setAutoShowReceipt(on); }} />} />
             <SettingsRow label="Print after each sale" description="Open the print dialog when a sale's receipt shows."
               action={<Switch testID="auto-print-toggle" accessibilityLabel="Print after each sale" checked={autoPrint}
                 onCheckedChange={(on) => { saveAutoPrint(on); setAutoPrint(on); }} />} />
