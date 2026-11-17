@@ -332,6 +332,32 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("the Products panel lists the catalogue's variants with SKU, price and stock, searches them, and a scan closes it and adds", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  const variants = CATALOGUE.flatMap(product => product.variants).length;
+  await expect(page.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants} products`);
+  const mug = panel.getByTestId(`product-row-${MUG_VARIANT_ID}`);
+
+  await page.getByTestId('products-search').fill('TALLY-MUG');
+  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
+  await expect(page.getByTestId('products-count')).toHaveText('Showing 1 of 1 products');
+  for (const text of ['Tally Fixture Mug', 'TALLY-MUG', '€8.00', String(MUG_SEED_STOCK)]) await expect(mug).toContainText(text);
+
+  await page.getByTestId('products-open').click();
+  await expect(panel).toHaveCount(0);
+  await page.getByTestId('products-open').click();
+  await expect(panel).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test('Store health shows Ready to sell, nothing waiting and the products on this device, and a scan closes it and adds', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -897,6 +923,28 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
   }).toPass();
 });
 
+test('Settings › General puts the cart on the left or the right of the till', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const cartLeft = async () => {
+    const cart = await page.getByTestId('till-cart').boundingBox();
+    const catalogue = await page.getByTestId('till-catalogue').boundingBox();
+    return cart && catalogue ? cart.x < catalogue.x : null;
+  };
+  await expect.poll(cartLeft).toBe(false);
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('cart-side-right')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('cart-side-left').click();
+  await expect(page.getByTestId('cart-side-left')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(cartLeft).toBe(true);
+  await openSettings(page, 'general');
+  await page.getByTestId('cart-side-right').click();
+  await page.getByTestId('settings-back').click();
+  await expect.poll(cartLeft).toBe(false);
+});
+
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -1008,17 +1056,26 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await expect(page.getByTestId('cashier-sheet')).toHaveCount(0);
 });
 
-test('the cashier sheet shows the shift: register and since, session sales, the drawer, Pay in and Close register', async ({ page }) => {
+test('the cashier sheet shows the register and since in its header, your sales today and the drawer, Pay in and Close register', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page);
 
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
   await page.getByTestId('register-bar-cashier').click();
   const sheet = page.getByTestId('cashier-sheet');
   await expect(sheet.getByTestId('cashier-shift-since')).toHaveText(/^Register · open since \d{2}:\d{2}$/);
-  await expect(sheet.getByTestId('cashier-shift-sales')).toHaveText('Session sales €0.00 · 0 sales');
-  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €100.00');
+  await expect(sheet.getByTestId('cashier-shift-sales-today')).toHaveText('€9.52');
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('€109.52');
 
   await sheet.getByTestId('cashier-shift-pay-in').click();
   const movement = page.getByTestId('movement-sheet');
@@ -1026,7 +1083,8 @@ test('the cashier sheet shows the shift: register and since, session sales, the 
   await movement.getByTestId('movement-reason').fill('Change');
   await movement.getByTestId('movement-confirm').click();
   await expect(movement).toHaveCount(0);
-  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('In the drawer €105.00');
+  await expect(sheet.getByTestId('cashier-shift-drawer')).toHaveText('€114.52');
+  await expect(sheet.getByTestId('cashier-shift-sales-today')).toHaveText('€9.52');
 
   await sheet.getByTestId('cashier-shift-close-register').click();
   await expect(sheet).toHaveCount(0);
@@ -1057,7 +1115,7 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
   const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
-  expect(download.suggestedFilename()).toMatch(/^closures-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/^closures-(\d{4}-\d{2}-\d{2})-to-\1\.csv$/);
   const csv = fs.readFileSync(await download.path(), 'utf8');
   expect(csv.startsWith('"Business day","Closure","Register","Store","Opened","Closed","Closed by",')).toBe(true);
   expect(csv).toContain('"100.00","100.00","0.00 Exact"');
@@ -1296,6 +1354,40 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await expect(page.getByTestId('receipt')).toBeVisible();
   await page.getByTestId('receipt-print').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
+});
+
+test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'printing');
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('sale-complete-toast')).toBeVisible();
+  await expect(page.getByTestId('sale-complete-toast')).toHaveText('Sale complete');
+  await expect(page.getByTestId('receipt')).toHaveCount(0);
+  await expect(page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+
+  await openSettings(page, 'printing');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('settings-back').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await page.getByTestId('new-sale').click();
 });
 
 test('a second tab is told the till is open in another tab, and opens after the first closes and it reloads', async ({ page, context }) => {
@@ -1652,6 +1744,29 @@ test('a demo cashier keeps two sales open as tabs under the cart and switches be
   await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
   await expect(page.getByTestId('cart-line-FIL-500')).toHaveCount(0);
   await expect(coffeeTab).toHaveAttribute('aria-selected', 'false');
+});
+
+test('Settings › General puts the open orders at the top or the foot of the cart', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const tabsOnTop = async () => {
+    const tabs = await page.getByTestId('open-sale-tabs').boundingBox();
+    const customer = await page.getByTestId('customer-row').boundingBox();
+    return tabs && customer ? tabs.y < customer.y : null;
+  };
+  await expect.poll(tabsOnTop).toBe(false);
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('open-orders-bottom')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('open-orders-top').click();
+  await expect(page.getByTestId('open-orders-top')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(tabsOnTop).toBe(true);
+  await openSettings(page, 'general');
+  await page.getByTestId('open-orders-bottom').click();
+  await page.getByTestId('settings-back').click();
+  await expect.poll(tabsOnTop).toBe(false);
 });
 
 test("the In Stock pill is on by default, hides the shelf's sold-out products and shows them when tapped off", async ({ page }) => {

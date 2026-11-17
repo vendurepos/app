@@ -48,6 +48,15 @@ export function closureHistoryCsv(rows: readonly Closure[], options: {
   return exportCsv(listedClosures(rows, options), minorUnitDigits(options.currency), (key) => CSV_LABELS[key] ?? key, {}, options.store);
 }
 
+/** The closures CSV's file name: the listed closures' oldest to newest close date in the store's zone; today's when none. */
+export function closureCsvFileName(rows: readonly Closure[], options: {
+  registerId: string; storeKey: string; timezone: string; today: string;
+}): string {
+  const days = listedClosures(rows, options).map((row) => formatClosureDate(row.closed_at, { timezone: options.timezone, locale: 'en' }).date_ymd).sort();
+  if (days.length === 0) return `closures-${options.today}.csv`;
+  return `closures-${days[0]}-to-${days[days.length - 1]}.csv`;
+}
+
 export function zCopyLines(closure: Closure, context: { store: string; currency: string; timezone: string; printedAt: string }): string[] {
   const [title, ...rest] = zReportLines(closure, context);
   return [title, `Copy · printed ${formatClosureDate(context.printedAt, { timezone: context.timezone, locale: 'en' }).datetime}`, ...rest];
