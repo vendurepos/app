@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { initTenderState, tenderReducer } from '@tallyui/pos';
-import { evenSplitPlan, SPLIT_WAYS } from './tender-split';
+import { evenSplitPlan, fixedSplitPlan, SPLIT_WAYS } from './tender-split';
 
 vi.mock('@tallyui/components', () => ({}));
 
@@ -39,4 +39,34 @@ it('clears the plan and pre-types the balance', () => {
   const cleared = tenderReducer(split, { type: 'clear-plan', balanceMinor: 952 });
   expect(cleared.plan).toBeNull();
   expect(cleared.entryMinor).toBe(952);
+});
+
+it('builds a fixed plan from the typed amount', () => {
+  expect(fixedSplitPlan([], '5.00', 'EUR', 952)).toEqual({ kind: 'fixed', firstMinor: 500, title: null, from: 0 });
+  expect(fixedSplitPlan([], ' 5 ', 'EUR', 952)).toMatchObject({ firstMinor: 500 });
+  expect(fixedSplitPlan([], '0.5', 'EUR', 952)).toMatchObject({ firstMinor: 50 });
+});
+
+it('starts a fixed plan after the captured legs only', () => {
+  expect(fixedSplitPlan([{ status: 'captured' }, { status: 'voided' }, {}], '1', 'EUR', 952)?.from).toBe(2);
+});
+
+it.each(['', 'abc', '-1', '0', '0.00', '5.001', '9.52', '10'])('has no fixed plan for %j at a balance of 952', (text) => {
+  expect(fixedSplitPlan([], text, 'EUR', 952)).toBeNull();
+});
+
+it("follows the currency's exponent", () => {
+  expect(fixedSplitPlan([], '500', 'JPY', 952)).toMatchObject({ firstMinor: 500 });
+  expect(fixedSplitPlan([], '5.5', 'JPY', 952)).toBeNull();
+});
+
+it('lets the reducer pre-type the fixed amount, then the rest', () => {
+  const state = initTenderState({ methodId: 'cash', balanceMinor: 952 });
+  const split = tenderReducer(state, { type: 'set-plan', plan: fixedSplitPlan([], '5.00', 'EUR', 952)!, balanceMinor: 952 });
+  expect(split.entryMinor).toBe(500);
+  expect(split.splitView).toBe(false);
+  const next = tenderReducer(split, {
+    type: 'tender-recorded', rowsSinceFrom: [{ title: 'cash', amountMinor: 500 }], balanceMinor: 452,
+  });
+  expect(next.entryMinor).toBe(452);
 });
