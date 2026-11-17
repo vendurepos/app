@@ -19,6 +19,8 @@ export const MIN_ORDER_CREATE = 4;
 // The plugin takes fee and shipping charges from order.create 5 (docs/adr/0005-order-create-v5.md), so the cart
 // offers them only from it.
 export const MIN_ORDER_CREATE_CHARGES = 5;
+/** order.create 7 (ADR-083) carries the sale's customer note; Order details offers the note only when the store accepts it. */
+export const MIN_ORDER_CREATE_NOTE = 7;
 // A sale is taken only inside an open register session, synced as the plugin's register commands (vendurepos #79):
 // a store without them has no server record of the drawer, so it waits as `plugin` too.
 export const MIN_REGISTER = 1;

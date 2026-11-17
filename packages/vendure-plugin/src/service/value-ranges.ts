@@ -9,6 +9,8 @@ export const MAX_STRING = 255;
 // The customerId bound both plugins share; a longer one is refused as invalid_payload (#43).
 export const CUSTOMER_ID_MAX = 64;
 export const SESSION_ID_MAX = 36; // a UUID's length, the contract's sessionId bound
+// TallyUI core's ORDER_NOTE_MAX (ADR-083): order.create 7's note, in UTF-16 code units.
+export const ORDER_NOTE_MAX = 1000;
 
 /**
  * The largest amount the store's money columns hold (N2): int4 for the default MoneyStrategy, and
@@ -39,6 +41,10 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor', 'discountMinor'] as const) minor(payload[field], field, maxMoney);
   for (const field of ['clientOrderId', 'registerId', 'cashierRef'] as const) text(payload[field], field);
   text(payload.sessionId, 'sessionId', SESSION_ID_MAX);
+  // P2.11a: order.create 7's note is a non-empty string of at most ORDER_NOTE_MAX.
+  const note = (payload as { note?: unknown }).note;
+  if (note !== undefined && (typeof note !== 'string' || !note.length)) errors.push('note: expected a non-empty string');
+  else text(note, 'note', ORDER_NOTE_MAX);
   // #43 (Front desk, 2026-09-30): an over-long customerId is malformed; the message is TallyUI core's.
   // The vendored payload-shape.ts checks only a non-empty string (its comment there predates #43);
   // the length bound is refused here, after the replay read.
@@ -67,6 +73,13 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
     minor(line.unitPriceMinor, `${path}.unitPriceMinor`, MAX_INT4);
     minor(line.discountMinor, `${path}.discountMinor`, maxMoney);
     text(line.clientLineId, `${path}.clientLineId`);
+    // v6's display-only fields (P2.11a): checked here, read by nothing.
+    const { regularUnitPriceMinor, attributes } = line as unknown as { regularUnitPriceMinor?: unknown; attributes?: unknown };
+    minor(regularUnitPriceMinor, `${path}.regularUnitPriceMinor`, Number.MAX_SAFE_INTEGER);
+    if (attributes !== undefined && (typeof attributes !== 'object' || attributes === null || Array.isArray(attributes)
+      || Object.values(attributes).some(value => typeof value !== 'string' || value.length > MAX_STRING))) {
+      errors.push(`${path}.attributes: expected an object of strings of at most ${MAX_STRING} characters`);
+    }
   });
   payload.payments.forEach((payment, index) => {
     const path = `payments[${index}]`;

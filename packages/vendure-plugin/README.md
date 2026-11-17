@@ -1,7 +1,7 @@
 # @vendurepos/plugin
 
 The VendurePOS server plugin for [Vendure](https://vendure.io). It records TallyUI's
-`order.create` command (versions 1–5) as a Vendure order, in one database transaction per
+`order.create` command (versions 1–7) as a Vendure order, in one database transaction per
 command, with an idempotency ledger. The design is ADR 0002
 (`docs/adr/0002-order-path-vendure-plugin.md`), proven by spike S1
 (`docs/spikes/s1-order-recipe.md`).
@@ -192,6 +192,12 @@ vendureDashboardPlugin({
 - "POS no tax" is a plugin-owned tax category for untaxed lines.
 - `taxClass` is matched to a tax category by name, then id. Without one, the store's **default** category is used. If none is marked default, the fee is refused, so mark one in Settings → Tax categories.
 - Run the bundled migration `TallyPosV51790900000000`, or generate your own, before starting 0.3.0.
+
+### order.create versions 6 and 7: the sale note
+
+Version 7 adds the sale's `note` (at most 1000 characters). It is written to the order as one public order note,
+which the order's history in the Admin shows. Version 6's coupons and Any picks are refused as `invalid_payload`;
+its regular prices and line attributes are accepted for display and change no amount.
 
 ### Register version 2: resume, take-over and unknown sessions
 

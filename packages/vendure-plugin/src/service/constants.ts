@@ -7,8 +7,10 @@ export const TALLY_CUSTOM_ITEM_SKU = 'TALLY-CUSTOM-ITEM';
 // ADR 0005 ruling (a): the plugin-owned category for untaxed custom lines.
 export const TALLY_NO_TAX_CATEGORY = 'POS no tax';
 
-// The order.create versions the server accepts (the plugin's own list; nothing is vendored for it).
-export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5];
+// The order.create versions the server accepts (the plugin's own list; nothing is vendored for it). 6 (ADR-077) is
+// accepted with coupons and Any picks refused and regular prices and line attributes display only; 7 (ADR-083) adds
+// the sale note, kept as a public Vendure order note (P2.11a).
+export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7];
 // Fees, shipping and custom lines are honoured (ADR 0005), so /tally/v1/info advertises every accepted version.
 export const ADVERTISED_ORDER_CREATE_VERSIONS: readonly number[] = ORDER_CREATE_VERSIONS;
 

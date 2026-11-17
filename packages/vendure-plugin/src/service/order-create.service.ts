@@ -827,6 +827,10 @@ export class OrderCreateService {
       order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate });
     }
     await this.connection.getRepository(ctx, Order).save(order);
+    // P2.11a: order.create 7's sale note, as Vendure's own public order note, in the sale's transaction. A replay never
+    // reaches the recipe (the replay read answers it), and a rerun rolls this back with the rest, so it is written once.
+    const note = (payload as OrderCreatePayload & { note?: string }).note;
+    if (command.version >= 7 && note !== undefined) await this.orders.addNoteToOrder(ctx, { id: order.id, note, isPublic: true });
 
     const fulfillment = unwrap(await this.orders.createFulfillment(ctx, {
       lines: order.lines.map(line => ({ orderLineId: line.id, quantity: line.quantity })),

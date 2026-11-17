@@ -26,7 +26,7 @@ export function tillNavEntries({ ordersShown, customersShown, registerShown, rej
   return entries;
 }
 
-/** The lit item: Notifications, then Orders, then Products, then Customers, then Reports, then Store health, then Register when open, else POS. */
-export function activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen, notificationsOpen }: { ordersOpen: boolean; productsOpen?: boolean; customersOpen: boolean; reportsOpen: boolean; healthOpen?: boolean; registerOpen: boolean; notificationsOpen?: boolean }): TillNavId {
-  return notificationsOpen ? 'notifications' : ordersOpen ? 'orders' : productsOpen ? 'products' : customersOpen ? 'customers' : reportsOpen ? 'reports' : healthOpen ? 'health' : registerOpen ? 'register' : 'pos';
+/** The lit item: Notifications, then Settings, then Orders, then Products, then Customers, then Reports, then Store health, then Register when open, else POS. */
+export function activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen, notificationsOpen, settingsOpen }: { ordersOpen: boolean; productsOpen?: boolean; customersOpen: boolean; reportsOpen: boolean; healthOpen?: boolean; registerOpen: boolean; notificationsOpen?: boolean; settingsOpen?: boolean }): TillNavId {
+  return notificationsOpen ? 'notifications' : settingsOpen ? 'settings' : ordersOpen ? 'orders' : productsOpen ? 'products' : customersOpen ? 'customers' : reportsOpen ? 'reports' : healthOpen ? 'health' : registerOpen ? 'register' : 'pos';
 }
