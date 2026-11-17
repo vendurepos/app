@@ -3,8 +3,7 @@ import { View } from 'react-native';
 import { Button, Card, Text } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import type { useRegisterSession } from '@tallyui/pos';
-
-const pad = (n: number) => String(n).padStart(2, '0');
+import { openSince } from './open-since';
 
 /** v2's Reports drawer card (CHECKLIST 8.1): the open register, float + cash sales = expected in the drawer, Print X-report, and the panel. */
 export function ReportsDrawerCard({ register, currency, cashier, onPrintXReport, onOpenRegister }: {
@@ -27,7 +26,7 @@ export function ReportsDrawerCard({ register, currency, cashier, onPrintXReport,
   return (
     <Card testID="reports-drawer" className="flex-row flex-wrap items-center gap-4 p-4">
       <Text testID="reports-drawer-status" className="font-semibold">
-        {`Register · Open since ${pad(opened.getHours())}:${pad(opened.getMinutes())} · ${cashier}`}
+        {`Register · Open since ${openSince(opened, new Date())} · ${cashier}`}
       </Text>
       {!register.blind && terms ? (
         <View className="flex-row flex-wrap items-center gap-2">

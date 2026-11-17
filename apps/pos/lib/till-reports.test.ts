@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
 import { presetRange, type PosOrder, type PosRefund, type ReportOrder } from '@tallyui/pos';
-import { compareLabel, hourlyGross, initialSalesFilters, reportOptions, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
+import { cashierSalesToday, compareLabel, hourlyGross, initialSalesFilters, reportOptions, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
 
 const timezone = 'Europe/Madrid';
 const today = '2026-11-16T12:00:00.000Z';
@@ -62,6 +62,17 @@ describe('tillSalesFigures', () => {
     const result = figures([order('yesterday', { createdAt: '2026-11-15T12:00:00.000Z' })]);
     expect(result.totals.orderCount).toBe(0);
     expect(result.comparison?.totals.orderCount).toBe(1);
+  });
+});
+
+describe('cashierSalesToday', () => {
+  it('counts only the picked cashier’s sales today, excluding rejected orders', () => {
+    const orders = [
+      order('mine'), order('mine-2', { totalMinor: 500 }), order('theirs', { cashierRef: 'cashier-b' }),
+      order('yesterday', { createdAt: '2026-11-15T12:00:00.000Z' }), order('rejected', { syncStatus: 'rejected' }),
+    ];
+    expect(cashierSalesToday({ orders, refunds: [], cashierRef: 'cashier-a', now: new Date(today), timezone })).toBe(1452);
+    expect(cashierSalesToday({ orders, refunds: [], cashierRef: 'cashier-b', now: new Date(today), timezone })).toBe(952);
   });
 });
 
