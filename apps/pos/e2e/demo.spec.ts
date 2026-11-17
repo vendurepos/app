@@ -463,6 +463,11 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
   await expect(page.getByTestId('hero-median')).toHaveText('€9.52');
   await expect(page.getByTestId('hero-largest')).toHaveText('€9.52');
+  await page.getByTestId('reports-print-summary').click();
+  const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(summary.slice(0, 1)).toEqual(['Sales summary']);
+  expect(summary).toEqual(expect.arrayContaining(['Total €9.52', 'Orders 1', 'Items 1', 'Payments']));
+  await expect(page.getByTestId('reports-print-error')).toHaveCount(0);
   await expect(page.getByTestId('reports-close')).toHaveCount(0);
   await expect(page.getByTestId('reports-panel')).not.toContainText('Back to sale');
   await expect(page.getByTestId('sales-hero')).not.toContainText('—');
