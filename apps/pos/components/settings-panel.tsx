@@ -23,7 +23,7 @@ import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
 /** Settings' sections and cards: a covering panel of the till (CHECKLIST 9.1, the rail stays beside it), and the /settings route. */
-export function SettingsPanel({ session, onClose }: { session: Session; onClose(): void }) {
+export function SettingsPanel({ session, onClose, tillUpdatesPending }: { session: Session; onClose(): void; tillUpdatesPending?: number }) {
   const [text, setText] = useState(() => String(loadScannerMinLength()));
   const [saved, setSaved] = useState<boolean | null>(null);
   const [varianceText, setVarianceText] = useState(() => formatVarianceLimit(loadVarianceLimitMinor()));
@@ -110,7 +110,7 @@ export function SettingsPanel({ session, onClose }: { session: Session; onClose(
       </Card>
       )}
       {section === 'general' && <>
-      <RegisterChoiceSettings session={session} />
+      <RegisterChoiceSettings session={session} tillUpdatesPending={tillUpdatesPending} />
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Prices</CardTitle></CardHeader>
         <CardContent>
