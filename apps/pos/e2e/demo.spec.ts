@@ -1077,6 +1077,18 @@ test('a counting register holds the till to it until it is closed', async ({ pag
   await expect.poll(() => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'))).not.toBe('demo-front-counter');
 });
 
+test('the register panel names the register the till is at', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'general');
+  await page.getByTestId('register-choice-demo-front-counter').click();
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+  await page.getByTestId('register-open-panel').click();
+  await expect(page.getByTestId('register-panel-title')).toHaveText('Front counter');
+});
+
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
