@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
-  BOUND_REGISTER_ID_KEY, bindRegister, boundRegisterId, DEVICE_ID_KEY, deviceId, OWN_REGISTER_ID_KEY, ownRegisterId, rebindRegister,
+  BOUND_REGISTER_ID_KEY, bindRegister, boundRegisterId, DEVICE_ID_KEY, deviceId, DISPLAY_DEVICE_ID_KEY, displayDeviceId,
+  OWN_REGISTER_ID_KEY, ownRegisterId, rebindRegister,
 } from './till-ids';
 
 it('mints the bound register (the drawer) once per device, under its own key, apart from the device id', () => {
@@ -62,4 +63,13 @@ it('moves the own register to the fresh id only when rebinding away from the own
   const rebound = rebindRegister(storage);
   expect(rebound).not.toBe('front-counter');
   expect(ownRegisterId(storage)).toBe(fresh);
+});
+
+it('mints the display device id once, apart from the device id the orders carry', () => {
+  const storage = keyStorage();
+  const display = displayDeviceId(storage);
+  expect(displayDeviceId(storage)).toBe(display);
+  expect(display).not.toBe(deviceId(storage));
+  expect(storage.getItem(DISPLAY_DEVICE_ID_KEY)).toBe(display);
+  expect(DISPLAY_DEVICE_ID_KEY).toBe('vendurepos.display_device_id');
 });

@@ -10,6 +10,9 @@ export const DEVICE_ID_KEY = 'vendurepos.register_id';
 export const BOUND_REGISTER_ID_KEY = 'vendurepos.bound_register_id';
 
 export const deviceId = (storage: IdStorage) => getDeviceId(storage, DEVICE_ID_KEY);
+// The display seam's X-Tally-Device-Id is not bound to the session (plugin README, #304), and the register id is in every order's registerId and every command, which any cashier who reads orders sees: so the display id is a separate random UUID only this till holds (9.8b, desk note 5).
+export const DISPLAY_DEVICE_ID_KEY = 'vendurepos.display_device_id';
+export const displayDeviceId = (storage: IdStorage) => getDeviceId(storage, DISPLAY_DEVICE_ID_KEY);
 export const boundRegisterId = (storage: IdStorage) => getDeviceId(storage, BOUND_REGISTER_ID_KEY);
 
 // The register this till minted for itself, kept once the till binds to another (Settings › General, CHECKLIST 6.6).
