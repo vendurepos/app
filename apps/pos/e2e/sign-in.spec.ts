@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { devices, expect, test, type Page, type Route } from '@playwright/test';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 import { openRegister } from './register';
@@ -440,6 +440,23 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   const first = await cashSale();
   await expect(page.getByTestId('orders-rejected')).toHaveText('1 order needs attention');
+  // Store health's callout lists the sale and, once, v2's View log ›, which opens Settings › Sync log.
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-attention').getByTestId(`store-health-attention-${first.orderId}`)).toBeVisible();
+  await expect(page.getByTestId('store-health-attention-view-log')).toBeVisible();
+  // The demo-pairs size (960 × 600, as 13d and 13e); the PNG is made a .webp for docs/v2-parity/demo-pairs by hand.
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13f-store-health-view-log-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.getByTestId('store-health-attention-view-log').click();
+  await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
+  const syncLog = page.getByTestId('sync-log');
+  await expect(syncLog).toBeVisible();
+  // The outbox's refusal, kept with the order's id (lib/log-buffer.ts keeps orderId, not the store's message).
+  await expect(syncLog.getByTestId('sync-log-entry').filter({ hasText: `Order refused by the store orderId=${first.orderId}` }).first())
+    .toBeVisible();
+  await page.getByTestId('settings-back').click();
   await page.getByTestId('new-sale').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();

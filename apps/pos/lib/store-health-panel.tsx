@@ -9,10 +9,11 @@ import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
 import { coveragePercent, readServerTotals, recordsOnDevice, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
-export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen }: {
+export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog }: {
   session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
   collections: { orders: RxCollection | null; refunds: RxCollection | null; parked: RxCollection | null; closures: RxCollection | null };
   attention: AttentionRow[]; onRetry: (orderIds: string[]) => Promise<number>; onOpen: (order: PosOrder) => void;
+  onViewLog: () => void;
 }): JSX.Element {
   const { orders, refunds, parked, closures } = collections;
   const [counts, setCounts] = useState<Record<'orders' | 'refunds' | 'parked' | 'closures', number | null>>({ orders: null, refunds: null, parked: null, closures: null });
@@ -77,6 +78,10 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                     {retry ? <Button testID={`store-health-attention-retry-${order.id}`} size="sm" onPress={() => void onRetry([order.id])}><Text>Retry</Text></Button> : null}
                   </HStack>
                 ))}
+                {/* v2's View log ›: once per callout, whatever the rows; it opens Settings › Sync log. */}
+                <Button testID="store-health-attention-view-log" variant="link" size="sm" className="self-start px-0" onPress={onViewLog}>
+                  <Text>View log ›</Text>
+                </Button>
               </VStack>
             ) : null}
             <Table className="mt-4">

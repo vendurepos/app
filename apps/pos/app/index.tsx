@@ -14,6 +14,7 @@ import {
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { SettingsPanel } from '../components/settings-panel';
+import type { SettingsSectionId } from '../lib/settings-sections';
 import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
 import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
@@ -121,6 +122,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [productsOpen, setProductsOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The section Settings opens on: the sync log from Store health's View log, General every other way.
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
+  useEffect(() => { if (!settingsOpen) setSettingsSection('general'); }, [settingsOpen]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
@@ -368,10 +372,12 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         attention={attentionRows(outbox.recent, outbox.state.stuck)}
         onRetry={outbox.requeue}
         onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
+        onViewLog={() => { setHealthOpen(false); setSettingsSection('sync-log'); setSettingsOpen(true); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
-      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} customerDisplay={customerDisplay} /> : null}
+      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} customerDisplay={customerDisplay}
+        initialSection={settingsSection} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
