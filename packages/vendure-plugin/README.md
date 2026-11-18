@@ -53,13 +53,14 @@ auth, CORS, tax strategy and a first sale. Install it with
 `npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
-   of generating a migration for your store, register all six below; do not run
+   of generating a migration for your store, register all seven below; do not run
    both approaches for the same schema changes:
 
    ```ts
    import {
      TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
      TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
+     TallyPosDisplay1791200000000,
    } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
@@ -70,6 +71,7 @@ auth, CORS, tax strategy and a first sale. Install it with
        migrations: [
          TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
          TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
+         TallyPosDisplay1791200000000,
          /* your own migrations */
        ],
        // …
@@ -79,7 +81,7 @@ auth, CORS, tax strategy and a first sale. Install it with
 
    The migrations create the `tally_command` ledger, the read-only `Order` and `OrderLine`
    custom-field columns, the unique index on `tallyClientOrderId`, and plain indexes on
-   `tallyRegisterId` and `tallySessionId`, recovery fields, and the register tables.
+   `tallyRegisterId` and `tallySessionId`, recovery fields, the register tables and the customer-display tables.
    Run them with `runMigrations(config)` before starting Vendure.
 
 2. POS orders send no order-confirmation email. If you use `@vendure/email-plugin` (an
@@ -229,6 +231,28 @@ The active channel's POS sales and refunds in a time range, every figure a SQL a
 - A refund counts on the date it was made, which may be outside its sale's range. Figures are gross; no net-of-refunds figure is given.
 - The answer's top-level keys are `version` (1), `from`, `to`, `timezone`, `currencyCode`, `registerId`, `orders` (count, sales, tax, discounts), `refunds` (count, total), `byMethod` and `byDay`.
 - `/tally/v1/info` does not list the route. Its shape is this plugin's own until TallyUI has a report contract.
+
+### Customer display: pairing and signalling
+
+A till can pair a customer display on a second device (TallyUI ADR-085). The till-side routes under
+`/tally/v1/displays` need the `TallyPosPairDisplay` permission and nothing else: `TallyPosSell` and `CreateOrder`
+do not open them. The display-side routes under `/tally/v1/display` are public and carry the display's own token. All
+state is in Postgres, so any server instance answers any call.
+
+- The till role preset (`tallyEnsurePosTillRole`) holds `TallyPosPairDisplay` from this version. A role created from
+  the preset before it does not gain the permission: add it under Settings → Roles in the Vendure admin, or with the
+  `updateRole` mutation, or by running `tallyEnsurePosTillRole` again, which adds the preset's permissions to the
+  existing role.
+- Failed claims are limited per source address, which is Express's `req.ip`. A server behind a proxy or load balancer
+  must set `trust proxy` to the number of proxies in front of the server (for example `apiOptions.trustProxy: 1`)
+  or to their addresses, never `true`: `true` takes the left-most `X-Forwarded-For`, which the client writes, so
+  every guess would count as a new source. Without it every display shares the proxy's address as one source,
+  which is stricter, never looser.
+- `GET /tally/v1/info` advertises `customerDisplay: { v: 1, snapshot: 1, iceServers? }`. Set the ICE servers with
+  `TallyPosPlugin.init({ customerDisplay: { iceServers: [{ urls: 'stun:stun.example.com:3478' }] } })`; without the
+  option the till uses its default STUN servers, and `[]` means LAN only.
+- Anything in `iceServers`, static TURN credentials included, is visible to whoever can reach `/info`, so use
+  short-lived TURN credentials or STUN only.
 
 ## Development
 

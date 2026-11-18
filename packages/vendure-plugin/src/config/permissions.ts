@@ -5,3 +5,5 @@ export const tallyPosSell = new PermissionDefinition({ name: 'TallyPosSell', des
 export const tallyPosApproveVariance = new PermissionDefinition({ name: 'ApproveTallyPosVariance', description: 'Approve a VendurePOS register close over the variance threshold' });
 /** Refund a sale at a VendurePOS till (Front desk ruling, 2026-10-07: its own permission, not Vendure's broad UpdateOrder). RefundService requires it for order.refund (ADR 0007); it never opens the /tally/v1 routes, and the till role preset leaves it out. */
 export const tallyPosRefund = new PermissionDefinition({ name: 'TallyPosRefund', description: 'Refund a sale at a VendurePOS till' });
+/** Pair, list, signal and forget customer displays at a VendurePOS till (TallyUI ADR-085's `customer_display.pair`). The only permission the till-side `/tally/v1/displays` routes accept; TallyPosSell and CreateOrder do not open them. */
+export const tallyPosPairDisplay = new PermissionDefinition({ name: 'TallyPosPairDisplay', description: 'Pair a customer display at a VendurePOS till' });
