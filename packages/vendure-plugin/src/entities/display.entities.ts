@@ -18,6 +18,7 @@ export class TallyDisplayCode {
   @Column('varchar')
   deviceId: string;
 
+  @Index()
   @Column('timestamptz')
   expiresAt: Date;
 
@@ -27,6 +28,7 @@ export class TallyDisplayCode {
 
 /** A claim waiting for the minting till's cashier; it lives as long as its code. */
 @Entity()
+@Index(['channelId', 'deviceId', 'checkCode'], { unique: true })
 export class TallyDisplayPending {
   @PrimaryColumn('varchar')
   id: string;
@@ -43,10 +45,11 @@ export class TallyDisplayPending {
   @Column('varchar')
   displayName: string;
 
-  /** Unique among pending pairings, so two displays asking at once never show the same check code. */
-  @Column('varchar', { unique: true })
+  /** Unique among one till's pending pairings, which is all the till needs to tell them apart. */
+  @Column('varchar')
   checkCode: string;
 
+  @Index()
   @Column('timestamptz')
   expiresAt: Date;
 
@@ -74,9 +77,11 @@ export class TallyDisplay {
   @Column('varchar')
   cashierId: string;
 
+  @Index()
   @Column('timestamptz')
   confirmedAt: Date;
 
+  @Index()
   @Column('timestamptz', { nullable: true })
   lastSeenAt: Date | null;
 
@@ -138,6 +143,7 @@ export class TallyDisplayClaimWindow {
   @Column('int')
   failures: number;
 
+  @Index()
   @Column('timestamptz')
   expiresAt: Date;
 }

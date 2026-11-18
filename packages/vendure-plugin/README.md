@@ -248,6 +248,9 @@ state is in Postgres, so any server instance answers any call.
   or to their addresses, never `true`: `true` takes the left-most `X-Forwarded-For`, which the client writes, so
   every guess would count as a new source. Without it every display shares the proxy's address as one source,
   which is stricter, never looser.
+- `X-Tally-Device-Id` is the till's own label and is not bound to the session, as in TallyUI's reference: anyone with
+  `TallyPosPairDisplay` in a channel can act for any device id there. The till generates it randomly, so it is not
+  guessable.
 - `GET /tally/v1/info` advertises `customerDisplay: { v: 1, snapshot: 1, iceServers? }`. Set the ICE servers with
   `TallyPosPlugin.init({ customerDisplay: { iceServers: [{ urls: 'stun:stun.example.com:3478' }] } })`; without the
   option the till uses its default STUN servers, and `[]` means LAN only.

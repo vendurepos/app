@@ -70,7 +70,8 @@ const PRUNE = `WITH codes AS (DELETE FROM "tally_display_code" WHERE "expiresAt"
   snapshots AS (DELETE FROM "tally_display_snapshot" WHERE "postedAt" <= $2),
   windows AS (DELETE FROM "tally_display_claim_window" WHERE "key" IN (SELECT "key" FROM "tally_display_claim_window"
     WHERE "expiresAt" <= $1 FOR UPDATE SKIP LOCKED))
-  DELETE FROM "tally_display" WHERE COALESCE("lastSeenAt", "confirmedAt") <= $3`;
+  -- Equals COALESCE("lastSeenAt", "confirmedAt") <= $3, written so the two column indexes can serve it.
+  DELETE FROM "tally_display" WHERE "lastSeenAt" <= $3 OR ("lastSeenAt" IS NULL AND "confirmedAt" <= $3)`;
 
 /**
  * The customer-display signalling seam (TallyUI ADR-085 d2, U7) on Postgres. Till-side calls see only their own
@@ -222,11 +223,11 @@ export class DisplaySignallingService {
       }
       const [moving] = request.token === undefined ? []
         : await query('SELECT "id" FROM "tally_display" WHERE "tokenHash" = $1', [sha256Hex(request.token)]);
-      // The unique index keeps check codes apart; a taken one is drawn again, up to MAX_DRAWS times.
+      // The unique index keeps one till's check codes apart; a taken one is drawn again, up to MAX_DRAWS times.
       for (let draw = 0; draw < MAX_DRAWS; draw += 1) {
         const checkCode = randomDigits(4);
         const inserted = await query(`INSERT INTO "tally_display_pending" ("id", "channelId", "deviceId", "secretHash", "displayName",
-          "checkCode", "expiresAt", "movingDisplayId") VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT ("checkCode") DO NOTHING RETURNING "id"`,
+          "checkCode", "expiresAt", "movingDisplayId") VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT ("channelId", "deviceId", "checkCode") DO NOTHING RETURNING "id"`,
         [newId(), code.channelId, code.deviceId, sha256Hex(claimSecret), request.displayName, checkCode, code.expiresAt, moving?.id ?? null]);
         if (inserted.length) return { claimSecret, checkCode };
       }
