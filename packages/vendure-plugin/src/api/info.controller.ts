@@ -1,6 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
+import { TALLY_RECEIPT_EMAIL } from './receipt-email.controller';
 import { DisplaySignallingService } from '../service/display-signalling.service';
 import type { IceServer } from '../service/display-signalling.service';
 import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
@@ -10,7 +11,7 @@ import type { TaxRounding } from '../service/tax-rounding';
 export type TallyInfo = { contracts: { 'order.create': number[]; register: number[]; 'order.refund': number[] }; taxRounding: TaxRounding;
   maxShippingLines: number; lineTax: { none: boolean; classes: boolean }; device?: { name: string };
   /** TallyUI ADR-085 d7, d8: the signalling routes exist; `iceServers` only when the plugin's init option sets it. */
-  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] } };
+  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] }; receiptEmail?: { v: 1 } };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -20,6 +21,7 @@ export class TallyInfoController {
 
   constructor(
     configService: ConfigService, private readonly connection: TransactionalConnection, private readonly displays: DisplaySignallingService,
+    @Inject(TALLY_RECEIPT_EMAIL) private readonly receiptEmail: boolean, // 12.1a: init({ receiptEmail: true })
   ) {
     const { taxOptions, entityOptions } = configService;
     this.taxRounding = taxRoundingFor({
@@ -40,6 +42,7 @@ export class TallyInfoController {
     };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };
+    if (this.receiptEmail) info.receiptEmail = { v: 1 };
     return info;
   }
 

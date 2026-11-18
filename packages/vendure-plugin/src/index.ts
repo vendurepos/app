@@ -2,6 +2,7 @@
 // requires the optional @vendure/email-plugin.
 export { TallyPosPlugin } from './plugin';
 export type { TallyPosPluginOptions } from './plugin';
+export { TallyReceiptEmailEvent } from './events/receipt-email.event';
 export { tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund, tallyPosSell } from './config/permissions';
 export { POS_TILL_ROLE_CODE, POS_TILL_PERMISSIONS } from './config/pos-till-role';
 export { TallyPriceStrategy } from './config/strategies';

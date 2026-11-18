@@ -3,6 +3,7 @@ import { EntityHydrator, OrderStateTransitionEvent } from '@vendure/core';
 import {
   EmailEventListener, orderConfirmationHandler, shippingLinesWithMethod, transformOrderLineAssetUrls,
 } from '@vendure/email-plugin';
+import { TallyReceiptEmailEvent } from './events/receipt-email.event';
 
 /**
  * ADR 0002 "No customer email": Vendure's order confirmation, minus POS orders. Install it in
@@ -29,3 +30,17 @@ export const tallyOrderConfirmationHandler = new EmailEventListener('order-confi
   .setSubject('Order confirmation for #{{ order.code }}')
   .setTemplateVars(event => ({ order: event.order, shippingLines: event.data.shippingLines }))
   .setMockEvent(orderConfirmationHandler.mockEvent!);
+
+/** 12.1a: the receipt a cashier asks for. Type 'order-confirmation': it renders with the store's order-confirmation template, so no file. */
+export const tallyReceiptEmailHandler = new EmailEventListener('order-confirmation')
+  .on(TallyReceiptEmailEvent)
+  .loadData(async ({ event, injector }) => {
+    await injector.get(EntityHydrator).hydrate(event.ctx, event.order, { relations: ['lines.featuredAsset', 'shippingLines.shippingMethod'] });
+    transformOrderLineAssetUrls(event.ctx, event.order, injector);
+    return { shippingLines: shippingLinesWithMethod(event.order) };
+  })
+  .setRecipient(event => event.emailAddress)
+  .setFrom('{{ fromAddress }}')
+  .setSubject('Receipt for order #{{ order.code }}')
+  .setTemplateVars(event => ({ order: event.order, shippingLines: event.data.shippingLines }))
+  .setMockEvent({ ...orderConfirmationHandler.mockEvent!, emailAddress: 'customer@example.com' });

@@ -27,6 +27,11 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     });
   });
 
+  it('without init({ receiptEmail: true }), the receipt-email route answers 404 receipt_email_disabled', async () => {
+    const response = await fetch(`${await server.app.getUrl()}/tally/v1/orders/ANY/receipt-email`, { method: 'POST', headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } });
+    expect([response.status, (await response.json()).code]).toEqual([404, 'receipt_email_disabled']);
+  });
+
   it('a version 8 order.create is rejected as unsupported_version and writes no order', async () => {
     const counts = async () => ({
       orders: await connection.rawConnection.getRepository(Order).count(),

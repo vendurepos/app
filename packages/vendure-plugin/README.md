@@ -233,6 +233,10 @@ The active channel's POS sales and refunds in a time range, every figure a SQL a
 - The answer's top-level keys are `version` (1), `from`, `to`, `timezone`, `currencyCode`, `registerId`, `orders` (count, sales, tax, discounts), `refunds` (count, total), `byMethod` and `byDay`.
 - `/tally/v1/info` does not list the route. Its shape is this plugin's own until TallyUI has a report contract.
 
+### Receipt email: POST /tally/v1/orders/:code/receipt-email
+
+A cashier's explicit request (12.1a), not ADR 0002's automatic confirmation: set `TallyPosPlugin.init({ receiptEmail: true })` and install `tallyReceiptEmailHandler` from `@vendurepos/plugin/email` beside `tallyOrderConfirmationHandler` in `EmailPlugin`'s handlers; `GET /tally/v1/info` then holds `receiptEmail: { v: 1 }`. It renders with your existing order-confirmation template, subject `Receipt for order #<code>`. The body is `{ emailAddress? }`; without it, the order customer's email is used. Answers: 202 `{ queued: true, emailAddress }` (each request sends one email), 404 `receipt_email_disabled`, 400 `invalid_payload`, 404 `order_not_found`, 409 `not_till_order`, 422 `no_recipient` (a walk-in sale and no address). It changes no customer or order.
+
 ### Customer display: pairing and signalling
 
 A till can pair a customer display on a second device (TallyUI ADR-085). The till-side routes under
