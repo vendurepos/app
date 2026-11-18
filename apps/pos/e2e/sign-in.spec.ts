@@ -2316,8 +2316,10 @@ test("the Products panel shows the price read-only when the channel's tax mode c
   const read = async (): Promise<StoreVariant> => (await admin(STORE_VARIANT, { sku })).productVariants.items[0];
   const seeded = await read();
   const { activeChannel: channel } = await admin('{ activeChannel { id pricesIncludeTax } }');
-  // The till now holds the channel's current tax mode.
+  const settingsRead = page.waitForResponse((response) => (response.request().postData() ?? '').includes('StoreSettingsChannel'));
   await signIn(page);
+  // signIn returns before the store settings are read; once they are, the till holds the channel's current tax mode.
+  expect((await settingsRead).ok()).toBe(true);
   try {
     await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: !channel.pricesIncludeTax } });
     await page.getByTestId('products-open').click();
