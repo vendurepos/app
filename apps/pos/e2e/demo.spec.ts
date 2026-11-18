@@ -1190,6 +1190,8 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await expect(panel.getByTestId('register-panel-footer').getByTestId('register-panel-close')).toBeVisible();
   const box = (await panel.boundingBox())!;
   expect(box.x).toBeGreaterThan(page.viewportSize()!.width / 2);
+  // Again once the register list has answered: the till's own register has no device name, so never the "Register 1a2b3c4d" id fallback (CHECKLIST 6.6c).
+  await expect(panel.getByTestId('register-panel-title')).toHaveText('Register');
   await panel.getByTestId('register-panel-dismiss').click();
 
   // The cashier sheet no longer has an X report: v2's avatar sheet has none.
