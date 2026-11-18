@@ -50,8 +50,12 @@ const SOURCE_WINDOW = MINUTE, SOURCE_MAX = 10, STORE_WINDOW = 10 * MINUTE, STORE
 const CONNECTED_MS = 30_000, UNSEEN_TTL = 30 * 24 * 60 * MINUTE;
 const STORE_KEY = 'store';
 // A random draw (a pairing code or a check code) is retried on collision at most this often; past it the call is
-// refused as `limit` and its transaction rolls back, so a crowded code space never holds a request in a loop.
+// refused (a mint as `limit`, a claim as `claim_refused`) and its transaction rolls back, so a crowded code space never
+// holds a request in a loop.
 const MAX_DRAWS = 50;
+// A pending claim lives at most its code's 10 minutes, until the cashier confirms or declines it, so 50 live at once in
+// one channel is 10 tills each pairing all 5 of their unspent codes, far past real pairing. It bounds the table at 50 × channels.
+const PENDING_MAX = 50;
 
 const sha256Hex = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 /** 128 bits, base64url without padding: 22 characters. */
@@ -204,6 +208,7 @@ export class DisplaySignallingService {
   /**
    * Claims a live code: spends it and records a pending pairing with a fresh check code, in one transaction. A source
    * or the store over its failed-claim limit is refused and spends nothing; a claim naming no live code is counted.
+   * A code whose channel already holds PENDING_MAX live pending claims is refused, unspent and uncounted.
    */
   async claim(source: string, request: { code: string; displayName: string; token?: string }): Promise<{ claimSecret: string; checkCode: string }> {
     const now = await this.prune();
@@ -221,6 +226,10 @@ export class DisplaySignallingService {
         await this.countFailure(query, sourceKey, now);
         return 'failed';
       }
+      const [{ n: pending }] = await query(`SELECT count(*) AS n FROM "tally_display_pending" WHERE "channelId" = $1 AND "expiresAt" > $2`,
+        [code.channelId, at(now)]);
+      // Throwing rolls the spend back, and the refusal is not counted as a failed claim.
+      if (Number(pending) >= PENDING_MAX) throw refuse('claim_refused');
       const [moving] = request.token === undefined ? []
         : await query('SELECT "id" FROM "tally_display" WHERE "tokenHash" = $1', [sha256Hex(request.token)]);
       // The unique index keeps one till's check codes apart; a taken one is drawn again, up to MAX_DRAWS times.
@@ -231,7 +240,8 @@ export class DisplaySignallingService {
         [newId(), code.channelId, code.deviceId, sha256Hex(claimSecret), request.displayName, checkCode, code.expiresAt, moving?.id ?? null]);
         if (inserted.length) return { claimSecret, checkCode };
       }
-      throw refuse('limit');
+      // Practically unreachable under PENDING_MAX: 50 draws against at most 50 taken codes of 10,000. Nothing is spent.
+      throw refuse('claim_refused');
     });
     if (typeof claimed === 'string') throw refuse('claim_refused');
     return claimed;
