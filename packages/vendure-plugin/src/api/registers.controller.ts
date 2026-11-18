@@ -14,7 +14,13 @@ export type TallyRegisterRead = {
   };
   closures: { items: TallyClosureRead[]; totalItems: number; skip: number; take: number };
 };
-/** A closure's frozen figures as `register.closure.submit` stored them; `closureId` is the command result's `serverClosureId`. */
+/**
+ * A closure's frozen figures as `register.closure.submit` stored them; `closureId` is the command result's `serverClosureId`.
+ * `countedFloatMinor` is the session's opening float. `paidInMinor` and `paidOutMinor` sum the session's `paid_in` and `paid_out`
+ * movements that the submit counted, under `deriveSessionFigures`' rule: of the movements in `movementIds`, skip each `void` row and
+ * each row voided by a `void` row in that same list. So `expected.cash` equals `countedFloatMinor` + the cash payments of `orderIds`
+ * + `paidInMinor` − `paidOutMinor` − the session's cash refunds. Those three fields are additive at version 1.
+ */
 export type TallyClosureRead = {
   closureId: string; sessionId: string; registerId: string; number: number; businessDay: string | null;
   openedAt: string; closedAt: string; closedBy: string | null; approvedBy: string | null;
@@ -23,7 +29,8 @@ export type TallyClosureRead = {
   periodSalesTotalMinor: number; periodRefundsTotalMinor: number;
   perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number;
   unsyncedCount: number; unsyncedTotalMinor: number; softwareVersion: string;
-  orderIds: string[]; movementIds: string[]; receivedAt: string;
+  orderIds: string[]; movementIds: string[];
+  countedFloatMinor: number; paidInMinor: number; paidOutMinor: number; receivedAt: string;
 };
 
 /** One row of `GET /tally/v1/registers`. A register has no name of its own (the plugin's rows, not a Vendure entity): the app labels it by `lastDeviceName`. */

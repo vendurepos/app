@@ -34,15 +34,26 @@ const CLIENT_TIMES: Record<RegisterCommandType, string[]> = {
 };
 export const REGISTER_TYPES = Object.keys(CLIENT_TIMES) as RegisterCommandType[];
 
+// The cash paid in and out that a closure counted: deriveSessionFigures' rule on the session's movements in movementIds.
+const countedMovements = (movementIds: string[], sessionMovements: TallyRegisterMovement[]) => {
+  const movements = sessionMovements.filter(row => movementIds.includes(row.id));
+  const voided = new Set(movements.filter(row => row.type === 'void').map(row => row.voids));
+  const sum = (type: 'paid_in' | 'paid_out') => movements
+    .filter(row => row.type === type && !voided.has(row.id)).reduce((total, row) => total + row.amountMinor, 0);
+  return { paidInMinor: sum('paid_in'), paidOutMinor: sum('paid_out') };
+};
+
 // Every field named, never the entity spread: channelId and commandId stay unexposed.
-const closureRead = (row: TallyRegisterClosure): TallyClosureRead => ({
+const closureRead = (row: TallyRegisterClosure, session: TallyRegisterSession, movements: TallyRegisterMovement[]): TallyClosureRead => ({
   closureId: row.id, sessionId: row.sessionId, registerId: row.registerId, number: row.number, businessDay: row.businessDay,
   openedAt: row.openedAt, closedAt: row.closedAt, closedBy: row.closedBy, approvedBy: row.approvedBy,
   tillExpected: row.tillExpected, counted: row.counted, expected: row.expected, variance: row.variance,
   periodSalesTotalMinor: row.periodSalesTotalMinor, periodRefundsTotalMinor: row.periodRefundsTotalMinor,
   perpetualSalesTotalMinor: row.perpetualSalesTotalMinor, perpetualRefundsTotalMinor: row.perpetualRefundsTotalMinor,
   unsyncedCount: row.unsyncedCount, unsyncedTotalMinor: row.unsyncedTotalMinor, softwareVersion: row.softwareVersion,
-  orderIds: row.orderIds, movementIds: row.movementIds, receivedAt: row.receivedAt.toISOString(),
+  orderIds: row.orderIds, movementIds: row.movementIds, countedFloatMinor: session.countedFloatMinor,
+  ...countedMovements(row.movementIds, movements),
+  receivedAt: row.receivedAt.toISOString(),
 });
 
 export type RegisterResult = CommandResult;
@@ -157,11 +168,21 @@ export class RegisterService {
       const [rows, totalItems] = await this.connection.getRepository(tx, TallyRegisterClosure).findAndCount({
         where: { channelId, registerId }, order: { number: 'DESC' }, skip: page.skip, take: page.take,
       });
+      // One query each for the page's sessions and their movements, for the float and the cash paid in and out.
+      const sessionIds = In(rows.map(row => row.sessionId));
+      const sessions = await this.connection.getRepository(tx, TallyRegisterSession).findBy({ channelId, id: sessionIds });
+      const movements = await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId, sessionId: sessionIds });
+      const items = rows.map(row => {
+        // Sessions are write-once and a submit needs one, so a missing session is a broken store, never a 0 float.
+        const closed = sessions.find(s => s.id === row.sessionId);
+        if (!closed) throw new Error(`Closure ${row.id}: no session ${row.sessionId}`);
+        return closureRead(row, closed, movements.filter(movement => movement.sessionId === row.sessionId));
+      });
       return {
         register: { id: register.id, receivedAt: register.receivedAt.toISOString() },
         counters: await this.counters(tx, registerId),
         session,
-        closures: { items: rows.map(closureRead), totalItems, skip: page.skip, take: page.take },
+        closures: { items, totalItems, skip: page.skip, take: page.take },
       };
     });
   }
