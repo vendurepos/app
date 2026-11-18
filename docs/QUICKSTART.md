@@ -71,9 +71,14 @@ tested version). Run store commands from that project's root.
    tokenMethod: ['bearer', 'cookie'],
    ```
 
-   Sign in with a Vendure administrator who can read the channel's catalogue
-   and settings and has the plugin's `TallyPosSell` permission (or `CreateOrder`, which is broader); the plugin routes require one of them.
-   <!-- Sources: dev/vendure-store/src/vendure-config.ts; docs/DISCOVERY.md §2.5; docs/adr/0002-order-path-vendure-plugin.md §1; apps/pos/lib/sign-in.ts. -->
+   Sign in with a Vendure administrator whose role in the till's channel has
+   the till role's permissions: `TallyPosSell`, `ReadCatalog`, `ReadSettings`,
+   `ReadCustomer`, `CreateCustomer`, `ReadOrder` and `TallyPosPairDisplay`.
+   `TallyPosSell` (or `CreateOrder`, which is broader) opens the plugin's sale
+   routes. Without `ReadOrder` the till still sells, but its order history and
+   sales report are refused. Without `TallyPosPairDisplay` it cannot pair a
+   customer display.
+   <!-- Sources: dev/vendure-store/src/vendure-config.ts; docs/DISCOVERY.md §2.5; docs/adr/0002-order-path-vendure-plugin.md §1; apps/pos/lib/sign-in.ts; packages/vendure-plugin/src/config/pos-till-role.ts; packages/vendure-plugin/src/api/reports.controller.ts; apps/pos/lib/order-list.ts; packages/vendure-plugin/README.md (Customer display). -->
 
    For a key per till instead, see **Optional: a device key for each till** below.
 
@@ -192,7 +197,8 @@ tested version). Run store commands from that project's root.
 
 A till can sign in with its own Vendure API key (Vendure 3.6+): add `'api-key'`
 to the step 4 `tokenMethod` list, then create the key in the till's channel with
-the Dashboard's **New POS till key** button (the plugin's
+the Dashboard's **New POS till key** button, which gives it the step 4
+permissions (the plugin's
 [README](https://github.com/vendurepos/app/blob/main/packages/vendure-plugin/README.md#dashboard-a-key-for-each-till)
 covers its role and the setting pnpm projects need). On the POS sign-in screen,
 choose **Device key**, then paste the key and the till's channel token. The POS
