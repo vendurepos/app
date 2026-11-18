@@ -22,7 +22,7 @@ import { useCameraScanner } from '../lib/camera-scan';
 import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
-import { ClosureHistory } from '../lib/closure-history-sheet';
+import { ClosureHistory, ClosureList } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
@@ -362,6 +362,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </VStack>
       ) : null}
       {reportsOpen ? <ReportsPanel orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}
+        closures={registerStore && boundRegisterId ? <ClosureList closures={registerStore.closures} session={session} registerId={boundRegisterId}
+          storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} blind={register.blind} active /> : undefined}
         timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}

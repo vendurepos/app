@@ -1341,6 +1341,38 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   await expect(page.getByTestId('closure-history')).toHaveCount(0);
 });
 
+test("Reports › Closures lists every register's closures and opens one to its Z report", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const card = page.getByTestId('open-register-card');
+  await card.getByTestId('open-register-amount').fill('100.00');
+  await card.getByTestId('open-register-button').click();
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel-close').click();
+  await page.getByTestId('count-amount').fill('100.00');
+  await page.getByTestId('count-close').click();
+  await page.getByTestId('closure-sheet').getByTestId('closure-done').click();
+  await page.getByTestId('reports-open').click();
+  const panel = page.getByTestId('reports-panel');
+  await panel.getByTestId('reports-tab-closures').click();
+  await expect(panel.getByTestId('closure-history-row-1')).toContainText('This device · Closure #1');
+  await expect(panel.getByTestId('closure-history-row-demo-front-counter-1')).toContainText('Front counter · Closure #1');
+  // The demo-pairs size, as 10c; the PNG is made docs/v2-parity/demo-pairs/10d-reports-closures-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('10d-reports-closures-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await panel.getByTestId('closure-history-open-demo-front-counter-1').click();
+  await expect(panel.getByTestId('closure-detail-title')).toHaveText('Front counter · Closure #1');
+  await expect(panel.getByTestId('closure-detail')).toContainText('Sales total €245.50');
+  await expect(panel.getByTestId('closure-detail')).toContainText('Cash counted €150.00');
+  await panel.getByTestId('closure-detail-back').click();
+  await expect(panel.getByTestId('closure-history-row-1')).toBeVisible();
+  await panel.getByTestId('reports-tab-sales').click();
+  await expect(panel.getByTestId('sales-room')).toBeVisible();
+});
+
 test('a demo visitor attaches a customer and sees it on the receipt', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
