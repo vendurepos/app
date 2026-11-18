@@ -44,7 +44,7 @@ test.beforeEach(async ({ context }) => {
   await context.route(DEMO_CAPTURE_URL, (route) => route.fulfill({ status: 200, body: '' }));
 });
 
-type DemoState = { stock: Record<string, { quantity: number }>; orders: unknown[]; closures: unknown[] };
+type DemoState = { stock: Record<string, { quantity: number }>; orders: unknown[]; closures: unknown[]; sessions: Record<string, { registerId: string; status: string }> };
 
 /** The simulated store's saved state; null before its first write and after a reset. */
 async function demoState(page: Page): Promise<DemoState | null> {
@@ -1050,6 +1050,8 @@ test('Settings › General picks the register this device is at, and the till fo
   await expect.poll(bound).toBe('demo-front-counter');
   // The till opens the register it is now bound to.
   await openRegister(page);
+  // The picker reads the register list once, when Settings opens: wait until the store holds the open session.
+  await expect.poll(async () => Object.values((await demoState(page))?.sessions ?? {}).some((s) => s.registerId === 'demo-front-counter' && s.status === 'open')).toBe(true);
   await openSettings(page, 'general');
   await expect(page.getByTestId('register-choice-demo-front-counter-status')).toContainText('Open since');
   await expect(page.getByTestId('register-choice-own-status')).toHaveCount(0);
