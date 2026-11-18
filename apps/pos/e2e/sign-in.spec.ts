@@ -831,6 +831,28 @@ test('a till update the store rejects shows in the header', async ({ page }) => 
   expect(cspConsole).toEqual([]);
 });
 
+test('Settings › Customer display mints a pairing code on the dev store', async ({ page }) => {
+  // superadmin holds TallyPosPairDisplay (dev/vendure-store), and the plugin's /info advertises the display.
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('settings-section-customer-display').click();
+  const mint = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/tally/v1/displays/codes'));
+  await page.getByTestId('pairing-start').click();
+  expect((await mint).ok()).toBe(true);
+  // The plugin's code is 6 random digits (packages/vendure-plugin/src/service/display-signalling.service.ts).
+  await expect(page.getByTestId('pairing-code')).toHaveText(/^\d{6}$/);
+  // Closing Settings cancels the pairing, so the code is not showing when the section opens again.
+  await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('pairing-code')).toHaveCount(0);
+  await page.getByTestId('settings-open').click();
+  await page.getByTestId('settings-section-customer-display').click();
+  await expect(page.getByTestId('pairing-start')).toBeVisible();
+  await expect(page.getByTestId('pairing-code')).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('the sync status shows a sale waiting and retrying, then a store without the plugin, and clears once sent', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto('/');

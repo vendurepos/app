@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, CustomerDisplaySettings, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
+import { useTillDisplays, useTillPairing } from '@tallyui/pos';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadAutoShowReceipt, saveAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { CartSideSettings } from '../lib/cart-side-settings';
+import type { TillCustomerDisplay } from '../lib/customer-display';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadOpenOrdersPosition, saveOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
@@ -22,8 +24,21 @@ import { ThemeSettings } from '../lib/theme-settings';
 import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
+/** Settings › Customer display over the till's handles; leaving it cancels a pairing, so no code stays showing. */
+function CustomerDisplaySection({ handles }: { handles: TillCustomerDisplay }) {
+  const { pairing, service } = handles;
+  useEffect(() => () => pairing.cancel(), [pairing]);
+  return (
+    <CustomerDisplaySettings className="w-full max-w-[420px]" pairing={useTillPairing(pairing)} displays={useTillDisplays(service)}
+      onStartPairing={() => void pairing.start()} onConfirm={(id) => void pairing.confirm(id)} onDecline={(id) => void pairing.decline(id)}
+      onCancelPairing={() => pairing.cancel()} onForget={(id) => void pairing.forget(id)} />
+  );
+}
+
 /** Settings' sections and cards: a covering panel of the till (CHECKLIST 9.1, the rail stays beside it), and the /settings route. */
-export function SettingsPanel({ session, onClose, tillUpdatesPending }: { session: Session; onClose(): void; tillUpdatesPending?: number }) {
+export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay }: {
+  session: Session; onClose(): void; tillUpdatesPending?: number; customerDisplay?: TillCustomerDisplay | null;
+}) {
   const [text, setText] = useState(() => String(loadScannerMinLength()));
   const [saved, setSaved] = useState<boolean | null>(null);
   const [varianceText, setVarianceText] = useState(() => formatVarianceLimit(loadVarianceLimitMinor()));
@@ -38,7 +53,9 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending }: { sessio
   const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
   const connector = useCatalogueConnector(session);
   const [section, setSection] = useState<SettingsSectionId>('general');
-  const sections = settingsSections({ printing: Platform.OS === 'web' });
+  const sections = settingsSections({ printing: Platform.OS === 'web', customerDisplay: !!customerDisplay });
+  // The store stopped advertising a display (or the session changed) while its section showed.
+  useEffect(() => { if (!customerDisplay && section === 'customer-display') setSection('general'); }, [customerDisplay, section]);
 
   return (
     <SettingsLayout navSlot={
@@ -199,6 +216,7 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending }: { sessio
           </CardContent>
         </Card>
       ) : null}
+      {section === 'customer-display' && customerDisplay ? <CustomerDisplaySection handles={customerDisplay} /> : null}
       {section === 'theme' && <ThemeSettings />}
       {section === 'sync-log' && <SyncLogCard />}
       {/* The till's panel closes; the /settings route goes back (app/settings.tsx). */}

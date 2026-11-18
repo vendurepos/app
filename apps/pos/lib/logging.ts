@@ -2,11 +2,13 @@ import {
   callbackSink, consoleSink, type Logger, saleLogger, outboxLogger, posOrdersLogger,
   taxLogger, registerCommandsLogger, registerFactsLogger, registerSessionsLogger,
 } from '@tallyui/pos';
+import { customerDisplayLogger } from './customer-display';
 import { keepLogEntry } from './log-buffer';
 
-/** TallyUI's POS loggers whose warnings and errors this app keeps (#82 item 5). */
+/** TallyUI's POS loggers, and this app's customer display logger, whose warnings and errors this app keeps (#82 item 5). */
 export const POS_LOGGERS: readonly Logger[] = [
   saleLogger, outboxLogger, posOrdersLogger, taxLogger, registerCommandsLogger, registerFactsLogger, registerSessionsLogger,
+  customerDisplayLogger,
 ];
 const LOG_SINK_ID = 'vendurepos-console';
 const LOG_BUFFER_SINK_ID = 'vendurepos-log-buffer';
