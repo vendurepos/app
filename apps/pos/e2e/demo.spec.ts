@@ -1319,6 +1319,14 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   expect(printed[1]).toMatch(/^Copy · printed /);
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
+  // The Front counter's Z copy, from a server read that has no sales count and no opening float.
+  await history.getByTestId('closure-history-print-demo-front-counter-1').click();
+  const frontPrint = page.frameLocator('#vendurepos-print').locator('p');
+  await expect(frontPrint.filter({ hasText: 'Sales total €245.50' })).toHaveCount(1);
+  const frontPrinted = await frontPrint.allTextContents();
+  expect(frontPrinted[0]).toBe('Z report · Closure #1');
+  expect(frontPrinted).toEqual(expect.arrayContaining(['Sales total €245.50', 'Cash counted €150.00']));
+  expect(frontPrinted.filter((line) => line.includes('undefined') || line.startsWith('Opening float'))).toEqual([]);
   const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
   // Yesterday's Front counter closure to today's own one.
   const fileName = /^closures-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.csv$/;

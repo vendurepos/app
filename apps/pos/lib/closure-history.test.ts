@@ -122,6 +122,13 @@ it("maps the plugin's closure read onto a Closure", () => {
   });
 });
 
+it("prints another register's Z copy without the lines its read lacks", () => {
+  const context = { store: 'http://127.0.0.1:3200', currency: 'EUR', timezone: 'UTC', printedAt: '2026-09-30T18:15:00.000Z' };
+  const lines = zCopyLines(remote, context);
+  expect(lines.filter((line) => line.includes('undefined') || line.startsWith('Opening float'))).toEqual([]);
+  expect(lines).toEqual(expect.arrayContaining(['Sales total €245.50', 'Cash expected €150.00', 'Cash counted €150.00', 'Cash variance €0.00']));
+});
+
 it("keeps the local copy of a closure the server also has, and adds other registers' after the local ones", () => {
   const synced = { ...closure, id: 'session-5', server_closure_id: 'closure-5' };
   const merged = mergeClosures([closure, synced], [{ ...remote, id: 'session-1' }, { ...remote, id: 'closure-5' }, remote]);
