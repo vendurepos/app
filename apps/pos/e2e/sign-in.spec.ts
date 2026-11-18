@@ -501,6 +501,60 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   expect(cspConsole).toEqual([]);
 });
 
+test("Store health's Fix record opens a refused sale whose Retry sends it again", async ({ page }) => {
+  // The store rejects every order with invalid_payload, which Retry can fix, as in "a rejected sale needs attention…".
+  const sent: { id: string; type: string; payload: { clientOrderId: string } }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const commands: typeof sent = route.request().postDataJSON().commands;
+    sent.push(...commands.filter(({ type }) => type === 'order.create'));
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
+      id, status: 'rejected', error: { code: 'invalid_payload', message: 'test refusal' },
+    })) }) });
+  });
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  const total = Math.round(Number((await page.getByTestId('receipt').getByTestId('receipt-total').innerText()).replace(/[^\d.]/g, '')) * 100);
+  await expect.poll(() => sent.length).toBeGreaterThan(0);
+  const orderId = sent[0].payload.clientOrderId;
+  await expect(page.getByTestId('orders-rejected')).toHaveText('1 order needs attention');
+  await page.getByTestId('store-health-open').click();
+  const fix = page.getByTestId(`store-health-attention-open-${orderId}`);
+  await expect(fix).toHaveText('Fix record');
+  // The demo-pairs size, as 13f; the PNG is made a .webp for docs/v2-parity/demo-pairs by hand.
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13g-store-health-fix-record-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await fix.click();
+  await expect(page.getByTestId('order-sheet-refused')).toHaveText('Refused by the store — invalid_payload');
+  await expect(page.getByTestId('order-sheet-send-again')).toBeEnabled();
+  // The store takes it now: the sheet's Retry requeues it under a new command id, and the cashier is back on the list.
+  await page.unroute('**/tally/v1/commands');
+  await page.getByTestId('order-sheet-send-again').click();
+  await expect(page.getByTestId('order-sheet')).toHaveCount(0);
+  await expect(page.getByTestId('orders-rejected')).toHaveCount(0, { timeout: 30_000 });
+  // Requeued, the sale is pending at once; it is applied once the store has it.
+  await expect.poll(async () => (await (await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax } } }',
+      variables: { id: orderId },
+    },
+  })).json()).data.orders.items, { timeout: 30_000 }).toEqual([{ totalWithTax: total }]);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await expect(page.getByTestId('store-health-attention')).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('Print receipt prints the receipt alone through the browser', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('sign-in-url').fill(STORE_URL);

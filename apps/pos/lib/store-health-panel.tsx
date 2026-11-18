@@ -74,7 +74,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                 {attention.map(({ order, reason, retry }) => (
                   <HStack key={order.id} testID={`store-health-attention-${order.id}`} className="flex-wrap items-center" space="sm">
                     <Text className="flex-1">{`Order ${orderReference(order)} · ${formatMoney({ amount: order.totalMinor, currency: order.currency })} — ${reason}`}</Text>
-                    <Button testID={`store-health-attention-open-${order.id}`} variant="ghost" size="sm" onPress={() => onOpen(order)}><Text>Open</Text></Button>
+                    <Button testID={`store-health-attention-open-${order.id}`} variant="ghost" size="sm" onPress={() => onOpen(order)}><Text>Fix record</Text></Button>
                     {retry ? <Button testID={`store-health-attention-retry-${order.id}`} size="sm" onPress={() => void onRetry([order.id])}><Text>Retry</Text></Button> : null}
                   </HStack>
                 ))}

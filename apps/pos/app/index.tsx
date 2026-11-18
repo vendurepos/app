@@ -350,7 +350,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {ordersOpen ? (
         <VStack testID="orders-panel" className="flex-1">
-          {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} footer={(order, reload) => <RefundSheet order={order}
+          {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} onRetry={outbox.requeue} footer={(order, reload) => <RefundSheet order={order}
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
             capabilities={readSettingsCapabilities} onRefunded={reload} />}
             receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back} />} /> : null}

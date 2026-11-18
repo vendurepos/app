@@ -4,10 +4,13 @@ import type { VendureOrder } from '@tallyui/connector-vendure';
 import type { PosOrder } from '@tallyui/pos';
 import { ORDER_LOADING_TEXT, orderDetailTarget, orderDetailView, useOrderDetail } from './order-detail';
 import type { Session } from './session';
+import { attentionReason, canSendAgain } from './store-health';
 
 /** One order's read-only detail from the store, opened from the Orders panel. */
-export function OrderSheet({ session, row, onClose, footer, receipt }: {
+export function OrderSheet({ session, row, onClose, onRetry, footer, receipt }: {
   session: Session; row: PosOrder | OrderHistoryRow; onClose(): void;
+  /** The till's retry (outbox.requeue): a refused sale Retry can fix gets a primary Retry, and the sheet closes once it is sent. */
+  onRetry?: (orderIds: string[]) => Promise<number>;
   /** Rendered in OrderDetail's footerSlot once the order is loaded; reload re-reads it from the store. */
   footer?: (order: VendureOrder, reload: () => void) => ReactNode;
   /** The loaded order's receipt, shown in place of the detail after Receipt; back returns to the detail. */
@@ -17,6 +20,8 @@ export function OrderSheet({ session, row, onClose, footer, receipt }: {
   const { order, notice, loading, reload } = useOrderDetail(session, 'orderId' in target ? target.orderId : null);
   const [showReceipt, setShowReceipt] = useState(false);
   const view = order ? orderDetailView(order) : null;
+  const refused = 'syncStatus' in row && row.syncStatus === 'rejected' ? row : null;
+  const [sending, setSending] = useState(false);
   return (
     <VStack testID="order-sheet" className="flex-1">
       <HStack dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
@@ -31,6 +36,16 @@ export function OrderSheet({ session, row, onClose, footer, receipt }: {
       </HStack>
       {'note' in target ? (
         <Text testID="order-sheet-note" className="px-4 py-2 text-sm text-muted-foreground">{target.note}</Text>
+      ) : null}
+      {refused ? (
+        <HStack className="items-center border-b border-destructive bg-destructive/10 px-4 py-3" space="sm">
+          <Text testID="order-sheet-refused" className="flex-1 font-semibold">{attentionReason(refused)}</Text>
+          {onRetry && canSendAgain(refused) ? (
+            <Button testID="order-sheet-send-again" disabled={sending} onPress={() => { setSending(true); void onRetry([refused.id]).then(onClose, () => setSending(false)); }}>
+              <Text>Retry</Text>
+            </Button>
+          ) : null}
+        </HStack>
       ) : null}
       {loading && !order ? (
         <Text testID="order-sheet-loading" className="px-4 py-2 text-sm text-muted-foreground">{ORDER_LOADING_TEXT}</Text>

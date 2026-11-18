@@ -53,19 +53,19 @@ export async function readServerTotals(context: SyncContext): Promise<ServerTota
 
 export type AttentionRow = { order: PosOrder; reason: string; retry: boolean };
 
+/** A refused sale that Retry can fix: a requeueable code, exactly where TallyUI's OrdersList offers Retry. */
+export const canSendAgain = (order: PosOrder): boolean => order.syncStatus === 'rejected' && isRequeueable(order.error?.code);
+
+/** Why an order needs attention, in Store health's words; `stuck` gives a pending sale's reason. */
+export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): string {
+  const entry = stuck?.orders.find((entry) => entry.commandId === order.commandId);
+  if (order.syncStatus === 'rejected') return 'Refused by the store' + (order.error?.code ? ` — ${order.error.code}` : '');
+  if (order.syncStatus === 'pending') return "Can't reach the store" + (entry ? ` — ${entry.reason}` : '');
+  return order.lateSessionId !== undefined ? 'Taken after the register closed' : 'Synced with a warning';
+}
+
 /** Store health's "needs attention" records (CHECKLIST 10.3): the orders the Orders panel counts (needsAttention), each with
  * the outbox's reason, and Retry exactly where TallyUI's OrdersList offers it (a refused sale with a requeueable code). */
 export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck']): AttentionRow[] {
-  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => {
-    let reason: string;
-    if (order.syncStatus === 'rejected') {
-      reason = 'Refused by the store' + (order.error?.code ? ` — ${order.error.code}` : '');
-    } else if (order.syncStatus === 'pending') {
-      const entry = stuck?.orders.find((entry) => entry.commandId === order.commandId);
-      reason = "Can't reach the store" + (entry ? ` — ${entry.reason}` : '');
-    } else {
-      reason = order.lateSessionId !== undefined ? 'Taken after the register closed' : 'Synced with a warning';
-    }
-    return { order, reason, retry: order.syncStatus === 'rejected' && isRequeueable(order.error?.code) };
-  });
+  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order) }));
 }

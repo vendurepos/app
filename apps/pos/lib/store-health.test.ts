@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionRows, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice } from './store-health';
 
 describe('readyToSell', () => {
   const ready = { catalogueSynced: true, signedOut: false, settingsReady: true, ordersOpen: true };
@@ -85,5 +85,17 @@ describe('attentionRows', () => {
 
   it('returns no rows for no orders', () => {
     expect(attentionRows([], undefined)).toEqual([]);
+  });
+});
+
+describe('attentionReason and canSendAgain', () => {
+  const sale = { id: 'sale', saleId: 'sale', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-sale' } as PosOrder;
+  it.each([
+    [{ syncStatus: 'rejected', error: { code: 'invalid_payload' } }, 'Refused by the store — invalid_payload', true],
+    [{ syncStatus: 'rejected', error: { code: 'idempotency_mismatch' } }, 'Refused by the store — idempotency_mismatch', false],
+    [{ syncStatus: 'pending' }, "Can't reach the store", false],
+  ] as const)('words %o as attentionRows did', (fields, reason, retry) => {
+    const order = { ...sale, ...fields } as PosOrder;
+    expect([attentionReason(order), canSendAgain(order)]).toEqual([reason, retry]);
   });
 });
