@@ -8,13 +8,7 @@ export { TallyPriceStrategy } from './config/strategies';
 export { TallyCommand } from './entities/tally-command.entity';
 export { OrderCreateService } from './service/order-create.service';
 export type { OrderCreateResult, PricingStage, TotalWarning } from './service/order-create.service';
-export {
-  DisplayRefusal, DisplaySignallingService, SNAPSHOT_MAX_BYTES, TALLY_DISPLAY_CLOCK, TALLY_DISPLAY_OPTIONS,
-} from './service/display-signalling.service';
-export type { CustomerDisplayOptions, DisplayRefusalCode, IceServer } from './service/display-signalling.service';
-export {
-  TallyDisplay, TallyDisplayClaimWindow, TallyDisplayCode, TallyDisplayPending, TallyDisplaySignal, TallyDisplaySnapshot,
-} from './entities/display.entities';
+export type { CustomerDisplayOptions, IceServer } from './service/display-signalling.service';
 export { RegisterService } from './service/register.service';
 export type { RegisterEnvelope, RegisterResult } from './service/register.service';
 export {

@@ -7,7 +7,8 @@ import { displaySignallingContract } from '@tallyui/core/server';
 import type { DisplaySignallingHarness } from '@tallyui/core/server';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { POS_TILL_PERMISSIONS, TALLY_DISPLAY_CLOCK, TallyPosPlugin } from '../src';
+import { POS_TILL_PERMISSIONS, TallyPosPlugin } from '../src';
+import { TALLY_DISPLAY_CLOCK } from '../src/service/display-signalling.service';
 import { bootstrapSecondInstance, createPluginTestEnvironment } from './env';
 
 const MINUTE = 60_000, DAY = 24 * 60 * MINUTE;

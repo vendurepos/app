@@ -241,7 +241,8 @@ state is in Postgres, so any server instance answers any call.
 
 - The till role preset (`tallyEnsurePosTillRole`) holds `TallyPosPairDisplay` from this version. A role created from
   the preset before it does not gain the permission: add it under Settings → Roles in the Vendure admin, or with the
-  `updateRole` mutation.
+  `updateRole` mutation, or by running `tallyEnsurePosTillRole` again, which adds the preset's permissions to the
+  existing role.
 - Failed claims are limited per source address, which is Express's `req.ip`. A server behind a proxy or load balancer
   must set `trust proxy` (`apiOptions.trustProxy` in the Vendure config); without it every display shares the
   proxy's address as one source, which is stricter, never looser.
