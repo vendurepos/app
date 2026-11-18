@@ -1972,6 +1972,26 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
       await contextB.close();
     }
   });
+
+  test('Settings opened before the register open reaches the store shows Open since once it lands', async ({ page }) => {
+    await signIn(page);
+    await page.getByTestId('product-tile-Tally Fixture Mug').click();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const hold = async (route: Route) => { if (route.request().method() === 'POST') await released; await route.continue(); };
+    await page.route('**/tally/v1/commands', hold);
+    try {
+      await openRegister(page, '50.00');
+      await page.getByTestId('settings-open').click();
+      await page.getByTestId('settings-section-general').click();
+      await expect(page.getByTestId('register-choice-own')).toBeVisible();
+      await expect(page.getByTestId('register-choice-own-status')).toHaveCount(0);
+      release();
+      await expect(page.getByTestId('register-choice-own-status')).toContainText('Open since');
+    } finally {
+      await page.unroute('**/tally/v1/commands', hold);
+    }
+  });
 });
 
 test('a password account without POS access is refused at sign-in and keeps no session', async ({ page }) => {

@@ -369,7 +369,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
-      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
