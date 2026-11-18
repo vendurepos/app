@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **27 / 56** rows at parity (round 16, 2026-11-17). The two rows marked N/A are not counted.
+**Score:** **30 / 56** rows at parity (round 17, 2026-11-18). The two rows marked N/A are not counted.
 
 ---
 
@@ -63,9 +63,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [x] **2.8 Quiet lines.** WCPOS shows Edit / Remove on hover. Done (spec B4): the line shows only quantity, name, price and total. Discount and Remove are actions in the line's quantity keypad, one tap away, the touch-first equivalent of v2's hover (a till tablet has no hover).
 - [x] **2.9 Itemised tax lines in the totals.** VendurePOS shows "incl. Reduced DE 7 %" and "incl. Standard DE 19 %", Vendure's way.
 - [ ] **2.10 "+" menu:** misc product, fee, shipping, discount, new customer. VendurePOS's "Add charge" covers fee, shipping and custom item. *Left:* a percentage fee and an "amount includes tax" switch. TallyUI 3.20.0's `ChargeForm` and `ChargeInput` take a fixed amount only. *Shared* first, then *app.*
-- [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. Partly done (#265): a ⋮ beside Checkout opens Order details with Void. *Left:*
-  - the customer note: `useSale().setNote` sends it in order.create v7, and the plugin takes up to v5 (*plugin*);
-  - tax exempt: TallyUI has no support for it (*shared + plugin*).
+- [ ] **2.11 Order details dialog:** customer note, tax exempt, void. VendurePOS has only an order discount. Partly done (#265): a ⋮ beside Checkout opens Order details with Void. Done (#284, P2.11a): the customer note, sent in order.create v7, which the plugin now takes (versions 6 and 7), with a demo shot of Order details holding the note. *Left:* tax exempt: TallyUI has no support for it (*shared + plugin*).
 - [x] **2.12 Toast when an item is added.** Done (spec B9): every add the sale takes, by tap or scan, shows "<item> added to cart" at the top of the till for 2.5 s; a refused add shows none, and the toast never takes a tap (demo e2e "a toast when an item is added"). *App.*
 
 | WCPOS | VendurePOS |
@@ -138,7 +136,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - [ ] **6.3 Pay in / pay out reason chips** (Float, Change, Bank, Other). VendurePOS has a free-text reason. *Left:* the chips. TallyUI 3.20.0's `MovementSheet` has the free-text reason only, with no prop for chips. *Shared.*
 - [x] **6.4 Close register: a cashier never sees a raw error.** The capture showed "RegisterTenderInProgressError: Finish or cancel…" when closing during a tender. Done (spec B5): TallyUI 3.19.0's register panel and count show a refusal's message alone (`errorText`). A demo e2e now pins it: Close register during a checkout says "Finish or cancel the sale in progress first.", opens no count, and leaves the checkout open.
 - [x] **6.5 Count the drawer by denomination at close.**
-- [ ] **6.6 Several registers per store, picked on the device** ("Which register is this device at?"). *Left:* all of it. The plugin reads one register by id (`GET /tally/v1/registers/:id`) and cannot list the channel's registers. TallyUI 3.20.0's `RegisterPicker` exists, unused. *Plugin + app.*
+- [x] **6.6 Several registers per store, picked on the device** ("Which register is this device at?"). Done: the plugin lists the channel's registers with `GET /tally/v1/registers` (#283, P6.6a); Settings › General picks the register this device is at with TallyUI's `RegisterPicker`, and the till follows it (#291, P6.6b; demo e2e "Settings › General picks the register this device is at, and the till follows it"); a register open on another till gets the conflict card, never a second drawer (#294; smoke e2e); the register panel, the cashier sheet and the hand-over name the register (#296 P6.6c, #297). *Plugin + app.*
 
 | WCPOS | VendurePOS |
 |---|---|
@@ -252,3 +250,4 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 | 14 | 2026-11-17 | 24 / 56 | refresh: no new ticks; the score recounted (7.1, 7.2 and 9.2 were ticked after round 13); 1.2's banner line fixed (#256); retagged 1.5, 1.8, 1.9, 2.5, 2.10, 4.1, 5.1, 6.3 to shared, 2.1 and 8.2 to app, 3.2 and 5.2 to shared + plugin, 9.8 to plugin + app. |
 | 15 | 2026-11-17 | 27 / 56 | 2.1 open sales as tabs (#259), 8.2 closures cash and CSV (#260), 9.6 read-only Tax (#263). Parts done in 1.6 (#258), 2.11 (#265), 3.1 (#266), 6.1 (#262), 8.1 (#261, #264, #269), 9.9 (#268), 9.10 (#267); 8.1's store-wide figures retagged to plugin, its card panels to shared. |
 | 16 | 2026-11-17 | 27 / 56 | No new ticks. Parts done in 1.1 (#273, #281, #282), 6.1 (#271), 8.2 (#278), 9.1 (#285), 9.9 (#276), 9.10 (#272, #274, #279), 10.2 (#281), 10.3 (#273, #280), 11.1 (#282); 10.3 stays open on coverage against the store, Fix record and View log (app). |
+| 17 | 2026-11-18 | 30 / 56 | New ticks: 6.1 (#277, #297 P6.1e), 6.6 (#283, #291, #294, #296, #297), 10.3 (#290 coverage, #308 View log, #309 Fix record). Parts done in 2.11 (#284 customer note); 2.11 stays open on tax exempt (shared + plugin). |
