@@ -1,7 +1,9 @@
+import { formatMoney } from '@tallyui/core';
 import type { Closure } from '@tallyui/pos';
 import { expect, it } from 'vitest';
 import {
-  closureCsvFileName, closureFromRead, closureHistoryCsv, closureHistoryRows, mergeClosures, zCopyLines, type TallyClosureRead,
+  closureCsvFileName, closureFromRead, closureHistoryCsv, closureHistoryRows, closureSummary, mergeClosures, openSessionRows, zCopyLines,
+  type TallyClosureRead,
 } from './closure-history';
 import { zReportLines } from './z-report';
 
@@ -36,9 +38,9 @@ it("lists this till's closures newest first", () => {
   };
   expect(closureHistoryRows([previous, { ...closure, id: 'other-store', store_key: 'vendurepos_orders_ffff0000' }, closure], options)).toEqual([
     { id: 'session-1', registerId: 'drawer-1', register: 'This device', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '€19.04',
-      cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: 'Exact' },
+      cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: 'Exact', expected: '€104.52', day: '2026-09-30', dayLabel: 'Today' },
     { id: 'session-2', registerId: 'drawer-1', register: 'This device', number: 2, closedAt: 'Sep 29, 2026, 17:00', salesTotal: '€0.00',
-      cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: '€5.00 short' },
+      cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: '€5.00 short', expected: '€104.52', day: '2026-09-29', dayLabel: 'Yesterday' },
   ]);
 });
 
@@ -54,7 +56,7 @@ it('words an over and a missing cash variance', () => {
 it('shows no figures while the count is blind', () => {
   expect(closureHistoryRows([closure], { ...options, blind: true })).toEqual([
     { id: 'session-1', registerId: 'drawer-1', register: 'This device', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '', cashAtOpen: '',
-      cashAtClose: '', variance: '' },
+      cashAtClose: '', variance: '', expected: '', day: '2026-09-30', dayLabel: 'Today' },
   ]);
 });
 
@@ -147,4 +149,29 @@ it("lists every register's closures of this store, this device's and the others'
 it("names another register in the closures CSV's Register column", () => {
   const lines = closureHistoryCsv([closure, remote], { ...options, names, store: 'Demo store' }).split('\r\n').filter(Boolean);
   expect(lines.slice(1).map((line) => line.split(',')[2])).toEqual(['"Front counter"', '"This device"']);
+});
+
+it("gives each register with a live session an open row, this device's as 'This device'", () => {
+  const session = { openedAt: '2026-09-30T08:15:00.000Z', openedBy: null, deviceName: null };
+  expect(openSessionRows([
+    { id: 'drawer-1', receivedAt: '', lastDeviceName: 'Till 1', session: { ...session, status: 'open' } },
+    { id: 'drawer-2', receivedAt: '', lastDeviceName: 'Front counter', session: { ...session, status: 'counting' } },
+    { id: 'drawer-3', receivedAt: '', lastDeviceName: 'Back office', session: null },
+  ], { ownRegisterId: 'drawer-1', timezone: 'UTC' })).toEqual([
+    { registerId: 'drawer-1', register: 'This device', status: 'open', since: 'Sep 30, 2026, 08:15' },
+    { registerId: 'drawer-2', register: 'Front counter', status: 'counting', since: 'Sep 30, 2026, 08:15' },
+  ]);
+});
+
+it("sums the listed closures' cash variance and cash counted, and counts the open sessions with them", () => {
+  const listed = [
+    { ...closure, variance: { cash: -100 }, counted: { cash: 15000 } },
+    { ...remote, variance: { cash: 0 }, counted: { cash: 10000 } },
+    { ...remote, id: 'other-store', store_key: 'vendurepos_orders_ffff0000', variance: { cash: -900 }, counted: { cash: 90000 } },
+  ];
+  expect(closureSummary(listed, { ...options, open: 1 })).toEqual({
+    sessions: '3', sessionsNote: '1 open · 2 closed', discrepancy: formatMoney({ amount: -100, currency: 'EUR' }), cashAtClose: '€250.00',
+  });
+  expect(closureSummary(listed, { ...options, open: 1, blind: true })).toMatchObject({ discrepancy: '—', cashAtClose: '—' });
+  expect(closureSummary([], { ...options, open: 0 })).toMatchObject({ sessions: '0', discrepancy: '—', cashAtClose: '—' });
 });

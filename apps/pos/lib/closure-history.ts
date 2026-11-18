@@ -1,12 +1,16 @@
 import { formatMoney, minorUnitDigits } from '@tallyui/core';
 import { clampClosureScope, exportCsv, formatClosureDate, selectClosureRows, varianceText, type Closure } from '@tallyui/pos';
-import { fetchRegisters, OWN_REGISTER_LABEL, registerLabel } from './register-choice';
+import { fetchRegisters, OWN_REGISTER_LABEL, registerLabel, type ListedRegister } from './register-choice';
 import { sessionContext, type Session } from './session';
 import { zReportLines } from './z-report';
 
 export type ClosureHistoryRow = {
   id: string; registerId: string; register: string; number: number; closedAt: string; salesTotal: string; cashAtOpen: string; cashAtClose: string; variance: string;
+  expected: string; day: string; dayLabel: string;
 };
+
+/** A register with a live session (GET /tally/v1/registers), as the Closures view's open row. */
+export type OpenSessionRow = { registerId: string; register: string; status: 'open' | 'counting'; since: string };
 
 /** One closure of the plugin's GET /tally/v1/registers/:id (packages/vendure-plugin/src/api/registers.controller.ts). */
 export type TallyClosureRead = {
@@ -37,7 +41,7 @@ export function mergeClosures(local: readonly Closure[], remote: readonly Closur
 }
 
 /** Every listed register's closures (one page of 100 each: the 92-day window at one a day) and each register's label. */
-export async function fetchChannelClosures(session: Session, storeKey: string): Promise<{ closures: Closure[]; names: Record<string, string> }> {
+export async function fetchChannelClosures(session: Session, storeKey: string): Promise<{ closures: Closure[]; names: Record<string, string>; registers: ListedRegister[] }> {
   const listed = await fetchRegisters(session);
   const pages = await Promise.all(listed.map(async ({ id }) => {
     const response = await fetch(`${session.url}/tally/v1/registers/${encodeURIComponent(id)}?take=100`, { headers: sessionContext(session).headers });
@@ -45,7 +49,7 @@ export async function fetchChannelClosures(session: Session, storeKey: string): 
     const body: { closures: { items: TallyClosureRead[] } } = await response.json();
     return body.closures.items.map((read) => closureFromRead(read, storeKey));
   }));
-  return { closures: pages.flat(), names: Object.fromEntries(listed.map((register) => [register.id, registerLabel(register)])) };
+  return { closures: pages.flat(), names: Object.fromEntries(listed.map((register) => [register.id, registerLabel(register)])), registers: listed };
 }
 
 // The keys are TallyUI exportCsv's label keys.
@@ -67,20 +71,46 @@ export function closureHistoryRows(rows: readonly Closure[], { ownRegisterId, na
   const exponent = minorUnitDigits(currency);
   const words: Record<string, string> = { 'register.exact': 'Exact', 'register.short': 'short', 'register.over': 'over' };
   const cash = (amount: unknown) => blind || typeof amount !== 'number' ? '' : formatMoney({ amount, currency }) ?? '';
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   return listedClosures(rows, { storeKey, timezone, today })
-    .map((row) => ({
+    .map((row) => ({ row, closed: formatClosureDate(row.closed_at, { timezone, locale: 'en' }) }))
+    .map(({ row, closed }) => ({
       id: row.id,
       registerId: row.register_id,
       register: row.register_id === ownRegisterId ? OWN_REGISTER_LABEL : names[row.register_id] ?? `Register ${row.register_id.slice(0, 8)}`,
       number: row.number,
-      closedAt: formatClosureDate(row.closed_at, { timezone, locale: 'en' }).datetime,
+      closedAt: closed.datetime,
       salesTotal: blind ? '' : formatMoney({ amount: row.period_sales_total_minor, currency }) ?? '',
       cashAtOpen: cash((row.breakdowns.opening_float as { counted_minor?: unknown } | undefined)?.counted_minor),
       cashAtClose: cash(row.counted.cash),
       variance: !blind && typeof row.variance.cash === 'number'
         ? varianceText(row.variance.cash, exponent,
           (major) => formatMoney({ amount: Math.round(major * 10 ** exponent), currency }) ?? '', (key) => words[key]) : '',
+      expected: cash(row.expected.cash),
+      day: closed.date_ymd,
+      dayLabel: closed.date_ymd === today ? 'Today' : closed.date_ymd === yesterday ? 'Yesterday' : closed.date,
     }));
+}
+
+/** One row per listed register with a live session: this device's as "This device", the others by name. */
+export function openSessionRows(registers: readonly ListedRegister[], { ownRegisterId, timezone }: { ownRegisterId: string; timezone: string }): OpenSessionRow[] {
+  return registers.flatMap((listed) => listed.session ? [{
+    registerId: listed.id, register: listed.id === ownRegisterId ? OWN_REGISTER_LABEL : registerLabel(listed), status: listed.session.status,
+    since: formatClosureDate(listed.session.openedAt, { timezone, locale: 'en' }).datetime,
+  }] : []);
+}
+
+/** v2's Closures tiles over the listed closures: sessions (open and closed), the summed cash variance and the summed cash counted. */
+export function closureSummary(closures: readonly Closure[], { open, storeKey, currency, timezone, today, blind }: {
+  open: number; storeKey: string; currency: string; timezone: string; today: string; blind: boolean;
+}): { sessions: string; sessionsNote: string; discrepancy: string; cashAtClose: string } {
+  const listed = listedClosures(closures, { storeKey, timezone, today });
+  const sum = (pick: (row: Closure) => unknown) => blind || listed.length === 0 ? '—'
+    : formatMoney({ amount: listed.reduce((total, row) => total + (typeof pick(row) === 'number' ? pick(row) as number : 0), 0), currency }) ?? '—';
+  return {
+    sessions: String(open + listed.length), sessionsNote: `${open} open · ${listed.length} closed`,
+    discrepancy: sum((row) => row.variance.cash), cashAtClose: sum((row) => row.counted.cash),
+  };
 }
 
 /** v2's closures CSV (TallyUI exportCsv, WCPOS's own) of the closures this sheet lists, in English. */

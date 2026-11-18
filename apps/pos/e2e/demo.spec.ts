@@ -1353,11 +1353,34 @@ test("Reports › Closures lists every register's closures and opens one to its 
   await page.getByTestId('count-amount').fill('100.00');
   await page.getByTestId('count-close').click();
   await page.getByTestId('closure-sheet').getByTestId('closure-done').click();
+  // Open the register again, so the Closures view has an open session beside the two closures.
+  await card.getByTestId('open-register-amount').fill('50.00');
+  await card.getByTestId('open-register-button').click();
   await page.getByTestId('reports-open').click();
   const panel = page.getByTestId('reports-panel');
   await panel.getByTestId('reports-tab-closures').click();
   await expect(panel.getByTestId('closure-history-row-1')).toContainText('This device · Closure #1');
   await expect(panel.getByTestId('closure-history-row-demo-front-counter-1')).toContainText('Front counter · Closure #1');
+  // v2's tiles: this device's open session and closure #1 (€100.00 counted), and Front counter's closure yesterday (€150.00).
+  await expect(panel.getByTestId('closures-tile-sessions')).toContainText('3');
+  await expect(panel.getByTestId('closures-tile-sessions')).toContainText('1 open · 2 closed');
+  await expect(panel.getByTestId('closures-tile-cash-at-close')).toContainText('€250.00');
+  await expect(panel.getByTestId('closures-tile-discrepancy')).toContainText('€0.00');
+  const openRow = panel.locator('[data-testid^="closures-open-"]').first();
+  await expect(openRow).toContainText('This device · Open since');
+  const days = panel.locator('[data-testid^="closures-day-"]');
+  await expect(days.first()).toContainText('Today');
+  await expect(days.first().getByTestId('closure-history-row-1')).toBeVisible();
+  await expect(days.nth(1)).toContainText('Yesterday');
+  await expect(days.nth(1).getByTestId('closure-history-row-demo-front-counter-1')).toBeVisible();
+  await panel.getByTestId('closures-filter-open').click();
+  await expect(openRow).toBeVisible();
+  await expect(panel.getByTestId('closure-history-row-1')).toHaveCount(0);
+  await panel.getByTestId('closures-filter-closed').click();
+  await expect(panel.locator('[data-testid^="closures-open-"]')).toHaveCount(0);
+  await expect(panel.getByTestId('closure-history-row-1')).toBeVisible();
+  await panel.getByTestId('closures-filter-all').click();
+  await expect(openRow).toBeVisible();
   // The demo-pairs size, as 10c; the PNG is made docs/v2-parity/demo-pairs/10d-reports-closures-vendurepos.webp (cwebp -q 80).
   await page.setViewportSize({ width: 960, height: 600 });
   await page.mouse.move(480, 0);
