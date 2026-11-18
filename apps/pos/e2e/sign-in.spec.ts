@@ -853,6 +853,70 @@ test('Settings › Customer display mints a pairing code on the dev store', asyn
   expect(cspConsole).toEqual([]);
 });
 
+test("a customer display pairs on a second page, shows the till's cart, and a forget sends it back to pairing", async ({ browser, page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  // Its own context, so its own storage: the display has no session and never sees the till's. The rewrite below serves
+  // the page from Playwright, not from the loopback server, so Chrome's Local Network Access needs the grant to reach the store.
+  const displayContext = await browser.newContext({ permissions: ['local-network-access'] });
+  try {
+    // CI's `expo serve` 404s deep links into this single-output export, so the test does the host's rewrite for /display.
+    await displayContext.route((url) => url.pathname === '/display', async (route) => {
+      await route.fulfill({ response: await route.fetch({ url: new URL('/', route.request().url()).href }) });
+    });
+    const display = await displayContext.newPage();
+    await display.goto(`/display?store=${encodeURIComponent(STORE_URL)}`);
+    // ?store= only prefills the field: no code entry until Continue.
+    await expect(display.getByTestId('display-store-url')).toHaveValue(STORE_URL);
+    await expect(display.getByTestId('display-store-continue')).toBeVisible();
+    await expect(display.getByTestId('display-code')).toHaveCount(0);
+    await display.getByTestId('display-store-continue').click();
+    await expect(display.getByTestId('display-code')).toBeVisible();
+
+    await page.getByTestId('settings-open').click();
+    await page.getByTestId('settings-section-customer-display').click();
+    await page.getByTestId('pairing-start').click();
+    const code = page.getByTestId('pairing-code');
+    await expect(code).toHaveText(/^\d{6}$/);
+    await display.getByTestId('display-code').fill((await code.textContent())!);
+    await display.getByTestId('display-name').fill('Counter display');
+    await display.getByTestId('display-pair').click();
+    const displayCheck = display.getByTestId('display-check-code');
+    await expect(displayCheck).toHaveText(/\S/);
+    const tillCheck = page.locator('[data-testid^="check-"]');
+    await expect(tillCheck).toHaveText((await displayCheck.textContent())!);
+    const claimId = (await tillCheck.getAttribute('data-testid'))!.slice('check-'.length);
+    await page.getByTestId(`confirm-${claimId}`).click();
+    await expect(display.getByTestId('customer-display-idle')).toBeVisible({ timeout: 30_000 });
+    // Paired, the page is the screen alone: not the pairing component's own paired view with its badge.
+    await expect(display.getByTestId('display-paired')).toHaveCount(0);
+
+    await page.getByTestId('settings-back').click();
+    await page.getByTestId('product-tile-Tally Fixture Mug').click();
+    const cart = display.getByTestId('customer-display-cart');
+    await expect(cart).toContainText('Tally Fixture Mug', { timeout: 30_000 });
+    // The display shows only what the till sends, and the till sends no cashier (Front desk ruling 4).
+    expect(await display.locator('body').innerText()).not.toContain(USERNAME);
+
+    await page.getByTestId('settings-open').click();
+    await page.getByTestId('settings-section-customer-display').click();
+    const state = page.locator('[data-testid^="display-state-"]');
+    await expect(state).toHaveCount(1);
+    const displayId = (await state.getAttribute('data-testid'))!.slice('display-state-'.length);
+    await page.getByTestId(`forget-${displayId}`).click();
+    await page.getByTestId(`forget-confirm-${displayId}`).click();
+    // A forgotten display's token is refused, so it is back at pairing (Front desk ruling 5).
+    await expect(display.getByTestId('display-code')).toBeVisible({ timeout: 30_000 });
+    await expect(display.getByTestId('customer-display-cart')).toHaveCount(0);
+  } finally {
+    await displayContext.close();
+  }
+  await expectCspMeta(page);
+  expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
 test('the sync status shows a sale waiting and retrying, then a store without the plugin, and clears once sent', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto('/');
