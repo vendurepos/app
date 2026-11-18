@@ -1,12 +1,20 @@
 // The email handler is the `@vendurepos/plugin/email` entry (src/email.ts), so this entry never
 // requires the optional @vendure/email-plugin.
 export { TallyPosPlugin } from './plugin';
-export { tallyPosApproveVariance, tallyPosRefund, tallyPosSell } from './config/permissions';
+export type { TallyPosPluginOptions } from './plugin';
+export { tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund, tallyPosSell } from './config/permissions';
 export { POS_TILL_ROLE_CODE, POS_TILL_PERMISSIONS } from './config/pos-till-role';
 export { TallyPriceStrategy } from './config/strategies';
 export { TallyCommand } from './entities/tally-command.entity';
 export { OrderCreateService } from './service/order-create.service';
 export type { OrderCreateResult, PricingStage, TotalWarning } from './service/order-create.service';
+export {
+  DisplayRefusal, DisplaySignallingService, SNAPSHOT_MAX_BYTES, TALLY_DISPLAY_CLOCK, TALLY_DISPLAY_OPTIONS,
+} from './service/display-signalling.service';
+export type { CustomerDisplayOptions, DisplayRefusalCode, IceServer } from './service/display-signalling.service';
+export {
+  TallyDisplay, TallyDisplayClaimWindow, TallyDisplayCode, TallyDisplayPending, TallyDisplaySignal, TallyDisplaySnapshot,
+} from './entities/display.entities';
 export { RegisterService } from './service/register.service';
 export type { RegisterEnvelope, RegisterResult } from './service/register.service';
 export {
@@ -23,3 +31,4 @@ export { TallyPosRegister1790800000000 } from './migrations/1790800000000-TallyP
 export { TallyPosV51790900000000 } from './migrations/1790900000000-TallyPosV5';
 export { TallyPosRegisterV21791000000000 } from './migrations/1791000000000-TallyPosRegisterV2';
 export { TallyPosRegisterOpenVersion1791100000000 } from './migrations/1791100000000-TallyPosRegisterOpenVersion';
+export { TallyPosDisplay1791200000000 } from './migrations/1791200000000-TallyPosDisplay';

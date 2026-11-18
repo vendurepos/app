@@ -6,17 +6,23 @@ import {
 import type { Middleware } from '@vendure/core';
 import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
+import { TallyDisplaysController } from './api/displays.controller';
 import { TallyInfoController } from './api/info.controller';
 import { TallyRegistersController } from './api/registers.controller';
 import { TallyReportsController } from './api/reports.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
-import { tallyPosSell, tallyPosApproveVariance, tallyPosRefund } from './config/permissions';
+import { tallyPosSell, tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund } from './config/permissions';
 import {
   TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
 } from './config/strategies';
+import { DISPLAY_ENTITIES } from './entities/display.entities';
 import { REGISTER_ENTITIES } from './entities/register.entities';
 import { TallyCommand } from './entities/tally-command.entity';
+import {
+  DisplayRefusal, DisplaySignallingService, SNAPSHOT_MAX_BYTES, TALLY_DISPLAY_OPTIONS,
+} from './service/display-signalling.service';
+import type { CustomerDisplayOptions } from './service/display-signalling.service';
 import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
 import { RegisterService } from './service/register.service';
@@ -34,6 +40,10 @@ const COMMANDS_ROUTE = '/tally/v1/commands';
 // global parser keeps 100 kB. The one source for the parser's limit and the 413 body_too_large answer (ruling 20).
 export const COMMANDS_BODY_MAX_BYTES = 1_048_576;
 const PROTOCOL_HEADER = 'X-Tally-Protocol';
+const TALLY_HEADERS = [PROTOCOL_HEADER, 'X-Tally-Device-Id', 'X-Tally-Display-Token'];
+const DISPLAYS_ROUTE = '/tally/v1/displays';
+// Twice the snapshot cap, so a snapshot just over it still reaches the service: too_large there, and the old one stays.
+const DISPLAYS_BODY_MAX_BYTES = 2 * SNAPSHOT_MAX_BYTES;
 // Ruling 16: from about this many customers, the email lookup's sequential scan is worth the README's optional index.
 export const CUSTOMER_INDEX_WARN_ROWS = 50_000;
 export const CUSTOMER_INDEX_SECTION = 'Optional: an index for POS customer lookups';
@@ -45,9 +55,11 @@ type Parser = (req: unknown, res: Reply, next: Next) => void;
 // The JSON parser Vendure itself uses: express is @vendure/core's dependency, so it is loaded from
 // there rather than added to this package's. A body it refuses (too large, malformed) is the
 // client's fault: answered here with the parser's own 4xx, never as the 500 Nest would make of it.
+const jsonParser = (limit: number): Parser =>
+  (createRequire(require.resolve('@vendure/core'))('express') as { json(options: { limit: number }): Parser }).json({ limit });
+
 function commandsBodyParser(): Middleware['handler'] {
-  const express = createRequire(require.resolve('@vendure/core'))('express') as { json(options: { limit: number | string }): Parser };
-  const parse = express.json({ limit: COMMANDS_BODY_MAX_BYTES });
+  const parse = jsonParser(COMMANDS_BODY_MAX_BYTES);
   return ((req: unknown, res: Reply, next: Next) => parse(req, res, error => {
     const status = (error as { status?: unknown } | undefined)?.status;
     if (typeof status !== 'number' || status < 400 || status >= 500) return next(error);
@@ -61,15 +73,29 @@ function commandsBodyParser(): Middleware['handler'] {
   })) as Middleware['handler'];
 }
 
+// The till-side display routes' parser: a refused body is answered in the seam's shape, `too_large` or `invalid_request`.
+function displaysBodyParser(): Middleware['handler'] {
+  const parse = jsonParser(DISPLAYS_BODY_MAX_BYTES);
+  return ((req: unknown, res: Reply, next: Next) => parse(req, res, error => {
+    const status = (error as { status?: unknown } | undefined)?.status;
+    if (typeof status !== 'number' || status < 400 || status >= 500) return next(error);
+    const refusal = new DisplayRefusal(status === 413 ? 'too_large' : 'invalid_request');
+    res.status(refusal.status).json({ code: refusal.code, message: refusal.message });
+  })) as Middleware['handler'];
+}
+
+export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions };
+
 /** VendurePOS: TallyUI's order.create (ADR 0002) and register commands (ADR 0003), one Postgres transaction per command. */
 @VendurePlugin({
   compatibility: '^3.6.0',
   // The Dashboard's Vite plugin resolves this next to compiled dist/plugin.js, so the build copies src/dashboard/ there.
   dashboard: './dashboard/index.tsx',
   imports: [PluginCommonModule],
-  entities: [TallyCommand, ...REGISTER_ENTITIES],
-  controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController],
-  providers: [OrderCreateService, RegisterService, RefundService, ReportService, StoreSetupService],
+  entities: [TallyCommand, ...REGISTER_ENTITIES, ...DISPLAY_ENTITIES],
+  controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController],
+  providers: [OrderCreateService, RegisterService, RefundService, ReportService, StoreSetupService, DisplaySignallingService,
+    { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} }],
   exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
@@ -79,7 +105,7 @@ function commandsBodyParser(): Middleware['handler'] {
     const byCode = (a: { code: string }, b: { code: string }) => a.code === b.code;
     config.customFields.Order = withMissing(config.customFields.Order, orderCustomFields, byName);
     config.customFields.OrderLine = withMissing(config.customFields.OrderLine, orderLineCustomFields, byName);
-    config.authOptions.customPermissions = withMissing(config.authOptions.customPermissions, [tallyPosSell, tallyPosApproveVariance, tallyPosRefund], (a, b) => a.Permission === b.Permission);
+    config.authOptions.customPermissions = withMissing(config.authOptions.customPermissions, [tallyPosSell, tallyPosApproveVariance, tallyPosRefund, tallyPosPairDisplay], (a, b) => a.Permission === b.Permission);
     registerOrderIndexes();
     const { orderOptions } = config;
     if (!(orderOptions.orderItemPriceCalculationStrategy instanceof TallyPriceStrategy)) {
@@ -95,21 +121,29 @@ function commandsBodyParser(): Middleware['handler'] {
     shipping.shippingEligibilityCheckers = withMissing(shipping.shippingEligibilityCheckers, [tallyShippingChecker], byCode);
     shipping.shippingCalculators = withMissing(shipping.shippingCalculators, [tallyShippingCalculator], byCode);
     const api = config.apiOptions;
-    api.middleware = withMissing(api.middleware, [{ route: COMMANDS_ROUTE, handler: commandsBodyParser(), beforeListen: true }],
+    api.middleware = withMissing(api.middleware, [{ route: COMMANDS_ROUTE, handler: commandsBodyParser(), beforeListen: true },
+      { route: DISPLAYS_ROUTE, handler: displaysBodyParser(), beforeListen: true }],
       (a, b) => a.route === b.route);
-    // A preflight carrying X-Tally-Protocol passes without auth. Vendure's default CORS reflects the
-    // requested headers; a merchant's explicit allowedHeaders list gets the header added.
+    // A preflight carrying the X-Tally-* headers passes without auth. Vendure's default CORS reflects the
+    // requested headers; a merchant's explicit allowedHeaders list gets each one added.
     const cors = api.cors;
     if (typeof cors === 'object' && cors.allowedHeaders !== undefined) {
       const headers = typeof cors.allowedHeaders === 'string' ? cors.allowedHeaders.split(',').map(h => h.trim()) : cors.allowedHeaders;
-      if (!headers.some(header => header.toLowerCase() === PROTOCOL_HEADER.toLowerCase())) {
-        cors.allowedHeaders = [...headers, PROTOCOL_HEADER];
-      }
+      cors.allowedHeaders = withMissing(headers, TALLY_HEADERS, (a, b) => a.toLowerCase() === b.toLowerCase());
     }
     return config;
   },
 })
 export class TallyPosPlugin implements OnApplicationBootstrap {
+  /** What `init` was given; the plugin needs none of it. */
+  static options: TallyPosPluginOptions = {};
+
+  /** `TallyPosPlugin.init({ customerDisplay: { iceServers } })`: the ICE servers `/info` advertises (TallyUI ADR-085 d7). */
+  static init(options: TallyPosPluginOptions): typeof TallyPosPlugin {
+    TallyPosPlugin.options = options;
+    return TallyPosPlugin;
+  }
+
   constructor(
     private connection: TransactionalConnection,
     private contexts: RequestContextService,

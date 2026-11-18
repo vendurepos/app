@@ -1,12 +1,16 @@
 import { Controller, Get } from '@nestjs/common';
 import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
+import { DisplaySignallingService } from '../service/display-signalling.service';
+import type { IceServer } from '../service/display-signalling.service';
 import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
 export type TallyInfo = { contracts: { 'order.create': number[]; register: number[]; 'order.refund': number[] }; taxRounding: TaxRounding;
-  maxShippingLines: number; lineTax: { none: boolean; classes: boolean }; device?: { name: string } };
+  maxShippingLines: number; lineTax: { none: boolean; classes: boolean }; device?: { name: string };
+  /** TallyUI ADR-085 d7, d8: the signalling routes exist; `iceServers` only when the plugin's init option sets it. */
+  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] } };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -14,7 +18,9 @@ export class TallyInfoController {
   // Store-wide, so the same for every channel: mapped once at bootstrap.
   private readonly taxRounding: TaxRounding;
 
-  constructor(configService: ConfigService, private readonly connection: TransactionalConnection) {
+  constructor(
+    configService: ConfigService, private readonly connection: TransactionalConnection, private readonly displays: DisplaySignallingService,
+  ) {
     const { taxOptions, entityOptions } = configService;
     this.taxRounding = taxRoundingFor({
       orderTax: taxOptions.orderTaxCalculationStrategy,
@@ -30,6 +36,7 @@ export class TallyInfoController {
       'order.refund': [...ORDER_REFUND_VERSIONS] }, taxRounding: this.taxRounding,
       maxShippingLines: MAX_SHIPPING_LINES, // ADR 0005 ruling (b): one shipping charge per order.
       lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
+      customerDisplay: this.displays.advertisement(),
     };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };
