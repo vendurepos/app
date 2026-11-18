@@ -29,9 +29,10 @@ export function zReportLines(closure: Closure, { store, currency, timezone, prin
     store,
     `Opened ${z.opened_at.datetime}`,
     `Closed ${z.closed_at.datetime}`,
-    `Sales ${breakdowns.transaction_count as number}`,
+    ...(typeof breakdowns.transaction_count === 'number' ? [`Sales ${breakdowns.transaction_count}`] : []),
     `Sales total ${z.period_sales_total_display}`,
-    `Opening float ${breakdowns.opening_float.counted_display}`,
+    ...(typeof breakdowns.opening_float.counted_display === 'string' && breakdowns.opening_float.counted_display !== ''
+      ? [`Opening float ${breakdowns.opening_float.counted_display}`] : []),
     ...breakdowns.payment_methods.map((method) => `${tenderName(String(method.name))} sales ${method.sales_display}`),
     ...breakdowns.tax_rates.map((rate) => `${String(rate.name)}: net ${rate.net_display}, tax ${rate.tax_display}, gross ${rate.gross_display}`),
     ...breakdowns.movements.map((movement) =>

@@ -3,6 +3,7 @@ import type {
 } from '@tallyui/core';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { demoProductImage } from './product-images';
+import type { TallyClosureRead } from '../closure-history';
 import type { ListedRegister } from '../register-choice';
 
 // All mutable demo data is saved together, including the command ledger.
@@ -140,6 +141,17 @@ function seed(): State {
   return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers, refunds: [], variants: {} };
 }
 
+// Front counter's closure yesterday in device time (the app's store zone), so the Closures list shows another register (CHECKLIST 8.2).
+function seededClosure(): TallyClosureRead {
+  const now = new Date(), cash = { cash: 15000 };
+  const at = (hours: number, minutes = 0) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, hours, minutes);
+  return { closureId: 'demo-front-counter-closure-1', sessionId: 'demo-front-counter-session-1', registerId: DEMO_FRONT_COUNTER.id, number: 1,
+    businessDay: at(12).toLocaleDateString('en-CA'), openedAt: at(8).toISOString(), closedAt: at(17, 30).toISOString(), closedBy: null,
+    approvedBy: null, tillExpected: cash, counted: cash, expected: cash, variance: { cash: 0 }, periodSalesTotalMinor: 24550, periodRefundsTotalMinor: 0,
+    perpetualSalesTotalMinor: 24550, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: 'demo', orderIds: [],
+    movementIds: [], receivedAt: at(17, 30).toISOString() };
+}
+
 /** A stock entry's next updatedAt: now, and always later than the last. */
 function nextUpdatedAt(updatedAt: string): string {
   return new Date(Math.max(Date.now(), Date.parse(updatedAt) + 1)).toISOString();
@@ -195,6 +207,17 @@ export class DemoStore {
   }
 
   customerList(): Customer[] { return this.state.customers; }
+
+  /** GET /tally/v1/registers/:id: a listed register and a page of its closures, newest first; null for an unknown id. */
+  register(id: string, skip: number, take: number) {
+    const listed = this.registers().find(item => item.id === id);
+    if (!listed) return null;
+    const stored = this.state.closures.filter(closure => closure.registerId === id).reverse().map(({ approval: _approval, ...p }): TallyClosureRead => ({
+      ...p, businessDay: p.businessDay ?? null, closedBy: p.closedBy ?? null, approvedBy: p.approvedBy ?? null, ...this.closureFigures(p), receivedAt: p.closedAt }));
+    const items = stored.length || id !== DEMO_FRONT_COUNTER.id ? stored : [seededClosure()];
+    return { version: 1, register: { id, receivedAt: listed.receivedAt }, counters: {}, session: null,
+      closures: { items: items.slice(skip, skip + take), totalItems: items.length, skip, take } };
+  }
 
   /** GET /tally/v1/registers: one row per register seen in a session, newest first, then Front counter if it has none. */
   registers(): ListedRegister[] {
@@ -423,12 +446,11 @@ export class DemoStore {
       if (p.number !== counters.lastClosureNumber + 1) result = refuse('register_closure_number_invalid',
         `Closure number ${p.number} is not ${counters.lastClosureNumber + 1}`, { counters });
       else {
-        const { expected } = this.figures(p.sessionId, p);
+        const { expected, variance } = this.closureFigures(p);
         this.state.closures.push(p);
         this.state.sessions[p.sessionId].status = 'closed';
         result.register = {
-          closure: { serverClosureId: p.closureId, number: p.number, expected,
-            variance: Object.fromEntries(Object.entries(p.counted as Record<string, number>).map(([key, value]) => [key, value - (expected[key] ?? 0)])) },
+          closure: { serverClosureId: p.closureId, number: p.number, expected, variance },
           counters: { ...counters, lastClosureNumber: p.number, perpetualSalesTotalMinor: p.perpetualSalesTotalMinor,
             perpetualRefundsTotalMinor: p.perpetualRefundsTotalMinor },
         };
@@ -455,6 +477,12 @@ export class DemoStore {
 
   private liveSession(id: string): NonNullable<RegisterCommandResult['session']> {
     return { id, status: this.state.sessions[id].status, ...this.figures(id) };
+  }
+
+  /** A closure's expected and variance, as register.closure.submit answers them. */
+  private closureFigures(p: RegisterClosureSubmitPayload) {
+    const { expected } = this.figures(p.sessionId, p);
+    return { expected, variance: Object.fromEntries(Object.entries(p.counted).map(([key, value]) => [key, value - (expected[key] ?? 0)])) };
   }
 
   private figures(id: string, closure?: RegisterClosureSubmitPayload) {
