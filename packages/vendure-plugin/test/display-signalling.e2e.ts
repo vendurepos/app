@@ -302,4 +302,48 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     expect(await answer('display/signals', { method: 'POST', headers: json, body: big }))
       .toEqual([413, { code: 'too_large', message: expect.any(String) }]);
   });
+
+  it('(j) another channel\'s till holding every check code never uses up a till\'s check codes', async () => {
+    await fresh();
+    // A till in channel B holds a pending claim on every check code, 0000 to 9999, live for 10 minutes on the service's clock.
+    await connection.rawConnection.query(`INSERT INTO "tally_display_pending" ("id", "channelId", "deviceId", "secretHash", "displayName",
+      "checkCode", "expiresAt") SELECT 'hog-' || n, $1, 'till-hog', md5('hog-' || n), 'Hog', lpad(n::text, 4, '0'), $2
+      FROM generate_series(0, 9999) AS n`, [environment.decode(channels.b.id), new Date(Date.now() + offset + 10 * MINUTE)]);
+    expect(await count('tally_display_pending')).toBe(10_000);
+    const ctx = await pairTill('check-codes');
+    const { code } = await signalling.mint(ctx, 'till-j');
+    const claim = await signalling.claim(display('192.0.2.80'), { code, displayName: 'Counter' });
+    expect(claim.checkCode).toMatch(/^\d{4}$/);
+    expect((await signalling.pending(ctx, 'till-j')).map(p => p.checkCode)).toEqual([claim.checkCode]);
+  });
+
+  it('(k) the store-wide cap holds under parallel claims across both instances', async () => {
+    await fresh();
+    const { code } = await signalling.mint(await pairTill('store-race'), 'till-k');
+    // 130 wrong claims from 13 sources, 10 each, so no source limit alone stops them before the store's 100.
+    const results = await Promise.all(Array.from({ length: 130 }, (_, i) =>
+      refused(signalling.claim(display(`198.51.100.${1 + (i % 13)}`, i % 2 ? second.url : base), { code: '000000x', displayName: 'Guess' }))));
+    expect(results).toEqual(Array(130).fill('claim_refused'));
+    const [store] = await connection.rawConnection.query(`SELECT "failures" FROM "tally_display_claim_window" WHERE "key" = 'store'`);
+    expect(Number(store.failures)).toBe(100);
+    expect(await refused(signalling.claim(display('192.0.2.90'), { code, displayName: 'Counter' }))).toBe('claim_refused');
+    expect(await count('tally_display_code', 'NOT "spent"')).toBe(1);
+  });
+
+  it('(l) a channel\'s live pending claims stop at 50, and other channels still pair', async () => {
+    await fresh();
+    // 50 live pending claims in channel A, one each under 50 devices, live for 10 minutes on the service's clock.
+    await connection.rawConnection.query(`INSERT INTO "tally_display_pending" ("id", "channelId", "deviceId", "secretHash", "displayName",
+      "checkCode", "expiresAt") SELECT 'full-' || n, $1, 'till-full-' || n, md5('full-' || n), 'Full', '0000', $2
+      FROM generate_series(1, 50) AS n`, [environment.decode(channels.a.id), new Date(Date.now() + offset + 10 * MINUTE)]);
+    const { code } = await signalling.mint(await pairTill('pending-cap'), 'till-l');
+    const d = display('192.0.2.100');
+    expect(await refused(signalling.claim(d, { code, displayName: 'Counter' }))).toBe('claim_refused');
+    expect(await count('tally_display_code', `"code" = '${code}' AND NOT "spent"`)).toBe(1);
+    expect(await count('tally_display_claim_window', `"key" = 'store' AND "failures" > 0`)).toBe(0);
+    await connection.rawConnection.query(`DELETE FROM "tally_display_pending" WHERE "id" = 'full-1'`);
+    expect((await signalling.claim(d, { code, displayName: 'Counter' })).checkCode).toMatch(/^\d{4}$/);
+    const other = await signalling.mint(await pairTill('pending-cap', 'b'), 'till-l-b');
+    expect((await signalling.claim(display('192.0.2.101'), { code: other.code, displayName: 'Counter' })).checkCode).toMatch(/^\d{4}$/);
+  });
 });
