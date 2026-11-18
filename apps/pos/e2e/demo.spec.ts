@@ -2163,3 +2163,11 @@ test('Settings › Products shows out-of-stock products: the In Stock pill start
   await expect(pill).toHaveAttribute('aria-pressed', 'true');
   await expect(carafe).toHaveCount(0);
 });
+
+test('the demo build has no customer display: /display lands on /', async ({ page }) => {
+  // app/display.tsx redirects to /, which sends a signed-out demo visitor on to /demo (Front desk ruling 3, 2026-11-18).
+  await page.goto('/display?store=https://store.example.com');
+  await expect(page).toHaveURL(/\/demo$/);
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+  await expect(page.getByTestId('display-store-url')).toHaveCount(0);
+});

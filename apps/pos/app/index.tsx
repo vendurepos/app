@@ -9,7 +9,7 @@ import {
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
   capturedMinor, catalogueEntries, CurrencyProvider, findEntryByCode, openSales, parkedOrderSummaries$, registerCommandsLogger, summarizeOutboxHealth, TaxProvider, taxProviderProps, useCurrencyFormatter,
-  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, type OutboxState, type ParkedOrderSummary, type PosOrder, type UseOrderOutboxResult,
+  useOrderOutbox, useRegisterOutbox, useRegisterSession, useSale, useSaleDisplay, type OutboxState, type ParkedOrderSummary, type PosOrder, type TillDisplayService, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
@@ -77,7 +77,7 @@ import { useCatalogueView } from '../lib/use-catalogue-view';
 import { useCatalogueFilters } from '../lib/use-catalogue-filters';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
-import { unsyncedNote, zReportLines } from '../lib/z-report';
+import { tenderName, unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
 const APP_VERSION = Constants.expoConfig?.version ?? 'unknown';
@@ -386,7 +386,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels} settingsOpen={settingsOpen}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
-                  overSheet={closureShown} />
+                  overSheet={closureShown} customerDisplay={customerDisplay?.service ?? null} />
               </TaxProvider>
             </CurrencyProvider>
           ) : catalogue.refusal ? (
@@ -450,7 +450,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 
 function Sale({
   session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
-  registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen,
+  registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -467,6 +467,8 @@ function Sale({
   registerClosing: boolean;
   /** The Z sheet shows: the scan notice goes over it. */
   overSheet: boolean;
+  /** The paired displays' service: each one shows this sale (P9.8c-2b). */
+  customerDisplay: TillDisplayService | null;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const catalogueView = useCatalogueView(settingsOpen);
@@ -479,6 +481,8 @@ function Sale({
     onSaleCompleted: session.url === DEMO_STORE_ORIGIN ? withDemoSaleEvent(outbox.record) : outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
+  // The store name only: a display never shows the cashier or the register (Front desk ruling 4, 2026-11-18).
+  useSaleDisplay(customerDisplay, { order: sale.order, stage: sale.stage }, { receipt: { storeName: storeLabel(session) }, methodTitle: tenderName, declinedMessage: 'Payment declined' });
   useDefaultCustomer(sale, session);
   const [parkedOpen, setParkedOpen] = useState(false);
   const [parked, setParked] = useState<ParkedOrderSummary[]>([]);
