@@ -23,7 +23,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 - **Vendure way:** where WCPOS's mechanism is WooCommerce's own, the row asks for the Vendure equivalent (Paul, 2026-10-07). For example, facets stand in for tags and brands, and promotions for coupons.
 - `[x]` means a cashier would call it the same. Partly-there rows stay `[ ]`, with the gap named.
 
-**Score:** **30 / 56** rows at parity (round 17, 2026-11-18). The two rows marked N/A are not counted.
+**Score:** **31 / 56** rows at parity (round 18, 2026-11-18: 3.1). The two rows marked N/A are not counted.
 
 ---
 
@@ -78,7 +78,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 |---|---|
 | ![](demo-pairs/05-checkout-wcpos.webp) | ![](demo-pairs/05-checkout-vendurepos.webp) |
 
-- [ ] **3.1 Full-screen checkout.** Its parts:
+- [x] **3.1 Full-screen checkout.** Its parts:
   - "TO PAY €x" with a Split chip;
   - payment-method cards;
   - quick amounts and a numeric keypad;
@@ -87,7 +87,7 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
   Mostly done (spec B3): Checkout opens TallyUI 3.19.0's `TenderPane` in the catalogue's place, with "Remaining €x", method tiles, quick amounts, a keypad and the Payments list; the cart stays on the right, locked, with its totals. On a phone the pane fills the Cart tab. *Left:*
   - the Split chip. TallyUI 3.20.0's tender state takes a split plan (even, fixed amounts, items), but `TenderPane` draws no chip or sheet for it. The app can draw them beside the pane and dispatch the plan (*app*); a chip inside the "TO PAY" headline needs a slot (*shared*).
 
-  Paid and Remaining now sit under Total in the locked cart, as v2 (#266). An even Split chip beside the pane is in progress (3.1c).
+  Paid and Remaining now sit under Total in the locked cart, as v2 (#266). Done: the Split chip beside the pane splits evenly 2–6 ways (#275), by a fixed amount (#292) and by items (#293, with an order discount #295); demo-pairs/05b, 05c. Round 18: at parity. The chip sits above the total, not inside the "TO PAY" headline, which needs a slot in `TenderPane` (*shared*, cosmetic); the method tiles are 3.2.
 - [ ] **3.2 Payment-method list on one screen:** Cash, Card, and the store's other methods. Mostly done (spec B3): Cash and Card terminal are tiles on the one checkout screen. *Left, Vendure way:* the tiles are the till's fixed pair, not the channel's own payment methods. TallyUI 3.20.0's `TenderPane` offers only the `cash` and `external` methods, and the plugin stores every tender as `tally-pos`. *Shared + plugin.*
 - [x] **3.3 Split payments shown as a Payments list** with Paid and Remaining. Done (spec B3): each leg is a ledger row (method, amount, Captured, Cancel payment) under "Remaining €x" and "€x of €y paid"; the next leg pre-fills the remaining balance.
 - [x] **3.4 Quick cash amounts complete the sale.** Done (spec B3): tapping €50.00 and Take enables Complete sale and shows the change; e2e "a demo cashier pays cash with a quick amount" proves it.
