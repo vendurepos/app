@@ -36,8 +36,9 @@ function CustomerDisplaySection({ handles }: { handles: TillCustomerDisplay }) {
 }
 
 /** Settings' sections and cards: a covering panel of the till (CHECKLIST 9.1, the rail stays beside it), and the /settings route. */
-export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay }: {
+export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay, initialSection }: {
   session: Session; onClose(): void; tillUpdatesPending?: number; customerDisplay?: TillCustomerDisplay | null;
+  initialSection?: SettingsSectionId;
 }) {
   const [text, setText] = useState(() => String(loadScannerMinLength()));
   const [saved, setSaved] = useState<boolean | null>(null);
@@ -52,8 +53,10 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
   const [autoShowReceipt, setAutoShowReceipt] = useState(() => loadAutoShowReceipt());
   const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
   const connector = useCatalogueConnector(session);
-  const [section, setSection] = useState<SettingsSectionId>('general');
   const sections = settingsSections({ printing: Platform.OS === 'web', customerDisplay: !!customerDisplay });
+  // Opens on the section asked for (Store health's View log asks for the sync log) when this till lists it.
+  const [section, setSection] = useState<SettingsSectionId>(() =>
+    initialSection && sections.some(({ id }) => id === initialSection) ? initialSection : 'general');
   // The store stopped advertising a display (or the session changed) while its section showed.
   useEffect(() => { if (!customerDisplay && section === 'customer-display') setSection('general'); }, [customerDisplay, section]);
 
