@@ -2309,6 +2309,33 @@ test('the Products panel writes a one-cent price edit as the price the merchant 
   expect(await read()).toEqual(seeded);
 });
 
+test("the Products panel shows the price read-only when the channel's tax mode changed after the till signed in", async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  const admin = await superadmin(page);
+  const sku = 'DRK-ESPRESSO';
+  const read = async (): Promise<StoreVariant> => (await admin(STORE_VARIANT, { sku })).productVariants.items[0];
+  const seeded = await read();
+  const { activeChannel: channel } = await admin('{ activeChannel { id pricesIncludeTax } }');
+  const settingsRead = page.waitForResponse((response) => (response.request().postData() ?? '').includes('StoreSettingsChannel'));
+  await signIn(page);
+  // signIn returns before the store settings are read; once they are, the till holds the channel's current tax mode.
+  expect((await settingsRead).ok()).toBe(true);
+  try {
+    await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: !channel.pricesIncludeTax } });
+    await page.getByTestId('products-open').click();
+    await page.getByTestId('products-search').fill(sku);
+    const panel = page.getByTestId('products-panel');
+    await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
+    // The stock input proves the access query answered and editing is allowed; only the price is gated on the tax mode.
+    await expect(panel.getByTestId(`product-stock-${seeded.id}`)).toBeVisible();
+    await expect(panel.getByTestId(`product-price-${seeded.id}`)).toHaveCount(0);
+    await expect(panel.locator('[data-testid^="product-row-"]')).toContainText('€');
+  } finally {
+    await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: channel.pricesIncludeTax } });
+  }
+  expect(await read()).toEqual(seeded);
+});
+
 test('the Products panel refuses a stock edit when another till changed the stock since the sync, and saves it after the refresh', async ({ page }) => {
   test.setTimeout(3 * 60_000);
   const admin = await superadmin(page);
