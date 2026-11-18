@@ -28,3 +28,7 @@ it('omits expected figures while blind and prints unsent sales and till updates'
     'Handed over by cashier@example.com', '1 sale', '1 unsent sale', '2 unsent till updates',
   ]);
 });
+
+it('names the bound register on the slip', () => {
+  expect(handoverSlipLines(register, { ...context, registerName: 'Front counter' })[2]).toBe('Front counter · open since 07:00 · cashier@example.com');
+});

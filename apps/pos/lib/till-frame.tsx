@@ -35,8 +35,8 @@ export function tillNavItems(entries: TillNavEntry[]): ShellNavItem[] {
  * The cashier's menu, opened from the bar's avatar: a side sheet as Tally Woo's `cashier-sheet.tsx` (v2's user sheet),
  * its header carries the register and since; the body holds the shift's actions, Hand over and Sign out with its lock message.
  */
-export function CashierSheet({ open, onOpenChange, name, store, openedAt, children, locked, pending, onHandOver, onSignOut }: {
-  open: boolean; onOpenChange(open: boolean): void; name: string; store: string; openedAt: string | null; children: ReactNode;
+export function CashierSheet({ open, onOpenChange, name, store, registerName, openedAt, children, locked, pending, onHandOver, onSignOut }: {
+  open: boolean; onOpenChange(open: boolean): void; name: string; store: string; registerName?: string; openedAt: string | null; children: ReactNode;
   locked: string | null | undefined; pending: boolean; onHandOver?(): void; onSignOut(): void;
 }): JSX.Element {
   return (
@@ -46,7 +46,7 @@ export function CashierSheet({ open, onOpenChange, name, store, openedAt, childr
         <DialogHeader className="text-left">
           <DialogTitle>{name}</DialogTitle>
           <DialogDescription>{store}</DialogDescription>
-          {openedAt ? <Text testID="cashier-shift-since" className="text-sm text-muted-foreground">{`Register · open since ${openSince(new Date(openedAt), new Date())}`}</Text> : null}
+          {openedAt ? <Text testID="cashier-shift-since" className="text-sm text-muted-foreground">{`${registerName ?? 'Register'} · open since ${openSince(new Date(openedAt), new Date())}`}</Text> : null}
         </DialogHeader>
         <VStack className="items-start" space="sm">{children}</VStack>
         {/* A record() not yet settled would be lost with the sale, and a close with its Z; the outbox closes its store at unmount. */}

@@ -1261,6 +1261,28 @@ test('Hand over in the cashier sheet signs this account out and leaves the regis
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
 });
 
+test('the cashier sheet and the hand-over name the register the till is at', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'general');
+  await page.getByTestId('register-choice-demo-front-counter').click();
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+
+  await page.getByTestId('register-bar-cashier').click();
+  const sheet = page.getByTestId('cashier-sheet');
+  await expect(sheet.getByTestId('cashier-shift-since')).toHaveText(/^Front counter · open since \d{2}:\d{2}$/);
+  await sheet.getByTestId('hand-over').click();
+  const confirm = page.getByTestId('switch-confirm');
+  await expect(confirm.getByTestId('switch-confirm-description')).toHaveText('The drawer stays open on Front counter.');
+
+  await confirm.getByTestId('switch-confirm-handover').click();
+  const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(printed[0]).toBe('Hand-over slip');
+  expect(printed[2]).toMatch(/^Front counter · open since \d{2}:\d{2}/);
+});
+
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
