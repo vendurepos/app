@@ -104,6 +104,7 @@ describe('GET /tally/v1/registers/:id', () => {
     expect(body.closures.items[0]).toEqual({
       ...payload, businessDay: null, closedBy: null, approvedBy: null,
       expected: { cash: 10000 }, variance: { cash: 3 }, receivedAt: expect.any(String),
+      countedFloatMinor: 10000, paidInMinor: 0, paidOutMinor: 0,
     });
     expect(body.closures.items[0].closureId).toBe(payload.closureId);
     expect(isIso(body.closures.items[0].receivedAt)).toBe(true);
@@ -131,6 +132,34 @@ describe('GET /tally/v1/registers/:id', () => {
     expect(status).toBe(200);
     expect(body.session.salesCount).toBe(1);
     expect(body.session.expected.cash).toBe(10000 + sale.payload.totalMinor);
+  });
+
+  it('a closure read carries the session\'s float and the cash paid in and out that its expected counted', async () => {
+    const [s, r] = [uuid(), uuid()];
+    await applied(open(s, r));
+    const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);
+    sale.payload.sessionId = s;
+    sale.payload.registerId = r;
+    sale.createdAt = now();
+    sale.payload.createdAt = sale.createdAt;
+    await applied(sale);
+    const movement = (type: string, amountMinor: number) => envelope('register.movement.record',
+      { movementId: uuid(), sessionId: s, type, amountMinor, reason: 'float', createdAt: now() });
+    const voidOf = (target: ReturnType<typeof movement>) =>
+      envelope('register.movement.void', { movementId: uuid(), sessionId: s, voids: target.payload.movementId, createdAt: now() });
+    const [m1, m2, m3, m4, m5] = [movement('paid_in', 500), movement('paid_out', 200), movement('paid_out', 300),
+      movement('paid_in', 400), movement('paid_in', 700)];
+    const [v3, v4] = [voidOf(m3), voidOf(m4)];
+    for (const command of [m1, m2, m3, v3, m4, v4, m5]) await applied(command);
+    await applied(transition(s, 'closed', { counted: { cash: 10000 } }));
+    // v4 and m5 are left out: the till's Z did not hold them.
+    await applied(closure(s, r, 1, { orderIds: [sale.payload.clientOrderId],
+      movementIds: [m1, m2, m3, v3, m4].map(command => command.payload.movementId) }));
+    const { body } = await get(r);
+    const item = body.closures.items[0];
+    expect(item).toMatchObject({ countedFloatMinor: 10000, paidInMinor: 900, paidOutMinor: 200 });
+    expect(item.expected.cash).toBe(item.countedFloatMinor + sale.payload.totalMinor + item.paidInMinor - item.paidOutMinor);
+    expect(item.expected.cash).toBe(10000 + sale.payload.totalMinor + 700);
   });
 
   it('answers 404 register_not_found for an unknown register and for another channel\'s register', async () => {

@@ -217,6 +217,7 @@ The plugin answers register contract versions 1 and 2 (`/tally/v1/info` lists `"
 A till or back office reads one register of the active channel, to show or reprint past Z reports from the server. The route needs the same permission as the command route (`TallyPosSell` or `CreateOrder`) and writes nothing.
 
 - The answer is `{ version: 1, register, counters, session, closures }`. `session` is the live session, or `null` when none is open. `closures` is `{ items, totalItems, skip, take }`, newest first, each item with the figures frozen at `register.closure.submit`.
+- Each closure item also carries `countedFloatMinor` (its session's opening float), `paidInMinor` and `paidOutMinor`: the `paid_in` and `paid_out` movements in its `movementIds` that its `expected` counted, skipping each one voided by a void in that same list. The three fields are additive at version 1.
 - `skip` (default 0) and `take` (default 20, at most 100) page the closures. Any other value answers 400 `invalid_query`.
 - A register the channel does not hold, including another channel's, answers 404 `register_not_found`.
 - `/tally/v1/info` does not list the route. A plugin without it answers 404 with Vendure's own body.

@@ -124,6 +124,11 @@ it("maps the plugin's closure read onto a Closure", () => {
   });
 });
 
+it('an app that predates the closure cash fields maps a read that carries them unchanged', () => {
+  const newer = { ...read, countedFloatMinor: 10000, paidInMinor: 900, paidOutMinor: 200 } as TallyClosureRead;
+  expect(closureFromRead(newer, options.storeKey)).toEqual(closureFromRead(read, options.storeKey));
+});
+
 it("prints another register's Z copy without the lines its read lacks", () => {
   const context = { store: 'http://127.0.0.1:3200', currency: 'EUR', timezone: 'UTC', printedAt: '2026-09-30T18:15:00.000Z' };
   const lines = zCopyLines(remote, context);
