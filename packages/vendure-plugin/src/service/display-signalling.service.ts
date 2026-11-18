@@ -306,7 +306,8 @@ export class DisplaySignallingService {
   private query: Query = (sql, params) => this.transaction(query => query(sql, params));
 
   private async transaction<T>(work: (query: Query) => Promise<T>): Promise<T> {
-    return this.connection.rawConnection.transaction((manager: EntityManager) =>
+    // READ COMMITTED on any database default: the claim lock holds only if each statement takes a fresh snapshot.
+    return this.connection.rawConnection.transaction('READ COMMITTED', (manager: EntityManager) =>
       work(async (sql, params) => (await manager.queryRunner!.query(sql, params, true)).records));
   }
 }

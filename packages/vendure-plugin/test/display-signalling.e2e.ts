@@ -91,8 +91,12 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     channels.b = createChannel;
     // (d) The second instance takes the init option; the harness server booted without it.
     TallyPosPlugin.init({ customerDisplay: { iceServers: ICE } });
-    second = await bootstrapSecondInstance(connection.rawConnection.options.database as string, { apiOptions: { trustProxy: true } },
-      [TallyPosPlugin, DisplayClockPlugin]);
+    // The second instance defaults to REPEATABLE READ, as a merchant database could, so (h) claims across both defaults.
+    second = await bootstrapSecondInstance(connection.rawConnection.options.database as string, { apiOptions: { trustProxy: true },
+      dbConnectionOptions: { extra: { options: '-c default_transaction_isolation=repeatable\\ read' } } }, [TallyPosPlugin, DisplayClockPlugin]);
+    // Proof the default took, outside any transaction: otherwise (h) would pass on READ COMMITTED alone.
+    expect((await second.app.get(TransactionalConnection).rawConnection.query('SHOW default_transaction_isolation'))[0])
+      .toEqual({ default_transaction_isolation: 'repeatable read' });
   });
   afterAll(async () => {
     TallyPosPlugin.init({});
