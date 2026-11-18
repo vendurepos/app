@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, SalesCards, SalesFiltersBar, Text, VStack } from '@tallyui/components';
+import { Button, SalesCards, SalesFiltersBar, Tabs, TabsList, TabsTrigger, Text, VStack } from '@tallyui/components';
 import type { PosOrder, PosRefundCollection } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { printLines } from './print-lines';
@@ -9,9 +9,10 @@ import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, 
 import { TillSalesHero } from './till-sales-hero';
 import { useFreshList } from './use-fresh-list';
 
-export function ReportsPanel({ orders, refunds, currency, timezone, drawer }: {
-  orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode;
+export function ReportsPanel({ orders, refunds, currency, timezone, drawer, closures }: {
+  orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode; closures?: ReactNode;
 }) {
+  const [tab, setTab] = useState('sales');
   const orderList = useFreshList(orders);
   const refundList = useFreshList(refunds);
   const [filters, setFilters] = useState(() => initialSalesFilters(new Date(), timezone));
@@ -21,7 +22,16 @@ export function ReportsPanel({ orders, refunds, currency, timezone, drawer }: {
   const spread = useMemo(() => tillOrderSpread({ orders: orderList, filters, timezone }), [orderList, filters, timezone]);
   return (
     <VStack testID="reports-panel" className="flex-1">
-      <ScrollView contentContainerClassName="p-4">
+      {closures ? (
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList dataSet={{ print: 'hide' }} className="m-2 flex-row">
+            <TabsTrigger testID="reports-tab-sales" value="sales" className="flex-1"><Text>Sales</Text></TabsTrigger>
+            <TabsTrigger testID="reports-tab-closures" value="closures" className="flex-1"><Text>Closures</Text></TabsTrigger>
+          </TabsList>
+        </Tabs>
+      ) : null}
+      {closures && tab === 'closures' ? <ScrollView contentContainerClassName="p-4">{closures}</ScrollView> : null}
+      <ScrollView contentContainerClassName="p-4" style={closures && tab === 'closures' ? { display: 'none' } : undefined}>
         <View testID="sales-room" className="gap-4">
           {drawer}
           <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone={timezone}
