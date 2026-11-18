@@ -44,7 +44,7 @@ import { printLines } from '../lib/print-lines';
 import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
-import { holdsRegister, setTillHoldsSession } from '../lib/register-choice';
+import { fetchRegisters, holdsRegister, registerTitle, setTillHoldsSession } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
@@ -200,6 +200,17 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // Settings refuses another register while this till holds its session, a closing one until its closure is written (lib/register-choice.ts holdsRegister).
   useEffect(() => { setTillHoldsSession(holdsRegister(sessionStatus, closureShown)); }, [sessionStatus, closureShown]);
   const registerPanelShown = registerOpen && sessionStatus === 'open';
+  // The side sheet's title names the bound register (lib/register-choice.ts registerTitle); "Register" offline or unnamed.
+  const [registerName, setRegisterName] = useState<string | undefined>();
+  useEffect(() => {
+    if (!registerPanelShown) return;
+    let live = true;
+    fetchRegisters(session).then(
+      (rows) => { if (live) setRegisterName(registerTitle(rows, boundRegisterId)); },
+      () => { if (live) setRegisterName(undefined); },
+    );
+    return () => { live = false; };
+  }, [registerPanelShown, boundRegisterId, session]);
   const printZ = async () => {
     const closure = register.lastClosure;
     if (!closure) return;
@@ -390,7 +401,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       </View>
       {/* Dialogs, drawn through the root PortalHost. */}
       {/* Mounted only while open, so a scan that closes it closes a cash-movement sheet within it for good. */}
-      {registerPanelShown ? <RegisterPanel register={register} currency={currency} open onOpenChange={setRegisterOpen} presentation="side" storeName={store}
+      {registerPanelShown ? <RegisterPanel register={register} currency={currency} open onOpenChange={setRegisterOpen} presentation="side" storeName={store} registerName={registerName}
         onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })} /> : null}
       {closureShown && register.lastClosure ? (
         <>

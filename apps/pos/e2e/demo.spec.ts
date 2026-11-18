@@ -1077,6 +1077,18 @@ test('a counting register holds the till to it until it is closed', async ({ pag
   await expect.poll(() => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'))).not.toBe('demo-front-counter');
 });
 
+test('the register panel names the register the till is at', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'general');
+  await page.getByTestId('register-choice-demo-front-counter').click();
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+  await page.getByTestId('register-open-panel').click();
+  await expect(page.getByTestId('register-panel-title')).toHaveText('Front counter');
+});
+
 test("the sync log in Settings keeps a till update's outcome, never its figures", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -1178,6 +1190,9 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   await expect(panel.getByTestId('register-panel-footer').getByTestId('register-panel-close')).toBeVisible();
   const box = (await panel.boundingBox())!;
   expect(box.x).toBeGreaterThan(page.viewportSize()!.width / 2);
+  // Again after the register list has answered (a few hundred ms after the panel opens): the till's own register has no device name, so never the "Register 1a2b3c4d" id fallback (CHECKLIST 6.6c).
+  await page.waitForTimeout(1500);
+  await expect(panel.getByTestId('register-panel-title')).toHaveText('Register');
   await panel.getByTestId('register-panel-dismiss').click();
 
   // The cashier sheet no longer has an X report: v2's avatar sheet has none.

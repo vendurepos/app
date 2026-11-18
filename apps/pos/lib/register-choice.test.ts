@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { holdsRegister, pickRefusal, registerChoices, registerLabel, registerStatus, setTillHoldsSession, type ListedRegister } from './register-choice';
+import { holdsRegister, pickRefusal, registerChoices, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
 
 const now = new Date(2026, 10, 17, 18, 0);
 const at = new Date(2026, 10, 17, 14, 38).toISOString();
@@ -12,6 +12,30 @@ describe('registerLabel', () => {
     const id = '0193abcd-1111-7000-8000-000000000000';
     expect(registerLabel({ id, lastDeviceName: null })).toBe('Register 0193abcd');
     expect(registerLabel({ id, lastDeviceName: '  ' })).toBe('Register 0193abcd');
+  });
+});
+
+describe('registerTitle', () => {
+  it('names the bound register by its last device', () => {
+    expect(registerTitle([{ id: 'a', lastDeviceName: 'Till a' }, { id: 'b', lastDeviceName: 'Front counter' }], 'b')).toBe('Front counter');
+  });
+
+  it('trims the name', () => {
+    expect(registerTitle([{ id: 'b', lastDeviceName: '  Front counter ' }], 'b')).toBe('Front counter');
+  });
+
+  it('has no title for a null, empty or blank name', () => {
+    expect(registerTitle([{ id: 'b', lastDeviceName: null }], 'b')).toBeUndefined();
+    expect(registerTitle([{ id: 'b', lastDeviceName: '' }], 'b')).toBeUndefined();
+    expect(registerTitle([{ id: 'b', lastDeviceName: '   ' }], 'b')).toBeUndefined();
+  });
+
+  it('has no title when the bound register is not listed, even when another is named', () => {
+    expect(registerTitle([{ id: 'a', lastDeviceName: 'Till a' }], 'b')).toBeUndefined();
+  });
+
+  it('has no title for an empty list', () => {
+    expect(registerTitle([], 'b')).toBeUndefined();
   });
 });
 

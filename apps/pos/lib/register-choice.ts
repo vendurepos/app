@@ -17,6 +17,11 @@ export function registerLabel(register: Pick<ListedRegister, 'id' | 'lastDeviceN
   return register.lastDeviceName?.trim() || `Register ${register.id.slice(0, 8)}`;
 }
 
+/** The register side sheet's title (CHECKLIST 6.6c): the bound register's last device name, or undefined (RegisterPanel then reads "Register"). */
+export function registerTitle(listed: readonly Pick<ListedRegister, 'id' | 'lastDeviceName'>[], boundId: string): string | undefined {
+  return listed.find((register) => register.id === boundId)?.lastDeviceName?.trim() || undefined;
+}
+
 /** "Open since 14:38 on Front till" (openSince's form; no " on …" without a device name); null without a live session or a listed register. */
 export function registerStatus(register: ListedRegister | undefined, now: Date): string | null {
   const session = register?.session;
