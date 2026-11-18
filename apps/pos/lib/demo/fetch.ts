@@ -19,6 +19,7 @@
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
  * GET /tally/v1/registers — apps/pos/lib/register-choice.ts.
+ * GET /tally/v1/registers/:id — apps/pos/lib/closure-history.ts.
  * POST /tally/v1/commands (order.create) — apps/pos/lib/order-transport.ts.
  * POST /tally/v1/commands (register.session.open) — apps/pos/app/index.tsx via order-transport.ts.
  * POST /tally/v1/commands (register.session.transition) — apps/pos/app/index.tsx via order-transport.ts.
@@ -124,6 +125,10 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
     if (route === INFO_PATH) return reply(DEMO_INFO);
     if (route === REGISTERS_PATH) return reply({ items: store.registers() });
+    const search = new URL(url).searchParams;
+    const read = route.startsWith(`${REGISTERS_PATH}/`) && store.register(decodeURIComponent(route.slice(REGISTERS_PATH.length + 1)),
+      Number(search.get('skip') ?? 0), Number(search.get('take') ?? 20));
+    if (read) return reply(read);
     if (route === COMMANDS_PATH) {
       const { commands } = await request.json();
       return reply({ results: commands.map((command: Parameters<DemoStore['apply']>[0]) => store.apply(command)) });

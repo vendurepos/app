@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from '@playwright/test';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
@@ -1300,8 +1300,19 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   await page.getByTestId('register-bar-cashier').click();
   await page.getByTestId('closure-history-open').click();
   const history = page.getByTestId('closure-history');
-  await expect(history.getByTestId('closure-history-row-1')).toContainText('Closure #1');
+  await expect(history.getByTestId('closure-history-row-1')).toContainText('This device · Closure #1');
   await expect(history.getByTestId('closure-history-row-1')).toContainText('Sales €0.00 · Cash at open €100.00 · Cash at close €100.00 · Exact');
+  // The demo's Front counter closed yesterday (lib/demo/store.ts seededClosure); the server read has no cash at open.
+  const front = history.getByTestId('closure-history-row-demo-front-counter-1');
+  await expect(front).toContainText('Front counter · Closure #1');
+  await expect(front).toContainText('Sales €245.50 · Cash at close €150.00 · Exact');
+  await expect(front).not.toContainText('Cash at open');
+  await expect(history.getByTestId('closure-history-remote-error')).toHaveCount(0);
+  // The demo-pairs size, as 13f; the PNG is made docs/v2-parity/demo-pairs/10c-closures-all-registers-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('10c-closures-all-registers-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await history.getByTestId('closure-history-print-1').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(printed[0]).toBe('Z report · Closure #1');
@@ -1309,10 +1320,15 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
   const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
-  expect(download.suggestedFilename()).toMatch(/^closures-(\d{4}-\d{2}-\d{2})-to-\1\.csv$/);
+  // Yesterday's Front counter closure to today's own one.
+  const fileName = /^closures-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.csv$/;
+  expect(download.suggestedFilename()).toMatch(fileName);
+  const [, from, to] = fileName.exec(download.suggestedFilename())!;
+  expect(from < to).toBe(true);
   const csv = fs.readFileSync(await download.path(), 'utf8');
   expect(csv.startsWith('"Business day","Closure","Register","Store","Opened","Closed","Closed by",')).toBe(true);
   expect(csv).toContain('"100.00","100.00","0.00 Exact"');
+  expect(csv).toContain('"Front counter"');
   await history.getByTestId('closure-history-close').click();
   await expect(page.getByTestId('closure-history')).toHaveCount(0);
 });

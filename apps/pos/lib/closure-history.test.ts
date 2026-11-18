@@ -1,6 +1,8 @@
 import type { Closure } from '@tallyui/pos';
 import { expect, it } from 'vitest';
-import { closureCsvFileName, closureHistoryCsv, closureHistoryRows, zCopyLines } from './closure-history';
+import {
+  closureCsvFileName, closureFromRead, closureHistoryCsv, closureHistoryRows, mergeClosures, zCopyLines, type TallyClosureRead,
+} from './closure-history';
 import { zReportLines } from './z-report';
 
 // A closure as writeClosure freezes it: a float of 100.00, a cash and a card sale of 9.52 at 19 %, a paid out of 5.00,
@@ -24,7 +26,7 @@ const closure: Closure = {
 } as Closure;
 
 const options = {
-  registerId: 'drawer-1', storeKey: 'vendurepos_orders_0000abcd', currency: 'EUR', timezone: 'UTC', today: '2026-09-30', blind: false,
+  ownRegisterId: 'drawer-1', names: {}, storeKey: 'vendurepos_orders_0000abcd', currency: 'EUR', timezone: 'UTC', today: '2026-09-30', blind: false,
 };
 
 it("lists this till's closures newest first", () => {
@@ -32,12 +34,11 @@ it("lists this till's closures newest first", () => {
     ...closure, id: 'session-2', number: 2, business_day: '2026-09-29', opened_at: '2026-09-29T07:00:00.000Z',
     closed_at: '2026-09-29T17:00:00.000Z', variance: { cash: -500 }, period_sales_total_minor: 0,
   };
-  expect(closureHistoryRows([
-    previous, { ...closure, id: 'other-register', register_id: 'drawer-2' },
-    { ...closure, id: 'other-store', store_key: 'vendurepos_orders_ffff0000' }, closure,
-  ], options)).toEqual([
-    { id: 'session-1', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '€19.04', cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: 'Exact' },
-    { id: 'session-2', number: 2, closedAt: 'Sep 29, 2026, 17:00', salesTotal: '€0.00', cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: '€5.00 short' },
+  expect(closureHistoryRows([previous, { ...closure, id: 'other-store', store_key: 'vendurepos_orders_ffff0000' }, closure], options)).toEqual([
+    { id: 'session-1', registerId: 'drawer-1', register: 'This device', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '€19.04',
+      cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: 'Exact' },
+    { id: 'session-2', registerId: 'drawer-1', register: 'This device', number: 2, closedAt: 'Sep 29, 2026, 17:00', salesTotal: '€0.00',
+      cashAtOpen: '€100.00', cashAtClose: '€104.52', variance: '€5.00 short' },
   ]);
 });
 
@@ -52,7 +53,8 @@ it('words an over and a missing cash variance', () => {
 
 it('shows no figures while the count is blind', () => {
   expect(closureHistoryRows([closure], { ...options, blind: true })).toEqual([
-    { id: 'session-1', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '', cashAtOpen: '', cashAtClose: '', variance: '' },
+    { id: 'session-1', registerId: 'drawer-1', register: 'This device', number: 3, closedAt: 'Sep 30, 2026, 17:00', salesTotal: '', cashAtOpen: '',
+      cashAtClose: '', variance: '' },
   ]);
 });
 
@@ -63,12 +65,12 @@ it('leaves out a missing cash at open and close', () => {
 });
 
 it("exports v2's closures CSV of this till's closures", () => {
-  const lines = closureHistoryCsv([closure, { ...closure, id: 'other-register', register_id: 'drawer-2' }], { ...options, store: 'Demo store' })
+  const lines = closureHistoryCsv([closure, { ...closure, id: 'other-store', store_key: 'vendurepos_orders_ffff0000' }], { ...options, store: 'Demo store' })
     .split('\r\n').filter(Boolean);
   expect(lines).toHaveLength(2);
   expect(lines[0]).toBe('"Business day","Closure","Register","Store","Opened","Closed","Closed by","Expected (cash)","Counted (cash)",'
     + '"Variance (cash)","Expected (external)","Counted (external)","Variance (external)","Status"');
-  expect(lines[1].startsWith('"2026-09-30","3","drawer-1","Demo store",')).toBe(true);
+  expect(lines[1].startsWith('"2026-09-30","3","This device","Demo store",')).toBe(true);
   expect(lines[1]).toContain('"104.52","104.52","0.00 Exact"');
 });
 
@@ -84,7 +86,7 @@ it("names the closures CSV by the listed closures' dates", () => {
     opened_at: '2026-09-29T07:00:00.000Z', closed_at: '2026-09-29T17:00:00.000Z',
   };
   expect(closureCsvFileName([
-    middle, closure, older, { ...older, id: 'other-register', register_id: 'drawer-2', business_day: '2026-08-15',
+    middle, closure, older, { ...older, id: 'other-store', store_key: 'vendurepos_orders_ffff0000', business_day: '2026-08-15',
       opened_at: '2026-08-15T07:00:00.000Z', closed_at: '2026-08-15T17:00:00.000Z' },
   ], options)).toBe('closures-2026-09-01-to-2026-09-30.csv');
   expect(closureCsvFileName([{ ...closure, closed_at: '2026-09-30T23:30:00.000Z' }], {
@@ -97,4 +99,45 @@ it('marks a reprinted Z as a copy', () => {
   expect(zCopyLines(closure, context)).toEqual([
     'Z report · Closure #3', 'Copy · printed Sep 30, 2026, 18:15', ...zReportLines(closure, context).slice(1),
   ]);
+});
+
+// Another register's closure as the plugin's GET /tally/v1/registers/:id reads it: no breakdowns, no business day.
+const read: TallyClosureRead = {
+  closureId: 'closure-9', sessionId: 'session-9', registerId: 'drawer-2', number: 1, businessDay: null,
+  openedAt: '2026-09-30T08:00:00.000Z', closedAt: '2026-09-30T18:00:00.000Z', closedBy: null, approvedBy: null,
+  tillExpected: { cash: 15000 }, counted: { cash: 15000 }, expected: { cash: 15000 }, variance: { cash: 0 },
+  periodSalesTotalMinor: 24550, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 24550, perpetualRefundsTotalMinor: 0,
+  unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '0.1.0', orderIds: ['order-9'], movementIds: [], receivedAt: '2026-09-30T18:00:01.000Z',
+};
+const remote = closureFromRead(read, options.storeKey);
+const names = { 'drawer-2': 'Front counter' };
+
+it("maps the plugin's closure read onto a Closure", () => {
+  expect(remote).toEqual({
+    id: 'closure-9', server_closure_id: 'closure-9', session_id: 'session-9', register_id: 'drawer-2', store_key: options.storeKey,
+    business_day: '', closed_by: null, number: 1, opened_at: read.openedAt, closed_at: read.closedAt, till_expected: { cash: 15000 },
+    expected: { cash: 15000 }, counted: { cash: 15000 }, variance: { cash: 0 }, period_sales_total_minor: 24550, period_refunds_total_minor: 0,
+    perpetual_sales_total_minor: 24550, perpetual_refunds_total_minor: 0, unsynced_count: 0, unsynced_total_minor: 0, software_version: '0.1.0',
+    breakdowns: {}, order_ids: ['order-9'], movement_ids: [], printed_at: null, print_count: 0, number_retried: false, corrections_count: 0,
+  });
+});
+
+it("keeps the local copy of a closure the server also has, and adds other registers' after the local ones", () => {
+  const synced = { ...closure, id: 'session-5', server_closure_id: 'closure-5' };
+  const merged = mergeClosures([closure, synced], [{ ...remote, id: 'session-1' }, { ...remote, id: 'closure-5' }, remote]);
+  expect(merged.map((row) => row.id)).toEqual(['session-1', 'session-5', 'closure-9']);
+  expect(merged[0]).toBe(closure);
+});
+
+it("lists every register's closures of this store, this device's and the others' by name", () => {
+  const rows = closureHistoryRows([closure, remote, { ...remote, id: 'other-store', store_key: 'vendurepos_orders_ffff0000' }], { ...options, names });
+  expect(rows.map(({ id, register }) => ({ id, register }))).toEqual([
+    { id: 'closure-9', register: 'Front counter' }, { id: 'session-1', register: 'This device' },
+  ]);
+  expect(rows[0]).toMatchObject({ registerId: 'drawer-2', salesTotal: '€245.50', cashAtOpen: '', cashAtClose: '€150.00', variance: 'Exact' });
+});
+
+it("names another register in the closures CSV's Register column", () => {
+  const lines = closureHistoryCsv([closure, remote], { ...options, names, store: 'Demo store' }).split('\r\n').filter(Boolean);
+  expect(lines.slice(1).map((line) => line.split(',')[2])).toEqual(['"Front counter"', '"This device"']);
 });
