@@ -200,17 +200,19 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // Settings refuses another register while this till holds its session, a closing one until its closure is written (lib/register-choice.ts holdsRegister).
   useEffect(() => { setTillHoldsSession(holdsRegister(sessionStatus, closureShown)); }, [sessionStatus, closureShown]);
   const registerPanelShown = registerOpen && sessionStatus === 'open';
-  // The side sheet's title names the bound register (lib/register-choice.ts registerTitle); "Register" offline or unnamed.
+  const registerNameWanted = registerPanelShown || (sessionStatus === 'open' && (cashierOpen || handOverOpen));
+  // The side sheet's title, the cashier sheet's header and the hand-over (confirm and slip) name the bound register
+  // (lib/register-choice.ts registerTitle); "Register" offline or unnamed.
   const [registerName, setRegisterName] = useState<string | undefined>();
   useEffect(() => {
-    if (!registerPanelShown) return;
+    if (!registerNameWanted) return;
     let live = true;
     fetchRegisters(session).then(
       (rows) => { if (live) setRegisterName(registerTitle(rows, boundRegisterId)); },
       () => { if (live) setRegisterName(undefined); },
     );
     return () => { live = false; };
-  }, [registerPanelShown, boundRegisterId, session]);
+  }, [registerNameWanted, boundRegisterId, session]);
   const printZ = async () => {
     const closure = register.lastClosure;
     if (!closure) return;
@@ -297,7 +299,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
-      <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} locked={signOutLocked}
+      <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} registerName={registerName} locked={signOutLocked}
         onHandOver={sessionStatus === 'open' ? () => { setCashierOpen(false); setHandOverOpen(true); } : undefined}
         openedAt={register.session?.status === 'open' ? register.session.opened_at_gmt : null} pending={pending} onSignOut={handleSignOut}>
         <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)}
@@ -307,7 +309,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       </CashierSheet>
       {handOverOpen && sessionStatus === 'open' ? (
         <HandOverConfirm register={register} outbox={summarizeOutboxHealth(outbox.state, registerOutbox.state)} {...saleHolds}
-          store={store} currency={currency} timezone={TIMEZONE} cashier={identity} disabled={pending || !!signOutLocked}
+          store={store} registerName={registerName} currency={currency} timezone={TIMEZONE} cashier={identity} disabled={pending || !!signOutLocked}
           onCancel={() => setHandOverOpen(false)} onSignOut={handleSignOut} />
       ) : null}
       <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
