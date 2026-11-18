@@ -126,7 +126,7 @@ jobs:
             exit 1
           fi
       - name: Install Playwright Chromium
-        run: pnpm --filter @vendurepos/pos exec playwright install --with-deps chromium
+        run: pnpm --filter @vendurepos/pos exec playwright install chromium
       - name: Web smoke
         run: pnpm smoke:web
       - name: Vendure log on failure
@@ -165,7 +165,7 @@ jobs:
             exit 1
           fi
       - name: Install Playwright Chromium
-        run: pnpm --filter @vendurepos/pos exec playwright install --with-deps chromium
+        run: pnpm --filter @vendurepos/pos exec playwright install chromium
       # Filtered like the install: the web export's build can print the licence token.
       - name: Offline e2e
         run: '{ pnpm e2e; } 2>&1 | grep -vi accessToken'
@@ -206,7 +206,7 @@ jobs:
             exit 1
           fi
       - name: Install Playwright Chromium
-        run: pnpm --filter @vendurepos/pos exec playwright install --with-deps chromium
+        run: pnpm --filter @vendurepos/pos exec playwright install chromium
       # Filtered like the install: the demo web export's build can print the licence token.
       - name: Demo e2e
         run: '{ pnpm e2e:demo; } 2>&1 | grep -vi accessToken'
