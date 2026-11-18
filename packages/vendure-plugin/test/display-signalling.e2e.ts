@@ -270,4 +270,32 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     await signalling.list(ctx, 'till-prune');
     expect([await count('tally_display'), await count('tally_display_signal')]).toEqual([0, 0]);
   });
+
+  it('(h) concurrent failed claims across both instances stop at the limit', async () => {
+    await fresh();
+    const { code } = await signalling.mint(await pairTill('limit-race'), 'till-limit');
+    const results = await Promise.all(Array.from({ length: 30 }, (_, i) =>
+      refused(signalling.claim(display('192.0.2.70', i % 2 ? second.url : base), { code: '000000x', displayName: 'Guess' }))));
+    expect(results).toEqual(Array(30).fill('claim_refused'));
+    const failures = async (where: string) => (await connection.rawConnection.query(
+      `SELECT "failures" FROM "tally_display_claim_window" WHERE ${where}`)).map((row: { failures: number }) => Number(row.failures));
+    expect([await failures(`"key" LIKE 'source:%'`), await failures(`"key" = 'store'`)]).toEqual([[10], [10]]);
+    expect(await refused(signalling.claim(display('192.0.2.70'), { code, displayName: 'Counter' }))).toBe('claim_refused');
+    expect(await count('tally_display_code', 'NOT "spent"')).toBe(1);
+  });
+
+  it('(i) the public routes refuse bad input in the seam\'s shape', async () => {
+    const answer = async (path: string, init: RequestInit) => {
+      const response = await fetch(`${base}/tally/v1/${path}`, init);
+      return [response.status, await response.json()];
+    };
+    const json = { 'Content-Type': 'application/json' };
+    const headers = { ...(await pairTill('bad-input')).headers, 'X-Tally-Device-Id': 'till-i' };
+    expect(await answer('displays/%00', { method: 'DELETE', headers })).toEqual([404, { code: 'not_found', message: expect.any(String) }]);
+    expect(await answer('display/claim', { method: 'POST', headers: json, body: '{' }))
+      .toEqual([400, { code: 'invalid_request', message: expect.any(String) }]);
+    const big = JSON.stringify({ type: 'offer', payload: 'x'.repeat(450_000 - 29) }); // over the parser's 409 600 bytes
+    expect(await answer('display/signals', { method: 'POST', headers: json, body: big }))
+      .toEqual([413, { code: 'too_large', message: expect.any(String) }]);
+  });
 });

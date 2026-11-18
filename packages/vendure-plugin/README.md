@@ -244,8 +244,10 @@ state is in Postgres, so any server instance answers any call.
   `updateRole` mutation, or by running `tallyEnsurePosTillRole` again, which adds the preset's permissions to the
   existing role.
 - Failed claims are limited per source address, which is Express's `req.ip`. A server behind a proxy or load balancer
-  must set `trust proxy` (`apiOptions.trustProxy` in the Vendure config); without it every display shares the
-  proxy's address as one source, which is stricter, never looser.
+  must set `trust proxy` to the number of proxies in front of the server (for example `apiOptions.trustProxy: 1`)
+  or to their addresses, never `true`: `true` takes the left-most `X-Forwarded-For`, which the client writes, so
+  every guess would count as a new source. Without it every display shares the proxy's address as one source,
+  which is stricter, never looser.
 - `GET /tally/v1/info` advertises `customerDisplay: { v: 1, snapshot: 1, iceServers? }`. Set the ICE servers with
   `TallyPosPlugin.init({ customerDisplay: { iceServers: [{ urls: 'stun:stun.example.com:3478' }] } })`; without the
   option the till uses its default STUN servers, and `[]` means LAN only.

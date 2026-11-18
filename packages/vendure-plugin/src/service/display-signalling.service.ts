@@ -49,6 +49,9 @@ export const SNAPSHOT_MAX_BYTES = 204_800;
 const SOURCE_WINDOW = MINUTE, SOURCE_MAX = 10, STORE_WINDOW = 10 * MINUTE, STORE_MAX = 100;
 const CONNECTED_MS = 30_000, UNSEEN_TTL = 30 * 24 * 60 * MINUTE;
 const STORE_KEY = 'store';
+// A random draw (a pairing code or a check code) is retried on collision at most this often; past it the call is
+// refused as `limit` and its transaction rolls back, so a crowded code space never holds a request in a loop.
+const MAX_DRAWS = 50;
 
 const sha256Hex = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 /** 128 bits, base64url without padding: 22 characters. */
@@ -61,11 +64,12 @@ const iso = (date: Date) => date.toISOString();
 const refuse = (code: DisplayRefusalCode) => new DisplayRefusal(code);
 
 // Lazy pruning (V7): every call first deletes what has expired, in one statement. A display's snapshot and both
-// inboxes go with it by ON DELETE CASCADE.
+// inboxes go with it by ON DELETE CASCADE. A window row a claim holds is skipped, never waited on; a later call prunes it.
 const PRUNE = `WITH codes AS (DELETE FROM "tally_display_code" WHERE "expiresAt" <= $1),
   pending AS (DELETE FROM "tally_display_pending" WHERE "expiresAt" <= $1),
   snapshots AS (DELETE FROM "tally_display_snapshot" WHERE "postedAt" <= $2),
-  windows AS (DELETE FROM "tally_display_claim_window" WHERE "expiresAt" <= $1)
+  windows AS (DELETE FROM "tally_display_claim_window" WHERE "key" IN (SELECT "key" FROM "tally_display_claim_window"
+    WHERE "expiresAt" <= $1 FOR UPDATE SKIP LOCKED))
   DELETE FROM "tally_display" WHERE COALESCE("lastSeenAt", "confirmedAt") <= $3`;
 
 /**
@@ -100,12 +104,13 @@ export class DisplaySignallingService {
         WHERE "channelId" = $1 AND "deviceId" = $2 AND NOT "spent" AND "expiresAt" > $3`, [till.channelId, till.deviceId, at(now)]);
       if (unspent >= MAX_UNSPENT) throw refuse('limit');
       const expiresAt = at(now + CODE_TTL);
-      for (;;) {
+      for (let draw = 0; draw < MAX_DRAWS; draw += 1) {
         const code = randomDigits(6);
         const inserted = await query(`INSERT INTO "tally_display_code" ("code", "channelId", "deviceId", "expiresAt") VALUES ($1, $2, $3, $4)
           ON CONFLICT ("code") DO NOTHING RETURNING "code"`, [code, till.channelId, till.deviceId, expiresAt]);
         if (inserted.length) return { code, expiresAt: iso(expiresAt) };
       }
+      throw refuse('limit');
     });
   }
 
@@ -204,24 +209,29 @@ export class DisplaySignallingService {
     const sourceKey = `source:${rateLimitSource(source)}`;
     const claimSecret = newSecret();
     const claimed = await this.transaction(async query => {
+      // Claims run one at a time across every instance: the limit check, the spend and the failure count are one step.
+      await query(`SELECT pg_advisory_xact_lock(hashtext('tally-display-claim'))`);
       const limited = await query(`SELECT 1 FROM "tally_display_claim_window" WHERE "expiresAt" > $1
         AND (("key" = $2 AND "failures" >= $3) OR ("key" = $4 AND "failures" >= $5))`, [at(now), sourceKey, SOURCE_MAX, STORE_KEY, STORE_MAX]);
       if (limited.length) return 'limited';
       const [code] = await query(`UPDATE "tally_display_code" SET "spent" = true WHERE "code" = $1 AND NOT "spent" AND "expiresAt" > $2
         RETURNING "channelId", "deviceId", "expiresAt"`, [request.code, at(now)]);
-      if (!code) return 'failed';
+      if (!code) {
+        await this.countFailure(query, sourceKey, now);
+        return 'failed';
+      }
       const [moving] = request.token === undefined ? []
         : await query('SELECT "id" FROM "tally_display" WHERE "tokenHash" = $1', [sha256Hex(request.token)]);
-      // The unique index keeps check codes apart; a taken one is drawn again (10 000 values, so this ends).
-      for (;;) {
+      // The unique index keeps check codes apart; a taken one is drawn again, up to MAX_DRAWS times.
+      for (let draw = 0; draw < MAX_DRAWS; draw += 1) {
         const checkCode = randomDigits(4);
         const inserted = await query(`INSERT INTO "tally_display_pending" ("id", "channelId", "deviceId", "secretHash", "displayName",
           "checkCode", "expiresAt", "movingDisplayId") VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT ("checkCode") DO NOTHING RETURNING "id"`,
         [newId(), code.channelId, code.deviceId, sha256Hex(claimSecret), request.displayName, checkCode, code.expiresAt, moving?.id ?? null]);
         if (inserted.length) return { claimSecret, checkCode };
       }
+      throw refuse('limit');
     });
-    if (claimed === 'failed') await this.countFailure(sourceKey, now);
     if (typeof claimed === 'string') throw refuse('claim_refused');
     return claimed;
   }
@@ -284,8 +294,8 @@ export class DisplaySignallingService {
   }
 
   /** Counts a failed claim in its source's window and the store-wide one, each opened by its first failure: one statement. */
-  private async countFailure(sourceKey: string, now: number): Promise<void> {
-    await this.query(`INSERT INTO "tally_display_claim_window" AS w ("key", "failures", "expiresAt") VALUES ($1, 1, $3), ($2, 1, $4)
+  private async countFailure(query: Query, sourceKey: string, now: number): Promise<void> {
+    await query(`INSERT INTO "tally_display_claim_window" AS w ("key", "failures", "expiresAt") VALUES ($1, 1, $3), ($2, 1, $4)
       ON CONFLICT ("key") DO UPDATE SET
         "failures" = CASE WHEN w."expiresAt" <= $5 THEN 1 ELSE w."failures" + 1 END,
         "expiresAt" = CASE WHEN w."expiresAt" <= $5 THEN EXCLUDED."expiresAt" ELSE w."expiresAt" END`,

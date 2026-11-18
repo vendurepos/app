@@ -42,6 +42,7 @@ export const COMMANDS_BODY_MAX_BYTES = 1_048_576;
 const PROTOCOL_HEADER = 'X-Tally-Protocol';
 const TALLY_HEADERS = [PROTOCOL_HEADER, 'X-Tally-Device-Id', 'X-Tally-Display-Token'];
 const DISPLAYS_ROUTE = '/tally/v1/displays';
+const DISPLAY_ROUTE = '/tally/v1/display';
 // Twice the snapshot cap, so a snapshot just over it still reaches the service: too_large there, and the old one stays.
 const DISPLAYS_BODY_MAX_BYTES = 2 * SNAPSHOT_MAX_BYTES;
 // Ruling 16: from about this many customers, the email lookup's sequential scan is worth the README's optional index.
@@ -73,7 +74,7 @@ function commandsBodyParser(): Middleware['handler'] {
   })) as Middleware['handler'];
 }
 
-// The till-side display routes' parser: a refused body is answered in the seam's shape, `too_large` or `invalid_request`.
+// The parser of both display route groups, the till's `displays/…` and the display's public `display/…`: a refused body is answered in the seam's shape, `too_large` or `invalid_request`.
 function displaysBodyParser(): Middleware['handler'] {
   const parse = jsonParser(DISPLAYS_BODY_MAX_BYTES);
   return ((req: unknown, res: Reply, next: Next) => parse(req, res, error => {
@@ -122,7 +123,8 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions }
     shipping.shippingCalculators = withMissing(shipping.shippingCalculators, [tallyShippingCalculator], byCode);
     const api = config.apiOptions;
     api.middleware = withMissing(api.middleware, [{ route: COMMANDS_ROUTE, handler: commandsBodyParser(), beforeListen: true },
-      { route: DISPLAYS_ROUTE, handler: displaysBodyParser(), beforeListen: true }],
+      { route: DISPLAYS_ROUTE, handler: displaysBodyParser(), beforeListen: true },
+      { route: DISPLAY_ROUTE, handler: displaysBodyParser(), beforeListen: true }],
       (a, b) => a.route === b.route);
     // A preflight carrying the X-Tally-* headers passes without auth. Vendure's default CORS reflects the
     // requested headers; a merchant's explicit allowedHeaders list gets each one added.

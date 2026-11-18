@@ -9,7 +9,7 @@ import type { SignalMessage } from '../service/display-signalling.service';
 const DEVICE_HEADER = 'x-tally-device-id', TOKEN_HEADER = 'x-tally-display-token';
 // Input bounds: the seam names none, so these only keep junk out of Postgres. A pairing code is 6 digits today; a token
 // or claim secret is 22 characters; an SDP offer is a few kB.
-const NAME_MAX = 100, CODE_MAX = 32, SECRET_MAX = 128, PAYLOAD_MAX = 65_536, DEVICE_MAX = 64;
+const NAME_MAX = 100, CODE_MAX = 32, SECRET_MAX = 128, PAYLOAD_MAX = 65_536, DEVICE_MAX = 64, ID_MAX = 64;
 const SIGNAL_TYPES: ReadonlySet<unknown> = new Set(['offer', 'answer', 'ice']);
 
 type Reply = { status(code: number): { json(body: unknown): void } };
@@ -46,6 +46,12 @@ const signal = (body: unknown): SignalMessage => {
 function deviceId(value: string | undefined): string {
   if (!text(1, DEVICE_MAX)(value)) throw invalid(`X-Tally-Device-Id: expected 1 to ${DEVICE_MAX} characters`);
   return value as string;
+}
+
+/** A `:claimId` or `:displayId`: one that is not 1 to 64 characters without NUL names no row, so `not_found`. */
+function pathId(value: string): string {
+  if (!text(1, ID_MAX)(value)) throw new DisplayRefusal('not_found');
+  return value;
 }
 
 /** The display's `X-Tally-Display-Token`. A missing or oversized one is a refused token, like an unknown one. */
@@ -91,14 +97,14 @@ export class TallyDisplaysController {
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
   async confirm(@Ctx() ctx: RequestContext, @Param('claimId') claimId: string, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.confirm(ctx, deviceId(device), claimId);
+    await this.displays.confirm(ctx, deviceId(device), pathId(claimId));
   }
 
   @Post('displays/pending/:claimId/decline')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
   async decline(@Ctx() ctx: RequestContext, @Param('claimId') claimId: string, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.decline(ctx, deviceId(device), claimId);
+    await this.displays.decline(ctx, deviceId(device), pathId(claimId));
   }
 
   @Get('displays')
@@ -117,14 +123,14 @@ export class TallyDisplaysController {
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
   async forget(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.forget(ctx, deviceId(device), displayId);
+    await this.displays.forget(ctx, deviceId(device), pathId(displayId));
   }
 
   @Post('displays/:displayId/signals')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
   async sendSignal(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Body() body: unknown, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.sendSignal(ctx, deviceId(device), displayId, signal(body));
+    await this.displays.sendSignal(ctx, deviceId(device), pathId(displayId), signal(body));
   }
 
   @Put('displays/:displayId/snapshot')
@@ -132,7 +138,7 @@ export class TallyDisplaysController {
   @Allow(tallyPosPairDisplay.Permission)
   async postSnapshot(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Body() body: unknown, @Headers(DEVICE_HEADER) device?: string) {
     const held = fields<{ snapshot: unknown }>(body, { snapshot: { check: () => true, what: 'any JSON value' } });
-    await this.displays.postSnapshot(ctx, deviceId(device), displayId, held.snapshot);
+    await this.displays.postSnapshot(ctx, deviceId(device), pathId(displayId), held.snapshot);
   }
 
   @Post('display/claim')
