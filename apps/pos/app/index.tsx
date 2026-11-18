@@ -32,6 +32,7 @@ import { logout } from '../lib/logout';
 import { loadOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
+import { useTillCustomerDisplay } from '../lib/customer-display';
 import { ProductsPanel } from '../lib/products-panel';
 import { useCustomersReadable } from '../lib/customer-list';
 import { OrderReceipt } from '../lib/order-receipt';
@@ -110,6 +111,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const customersShown = useCustomersReadable(session);
   const { connector, stockOverlay, stockOverlayAsOf } = catalogue;
   const saleSettings = useSaleSettings(session, connector);
+  const customerDisplay = useTillCustomerDisplay(session, saleSettings.status === 'ready' ? saleSettings.capabilities : undefined);
   const notices = tillNotices({ capabilities: saleSettings.capabilities });
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
@@ -369,7 +371,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
-      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} /> : null}
+      {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} customerDisplay={customerDisplay} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen ? { display: 'none' } : undefined}>
         <ConnectorProvider connector={connector} traitContext={traitContext} stockOverlay={stockOverlay} stockOverlayAsOf={stockOverlayAsOf}>
