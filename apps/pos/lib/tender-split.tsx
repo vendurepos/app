@@ -25,10 +25,11 @@ export function lineGrossMinor(line: Pick<LineItem, 'netMinor' | 'taxMicros' | '
   return line.taxInclusive ? line.netMinor : line.netMinor + roundMicrosToMinor(BigInt(line.taxMicros));
 }
 
-/** The reducer's items plan ("pay these lines first, the rest after"), or null unless at least one line is picked and their gross is above 0 and below the balance. */
-export function itemsSplitPlan(payments: readonly Parameters<typeof countsTowardPaid>[0][], lines: readonly Pick<LineItem, 'id' | 'netMinor' | 'taxMicros' | 'taxInclusive'>[], pickedIds: readonly TenderLineId[], balanceMinor: number): TenderPlan | null {
+/** The reducer's items plan ("pay these lines first, the rest after"), or null unless at least one line is picked, their gross is above 0 and below the balance, and (with no fees or shipping) some line is left unpicked and unpaid, so the rest is never rounding only. */
+export function itemsSplitPlan(payments: readonly Parameters<typeof countsTowardPaid>[0][], lines: readonly Pick<LineItem, 'id' | 'netMinor' | 'taxMicros' | 'taxInclusive'>[], pickedIds: readonly TenderLineId[], balanceMinor: number, rest: { paidLineIds?: readonly TenderLineId[]; hasCharges?: boolean } = {}): TenderPlan | null {
   const picked = lines.filter((line) => pickedIds.includes(line.id));
   if (picked.length === 0) return null;
+  if (!rest.hasCharges && lines.every((line) => pickedIds.includes(line.id) || (rest.paidLineIds ?? []).includes(line.id))) return null;
   const firstMinor = picked.reduce((sum, line) => sum + lineGrossMinor(line), 0);
   if (!(firstMinor > 0 && firstMinor < balanceMinor)) return null;
   return { kind: 'items', lineIds: picked.map((line) => line.id), firstMinor, ways: 1, from: payments.filter(countsTowardPaid).length };
@@ -40,7 +41,9 @@ export function TenderSplit({ sale, state, dispatch }: {
 }) {
   const [amountText, setAmountText] = useState('');
   const fixedPlan = fixedSplitPlan(sale.order.payments, amountText, sale.order.currency, sale.order.balanceDueMinor);
-  const itemsPlan = itemsSplitPlan(sale.order.payments, sale.order.lineItems, state.pickedLineIds, sale.order.balanceDueMinor);
+  const itemsPlan = itemsSplitPlan(sale.order.payments, sale.order.lineItems, state.pickedLineIds, sale.order.balanceDueMinor, {
+    paidLineIds: Object.keys(state.linesPaidBy), hasCharges: (sale.order.fees?.length ?? 0) + (sale.order.shipping?.length ?? 0) > 0,
+  });
   if (sale.stage.kind !== 'tender' || sale.order.balanceDueMinor === 0) return null;
   return (
     <VStack testID="tender-split" space="sm" className="px-4 pt-4">
@@ -89,6 +92,9 @@ export function TenderSplit({ sale, state, dispatch }: {
               </Button>
             );
           })}
+          {sale.order.discounts.length > 0 && (
+            <Text testID="tender-split-items-note" className="text-sm text-muted-foreground">{"Each item's share includes its part of the order discount."}</Text>
+          )}
           <Button testID="tender-split-items-set" variant="outline" size="sm" disabled={itemsPlan === null}
             onPress={() => { if (itemsPlan) dispatch({ type: 'set-plan', plan: itemsPlan, balanceMinor: sale.order.balanceDueMinor }); }}>
             <Text>Pay these first</Text>
