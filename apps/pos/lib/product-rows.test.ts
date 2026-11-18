@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { vendureProductTraits } from '@tallyui/connector-vendure';
+import { createVendureConnector, vendureProductTraits } from '@tallyui/connector-vendure';
 import { productRows } from './product-rows';
 
 const variant = (id: string, sku: string, price: number, name: string, stockOnHand?: number) =>
@@ -30,5 +30,13 @@ describe('productRows', () => {
     ['nothing', []],
   ])('filters by %s, keeping an exact SKU alone', (term, ids) => {
     expect(productRows(products, term, vendureProductTraits, 'EUR', 0).map(row => row.id)).toEqual(ids);
+  });
+
+  it("shows Manage from the effective setting: a variant on INHERIT follows the store's Track inventory", () => {
+    const inherit = [{ id: '4', name: 'House Blend', variants: [{ ...variant('41', 'HSE-BLEND', 1200, 'House Blend', 5), trackInventory: 'INHERIT' }] }];
+    const row = (globalTrackInventory: boolean) => productRows(inherit, '',
+      createVendureConnector({ pricesIncludeTax: false, globalTrackInventory, globalOutOfStockThreshold: 0 }).traits.product, 'EUR', 0)[0];
+    expect([row(true).managed, row(true).stockText]).toEqual([true, '5']);
+    expect([row(false).managed, row(false).stock]).toEqual([false, '—']);
   });
 });
