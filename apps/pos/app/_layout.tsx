@@ -8,10 +8,11 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
-import { ScopedVariables } from 'uniwind';
+import { ScopedVariables, useUniwind } from 'uniwind';
 import { printInLightScheme } from '../lib/print-light';
 import { useStoredScale } from '../lib/scale-setting';
 import { SessionProvider } from '../lib/session-context';
+import { statusBarStyle } from '../lib/status-bar-style';
 import { useStackColors } from '../lib/theme-colors';
 import { applyTheme, loadTheme } from '../lib/theme-setting';
 
@@ -24,13 +25,14 @@ if (startTheme !== 'system') applyTheme(startTheme);
 export default function RootLayout() {
   const scale = useStoredScale();
   const stackColors = useStackColors();
+  const { theme } = useUniwind();
   useEffect(printInLightScheme, []);
 
   return (
     // The web uses TallyUI's root mirror.
     <ScaleProvider scale={scale} scope={Platform.OS === 'web' ? undefined : ScopedVariables}>
       <SessionProvider>
-        <StatusBar style="auto" />
+        <StatusBar style={statusBarStyle(theme)} />
         <Stack screenOptions={stackColors} />
         {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
         <PortalHost />
