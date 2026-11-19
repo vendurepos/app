@@ -69,3 +69,9 @@ export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): 
 export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck']): AttentionRow[] {
   return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order) }));
 }
+
+/** Clear & re-download's confirm (CHECKLIST 10.3): how many products leave this device and download again from the store. */
+export function redownloadSummary(count: number): string {
+  if (count === 0) return 'No products are on this device yet; they download again from your store.';
+  return `${count} ${count === 1 ? 'product is' : 'products are'} removed from this device and downloaded again from your store.`;
+}

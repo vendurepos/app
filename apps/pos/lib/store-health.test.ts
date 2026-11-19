@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionReason, attentionRows, canSendAgain, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice, redownloadSummary } from './store-health';
+
+it("words Clear & re-download's confirm for no product, one and several", () => {
+  expect(redownloadSummary(0)).toBe('No products are on this device yet; they download again from your store.');
+  expect(redownloadSummary(1)).toBe('1 product is removed from this device and downloaded again from your store.');
+  expect(redownloadSummary(3)).toBe('3 products are removed from this device and downloaded again from your store.');
+});
 
 describe('readyToSell', () => {
   const ready = { catalogueSynced: true, signedOut: false, settingsReady: true, ordersOpen: true };

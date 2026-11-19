@@ -1,20 +1,26 @@
 import { useEffect, useState, type JSX } from 'react';
 import { ScrollView, View } from 'react-native';
 import {
-  Button, Card, CardContent, CardDescription, CardHeader, CardTitle, HStack, orderReference, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
+  Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, orderReference, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
-import { coveragePercent, readServerTotals, recordsOnDevice, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
+import { coveragePercent, readServerTotals, recordsOnDevice, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
-export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog }: {
+export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
   session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
   collections: { orders: RxCollection | null; refunds: RxCollection | null; parked: RxCollection | null; closures: RxCollection | null };
   attention: AttentionRow[]; onRetry: (orderIds: string[]) => Promise<number>; onOpen: (order: PosOrder) => void;
-  onViewLog: () => void;
+  onViewLog: () => void; onCheckNow: () => Promise<void>; onRedownload: () => Promise<void>; redownloading: boolean;
 }): JSX.Element {
+  const [checking, setChecking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  async function checkNow() {
+    setChecking(true);
+    try { await onCheckNow(); } finally { setChecking(false); }
+  }
   const { orders, refunds, parked, closures } = collections;
   const [counts, setCounts] = useState<Record<'orders' | 'refunds' | 'parked' | 'closures', number | null>>({ orders: null, refunds: null, parked: null, closures: null });
   useEffect(() => {
@@ -95,6 +101,10 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                 <TableCell><VStack space="none">
                   <Text className="font-medium">{row.name}</Text>
                   <Text className="text-xs text-muted-foreground">{row.note}</Text>
+                  {row.key === 'products' ? <Button testID="store-health-redownload" variant="link" size="sm" className="self-start px-0"
+                    disabled={redownloading} onPress={() => setConfirming(true)}>
+                    <Text>{redownloading ? 'Re-downloading…' : 'Clear & re-download'}</Text>
+                  </Button> : null}
                 </VStack></TableCell>
                 <TableCell className="w-28"><Text testID={`store-health-count-${row.key}`} className="text-right">{row.count ?? '—'}</Text></TableCell>
                 <TableCell className="w-28"><Text testID={`store-health-server-${row.key}`} className="text-right text-muted-foreground">{row.server ?? '—'}</Text></TableCell>
@@ -104,9 +114,27 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                   : <Progress testID={`store-health-coverage-${row.key}`} value={row.coverage} aria-valuenow={row.coverage} className="h-2 w-20" />}</TableCell>
               </TableRow></View>)}</TableBody>
             </Table>
+            <Button testID="store-health-check-now" variant="outline" className="mt-4 self-start" disabled={checking} onPress={() => void checkNow()}>
+              <Text>{checking ? 'Checking…' : 'Check everything now'}</Text>
+            </Button>
           </CardContent>
         </Card>
       </ScrollView>
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent testID="store-health-redownload-confirm" className="max-w-md">
+          <DialogTitle>Clear and re-download the products?</DialogTitle>
+          <DialogDescription>{redownloadSummary(productCount)}</DialogDescription>
+          <Text className="text-sm text-muted-foreground">
+            {"Nothing changes on your store. This till's sales, refunds, parked carts and closures stay on this device. Products can't be scanned or found until the download finishes."}
+          </Text>
+          <HStack space="sm" className="justify-end">
+            <Button testID="store-health-redownload-cancel" variant="outline" onPress={() => setConfirming(false)}><Text>Cancel</Text></Button>
+            <Button testID="store-health-redownload-yes" variant="destructive" onPress={() => { setConfirming(false); void onRedownload(); }}>
+              <Text>Clear & re-download</Text>
+            </Button>
+          </HStack>
+        </DialogContent>
+      </Dialog>
     </VStack>
   );
 }

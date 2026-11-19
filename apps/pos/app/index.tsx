@@ -23,7 +23,7 @@ import { nativeCamera } from '../lib/native-camera';
 import { cameraScanShown, permissionHook } from '../lib/native-camera-core';
 import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
-import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
+import { refreshCatalogue, removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { ClosureHistory, ClosureList } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
@@ -66,6 +66,7 @@ import { errorDetail, orderStoreFailureMessage } from '../lib/storage-start-fail
 import { storeLabel } from '../lib/store-label';
 import { StoreHealthPanel } from '../lib/store-health-panel';
 import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health';
+import { syncNow } from '../lib/sync-now';
 import { SyncNowControl } from '../lib/sync-now-control';
 import { TenderSplit } from '../lib/tender-split';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
@@ -381,7 +382,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         onViewLog={() => { setHealthOpen(false); setSettingsSection('sync-log'); setSettingsOpen(true); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
-        collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }} /> : null}
+        collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }}
+        onCheckNow={() => syncNow([outbox, registerOutbox], refreshCatalogue)}
+        redownloading={catalogue.redownloading}
+        onRedownload={async () => {
+          const result = await catalogue.redownload();
+          // A hung storage worker is recovered by a reload (ADR-061).
+          if (result === 'timed_out' && Platform.OS === 'web') window.location.reload();
+        }} /> : null}
       {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} customerDisplay={customerDisplay}
         initialSection={settingsSection} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}

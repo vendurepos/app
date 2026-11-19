@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { withStockOverlay, type TallyConnector } from '@tallyui/core';
 import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import type { Subscription } from 'rxjs';
-import { catalogueConnector, startCatalogueSync, stopCatalogueSync } from './catalogue';
+import { catalogueConnector, removeCatalogueDatabaseWithin, startCatalogueSync, stopCatalogueSync } from './catalogue';
 import { sessionKey, type Session } from './session';
 import { catalogueStatus, INITIAL_CATALOGUE_STATUS, type CatalogueError, type CatalogueEvent, type CatalogueRefusal } from './catalogue-status';
 
@@ -25,6 +25,8 @@ export function useCatalogue(session: Session): {
   refusal: CatalogueRefusal | null;
   stockOverlay: ReadonlyMap<string, unknown> | undefined;
   stockOverlayAsOf: string | undefined;
+  redownloading: boolean;
+  redownload(): Promise<'removed' | 'timed_out' | 'failed'>;
 } {
   const connector = useCatalogueConnector(session);
   const [products, setProducts] = useState<any[]>([]);
@@ -32,6 +34,9 @@ export function useCatalogue(session: Session): {
   const [error, setError] = useState<CatalogueError | null>(null);
   const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [stockOverlayAsOf, setStockOverlayAsOf] = useState<string>();
+  // Bumping the generation restarts the sync (Clear & re-download).
+  const [generation, setGeneration] = useState(0);
+  const [redownloading, setRedownloading] = useState(false);
   const overlaidProducts = useMemo(() => products.map(doc => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay)), [products, connector, stockOverlay]);
 
   useEffect(() => {
@@ -44,6 +49,7 @@ export function useCatalogue(session: Session): {
       const step = catalogueStatus(catalogueState, event);
       catalogueState = step.state;
       if (step.synced) setLastSyncedAt(new Date());
+      if (step.synced || event.type === 'start-failed') setRedownloading(false);
       if (step.error !== undefined) setError(step.error);
     }
     void startCatalogueSync(session, connector).then(({ db, replication, stockLevels, health }) => {
@@ -81,7 +87,19 @@ export function useCatalogue(session: Session): {
       // Queued behind any pending start so its replication is stopped too.
       void stopCatalogueSync().catch((error) => console.warn('Failed to stop catalogue sync', error));
     };
-  }, [session, connector]);
+  }, [session, connector, generation]);
 
-  return { connector, products: overlaidProducts, lastSyncedAt, error: error?.text ?? null, refusal: error?.refusal ?? null, stockOverlay, stockOverlayAsOf };
+  // Store health's Clear & re-download: the reset clears only the catalogue database, never the orders database.
+  async function redownload(): Promise<'removed' | 'timed_out' | 'failed'> {
+    if (redownloading) return 'removed';
+    setRedownloading(true);
+    const result = await removeCatalogueDatabaseWithin();
+    setProducts([]);
+    setLastSyncedAt(null);
+    setStockOverlay(undefined);
+    setGeneration(current => current + 1);
+    return result;
+  }
+
+  return { connector, products: overlaidProducts, lastSyncedAt, error: error?.text ?? null, refusal: error?.refusal ?? null, stockOverlay, stockOverlayAsOf, redownloading, redownload };
 }
