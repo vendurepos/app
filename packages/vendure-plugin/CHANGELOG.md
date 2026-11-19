@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `GET /tally/v1/registers/:id`: the live `session` gains `movements` (every movement of the session, oldest first) and `paidInMinor` and `paidOutMinor` (the cash paid in and out its `expected` counts), additive at version 1. No migration.
 - Dashboard: **POS sales to resolve** (Sales, SuperAdmin only) lists the sales kept `needs_admin` and resolves each with a note: **Keep the sale** (`applied`) or **Cancel the sale** (`rejected`), through the existing `tallyNeedsAdminCommands` and `tallyResolveNeedsAdmin`. No migration.
 - `POST /tally/v1/orders/:code/receipt-email` (12.1a): with `TallyPosPlugin.init({ receiptEmail: true })` and `tallyReceiptEmailHandler` (`@vendurepos/plugin/email`) installed, a till sale's receipt is emailed on request (needs ReadOrder as well), to the order's customer or a given `emailAddress`, with the order-confirmation template; `GET /tally/v1/info` advertises `receiptEmail: { v: 1 }`; one plain address only, at most `perOrder` sends per order (default 3) and `perUserPerMinute` requests per user (default 20), each answering 429. No migration.
 - `GET /tally/v1/registers/:id`: each closure item gains `countedFloatMinor`, `paidInMinor` and `paidOutMinor` (the session's float and the cash paid in and out its `expected` counted), additive at version 1. No migration.

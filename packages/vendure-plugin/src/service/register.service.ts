@@ -162,8 +162,14 @@ export class RegisterService {
       if (live && state && !state.closed) {
         // openSessionOf excludes closed and superseded sessions, so the status is open or counting.
         const { id, status, expected, salesCount } = await this.liveSession(tx, live, state.status);
+        // Every movement of the live session counts, oldest first; every field named, so channelId, commandId and receivedAt stay unexposed.
+        const moves = (await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId, sessionId: live.id }))
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
         session = { id, status: status as 'open' | 'counting', openedAt: live.openedAt, openedBy: live.openedBy, deviceId: live.deviceId,
-          deviceName: live.deviceName, countedFloatMinor: live.countedFloatMinor, expected, salesCount };
+          deviceName: live.deviceName, countedFloatMinor: live.countedFloatMinor, expected, salesCount,
+          ...countedMovements(moves.map(row => row.id), moves),
+          movements: moves.map(row => ({ id: row.id, type: row.type, amountMinor: row.amountMinor, reason: row.reason, voids: row.voids,
+            createdAt: row.createdAt, createdBy: row.createdBy })) };
       }
       const [rows, totalItems] = await this.connection.getRepository(tx, TallyRegisterClosure).findAndCount({
         where: { channelId, registerId }, order: { number: 'DESC' }, skip: page.skip, take: page.take,
