@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Logger, RequestContextService, TransactionalConnection } from '@vendure/core';
+import { SUPER_ADMIN_ROLE_CODE } from '@vendure/common/lib/shared-constants';
+import { Logger, RequestContextService, Role, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -35,9 +36,9 @@ describe('register approval (contract 3)', () => {
   });
   afterAll(() => server.destroy());
 
-  async function admin(permissions: string[], firstName = 'Till', lastName = 'User') {
+  async function admin(permissions: string[], firstName = 'Till', lastName = 'User', channelIds = [channelId]) {
     const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
-      createRole(input: $input) { id } }`), { input: { code: `role-${uuid()}`, description: 'test', permissions, channelIds: [channelId] } });
+      createRole(input: $input) { id } }`), { input: { code: `role-${uuid()}`, description: 'test', permissions, channelIds } });
     const email = `${uuid()}@staff.example`;
     const { createAdministrator } = await adminClient.query<{ createAdministrator: { user: { id: string } } }>(parse(`
       mutation Admin($input: CreateAdministratorInput!) { createAdministrator(input: $input) { user { id } } }`),
@@ -92,6 +93,17 @@ describe('register approval (contract 3)', () => {
   }
   const invalid = (command: RegisterEnvelope, reason: string) =>
     refused(command, 'register_approval_invalid', `The approval is not valid for this closure: ${reason}`, { reason });
+  async function channel(code: string) {
+    const { activeChannel } = await adminClient.query(parse('query { activeChannel { defaultTaxZone { id } } }'));
+    const zone = activeChannel.defaultTaxZone.id;
+    const { createChannel } = await adminClient.query(parse(`mutation Channel($input: CreateChannelInput!) {
+      createChannel(input: $input) { ... on Channel { id } } }`), { input: { code, token: `${code}-token`, defaultLanguageCode: 'en',
+      pricesIncludeTax: false, defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: zone, defaultShippingZoneId: zone } });
+    return createChannel.id as string;
+  }
+  const transition = (s: string) => envelope('register.session.transition', 3, { sessionId: s, status: 'closed', at: AT, approvedBy: 'mallory' });
+  // reapproveClosure: the refused closure resent with a new command id and the proof, every other field as it was.
+  const resend = (command: RegisterEnvelope, approval: string) => ({ ...command, id: uuid(), payload: { ...command.payload, approval } });
   async function closureRead(r: string) {
     const response = await fetch(`${base}/tally/v1/registers/${r}`, { headers: { Authorization: superAdmin() } });
     return (await response.json()).closures.items[0];
@@ -234,11 +246,7 @@ describe('register approval (contract 3)', () => {
   });
 
   it('11. a proof minted in one channel is unknown to a closure in another', async () => {
-    const { activeChannel } = await adminClient.query(parse('query { activeChannel { defaultTaxZone { id } } }'));
-    const zone = activeChannel.defaultTaxZone.id;
-    await adminClient.query(parse(`mutation Channel($input: CreateChannelInput!) { createChannel(input: $input) { ... on Channel { id } } }`),
-      { input: { code: 'approval-b', token: 'approval-b-token', defaultLanguageCode: 'en', pricesIncludeTax: false, defaultCurrencyCode: 'EUR',
-        availableCurrencyCodes: ['EUR'], defaultTaxZoneId: zone, defaultShippingZoneId: zone } });
+    await channel('approval-b');
     const a = await session();
     const proof = await proofFor(a.s);
     const b = await session(3, 'approval-b-token');
@@ -259,7 +267,6 @@ describe('register approval (contract 3)', () => {
   });
 
   it("13. a transition's approvedBy never becomes a closure's approver", async () => {
-    const transition = (s: string) => envelope('register.session.transition', 3, { sessionId: s, status: 'closed', at: AT, approvedBy: 'mallory' });
     const under = await session();
     expect(await send(transition(under.s))).toMatchObject({ status: 'applied' });
     expect(await send(closure(under.s, under.r, 10100, { approvedBy: 'mallory' }))).toMatchObject({ status: 'applied',
@@ -288,5 +295,68 @@ describe('register approval (contract 3)', () => {
     const { s, r } = await session(2);
     expect(await send(closure(s, r, 10000, { approvedBy: 'manager-1' }, 2))).toMatchObject({ status: 'applied' });
     expect(await closureRead(r)).toMatchObject({ approvedBy: 'manager-1', approvalVerified: false });
+  });
+
+  it('17. a closure whose counted has no cash key is held to the server cash variance, and a proof for it applies', async () => {
+    const { s, r } = await session();
+    // deriveVariance maps only counted's keys; the server still expects the 10000 float in cash.
+    const command = closure(s, r, 0, { tillExpected: {}, counted: {} });
+    await refused(command, 'register_approval_required', `Session ${s} needs a manager's approval: its cash variance is over ${THRESHOLD}`,
+      { sessionId: s, thresholdMinor: THRESHOLD, variance: { cash: -10000 } });
+    expect(await send(resend(command, await proofFor(s, { cash: -10000 })))).toMatchObject({ status: 'applied',
+      register: { closure: { approvalVerified: true } } });
+  });
+
+  let approvedAfterTransition: string;
+  it('18. a session the till transitioned to closed is admitted, and its refused closure resent with the proof applies', async () => {
+    const { s, r } = await session();
+    expect(await send(transition(s))).toMatchObject({ status: 'applied' });
+    const command = closure(s, r, 10600);
+    expect(await send(command)).toMatchObject({ status: 'rejected', error: { code: 'register_approval_required' } });
+    expect(await send(resend(command, await proofFor(s)))).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: true } } });
+    expect(await closureRead(r)).toMatchObject({ approvedBy: manager.userId, approvalVerified: true });
+    approvedAfterTransition = s;
+  });
+
+  it("18b. once test 18's closure has applied, its session answers 409", async () => {
+    expect(approvedAfterTransition).toBeDefined();
+    expect(await approve(request(approvedAfterTransition))).toMatchObject({ status: 409, body: { code: 'approval_session_closed' } });
+  });
+
+  it('19. a superseded session answers 409', async () => {
+    const { s, r } = await session();
+    // A takeover from another till, as register-v2.e2e.ts does; the same device would resume instead.
+    const takeover = { ...envelope('register.session.open', 2, { sessionId: uuid(), registerId: r, openedAt: AT, countedFloatMinor: 10000,
+      supersedes: s }), deviceId: 'till-2' };
+    expect(await send(takeover)).toMatchObject({ status: 'applied', register: { superseded: { sessionId: s } } });
+    expect(await approve(request(s))).toMatchObject({ status: 409, body: { code: 'approval_session_closed' } });
+  });
+
+  it('20. ApproveTallyPosVariance held only on another channel answers 403 for a session in this one', async () => {
+    const elsewhere = await admin(['ApproveTallyPosVariance'], 'Else', 'Where', [await channel('approval-c')]);
+    const { s } = await session();
+    expect(await approve(request(s, { username: elsewhere.email }), await cashier())).toMatchObject({ status: 403,
+      body: { code: 'approval_forbidden' } });
+  });
+
+  it("21. a SuperAdmin approves, and the closure stores the superadmin's user id as approvedBy", async () => {
+    const { me } = await adminClient.query<{ me: { id: string } }>(parse('query { me { id } }'));
+    const { s, r } = await session();
+    // Vendure gives the SuperAdmin role every assignable permission; take ours off so only SuperAdmin itself can admit it.
+    const roles = connection.rawConnection.getRepository(Role);
+    const role = await roles.findOneByOrFail({ code: SUPER_ADMIN_ROLE_CODE });
+    await roles.update(role.id, { permissions: role.permissions.filter(permission => String(permission) !== 'ApproveTallyPosVariance') });
+    const { status, body } = await approve(request(s, { username: 'superadmin', password: 'superadmin' }), await cashier())
+      .finally(() => roles.update(role.id, { permissions: role.permissions }));
+    expect(role.permissions).toContain('ApproveTallyPosVariance');
+    expect(status).toBe(200);
+    expect(await send(closure(s, r, 10600, { approval: body.approval }))).toMatchObject({ status: 'applied' });
+    expect(await closureRead(r)).toMatchObject({ approvedBy: decode(me.id), approvalVerified: true });
+  });
+
+  it('22. with the option set, a session opened at v2 closes over the threshold unapproved, and its record says so', async () => {
+    const { s, r } = await session(2);
+    expect(await send(closure(s, r, 10600, {}, 2))).toMatchObject({ status: 'applied' });
+    expect(await closureRead(r)).toMatchObject({ approvedBy: null, approvalVerified: false });
   });
 });

@@ -161,12 +161,14 @@ export class RegisterService {
     return status === 'closed' || status === 'superseded' || closed ? undefined : session;
   }
 
-  /** #332 step 1: the session (or the session an alias names) of this channel; 'closed' once closed, superseded or closed by a closure. */
+  /** #332 step 1: the session (or the session an alias names) of this channel; 'closed' once superseded or closed by a closure.
+   * A `closed` status alone is admitted: the till transitions to closed before it submits the closure that needs the approval. */
   async approvalSession(tx: RequestContext, sessionId: string): Promise<TallyRegisterSession | 'unknown' | 'closed'> {
     const session = await this.resolveSession(tx, sessionId);
     if (!session) return 'unknown';
-    const { status, closed } = await this.sessionState(tx, session);
-    return closed || status === 'superseded' ? 'closed' : session;
+    const { status } = await this.sessionState(tx, session);
+    const closure = await this.connection.getRepository(tx, TallyRegisterClosure).existsBy({ channelId: session.channelId, sessionId: session.id });
+    return closure || status === 'superseded' ? 'closed' : session;
   }
 
   /** `GET /tally/v1/registers/:id`: the register's counters, live session and a page of its closures, newest first; undefined
@@ -330,18 +332,20 @@ export class RegisterService {
         refunds: await this.sessionRefunds(tx, session!.id) });
       const variance = deriveVariance(p.counted, expected);
       // #332: the server's variance decides, never counted − tillExpected. A session opened at v3 needs approval at every
-      // version (a v1 or v2 closure cannot carry a proof); sessions opened before v3 close as they always did.
+      // version (a v1 or v2 closure cannot carry a proof); sessions opened before v3 close as they always did. deriveVariance
+      // maps only counted's keys, so the approval's cash is set from the server's expected even when counted has no cash.
+      const approvalVariance = { ...variance, cash: (p.counted.cash ?? 0) - (expected.cash ?? 0) };
       const threshold = this.options.registerApproval?.thresholdMinor;
       let approval: TallyRegisterApproval | null = null;
       if (p.approval !== undefined) {
         approval = await repo(TallyRegisterApproval).findOne({ where: { channelId, tokenHash: createHash('sha256').update(p.approval).digest('hex') },
           lock: { mode: 'pessimistic_write' } });
         const reason = !approval ? 'unknown' : approval.usedAt ? 'used' : approval.expiresAt! <= new Date() ? 'expired'
-          : approval.sessionId !== session!.id ? 'session_mismatch' : !sameFigures(approval.variance, variance) ? 'variance_mismatch' : undefined;
+          : approval.sessionId !== session!.id ? 'session_mismatch' : !sameFigures(approval.variance, approvalVariance) ? 'variance_mismatch' : undefined;
         if (reason) return conflict('register_approval_invalid', `The approval is not valid for this closure: ${reason}`, { reason });
-      } else if (threshold !== undefined && (command.version >= 3 || (session!.openVersion ?? 1) >= 3) && Math.abs(variance.cash ?? 0) > threshold) {
+      } else if (threshold !== undefined && (command.version >= 3 || (session!.openVersion ?? 1) >= 3) && Math.abs(approvalVariance.cash) > threshold) {
         return conflict('register_approval_required', `Session ${p.sessionId} needs a manager's approval: its cash variance is over ${threshold}`,
-          { sessionId: p.sessionId, thresholdMinor: threshold, variance });
+          { sessionId: p.sessionId, thresholdMinor: threshold, variance: approvalVariance });
       }
       await repo(TallyRegisterClosure).insert({
         channelId, id: p.closureId, sessionId: session!.id, registerId: p.registerId, number: p.number, businessDay: p.businessDay ?? null,
