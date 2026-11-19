@@ -3,7 +3,7 @@ import { createTallyDatabase, getStorageHealth, startReplication, startStockReco
 import { useEffect, useMemo, useState } from 'react';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { Subject } from 'rxjs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Session } from './session';
 
 vi.mock('./storage', () => ({ createStorage: () => getRxStorageMemory() }));
@@ -37,7 +37,44 @@ const session: Session = {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  // A state a test does not queue reads its initial value.
+  vi.mocked(useState).mockImplementation((initial?: unknown) => [initial, vi.fn()] as any);
 });
+
+// React's semantics for useCatalogue: a setter's value is read on the next render; a memo or effect reruns only when a dependency changes.
+// State slots: 0 products, 1 lastSyncedAt, 2 error, 3 stockOverlay, 4 stockOverlayAsOf, 5 generation, 6 redownloading.
+function statefulRender(catalogueHook: (session: Session) => ReturnType<typeof import('./use-catalogue').useCatalogue>) {
+  const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((dep, i) => Object.is(dep, b[i]));
+  const states: unknown[] = [];
+  const setters: Mock[] = [];
+  const memos: { deps: readonly unknown[]; value: unknown }[] = [];
+  let stateSlot = 0;
+  let memoSlot = 0;
+  vi.mocked(useState).mockImplementation(((initial?: unknown) => {
+    const index = stateSlot++;
+    if (!setters[index]) {
+      states[index] = initial;
+      setters[index] = vi.fn((next: unknown) => { states[index] = typeof next === 'function' ? next(states[index]) : next; });
+    }
+    return [states[index], setters[index]];
+  }) as any);
+  vi.mocked(useMemo).mockImplementation((create, deps) => {
+    const index = memoSlot++;
+    if (memos[index] && same(deps!, memos[index].deps)) return memos[index].value;
+    memos[index] = { deps: deps!, value: create() };
+    return memos[index].value;
+  });
+  let effectDeps: readonly unknown[] | undefined;
+  let cleanup: (() => void) | void = undefined;
+  vi.mocked(useEffect).mockImplementation((effect, deps) => {
+    if (effectDeps && same(deps!, effectDeps)) return;
+    (cleanup as (() => void) | undefined)?.();
+    effectDeps = deps;
+    cleanup = effect();
+  });
+  const render = () => { stateSlot = 0; memoSlot = 0; return catalogueHook(session); };
+  return { render, states, setters, cleanup: () => (cleanup as (() => void) | undefined)?.() };
+}
 
 it('uses distinct database names for different barcode fields', async () => {
   const { databaseName } = await import('./catalogue');
@@ -534,6 +571,57 @@ describe('catalogue sync lifecycle', () => {
     const clear = catalogueHook(session);
     expect(clear.error).toBeNull();
     expect(clear.refusal).toBeNull();
+  });
+
+  it('Clear & re-download removes the catalogue database, empties the products and starts a fresh sync', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { databaseName, stopCatalogueSync } = await import('./catalogue');
+    const hook = statefulRender(catalogueHook);
+    let result = hook.render();
+    // Joining the lifecycle queue waits for the hook's start and subscriptions.
+    await stopCatalogueSync();
+    const [setProducts, setLastSyncedAt, , , , , setRedownloading] = hook.setters;
+    const firstDb = await vi.mocked(createTallyDatabase).mock.results[0].value;
+    const remove = vi.spyOn(firstDb, 'remove');
+    await vi.waitFor(() => expect(setProducts).toHaveBeenCalled());
+    setProducts.mockClear();
+    const removal = result.redownload();
+    expect(setRedownloading).toHaveBeenLastCalledWith(true);
+    await expect(removal).resolves.toBe('removed');
+    // (a) the first database was removed, after redownloading was set (d).
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(setRedownloading.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
+    // (b) the products and the last sync are emptied.
+    expect(setProducts).toHaveBeenCalledWith([]);
+    expect(setLastSyncedAt).toHaveBeenLastCalledWith(null);
+    // (c) the generation was bumped, so the effect reruns and a fresh database is created under the same name.
+    expect(hook.states[5]).toBe(1);
+    result = hook.render();
+    expect(result.redownloading).toBe(true);
+    await stopCatalogueSync();
+    expect(createTallyDatabase).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(createTallyDatabase).mock.calls[1][0].name).toBe(databaseName(session));
+    // (d) the restarted sync's first synced event ends the re-download.
+    const replication = vi.mocked(startReplication).mock.results[1].value;
+    replication.active$.next(true);
+    replication.received$.next({});
+    replication.active$.next(false);
+    expect(setRedownloading).toHaveBeenLastCalledWith(false);
+    expect(hook.render().redownloading).toBe(false);
+    hook.cleanup();
+  });
+
+  it('Clear & re-download pressed again while one runs does not remove twice', async () => {
+    const { useCatalogue: catalogueHook } = await import('./use-catalogue');
+    const { stopCatalogueSync } = await import('./catalogue');
+    const hook = statefulRender(catalogueHook);
+    const first = hook.render().redownload();
+    await expect(hook.render().redownload()).resolves.toBe('removed');
+    await expect(first).resolves.toBe('removed');
+    expect(hook.setters[6]).toHaveBeenCalledTimes(1);
+    expect(hook.states[5]).toBe(1);
+    await stopCatalogueSync();
+    hook.cleanup();
   });
 
   it('subscribes to reconciled stock and its last successful pass until cleanup', async () => {

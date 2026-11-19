@@ -34,7 +34,8 @@ it('asks to sign in again with the sign-in words when the store answers a produc
   const setError = vi.fn();
   vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
     .mockReturnValueOnce([null, setLastSyncedAt]).mockReturnValueOnce([null, setError])
-    .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()]);
+    .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
+    .mockReturnValueOnce([0, vi.fn()]).mockReturnValueOnce([false, vi.fn()]);
   vi.mocked(useMemo).mockImplementation((create) => create());
   let cleanup: (() => void) | void = undefined;
   vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });

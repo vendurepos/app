@@ -435,6 +435,40 @@ test("Store health shows Ready to sell, nothing waiting, the products on this de
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('Store health checks everything now, and Clear & re-download empties and refills the products and the till still sells', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
+  const checkNow = page.getByTestId('store-health-check-now');
+  await checkNow.click();
+  await expect(checkNow).toHaveText('Check everything now');
+  await expect(checkNow).toBeEnabled();
+  const redownload = page.getByTestId('store-health-redownload');
+  const confirm = page.getByTestId('store-health-redownload-confirm');
+  await redownload.click();
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText(`${CATALOGUE.length} products are removed`);
+  await page.getByTestId('store-health-redownload-cancel').click();
+  await expect(confirm).toHaveCount(0);
+  // Cancel starts nothing: sampled for a second, the button never reads Re-downloading….
+  const words: (string | null)[] = [];
+  await expect.poll(async () => words.push(await redownload.textContent()), { intervals: [50] }).toBeGreaterThanOrEqual(20);
+  expect([...new Set(words)]).toEqual(['Clear & re-download']);
+  await redownload.click();
+  await page.getByTestId('store-health-redownload-yes').click();
+  // The button returns only on the restarted sync's first pull, so the count and Ready below are the refilled ones.
+  await expect(redownload).toHaveText('Clear & re-download');
+  await expect(page.getByTestId('store-health-count-products')).toHaveText(String(CATALOGUE.length));
+  await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test('Notifications at the foot of the rail shows the empty state and closes', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

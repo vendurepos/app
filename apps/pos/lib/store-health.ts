@@ -69,3 +69,32 @@ export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): 
 export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck']): AttentionRow[] {
   return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order) }));
 }
+
+/** Clear & re-download's confirm (CHECKLIST 10.3): how many products leave this device and download again from the store. */
+export function redownloadSummary(count: number): string {
+  if (count === 0) return 'No products are on this device yet; they download again from your store.';
+  return `${count} ${count === 1 ? 'product is' : 'products are'} removed from this device and downloaded again from your store.`;
+}
+
+/** Why Clear & re-download is off: mid-run, or the store has not answered (an offline till must not clear what it cannot re-download). */
+export function redownloadBlocked(redownloading: boolean, serverProducts: number | null): string | null {
+  if (redownloading) return 'Re-downloading…';
+  if (serverProducts === null) return 'Needs your store to answer, so the products can download again.';
+  return null;
+}
+
+/** Clear & re-download's Yes asks the store again, so a till that went offline after the panel opened keeps its catalogue;
+ * a Cancel while the store is checked (stillWanted false when it answers) keeps it too. */
+export async function confirmRedownload(
+  readTotals: () => Promise<ServerTotals>,
+  onTotals: (totals: ServerTotals) => void,
+  onRedownload: () => Promise<void>,
+  stillWanted: () => boolean,
+): Promise<'cleared' | 'refused'> {
+  const totals = await readTotals();
+  onTotals(totals);
+  if (totals.products === null) return 'refused';
+  if (!stillWanted()) return 'refused';
+  await onRedownload();
+  return 'cleared';
+}
