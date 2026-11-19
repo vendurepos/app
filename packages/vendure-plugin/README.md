@@ -229,7 +229,8 @@ Off by default. Set `TallyPosPlugin.init({ registerApproval: { thresholdMinor } 
   - 400 `invalid_payload`.
 - The till resends the closure with `approval`. The proof is good for 15 minutes, once, for that session and that variance. Otherwise the closure is refused `register_approval_invalid` with `reason` `unknown`, `used`, `expired`, `session_mismatch` or `variance_mismatch`. The store keeps only the proof's hash.
 - A version 3 closure's `approvedBy` is the approving administrator's user id, never a name the till sends, and the register read shows `approvalVerified: true`. Every other closure reads `approvalVerified: false`: older ones, version 1 and 2 ones (whose `approvedBy` is the till's unverified label), and version 3 ones under the threshold or with the option off.
-- **Known limits (#332, #334).** A session opened at version 1 or 2 is not held to the threshold; its closes read `approvalVerified: false`. The server's expected figure counts only the sales and movements the closure lists.
+- **New sessions open at version 3 (#334).** While the option is set, a version 1 or 2 `register.session.open` that would create a session, a take-over included, is refused `unsupported_version` with `{ register: 3 }`. Nothing is stored, so the same command can be resent at version 3. A version 1 or 2 open that resumes the till's own live session still applies, and an open stored before the option was set replays as stored.
+- **Known limits (#332).** A session that was already open at version 1 or 2 when the option was set finishes at its own version: it is not held to the threshold, and its closes read `approvalVerified: false`. The server's expected figure counts only the sales and movements the closure lists. An approval request that ends in 403, or whose credential check throws, still counts as a failure toward the rate limits.
 
 ### Register read: GET /tally/v1/registers/:id
 
