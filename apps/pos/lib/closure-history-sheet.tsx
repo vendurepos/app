@@ -10,7 +10,7 @@ import type { Session } from './session';
 import { zReportLines } from './z-report';
 
 // No other register's closures yet (or none loaded).
-const NO_REMOTE: Awaited<ReturnType<typeof fetchChannelClosures>> = { closures: [], names: {}, registers: [] };
+const NO_REMOTE: Awaited<ReturnType<typeof fetchChannelClosures>> = { closures: [], names: {}, registers: [], floats: {} };
 // The table view's figure columns (Expected, Counted, Result) and its Print again column, the same widths in the head and the rows.
 const CELL = 'w-32 text-right', PRINT = 'w-36';
 
@@ -81,8 +81,9 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
     </View>
   );
   const openRows = openSessionRows(remote.registers, { ownRegisterId: registerId, timezone });
-  const summary = closureSummary(merged, { open: openRows.length, storeKey, currency, timezone, today, blind });
-  const tiles = [['sessions', 'Sessions', summary.sessions, summary.sessionsNote], ['discrepancy', 'Discrepancy', summary.discrepancy, 'counted − expected'],
+  const summary = closureSummary(merged, { open: openRows.length, openFloats: openRows.map((row) => remote.floats[row.registerId]), storeKey, currency, timezone, today, blind });
+  const tiles = [['discrepancy', 'Discrepancy', summary.discrepancy, 'counted − expected'], ['sessions', 'Sessions', summary.sessions, summary.sessionsNote],
+    ['cash-at-open', 'Cash at open', summary.cashAtOpen, 'floats'], ['cash-activity', 'Cash activity', summary.cashActivity, 'sales − refunds ± movements'],
     ['cash-at-close', 'Cash at close', summary.cashAtClose, 'counted']];
   // The closed rows by close day, in list order (newest first).
   const days = rows.reduce<{ day: string; label: string; rows: ClosureHistoryRow[] }[]>((groups, row) => {
@@ -94,7 +95,7 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
     <View className="mb-4 gap-4">
       <View className="flex-row flex-wrap gap-4">
         {tiles.map(([id, label, value, note]) => (
-          <View key={id} testID={`closures-tile-${id}`} className="min-w-48 flex-1 gap-1 rounded-md border border-border p-4">
+          <View key={id} testID={`closures-tile-${id}`} className="min-w-32 flex-1 gap-1 rounded-md border border-border p-4">
             <Text className="text-sm text-muted-foreground">{label}</Text>
             <Text className="text-lg font-semibold">{value}</Text>
             <Text className="text-xs text-muted-foreground">{note}</Text>

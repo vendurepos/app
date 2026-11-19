@@ -124,9 +124,11 @@ it("maps the plugin's closure read onto a Closure", () => {
   });
 });
 
-it('an app that predates the closure cash fields maps a read that carries them unchanged', () => {
-  const newer = { ...read, countedFloatMinor: 10000, paidInMinor: 900, paidOutMinor: 200 } as TallyClosureRead;
-  expect(closureFromRead(newer, options.storeKey)).toEqual(closureFromRead(read, options.storeKey));
+const floated = closureFromRead({ ...read, countedFloatMinor: 12000 }, options.storeKey);
+
+it("maps a read's float into the opening float breakdown; an older read keeps none", () => {
+  expect(floated.breakdowns).toEqual({ opening_float: { expected_minor: null, counted_minor: 12000, variance_minor: null } });
+  expect(closureFromRead(read, options.storeKey).breakdowns).toEqual({});
 });
 
 it("prints another register's Z copy without the lines its read lacks", () => {
@@ -134,6 +136,7 @@ it("prints another register's Z copy without the lines its read lacks", () => {
   const lines = zCopyLines(remote, context);
   expect(lines.filter((line) => line.includes('undefined') || line.startsWith('Opening float'))).toEqual([]);
   expect(lines).toEqual(expect.arrayContaining(['Sales total €245.50', 'Cash expected €150.00', 'Cash counted €150.00', 'Cash variance €0.00']));
+  expect(zCopyLines(floated, context)).toContain('Opening float €120.00');
 });
 
 it("keeps the local copy of a closure the server also has, and adds other registers' after the local ones", () => {
@@ -149,6 +152,7 @@ it("lists every register's closures of this store, this device's and the others'
     { id: 'closure-9', register: 'Front counter' }, { id: 'session-1', register: 'This device' },
   ]);
   expect(rows[0]).toMatchObject({ registerId: 'drawer-2', salesTotal: '€245.50', cashAtOpen: '', cashAtClose: '€150.00', variance: 'Exact' });
+  expect(closureHistoryRows([floated], { ...options, names })[0]).toMatchObject({ cashAtOpen: '€120.00' });
 });
 
 it("names another register in the closures CSV's Register column", () => {
@@ -176,7 +180,22 @@ it("sums the listed closures' cash variance and cash counted, and counts the ope
   ];
   expect(closureSummary(listed, { ...options, open: 1 })).toEqual({
     sessions: '3', sessionsNote: '1 open · 2 closed', discrepancy: formatMoney({ amount: -100, currency: 'EUR' }), cashAtClose: '€250.00',
+    cashAtOpen: '€100.00', cashActivity: '+€4.52',
   });
   expect(closureSummary(listed, { ...options, open: 1, blind: true })).toMatchObject({ discrepancy: '—', cashAtClose: '—' });
   expect(closureSummary([], { ...options, open: 0 })).toMatchObject({ sessions: '0', discrepancy: '—', cashAtClose: '—' });
+});
+
+it("v2's Cash at open sums open and closed floats, and Cash activity the closed sessions' expected less float", () => {
+  // Counted differs from expected on both rows, so a sum over counted would read +€60.00, not +€30.00.
+  const listed = [
+    { ...closure, expected: { cash: 10000 }, counted: { cash: 12000 } },
+    { ...floated, expected: { cash: 15000 }, counted: { cash: 16000 } },
+  ];
+  expect(closureSummary(listed, { ...options, open: 2, openFloats: [5000, undefined] })).toMatchObject({ cashAtOpen: '€270.00', cashActivity: '+€30.00' });
+  expect(closureSummary([{ ...floated, expected: { cash: 11000 } }], { ...options, open: 0 }).cashActivity)
+    .toBe(formatMoney({ amount: -1000, currency: 'EUR' }));
+  expect(closureSummary([], { ...options, open: 1, openFloats: [5000] })).toMatchObject({ cashAtOpen: '€50.00', cashActivity: '+€0.00' });
+  expect(closureSummary(listed, { ...options, open: 1, openFloats: [5000], blind: true })).toMatchObject({ cashAtOpen: '—', cashActivity: '—' });
+  expect(closureSummary([remote], { ...options, open: 1, openFloats: [undefined] })).toMatchObject({ cashAtOpen: '—', cashActivity: '—' });
 });
