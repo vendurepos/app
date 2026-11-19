@@ -161,10 +161,11 @@ export class RegisterService {
       let session: TallyRegisterRead['session'] = null;
       if (live && state && !state.closed) {
         // openSessionOf excludes closed and superseded sessions, so the status is open or counting.
-        const { id, status, expected, salesCount } = await this.liveSession(tx, live, state.status);
         // Every movement of the live session counts, oldest first; every field named, so channelId, commandId and receivedAt stay unexposed.
         const moves = (await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId, sessionId: live.id }))
           .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        // expected and the cash paid in and out come from this one read of the movements, so they cannot disagree.
+        const { id, status, expected, salesCount } = await this.liveSession(tx, live, state.status, moves);
         session = { id, status: status as 'open' | 'counting', openedAt: live.openedAt, openedBy: live.openedBy, deviceId: live.deviceId,
           deviceName: live.deviceName, countedFloatMinor: live.countedFloatMinor, expected, salesCount,
           ...countedMovements(moves.map(row => row.id), moves),
@@ -394,10 +395,10 @@ export class RegisterService {
 
   /** ADR-068 d13.1: the live figure counts every received order in the channel carrying the session's id.
    * ADR-078 d2: orders carrying any of the session's aliases count too. */
-  private async liveSession(tx: RequestContext, session: TallyRegisterSession, status: Status) {
+  private async liveSession(tx: RequestContext, session: TallyRegisterSession, status: Status, movements?: TallyRegisterMovement[]) {
     const aliases = await this.connection.getRepository(tx, TallyRegisterSessionAlias).findBy({ channelId: session.channelId, sessionId: session.id });
     const orders = await this.receivedOrders(tx, { tallySessionId: In([session.id, ...aliases.map(alias => alias.id)]) });
-    const movements = await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId: session.channelId, sessionId: session.id });
+    movements ??= await this.connection.getRepository(tx, TallyRegisterMovement).findBy({ channelId: session.channelId, sessionId: session.id });
     const { expected, salesCount } = deriveSessionFigures({ countedFloatMinor: session.countedFloatMinor, orders, movements,
       refunds: await this.sessionRefunds(tx, session.id) });
     return { id: session.id, status, expected, salesCount };

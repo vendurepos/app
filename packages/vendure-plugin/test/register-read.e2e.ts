@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TallyRegister } from '../src/entities/register.entities';
+import { Repository, type FindOptionsWhere } from 'typeorm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { TallyRegister, TallyRegisterMovement } from '../src/entities/register.entities';
 import type { CommandResult } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -165,6 +166,37 @@ describe('GET /tally/v1/registers/:id', () => {
     expect(session.paidOutMinor).toBe(200);
     expect(session.expected.cash).toBe(session.countedFloatMinor + sale.payload.totalMinor + session.paidInMinor - session.paidOutMinor);
     expect(session.expected.cash).toBe(10000 + sale.payload.totalMinor + 300);
+  });
+
+  it('a movement committed during the read cannot make expected and the cash paid in disagree', async () => {
+    const [s, r] = [uuid(), uuid()];
+    await applied(open(s, r));
+    await applied(envelope('register.movement.record', { movementId: uuid(), sessionId: s, type: 'paid_in', amountMinor: 500, reason: 'float', createdAt: now() }));
+    const findBy = Repository.prototype.findBy;
+    let first = true;
+    // On the GET's first movement query only: m2 commits outside the request's transaction once that query has answered.
+    const spy = vi.spyOn(Repository.prototype, 'findBy').mockImplementation(async function (this: Repository<TallyRegisterMovement>, where) {
+      const rows = await findBy.call(this, where as FindOptionsWhere<TallyRegisterMovement>);
+      if (this.target === TallyRegisterMovement && first) {
+        first = false;
+        await server.app.get(TransactionalConnection).rawConnection.getRepository(TallyRegisterMovement)
+          .insert({ ...rows[0], id: uuid(), amountMinor: 300, commandId: uuid() });
+      }
+      return rows;
+    });
+    let read;
+    try {
+      read = await get(r);
+    } finally {
+      spy.mockRestore();
+    }
+    const { session } = read.body;
+    expect(first).toBe(false);
+    expect(session.expected.cash).toBe(session.countedFloatMinor + session.paidInMinor - session.paidOutMinor);
+    const voided = (id: string) => session.movements.some((row: { voids: string | null }) => row.voids === id);
+    expect(session.paidInMinor).toBe(session.movements.filter((row: { id: string; type: string }) => row.type === 'paid_in' && !voided(row.id))
+      .reduce((total: number, row: { amountMinor: number }) => total + row.amountMinor, 0));
+    expect((await get(r)).body.session).toMatchObject({ paidInMinor: 800, expected: { cash: 10800 } });
   });
 
   it('a closure read carries the session\'s float and the cash paid in and out that its expected counted', async () => {
