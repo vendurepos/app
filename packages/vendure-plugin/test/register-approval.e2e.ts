@@ -8,6 +8,7 @@ import { RegisterService, TallyCommand, TallyPosPlugin, TallyRegisterApproval, T
 import type { RegisterEnvelope } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import type { RegisterCommandType } from '../src/vendored/commands';
+import { TallyRegisterSession, TallyRegisterSessionAlias } from '../src/entities/register.entities';
 import { createPluginTestEnvironment } from './env';
 
 const NOW = Date.parse('2026-10-01T00:00:00.000Z');
@@ -17,7 +18,7 @@ const uuid = () => randomUUID();
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const INVALID = { code: 'approval_invalid_credentials', message: 'The username or password is wrong.' };
 
-// #332: register contract 3, with the plugin's approval option set (case 14 turns it off for one test).
+// #332: register contract 3, with the plugin's approval option set (case 14, and each open below v3, turn it off).
 describe('register approval (contract 3)', () => {
   const environment = createPluginTestEnvironment({}, [TallyPosPlugin.init({ registerApproval: { thresholdMinor: THRESHOLD } })]);
   const { server, adminClient, decode } = environment;
@@ -78,9 +79,20 @@ describe('register approval (contract 3)', () => {
     closureId: uuid(), sessionId: s, registerId: r, number: 1, openedAt: AT, closedAt: AT, tillExpected: { cash }, counted: { cash },
     periodSalesTotalMinor: 0, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0,
     unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '3.20.0', orderIds: [], movementIds: [], ...extra });
+  // #334: with the option set no session opens below v3, so such a send switches it off for that send alone.
+  async function withoutApproval(command: RegisterEnvelope, channelOrToken?: string) {
+    const saved = TallyPosPlugin.options.registerApproval;
+    TallyPosPlugin.options.registerApproval = undefined;
+    try {
+      return await send(command, channelOrToken);
+    } finally {
+      TallyPosPlugin.options.registerApproval = saved;
+    }
+  }
+  // A session below v3 is one opened before the option was set.
   async function session(version = 3, channelOrToken?: string) {
     const [s, r] = [uuid(), uuid()];
-    expect(await send(open(s, r, version), channelOrToken)).toMatchObject({ status: 'applied' });
+    expect(await (version < 3 ? withoutApproval : send)(open(s, r, version), channelOrToken)).toMatchObject({ status: 'applied' });
     return { s, r };
   }
   const ledger = (command: { id: string }) => connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id });
@@ -329,8 +341,8 @@ describe('register approval (contract 3)', () => {
 
   it('19. a superseded session answers 409', async () => {
     const { s, r } = await session();
-    // A takeover from another till, as register-v2.e2e.ts does; the same device would resume instead.
-    const takeover = { ...envelope('register.session.open', 2, { sessionId: uuid(), registerId: r, openedAt: AT, countedFloatMinor: 10000,
+    // A takeover from another till, at v3 as #334 requires; the same device would resume instead.
+    const takeover = { ...envelope('register.session.open', 3, { sessionId: uuid(), registerId: r, openedAt: AT, countedFloatMinor: 10000,
       supersedes: s }), deviceId: 'till-2' };
     expect(await send(takeover)).toMatchObject({ status: 'applied', register: { superseded: { sessionId: s } } });
     expect(await approve(request(s))).toMatchObject({ status: 409, body: { code: 'approval_session_closed' } });
@@ -368,5 +380,58 @@ describe('register approval (contract 3)', () => {
     const { s, r } = await session(2);
     expect(await send(closure(s, r, 10600, {}, 2))).toMatchObject({ status: 'applied' });
     expect(await closureRead(r)).toMatchObject({ approvedBy: null, approvalVerified: false });
+  });
+
+  // #334: while the option is set, a new session opens only at v3; a resume or a replay still answers as before.
+  const sessions = () => connection.rawConnection.getRepository(TallyRegisterSession);
+  async function needsV3(command: RegisterEnvelope) {
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: { code: 'unsupported_version',
+      message: `register version ${command.version} cannot open a new session while manager approval is required; this server needs 3`,
+      data: { register: 3 } } });
+    expect(await ledger(command)).toBeNull();
+    expect(await sessions().findOneBy({ id: String(command.payload.sessionId) })).toBeNull();
+  }
+
+  let refusedV1: RegisterEnvelope;
+  it('23. a v1 open of a fresh session is refused unsupported_version, and nothing is stored', async () => {
+    refusedV1 = open(uuid(), uuid(), 1);
+    await needsV3(refusedV1);
+  });
+
+  it('24. a v2 open of a fresh session, and a v2 take-over, are refused the same way; the live session stays open', async () => {
+    await needsV3(open(uuid(), uuid(), 2));
+    const { s, r } = await session();
+    await needsV3({ ...envelope('register.session.open', 2, { sessionId: uuid(), registerId: r, openedAt: AT, countedFloatMinor: 10000,
+      supersedes: s }), deviceId: 'till-2' });
+    const read = await fetch(`${base}/tally/v1/registers/${r}`, { headers: { Authorization: superAdmin() } });
+    expect((await read.json()).session).toMatchObject({ id: s, status: 'open' });
+  });
+
+  it("25. test 23's command id and payload, resent at v3, apply", async () => {
+    expect(refusedV1).toBeDefined();
+    expect(await send({ ...refusedV1, version: 3 })).toMatchObject({ id: refusedV1.id, status: 'applied',
+      register: { session: { id: refusedV1.payload.sessionId } } });
+  });
+
+  it('26. a v2 open stored with the option off replays its stored result once the option is on', async () => {
+    const command = open(uuid(), uuid(), 2);
+    const stored = await withoutApproval(command);
+    expect(stored).toMatchObject({ status: 'applied' });
+    expect(await send(command)).toEqual({ ...stored, status: 'duplicate' });
+  });
+
+  it('27. a v1 session resumes at v1 from the same device, with no new session row', async () => {
+    const { s, r } = await session(1);
+    expect(await send(open(s, r, 1))).toMatchObject({ status: 'applied', register: { session: { id: s } } });
+    expect(await sessions().countBy({ registerId: r })).toBe(1);
+  });
+
+  it('28. a v2 session resumes at v2 from the same device under a new session id, which aliases the live session', async () => {
+    const { s, r } = await session(2);
+    const alias = uuid();
+    expect(await send(open(alias, r, 2))).toMatchObject({ status: 'applied',
+      register: { session: { id: s }, resumed: { fromSessionId: alias } } });
+    expect(await connection.rawConnection.getRepository(TallyRegisterSessionAlias).findOneBy({ id: alias })).toMatchObject({ sessionId: s });
+    expect(await sessions().countBy({ registerId: r })).toBe(1);
   });
 });
