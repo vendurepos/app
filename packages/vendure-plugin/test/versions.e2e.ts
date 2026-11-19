@@ -1,6 +1,6 @@
 import { Order, TransactionalConnection } from '@vendure/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TallyCommand } from '../src';
+import { TallyCommand, TallyPosPlugin } from '../src';
 import { ORDER_CREATE_VERSIONS } from '../src/service/constants';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -22,9 +22,21 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2], 'order.refund': [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], 'order.refund': [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
       maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 },
     });
+  });
+
+  it('/info advertises registerApproval only while the option is set (#332)', async () => {
+    const info = async () => (await fetch(`${await server.app.getUrl()}/tally/v1/info`, {
+      headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } })).json();
+    expect(await info()).not.toHaveProperty('registerApproval');
+    TallyPosPlugin.options.registerApproval = { thresholdMinor: 500 };
+    try {
+      expect(await info()).toMatchObject({ contracts: { register: [1, 2, 3] }, registerApproval: { thresholdMinor: 500 } });
+    } finally {
+      delete TallyPosPlugin.options.registerApproval;
+    }
   });
 
   it('without init({ receiptEmail: true }), the receipt-email route answers 404 receipt_email_disabled', async () => {

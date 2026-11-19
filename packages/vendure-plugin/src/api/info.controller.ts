@@ -6,13 +6,17 @@ import type { ReceiptEmailCaps } from './receipt-email.controller';
 import { DisplaySignallingService } from '../service/display-signalling.service';
 import type { IceServer } from '../service/display-signalling.service';
 import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
+import { TALLY_PLUGIN_OPTIONS } from '../service/register.service';
+import type { RegisterApprovalOptions } from '../service/register.service';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 
 export type TallyInfo = { contracts: { 'order.create': number[]; register: number[]; 'order.refund': number[] }; taxRounding: TaxRounding;
   maxShippingLines: number; lineTax: { none: boolean; classes: boolean }; device?: { name: string };
   /** TallyUI ADR-085 d7, d8: the signalling routes exist; `iceServers` only when the plugin's init option sets it. */
-  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] }; receiptEmail?: { v: 1 } };
+  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] }; receiptEmail?: { v: 1 };
+  /** #332: only when the plugin's `registerApproval` option is set. */
+  registerApproval?: { thresholdMinor: number } };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -23,6 +27,7 @@ export class TallyInfoController {
   constructor(
     configService: ConfigService, private readonly connection: TransactionalConnection, private readonly displays: DisplaySignallingService,
     @Inject(TALLY_RECEIPT_EMAIL) private readonly receiptEmail: ReceiptEmailCaps, // 12.1a: init({ receiptEmail })
+    @Inject(TALLY_PLUGIN_OPTIONS) private readonly options: RegisterApprovalOptions,
   ) {
     const { taxOptions, entityOptions } = configService;
     this.taxRounding = taxRoundingFor({
@@ -44,6 +49,8 @@ export class TallyInfoController {
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };
     if (this.receiptEmail) info.receiptEmail = { v: 1 };
+    const approval = this.options.registerApproval;
+    if (approval) info.registerApproval = { thresholdMinor: approval.thresholdMinor };
     return info;
   }
 

@@ -43,7 +43,7 @@ for (const [name, override, taxRounding] of cases) {
       // Never absent, and `custom` carries no mode: exact keys, not just a matching shape.
       expect(Object.keys(body)).toEqual(['contracts', 'taxRounding', 'maxShippingLines', 'lineTax', 'customerDisplay']);
       expect(Object.keys(body.taxRounding).sort()).toEqual(Object.keys(taxRounding).sort());
-      expect(body).toEqual({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2], 'order.refund': [1] }, taxRounding,
+      expect(body).toEqual({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], 'order.refund': [1] }, taxRounding,
         maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 } });
     });
   });

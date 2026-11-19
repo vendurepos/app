@@ -253,6 +253,10 @@ export class TallyRegisterClosure {
   @Column('simple-json')
   variance: Record<string, number>;
 
+  /** The manager's approval this closure used (register v3); null for every other closure, so `approvedBy` is the till's label. */
+  @Column('varchar', { nullable: true })
+  approvalId: string | null;
+
   @Column('varchar')
   commandId: string;
 
@@ -260,4 +264,52 @@ export class TallyRegisterClosure {
   receivedAt: Date;
 }
 
-export const REGISTER_ENTITIES = [TallyRegister, TallyRegisterSession, TallyRegisterSessionStatus, TallyRegisterMovement, TallyRegisterClosure, TallyRegisterSessionAlias];
+/** One `POST /tally/v1/register-approvals` request (medusapos ADR 0023): pending while `tokenHash` is null, which counts
+ * as a failure towards the rate limits; issued with the proof's sha256, used once by a v3 closure of `sessionId`. */
+@Entity()
+export class TallyRegisterApproval {
+  @PrimaryColumn('varchar')
+  id: string;
+
+  @Column('varchar')
+  channelId: string;
+
+  @Column('varchar', { nullable: true, unique: true })
+  tokenHash: string | null;
+
+  @Column('varchar')
+  sessionId: string;
+
+  @Column('simple-json')
+  variance: Record<string, number>;
+
+  @Column('varchar', { nullable: true })
+  approvedBy: string | null;
+
+  @Column('varchar', { nullable: true })
+  approvedByName: string | null;
+
+  @Column('varchar')
+  requestedBy: string;
+
+  @Column('varchar')
+  targetIdentifier: string;
+
+  @Column('timestamptz', { nullable: true })
+  expiresAt: Date | null;
+
+  @Column('timestamptz', { nullable: true })
+  usedAt: Date | null;
+
+  @Column('varchar', { nullable: true })
+  usedByCommandId: string | null;
+
+  @Column('varchar', { nullable: true })
+  closureId: string | null;
+
+  @CreateDateColumn()
+  createdAt: Date;
+}
+
+export const REGISTER_ENTITIES = [TallyRegister, TallyRegisterSession, TallyRegisterSessionStatus, TallyRegisterMovement, TallyRegisterClosure,
+  TallyRegisterSessionAlias, TallyRegisterApproval];
