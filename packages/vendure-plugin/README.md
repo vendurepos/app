@@ -53,14 +53,14 @@ auth, CORS, tax strategy and a first sale. Install it with
 `npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
-   of generating a migration for your store, register all seven below; do not run
+   of generating a migration for your store, register all eight below; do not run
    both approaches for the same schema changes:
 
    ```ts
    import {
      TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
      TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
-     TallyPosDisplay1791200000000,
+     TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000,
    } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
@@ -71,7 +71,7 @@ auth, CORS, tax strategy and a first sale. Install it with
        migrations: [
          TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
          TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
-         TallyPosDisplay1791200000000,
+         TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000,
          /* your own migrations */
        ],
        // …
@@ -206,7 +206,7 @@ its regular prices and line attributes are accepted for display and change no am
 
 ### Register version 2: resume, take-over and unknown sessions
 
-The plugin answers register contract versions 1 and 2 (`/tally/v1/info` lists `"register": [1, 2]`). The design is ADR 0006 (`docs/adr/0006-register-v2.md`), after TallyUI ADR-078.
+The plugin answers register contract versions 1 to 3 (`/tally/v1/info` lists `"register": [1, 2, 3]`); version 3 is below. The design is ADR 0006 (`docs/adr/0006-register-v2.md`), after TallyUI ADR-078.
 
 - Every open records the till's `deviceId`; a version 2 open also records `deviceName`.
 - **Resume.** A version 2 open from the till that holds the register's live session resumes that session instead of opening a new one. The id the till sent becomes a permanent alias: later commands and orders naming it act on the live session, and its sales count in the live figures.
@@ -214,6 +214,22 @@ The plugin answers register contract versions 1 and 2 (`/tally/v1/info` lists `"
 - **Unknown sessions.** An `order.create` naming a session the store does not hold is applied, with the warning `register_session_unknown`. The order keeps the id, and a session opened later under it counts the sale.
 - Run the bundled migration `TallyPosRegisterV21791000000000`, or generate your own, before a till sends register version 2. Its `down` is safe only on a store that never served a version 2 open (ADR 0006, Consequences).
 - Run `TallyPosRegisterOpenVersion1791100000000` before a till sends register version 2; sessions opened before it answer a v1 command on a taken-over session with `register_session_closed`.
+
+### Register version 3: a manager approves a close over the variance threshold
+
+Off by default. Set `TallyPosPlugin.init({ registerApproval: { thresholdMinor } })` only once your tills run a VendurePOS app version that asks a manager for approval; until then a close over the threshold cannot complete. Run the bundled migration `TallyPosRegisterApproval1791300000000`, or generate your own, first.
+
+- With the option set, `GET /tally/v1/info` holds `registerApproval: { thresholdMinor }`. A version 3 closure whose cash variance is over the threshold (either way) is refused `register_approval_required` with `{ sessionId, thresholdMinor, variance }`. The variance is the server's: counted cash minus the float, the received sales the closure lists and the synced movements. It is not the till's own expected figure.
+- **The manager's proof.** `POST /tally/v1/register-approvals` with `{ sessionId, variance, username, password }`, sent by the till's cashier, checks a Dashboard administrator's credentials without logging them in. The administrator needs `ApproveTallyPosVariance` (or SuperAdmin) on the session's channel. It answers 200 `{ approval, approvedBy, approvedByName, expiresAt }`. The refusals are:
+  - 401 `approval_invalid_credentials`, the same answer for an unknown user and a wrong password;
+  - 403 `approval_forbidden`;
+  - 404 `approval_session_unknown`;
+  - 409 `approval_session_closed`, once the session is superseded or has a closure;
+  - 429 `approval_rate_limited`, after 5 failures from one cashier or 10 for one username in 15 minutes;
+  - 400 `invalid_payload`.
+- The till resends the closure with `approval`. The proof is good for 15 minutes, once, for that session and that variance. Otherwise the closure is refused `register_approval_invalid` with `reason` `unknown`, `used`, `expired`, `session_mismatch` or `variance_mismatch`. The store keeps only the proof's hash.
+- A version 3 closure's `approvedBy` is the approving administrator's user id, never a name the till sends, and the register read shows `approvalVerified: true`. Every other closure reads `approvalVerified: false`: older ones, version 1 and 2 ones (whose `approvedBy` is the till's unverified label), and version 3 ones under the threshold or with the option off.
+- **Known limits (#332, #334).** A session opened at version 1 or 2 is not held to the threshold; its closes read `approvalVerified: false`. The server's expected figure counts only the sales and movements the closure lists.
 
 ### Register read: GET /tally/v1/registers/:id
 
