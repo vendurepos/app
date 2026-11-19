@@ -45,18 +45,21 @@ export function mergeClosures(local: readonly Closure[], remote: readonly Closur
 
 /** Every listed register's closures (one page of 100 each: the 92-day window at one a day), each register's label and its live session's float. */
 export async function fetchChannelClosures(session: Session, storeKey: string): Promise<{
-  closures: Closure[]; names: Record<string, string>; registers: ListedRegister[]; floats: Record<string, number>;
+  closures: Closure[]; names: Record<string, string>; registers: ListedRegister[]; floats: Record<string, number>; printable: string[];
 }> {
   const listed = await fetchRegisters(session);
   const pages = await Promise.all(listed.map(async ({ id }) => {
     const response = await fetch(`${session.url}/tally/v1/registers/${encodeURIComponent(id)}?take=100`, { headers: sessionContext(session).headers });
     if (!response.ok) throw new Error(`GET /tally/v1/registers/${id} answered ${response.status}`);
-    const body: { session: { countedFloatMinor?: unknown } | null; closures: { items: TallyClosureRead[] } } = await response.json();
+    const body: { session: { countedFloatMinor?: unknown; status?: unknown; movements?: unknown } | null; closures: { items: TallyClosureRead[] } } = await response.json();
     const float = body.session?.countedFloatMinor;
-    return { id, float: typeof float === 'number' ? float : undefined, closures: body.closures.items.map((read) => closureFromRead(read, storeKey)) };
+    // An open session whose read carries its movements (an older plugin sends none) can print its X report here.
+    const printable = body.session?.status === 'open' && Array.isArray(body.session.movements);
+    return { id, float: typeof float === 'number' ? float : undefined, printable, closures: body.closures.items.map((read) => closureFromRead(read, storeKey)) };
   }));
   return { closures: pages.flatMap((page) => page.closures), names: Object.fromEntries(listed.map((register) => [register.id, registerLabel(register)])),
-    registers: listed, floats: Object.fromEntries(pages.flatMap(({ id, float }) => float === undefined ? [] : [[id, float]])) };
+    registers: listed, floats: Object.fromEntries(pages.flatMap(({ id, float }) => float === undefined ? [] : [[id, float]])),
+    printable: pages.flatMap(({ id, printable }) => printable ? [id] : []) };
 }
 
 // The keys are TallyUI exportCsv's label keys.

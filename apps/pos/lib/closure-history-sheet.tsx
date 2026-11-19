@@ -1,22 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { Button, Dialog, DialogContent, DialogTitle, Tabs, TabsList, TabsTrigger, Text } from '@tallyui/components';
-import { formatClosureDate, watchFresh, type Closure, type ClosureCollection, type useRegisterSession } from '@tallyui/pos';
+import { formatClosureDate, recordRegisterFact, watchFresh, type Actor, type Closure, type ClosureCollection, type useRegisterSession } from '@tallyui/pos';
 import {
   closureCsvFileName, closureHistoryCsv, closureHistoryRows, closureSummary, fetchChannelClosures, mergeClosures, openSessionRows, zCopyLines, type ClosureHistoryRow,
 } from './closure-history';
 import { printLines } from './print-lines';
+import { remoteXReport, xReportOffered } from './remote-x-report';
 import type { Session } from './session';
 import { zReportLines } from './z-report';
 
 // No other register's closures yet (or none loaded).
-const NO_REMOTE: Awaited<ReturnType<typeof fetchChannelClosures>> = { closures: [], names: {}, registers: [], floats: {} };
+const NO_REMOTE: Awaited<ReturnType<typeof fetchChannelClosures>> = { closures: [], names: {}, registers: [], floats: {}, printable: [] };
 // The table view's figure columns (Expected, Counted, Result) and its Print again column, the same widths in the head and the rows.
 const CELL = 'w-32 text-right', PRINT = 'w-36';
 
-export function ClosureList({ closures, session, registerId, storeKey, store, currency, timezone, blind, active: open, view = 'list' }: {
+export function ClosureList({ closures, session, registerId, storeKey, store, currency, timezone, blind, active: open, view = 'list', actor }: {
   closures: ClosureCollection | null; session: Session | null; registerId: string;
-  storeKey: string; store: string; currency: string; timezone: string; blind: boolean; active: boolean; view?: 'list' | 'table';
+  storeKey: string; store: string; currency: string; timezone: string; blind: boolean; active: boolean; view?: 'list' | 'table'; actor?: Actor;
 }) {
   const [filter, setFilter] = useState('all');
   const [found, setFound] = useState<Closure[]>([]);
@@ -24,6 +25,9 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
   const [remoteError, setRemoteError] = useState(false);
   const [error, setError] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  // Another register's X report that could not print, and a counter that reads the closures again.
+  const [xNotice, setXNotice] = useState<{ registerId: string; text: string | null; retry: boolean } | null>(null);
+  const [reload, setReload] = useState(0);
   // Every register's closures from the server, once per open; a late answer after the dialog closed is dropped.
   useEffect(() => {
     setRemote(NO_REMOTE); setRemoteError(false);
@@ -31,7 +35,7 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
     let cancelled = false;
     fetchChannelClosures(session, storeKey).then((answer) => { if (!cancelled) setRemote(answer); }, () => { if (!cancelled) setRemoteError(true); });
     return () => { cancelled = true; };
-  }, [open, session, storeKey]);
+  }, [open, session, storeKey, reload]);
   useEffect(() => {
     setFound([]);
     if (!open || !closures || !registerId) return;
@@ -68,6 +72,15 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  };
+  // Another register's X report from a fresh read of its live session; this device's prints from the drawer card.
+  const printRemoteX = async (target: { registerId: string }) => {
+    setError(''); setXNotice(null);
+    if (!session) return;
+    const answer = await remoteXReport(session, target.registerId, { store, currency, timezone, blind, printedAt: new Date().toISOString() });
+    if ('notice' in answer) { setXNotice({ registerId: target.registerId, text: answer.notice, retry: answer.retry }); if (answer.refresh) setReload((count) => count + 1); return; }
+    try { await printLines('X report', answer.lines); } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
+    if (actor) recordRegisterFact({ kind: 'x-report-dispatched', sessionId: answer.sessionId, registerId: target.registerId, actor });
   };
   const openRow = rows.find((row) => row.id === openId);
   const openClosure = merged.find((row) => row.id === openId);
@@ -117,10 +130,16 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
           {!blind ? <View className={PRINT} /> : null}
         </View>
         {filter !== 'closed' ? openRows.map((row) => (
-          <View key={row.registerId} testID={`closures-open-${row.registerId}`} className="border-b border-border px-4 py-3">
-            <Text>{`${row.register} · ${row.status === 'open' ? 'Open' : 'Counting'} since ${row.since}`}</Text>
+          <View key={row.registerId} testID={`closures-open-${row.registerId}`} className="flex-row items-center gap-2 border-b border-border px-4 py-3">
+            <Text className="flex-1">{`${row.register} · ${row.status === 'open' ? 'Open' : 'Counting'} since ${row.since}`}</Text>
+            {session && xReportOffered(row.registerId, { ownRegisterId: registerId, status: row.status, printable: remote.printable }) ? (
+              <Button testID={`closures-open-print-x-${row.registerId}`} variant="secondary" accessibilityLabel={`Print X-report for ${row.register}`}
+                onPress={() => printRemoteX(row)}><Text>Print X-report</Text></Button>
+            ) : null}
           </View>
         )) : null}
+        {filter !== 'closed' && xNotice?.text ? <Text testID="closures-open-notice" className="px-4 py-3">{xNotice.text}</Text> : null}
+        {filter !== 'closed' && xNotice?.retry ? <Button testID="closures-open-retry" variant="secondary" className="mx-4 mb-3 self-start" onPress={() => printRemoteX(xNotice)}><Text>Retry</Text></Button> : null}
         {filter === 'open' && openRows.length === 0 ? <Text testID="closures-open-empty" className="px-4 py-3">No register is open.</Text> : null}
         {filter !== 'open' ? days.map((group) => (
           <View key={group.day} testID={`closures-day-${group.day}`}>
