@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { ScrollView, View } from 'react-native';
 import {
   Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, orderReference, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
@@ -18,9 +18,13 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
   const [checking, setChecking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [checkingStore, setCheckingStore] = useState(false);
+  const yesWanted = useRef(false);
+  function closeConfirm() { yesWanted.current = false; setConfirming(false); }
   async function confirmYes() {
+    yesWanted.current = true;
     setCheckingStore(true);
-    try { await confirmRedownload(() => readServerTotals(sessionContext(session)), setTotals, onRedownload); } finally { setCheckingStore(false); setConfirming(false); }
+    try { await confirmRedownload(() => readServerTotals(sessionContext(session)), setTotals,
+      async () => { closeConfirm(); setCheckingStore(false); await onRedownload(); }, () => yesWanted.current); } finally { setCheckingStore(false); closeConfirm(); }
   }
   async function checkNow() {
     setChecking(true);
@@ -128,7 +132,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
           </CardContent>
         </Card>
       </ScrollView>
-      <Dialog open={confirming} onOpenChange={setConfirming}>
+      <Dialog open={confirming} onOpenChange={open => (open ? setConfirming(true) : closeConfirm())}>
         <DialogContent testID="store-health-redownload-confirm" className="max-w-md">
           <DialogTitle>Clear and re-download the products?</DialogTitle>
           <DialogDescription>{redownloadSummary(productCount)}</DialogDescription>
@@ -136,7 +140,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
             {"Nothing changes on your store. This till's sales, refunds, parked carts and closures stay on this device. Products can't be scanned or found until the download finishes."}
           </Text>
           <HStack space="sm" className="justify-end">
-            <Button testID="store-health-redownload-cancel" variant="outline" onPress={() => setConfirming(false)}><Text>Cancel</Text></Button>
+            <Button testID="store-health-redownload-cancel" variant="outline" onPress={closeConfirm}><Text>Cancel</Text></Button>
             <Button testID="store-health-redownload-yes" variant="destructive" disabled={checkingStore} onPress={() => void confirmYes()}>
               <Text>{checkingStore ? 'Checking the store…' : 'Clear & re-download'}</Text>
             </Button>

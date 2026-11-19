@@ -119,13 +119,19 @@ it('refuses to clear on Yes when the store no longer answers', async () => {
   const totals = { products: null, orders: null };
   const onTotals = vi.fn();
   const onRedownload = vi.fn(async () => {});
-  expect(await confirmRedownload(async () => totals, onTotals, onRedownload)).toBe('refused');
+  expect(await confirmRedownload(async () => totals, onTotals, onRedownload, () => true)).toBe('refused');
   expect(onTotals).toHaveBeenCalledWith(totals);
   expect(onRedownload).not.toHaveBeenCalled();
 });
 
 it('clears on Yes when the store answers', async () => {
   const onRedownload = vi.fn(async () => {});
-  expect(await confirmRedownload(async () => ({ products: 5, orders: 2 }), vi.fn(), onRedownload)).toBe('cleared');
+  expect(await confirmRedownload(async () => ({ products: 5, orders: 2 }), vi.fn(), onRedownload, () => true)).toBe('cleared');
   expect(onRedownload).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the catalogue when Yes is cancelled while the store is checked', async () => {
+  const onRedownload = vi.fn(async () => {});
+  expect(await confirmRedownload(async () => ({ products: 5, orders: 2 }), vi.fn(), onRedownload, () => false)).toBe('refused');
+  expect(onRedownload).not.toHaveBeenCalled();
 });
