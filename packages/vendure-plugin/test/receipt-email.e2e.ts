@@ -14,15 +14,15 @@ import { guestOrder } from './shop';
 const { TallyPosPlugin } = require('@vendurepos/plugin' as string) as typeof import('../src');
 
 /** Mailpit's messages to `address`, once the first has arrived or 20 s have passed (email-smtp.e2e.ts's wait). */
-async function mailpit(address: string, start = performance.now()): Promise<{ messages_count: number; messages: Array<{ Subject: string }> }> {
+async function mailpit(address: string, min = 1, start = performance.now()): Promise<{ messages_count: number; messages: Array<{ Subject: string }> }> {
   const found = await (await fetch(`http://127.0.0.1:${testStack.mailpitPort}/api/v1/search?query=${encodeURIComponent(`to:"${address}"`)}`)).json();
-  if (found.messages_count > 0 || performance.now() - start > 20_000) return found;
+  if (found.messages_count >= min || performance.now() - start > 20_000) return found;
   await new Promise(resolve => setTimeout(resolve, 200));
-  return mailpit(address, start);
+  return mailpit(address, min, start);
 }
 
 describe('12.1a: POST /tally/v1/orders/:code/receipt-email', () => {
-  const environment = createPluginTestEnvironment({}, [TallyPosPlugin.init({ receiptEmail: true }), EmailPlugin.init({
+  const environment = createPluginTestEnvironment({}, [TallyPosPlugin.init({ receiptEmail: { perOrder: 2, perUserPerMinute: 40 } }), EmailPlugin.init({
     handlers: [tallyOrderConfirmationHandler, tallyReceiptEmailHandler],
     templateLoader: new FileBasedTemplateLoader(join(__dirname, '../node_modules/@vendure/email-plugin/templates')),
     transport: { type: 'smtp', host: '127.0.0.1', port: testStack.smtpPort },
@@ -31,9 +31,9 @@ describe('12.1a: POST /tally/v1/orders/:code/receipt-email', () => {
   const { server, adminClient, shopClient, variantIds } = environment;
   beforeAll(() => environment.init());
   afterAll(() => (TallyPosPlugin.init({}), server.destroy()));
-  const call = async (path: string, body?: unknown, method = 'POST') => {
+  const call = async (path: string, body?: unknown, method = 'POST', headers: Record<string, string> = {}) => {
     const response = await fetch(`${await server.app.getUrl()}/tally/v1/${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminClient.getAuthToken()}`, 'X-Tally-Protocol': '1' } });
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminClient.getAuthToken()}`, 'X-Tally-Protocol': '1', ...headers } });
     return { status: response.status, body: await response.json() };
   };
   const sale = async (email?: string): Promise<string> => (await call('commands', { commands: [orderCommand(
@@ -62,5 +62,26 @@ describe('12.1a: POST /tally/v1/orders/:code/receipt-email', () => {
   });
   it('GET /tally/v1/info advertises receiptEmail', async () => {
     expect(await call('info', undefined, 'GET')).toMatchObject({ status: 200, body: { receiptEmail: { v: 1 } } });
+  });
+  it('sends at most perOrder receipts, and never to a list, a quoted or named address or an injected header', async () => {
+    const a = address(), code = await sale(a);
+    for (const emailAddress of ['a@b.co\r\nBcc: x@y.co', 'a@b.co\nx', 'a@b.co\r\n', 'a@b.co,c@d.co', 'a@b.co; c@d.co', '"a b"@c.co', 'A <a@b.co>', 'a,c@d.co', 'A<a@b.co>']) {
+      expect(await receipt(code, { emailAddress }), JSON.stringify(emailAddress)).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
+    }
+    expect([await receipt(code), await receipt(code), await receipt(code)]).toMatchObject([{ status: 202 }, { status: 202 }, { status: 429, body: { code: 'order_send_limit' } }]);
+    expect((await mailpit(a, 2)).messages_count).toBe(2);
+    expect(await Promise.all(['x@y.co', 'c@d.co', 'a@b.co'].map(async to => (await mailpit(to, 0)).messages_count))).toEqual([0, 0, 0]);
+  });
+  it('finds no order of another channel, even for the superadmin', async () => {
+    const code = await sale(address()), { zones } = await adminClient.query(parse('query { zones { items { id } } }')), zone = zones.items[0].id;
+    await adminClient.query(parse('mutation($input: CreateChannelInput!) { createChannel(input: $input) { ... on Channel { id } } }'), { input: { code: 'r121a-second',
+      token: 'r121a-second', defaultLanguageCode: 'en', pricesIncludeTax: false, defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: zone, defaultShippingZoneId: zone } });
+    expect(await call(`orders/${code}/receipt-email`, undefined, 'POST', { 'vendure-token': 'r121a-second' })).toMatchObject({ status: 404, body: { code: 'order_not_found' } });
+  });
+  it('refuses a user past perUserPerMinute requests a minute, refusals included (last: it spends the minute)', async () => {
+    const answers: Array<{ status: number; body: { code: string } }> = [];
+    while (answers.length < 41 && answers.at(-1)?.status !== 429) answers.push(await receipt('NO-SUCH-ORDER'));
+    expect([answers.pop(), await receipt('NO-SUCH-ORDER')]).toMatchObject(Array(2).fill({ status: 429, body: { code: 'rate_limited' } }));
+    expect(answers.map(answer => answer.body.code)).toEqual(answers.map(() => 'order_not_found'));
   });
 });

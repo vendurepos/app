@@ -2,6 +2,7 @@ import { Controller, Get, Inject } from '@nestjs/common';
 import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
 import { TALLY_RECEIPT_EMAIL } from './receipt-email.controller';
+import type { ReceiptEmailCaps } from './receipt-email.controller';
 import { DisplaySignallingService } from '../service/display-signalling.service';
 import type { IceServer } from '../service/display-signalling.service';
 import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
@@ -21,7 +22,7 @@ export class TallyInfoController {
 
   constructor(
     configService: ConfigService, private readonly connection: TransactionalConnection, private readonly displays: DisplaySignallingService,
-    @Inject(TALLY_RECEIPT_EMAIL) private readonly receiptEmail: boolean, // 12.1a: init({ receiptEmail: true })
+    @Inject(TALLY_RECEIPT_EMAIL) private readonly receiptEmail: ReceiptEmailCaps, // 12.1a: init({ receiptEmail })
   ) {
     const { taxOptions, entityOptions } = configService;
     this.taxRounding = taxRoundingFor({

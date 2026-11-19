@@ -8,7 +8,7 @@ import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
 import { TallyDisplaysController } from './api/displays.controller';
 import { TallyInfoController } from './api/info.controller';
-import { TALLY_RECEIPT_EMAIL, TallyReceiptEmailController } from './api/receipt-email.controller';
+import { TALLY_RECEIPT_EMAIL, TallyReceiptEmailController, receiptEmailCaps } from './api/receipt-email.controller';
 import { TallyRegistersController } from './api/registers.controller';
 import { TallyReportsController } from './api/reports.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
@@ -86,8 +86,8 @@ function displaysBodyParser(): Middleware['handler'] {
   })) as Middleware['handler'];
 }
 
-/** `receiptEmail` (12.1a): the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. */
-export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; receiptEmail?: boolean };
+/** `receiptEmail` (12.1a): `true` or an object turns on the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. The object overrides the caps: `perOrder` sends per order (default 3), `perUserPerMinute` requests per user (default 20). */
+export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; receiptEmail?: boolean | { perOrder?: number; perUserPerMinute?: number } };
 
 /** VendurePOS: TallyUI's order.create (ADR 0002) and register commands (ADR 0003), one Postgres transaction per command. */
 @VendurePlugin({
@@ -99,7 +99,7 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; 
   controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController],
   providers: [OrderCreateService, RegisterService, RefundService, ReportService, StoreSetupService, DisplaySignallingService,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
-    { provide: TALLY_RECEIPT_EMAIL, useFactory: () => TallyPosPlugin.options.receiptEmail === true }],
+    { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],
   exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
