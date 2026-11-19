@@ -38,4 +38,11 @@ describe('the Dashboard extension is packaged where the Dashboard looks for it',
     expect(source).toContain('tallyEnsurePosTillRole');
     expect(source).toContain('createApiKey');
   });
+
+  it('adds the needs-admin queue page with its list query and resolve mutation', () => {
+    const source = readFileSync(sourceFile, 'utf8');
+    expect(source).toMatch(/path:\s*(['"])\/vendurepos-needs-admin\1/);
+    expect(source).toContain('tallyNeedsAdminCommands');
+    expect(source).toContain('tallyResolveNeedsAdmin');
+  });
 });

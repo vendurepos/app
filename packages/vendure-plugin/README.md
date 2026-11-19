@@ -175,6 +175,9 @@ The key works only in the channel the Dashboard is in when you create it (Vendur
 Rotate and delete stay on Vendure's own key page. The till signs in with the key only when
 `authOptions.tokenMethod` includes `'api-key'` (ADR 0004).
 
+Sales → **POS sales to resolve** lists the till sales kept for an admin (`needs_admin`) and keeps or cancels each one, with a note.
+The page and its nav item are SuperAdmin only, as the `tallyNeedsAdminCommands` and `tallyResolveNeedsAdmin` calls behind them are.
+
 With npm, the Dashboard build finds the button by itself. With pnpm, the Dashboard looks for
 plugins inside `node_modules/.pnpm` and misses it, so point `vendureDashboardPlugin` at the
 project's `node_modules` (tested with Vendure 3.7.3):
