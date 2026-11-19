@@ -21,7 +21,7 @@ A camera scan (web, the Products search's camera button, TallyUI's `CameraScanne
 shortest scan length is dropped silently. An item resting in view is added once (TallyUI `createScanSession`, continuous,
 1.2 s), and an EAN/UPC read with a bad check digit is dropped. Scan sounds are the same. While the catalogue is hidden
 (the narrow Cart tab, a wide tender), the panel is unmounted and the camera let go; showing the catalogue again reopens
-it. The camera is web only for now.
+it. On iOS and Android the same panel uses expo-camera's viewfinder (1.7b, not yet proven on a device: #319); where the camera module is absent the button is hidden.
 
 | Surface | What a scan does | Where |
 |---|---|---|

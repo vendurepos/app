@@ -29,6 +29,7 @@
     "@tallyui/storage-sqlite": "3.20.0",
     "@tallyui/theme": "3.20.0",
     "expo": "~54.0.37",
+    "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.14",
     "expo-linking": "~8.0.12",
     "expo-router": "~6.0.24",
