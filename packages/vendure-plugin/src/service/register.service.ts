@@ -277,11 +277,8 @@ export class RegisterService {
     }
 
     const { status, closed } = await this.sessionState(tx, session!);
-    if (status === 'superseded') {
-      // TallyUI sends later commands at v1; follow what the session's till understands (TallyUI/tallyui#515).
-      if (command.version >= 2 || (session!.openVersion ?? 1) >= 2) return this.supersededRefusal(tx, commandId, session!);
-      return conflict('register_session_closed', `Session ${session!.id} is closed`);
-    }
+    // ADR-078 d4: every command naming a superseded session is refused with this code, whatever its version (TallyUI#515).
+    if (status === 'superseded') return this.supersededRefusal(tx, commandId, session!);
     if (command.type === 'register.session.transition') {
       const p = command.payload as unknown as RegisterSessionTransitionPayload;
       // ADR-068 d5a: a snapshot; the same status is an applied no-op, and nothing leaves closed.
