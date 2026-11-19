@@ -105,7 +105,7 @@ describe('GET /tally/v1/registers/:id', () => {
     expect(body.closures.items[0]).toEqual({
       ...payload, businessDay: null, closedBy: null, approvedBy: null,
       expected: { cash: 10000 }, variance: { cash: 3 }, receivedAt: expect.any(String),
-      countedFloatMinor: 10000, paidInMinor: 0, paidOutMinor: 0,
+      countedFloatMinor: 10000, paidInMinor: 0, paidOutMinor: 0, approvalVerified: false,
     });
     expect(body.closures.items[0].closureId).toBe(payload.closureId);
     expect(isIso(body.closures.items[0].receivedAt)).toBe(true);

@@ -1,6 +1,7 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
 import { Allow, Ctx, Permission, RequestContext } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
+import { RegisterApprovalService, approvalBody } from '../service/register-approval.service';
 import { RegisterService } from '../service/register.service';
 
 export type TallyRegisterRead = {
@@ -37,6 +38,8 @@ export type TallyClosureRead = {
   unsyncedCount: number; unsyncedTotalMinor: number; softwareVersion: string;
   orderIds: string[]; movementIds: string[];
   countedFloatMinor: number; paidInMinor: number; paidOutMinor: number; receivedAt: string;
+  /** #332: the closure used a manager's approval proof, so `approvedBy` is that manager's user id; false for every other closure. */
+  approvalVerified: boolean;
 };
 
 /** One row of `GET /tally/v1/registers`. A register has no name of its own (the plugin's rows, not a Vendure entity): the app labels it by `lastDeviceName`. */
@@ -58,7 +61,22 @@ const queryInt = (value: unknown, fallback: number) => value === undefined ? fal
  */
 @Controller('tally/v1')
 export class TallyRegistersController {
-  constructor(private registers: RegisterService) {}
+  constructor(private registers: RegisterService, private approvals: RegisterApprovalService) {}
+
+  /** #332: a manager's approval proof for one session and its variance; every answer goes through the response. */
+  @Post('register-approvals')
+  @HttpCode(200)
+  @Allow(tallyPosSell.Permission, Permission.CreateOrder)
+  async approve(@Ctx() ctx: RequestContext, @Body() body: unknown, @Res({ passthrough: true }) res: StatusResponse) {
+    const parsed = approvalBody(body);
+    if (typeof parsed === 'string') {
+      res.status(400);
+      return { code: 'invalid_payload', message: parsed };
+    }
+    const answer = await this.approvals.approve(ctx, parsed);
+    res.status(answer.status);
+    return answer.body;
+  }
 
   @Get('registers')
   @Allow(tallyPosSell.Permission, Permission.CreateOrder)

@@ -94,9 +94,9 @@ const REGISTER_PAYLOADS: Record<string, Fields> = {
   'register.session.transition': since(1, 'sessionId status at counted closedBy approvedBy'),
   'register.movement.record': since(1, 'movementId sessionId type amountMinor reason createdAt createdBy'),
   'register.movement.void': since(1, 'movementId sessionId voids createdAt createdBy'),
-  'register.closure.submit': since(1, 'closureId sessionId registerId number businessDay openedAt closedAt closedBy approvedBy tillExpected '
+  'register.closure.submit': { ...since(1, 'closureId sessionId registerId number businessDay openedAt closedAt closedBy approvedBy tillExpected '
     + 'counted periodSalesTotalMinor periodRefundsTotalMinor perpetualSalesTotalMinor perpetualRefundsTotalMinor unsyncedCount '
-    + 'unsyncedTotalMinor softwareVersion orderIds movementIds'),
+    + 'unsyncedTotalMinor softwareVersion orderIds movementIds'), ...since(3, 'approval') },
 };
 const METHOD_KINDS = since(1, 'cash external');
 
@@ -117,5 +117,10 @@ export function registerStrictErrors(command: Record<string, unknown>, type: str
   const payload = command.payload as Record<string, object | undefined>;
   check(payload, REGISTER_PAYLOADS[type], '', 'field');
   for (const map of ['counted', 'tillExpected']) if (payload[map]) check(payload[map], METHOD_KINDS, map, 'key');
+  // Register v3's opaque manager proof (ADR-082): a string, never parsed.
+  const approval: unknown = payload.approval;
+  if (type === 'register.closure.submit' && approval !== undefined && (typeof approval !== 'string' || !approval.length)) {
+    errors.push('approval: expected a non-empty string');
+  }
   return errors;
 }

@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { Order, RequestContext, TransactionalConnection } from '@vendure/core';
 import { In, IsNull, Not } from 'typeorm';
 import type { FindOptionsWhere, ObjectType } from 'typeorm';
 import type { TallyClosureRead, TallyRegisterListItem, TallyRegisterRead } from '../api/registers.controller';
 import {
-  TallyRegister, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
+  TallyRegister, TallyRegisterApproval, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterSessionStatus,
 } from '../entities/register.entities';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type {
@@ -43,6 +44,15 @@ const countedMovements = (movementIds: string[], sessionMovements: TallyRegister
   return { paidInMinor: sum('paid_in'), paidOutMinor: sum('paid_out') };
 };
 
+/** The plugin's `init` options, read at each command so a test may toggle them. */
+export const TALLY_PLUGIN_OPTIONS = Symbol('TALLY_PLUGIN_OPTIONS');
+export type RegisterApprovalOptions = { registerApproval?: { thresholdMinor: number } };
+// Register v3 (ADR-082): the closure's opaque proof and the two refusals, which the vendored copies predate.
+type ClosureSubmitPayload = RegisterClosureSubmitPayload & { approval?: string };
+type ConflictCode = RegisterConflictCode | 'register_approval_required' | 'register_approval_invalid';
+const sameFigures = (a: Record<string, number>, b: Record<string, number>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([key, value]) => b[key] === value);
+
 // Every field named, never the entity spread: channelId and commandId stay unexposed.
 const closureRead = (row: TallyRegisterClosure, session: TallyRegisterSession, movements: TallyRegisterMovement[]): TallyClosureRead => ({
   closureId: row.id, sessionId: row.sessionId, registerId: row.registerId, number: row.number, businessDay: row.businessDay,
@@ -53,7 +63,7 @@ const closureRead = (row: TallyRegisterClosure, session: TallyRegisterSession, m
   unsyncedCount: row.unsyncedCount, unsyncedTotalMinor: row.unsyncedTotalMinor, softwareVersion: row.softwareVersion,
   orderIds: row.orderIds, movementIds: row.movementIds, countedFloatMinor: session.countedFloatMinor,
   ...countedMovements(row.movementIds, movements),
-  receivedAt: row.receivedAt.toISOString(),
+  receivedAt: row.receivedAt.toISOString(), approvalVerified: row.approvalId !== null,
 });
 
 export type RegisterResult = CommandResult;
@@ -61,7 +71,8 @@ export type RegisterEnvelope = RegisterCommandEnvelope<Record<string, unknown>>;
 type Status = 'open' | 'counting' | 'closed' | 'superseded';
 
 /**
- * TallyUI's five register commands at contract versions 1 and 2 (ADR-078 adds the open's resume and take-over), each in its own transaction, in
+ * TallyUI's five register commands at contract versions 1 to 3 (ADR-078 adds the open's resume and take-over, ADR-082 the closure's
+ * manager approval), each in its own transaction, in
  * order.create's step order: shape, replay read, strict fields and client time, claim, the register's lock, the
  * state checks, the writes and the stored result.
  */
@@ -70,7 +81,8 @@ export class RegisterService {
   /** Test seam: runs after a command's writes, before its commit, only while VENDUREPOS_PLUGIN_TEST_HOOKS is '1'. */
   testHooks: { afterWrites?: (commandId: string) => Promise<void> } = {};
 
-  constructor(private connection: TransactionalConnection) {}
+  constructor(private connection: TransactionalConnection,
+    @Optional() @Inject(TALLY_PLUGIN_OPTIONS) private readonly options: RegisterApprovalOptions = {}) {}
 
   async apply(ctx: RequestContext, command: RegisterEnvelope, options: { requestTimeMs?: number } = {}): Promise<RegisterResult> {
     // 1. Shape and version, before any database access.
@@ -149,6 +161,14 @@ export class RegisterService {
     return status === 'closed' || status === 'superseded' || closed ? undefined : session;
   }
 
+  /** #332 step 1: the session (or the session an alias names) of this channel; 'closed' once closed, superseded or closed by a closure. */
+  async approvalSession(tx: RequestContext, sessionId: string): Promise<TallyRegisterSession | 'unknown' | 'closed'> {
+    const session = await this.resolveSession(tx, sessionId);
+    if (!session) return 'unknown';
+    const { status, closed } = await this.sessionState(tx, session);
+    return closed || status === 'superseded' ? 'closed' : session;
+  }
+
   /** `GET /tally/v1/registers/:id`: the register's counters, live session and a page of its closures, newest first; undefined
    * for a register this channel does not hold. One transaction and no register lock: a concurrent close is an accepted race. */
   async read(ctx: RequestContext, registerId: string, page: { skip: number; take: number }): Promise<Omit<TallyRegisterRead, 'version'> | undefined> {
@@ -225,7 +245,7 @@ export class RegisterService {
     const channelId = String(tx.channelId);
     const repo = <T extends object>(entity: ObjectType<T>) => this.connection.getRepository(tx, entity);
     const applied = (register: RegisterCommandResult): RegisterResult => ({ id: command.id, status: 'applied', register });
-    const conflict = (code: RegisterConflictCode, message: string, data?: Record<string, unknown>) => refuse(command.id, code, message, data);
+    const conflict = (code: ConflictCode, message: string, data?: Record<string, unknown>) => refuse(command.id, code, message, data);
     const unstored = (message: string) => new Unstored(refuse(command.id, 'invalid_payload', message));
     const commandId = command.id;
 
@@ -294,7 +314,7 @@ export class RegisterService {
     }
 
     if (command.type === 'register.closure.submit') {
-      const p = command.payload as unknown as RegisterClosureSubmitPayload;
+      const p = command.payload as unknown as ClosureSubmitPayload;
       const existing = await repo(TallyRegisterClosure).findOne({ where: [{ channelId, sessionId: session!.id }, { channelId, id: p.closureId }] });
       if (existing) return conflict('register_closure_exists', `Session ${existing.sessionId} has closure ${existing.id}`, { closureId: existing.id });
       const counters = await this.counters(tx, session!.registerId);
@@ -309,16 +329,34 @@ export class RegisterService {
       const { expected } = deriveSessionFigures({ countedFloatMinor: session!.countedFloatMinor, orders, movements,
         refunds: await this.sessionRefunds(tx, session!.id) });
       const variance = deriveVariance(p.counted, expected);
+      // #332: the server's variance decides, never counted − tillExpected. A session opened at v3 needs approval at every
+      // version (a v1 or v2 closure cannot carry a proof); sessions opened before v3 close as they always did.
+      const threshold = this.options.registerApproval?.thresholdMinor;
+      let approval: TallyRegisterApproval | null = null;
+      if (p.approval !== undefined) {
+        approval = await repo(TallyRegisterApproval).findOne({ where: { channelId, tokenHash: createHash('sha256').update(p.approval).digest('hex') },
+          lock: { mode: 'pessimistic_write' } });
+        const reason = !approval ? 'unknown' : approval.usedAt ? 'used' : approval.expiresAt! <= new Date() ? 'expired'
+          : approval.sessionId !== session!.id ? 'session_mismatch' : !sameFigures(approval.variance, variance) ? 'variance_mismatch' : undefined;
+        if (reason) return conflict('register_approval_invalid', `The approval is not valid for this closure: ${reason}`, { reason });
+      } else if (threshold !== undefined && (command.version >= 3 || (session!.openVersion ?? 1) >= 3) && Math.abs(variance.cash ?? 0) > threshold) {
+        return conflict('register_approval_required', `Session ${p.sessionId} needs a manager's approval: its cash variance is over ${threshold}`,
+          { sessionId: p.sessionId, thresholdMinor: threshold, variance });
+      }
       await repo(TallyRegisterClosure).insert({
         channelId, id: p.closureId, sessionId: session!.id, registerId: p.registerId, number: p.number, businessDay: p.businessDay ?? null,
-        openedAt: p.openedAt, closedAt: p.closedAt, closedBy: p.closedBy ?? null, approvedBy: p.approvedBy ?? null,
+        openedAt: p.openedAt, closedAt: p.closedAt, closedBy: p.closedBy ?? null, approvalId: approval?.id ?? null,
+        // A v3 closure stores only a verified approver; the till's label is kept below v3 alone.
+        approvedBy: command.version >= 3 ? approval?.approvedBy ?? null : p.approvedBy ?? null,
         tillExpected: p.tillExpected, counted: p.counted, periodSalesTotalMinor: p.periodSalesTotalMinor,
         periodRefundsTotalMinor: p.periodRefundsTotalMinor, perpetualSalesTotalMinor: p.perpetualSalesTotalMinor,
         perpetualRefundsTotalMinor: p.perpetualRefundsTotalMinor, unsyncedCount: p.unsyncedCount, unsyncedTotalMinor: p.unsyncedTotalMinor,
         softwareVersion: p.softwareVersion, orderIds: p.orderIds, movementIds: p.movementIds, expected, variance, commandId,
       });
+      if (approval) await repo(TallyRegisterApproval).update(approval.id, { usedAt: new Date(), usedByCommandId: commandId, closureId: p.closureId });
       return applied({
-        closure: { serverClosureId: p.closureId, number: p.number, expected, variance },
+        closure: { serverClosureId: p.closureId, number: p.number, expected, variance,
+          ...(command.version >= 3 ? { approvalVerified: approval !== null } : {}) },
         counters: await this.counters(tx, session!.registerId),
       });
     }

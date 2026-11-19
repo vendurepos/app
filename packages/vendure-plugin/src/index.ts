@@ -13,7 +13,7 @@ export type { CustomerDisplayOptions, IceServer } from './service/display-signal
 export { RegisterService } from './service/register.service';
 export type { RegisterEnvelope, RegisterResult } from './service/register.service';
 export {
-  TallyRegister, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionStatus,
+  TallyRegister, TallyRegisterApproval, TallyRegisterClosure, TallyRegisterMovement, TallyRegisterSession, TallyRegisterSessionStatus,
 } from './entities/register.entities';
 export {
   BusinessRejection, INTERNAL_ERROR_CODE, PLATFORM_ERROR_CODE, TransientCommandError,
@@ -27,3 +27,4 @@ export { TallyPosV51790900000000 } from './migrations/1790900000000-TallyPosV5';
 export { TallyPosRegisterV21791000000000 } from './migrations/1791000000000-TallyPosRegisterV2';
 export { TallyPosRegisterOpenVersion1791100000000 } from './migrations/1791100000000-TallyPosRegisterOpenVersion';
 export { TallyPosDisplay1791200000000 } from './migrations/1791200000000-TallyPosDisplay';
+export { TallyPosRegisterApproval1791300000000 } from './migrations/1791300000000-TallyPosRegisterApproval';

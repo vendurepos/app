@@ -26,7 +26,8 @@ import {
 import type { CustomerDisplayOptions } from './service/display-signalling.service';
 import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
-import { RegisterService } from './service/register.service';
+import { RegisterApprovalService } from './service/register-approval.service';
+import { RegisterService, TALLY_PLUGIN_OPTIONS } from './service/register.service';
 import { RefundService } from './service/refund.service';
 import { ReportService } from './service/report.service';
 import { StoreSetupService } from './service/store-setup.service';
@@ -87,7 +88,11 @@ function displaysBodyParser(): Middleware['handler'] {
 }
 
 /** `receiptEmail` (12.1a): `true` or an object turns on the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. The object overrides the caps: `perOrder` sends per order (default 3), `perUserPerMinute` requests per user (default 20). */
-export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; receiptEmail?: boolean | { perOrder?: number; perUserPerMinute?: number } };
+export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; receiptEmail?: boolean | { perOrder?: number; perUserPerMinute?: number };
+  /** Off by default (#332). With it set, a register v3 closure whose server cash variance is over `thresholdMinor` (minor units,
+   * either way) needs a manager's proof from `POST /tally/v1/register-approvals`, and `/info` advertises the threshold. Do not set
+   * this before the VendurePOS app version that asks a manager for approval: until then such a close cannot complete. */
+  registerApproval?: { thresholdMinor: number } };
 
 /** VendurePOS: TallyUI's order.create (ADR 0002) and register commands (ADR 0003), one Postgres transaction per command. */
 @VendurePlugin({
@@ -97,8 +102,9 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; 
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES, ...DISPLAY_ENTITIES],
   controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController],
-  providers: [OrderCreateService, RegisterService, RefundService, ReportService, StoreSetupService, DisplaySignallingService,
+  providers: [OrderCreateService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
+    { provide: TALLY_PLUGIN_OPTIONS, useFactory: () => TallyPosPlugin.options },
     { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],
   exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },

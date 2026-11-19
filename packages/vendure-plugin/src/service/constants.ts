@@ -15,8 +15,18 @@ export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7];
 export const ADVERTISED_ORDER_CREATE_VERSIONS: readonly number[] = ORDER_CREATE_VERSIONS;
 
 // The register contract versions this plugin implements (ADR 0003), shared by the five register.* commands; /info
-// advertises this list and RegisterService's version gate reads it. Version 2 is ADR-078's take-over and resume.
-export const REGISTER_VERSIONS: readonly number[] = [1, 2];
+// advertises this list and RegisterService's version gate reads it. Version 2 is ADR-078's take-over and resume; 3 (ADR-082)
+// adds the closure's manager approval proof.
+export const REGISTER_VERSIONS: readonly number[] = [1, 2, 3];
+
+// medusapos ADR 0023: an issued approval proof is good for 15 minutes, then a v3 closure refuses it as expired.
+export const APPROVAL_TTL_MS = 15 * 60_000;
+// medusapos ADR 0023: failed approval requests (never issued) count towards the limits for 15 minutes.
+export const APPROVAL_FAILURE_WINDOW_MS = 15 * 60_000;
+// medusapos ADR 0023: failed approvals per requesting cashier in the window; the next request is approval_rate_limited.
+export const MAX_APPROVAL_FAILURES_PER_ACTOR = 5;
+// medusapos ADR 0023: failed approvals per manager username in the window, across cashiers.
+export const MAX_APPROVAL_FAILURES_PER_IDENTIFIER = 10;
 
 // ADR 0007: the order.refund versions this plugin implements; /info advertises them and RefundService gates on them.
 export const ORDER_REFUND_VERSIONS: readonly number[] = [1];
