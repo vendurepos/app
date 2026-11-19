@@ -1,0 +1,103 @@
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { EmailPlugin, FileBasedTemplateLoader } from '@vendure/email-plugin';
+// The package's own exports (dist/, so `npm run build` first), as a store installs them.
+import { tallyOrderConfirmationHandler, tallyReceiptEmailHandler } from '@vendurepos/plugin/email';
+import { parse } from 'graphql';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WALK_IN_EMAIL } from '../src/service/constants';
+import { createPluginTestEnvironment, testStack } from './env';
+import { orderCommand } from './payloads';
+import { guestOrder } from './shop';
+
+// The main entry from dist/ too, so the route's event is the listener's class; computed, as the typecheck runs before the build.
+const { TallyPosPlugin } = require('@vendurepos/plugin' as string) as typeof import('../src');
+
+/** Mailpit's messages to `address`, once the first has arrived or 20 s have passed (email-smtp.e2e.ts's wait). */
+async function mailpit(address: string, min = 1, start = performance.now()): Promise<{ messages_count: number; messages: Array<{ Subject: string }> }> {
+  const found = await (await fetch(`http://127.0.0.1:${testStack.mailpitPort}/api/v1/search?query=${encodeURIComponent(`to:"${address}"`)}`)).json();
+  if (found.messages_count >= min || performance.now() - start > 20_000) return found;
+  await new Promise(resolve => setTimeout(resolve, 200));
+  return mailpit(address, min, start);
+}
+
+describe('12.1a: POST /tally/v1/orders/:code/receipt-email', () => {
+  const environment = createPluginTestEnvironment({}, [TallyPosPlugin.init({ receiptEmail: { perOrder: 2, perUserPerMinute: 40 } }), EmailPlugin.init({
+    handlers: [tallyOrderConfirmationHandler, tallyReceiptEmailHandler],
+    templateLoader: new FileBasedTemplateLoader(join(__dirname, '../node_modules/@vendure/email-plugin/templates')),
+    transport: { type: 'smtp', host: '127.0.0.1', port: testStack.smtpPort },
+    globalTemplateVars: { fromAddress: '"12.1a" <receipt@vendurepos.invalid>' },
+  })]);
+  const { server, adminClient, shopClient, variantIds } = environment;
+  beforeAll(() => environment.init());
+  afterAll(() => (TallyPosPlugin.init({}), server.destroy()));
+  const call = async (path: string, body?: unknown, method = 'POST', headers: Record<string, string> = {}) => {
+    const response = await fetch(`${await server.app.getUrl()}/tally/v1/${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminClient.getAuthToken()}`, 'X-Tally-Protocol': '1', ...headers } });
+    return { status: response.status, body: await response.json() };
+  };
+  const sale = async (email?: string): Promise<string> => (await call('commands', { commands: [orderCommand(
+    [{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, email ? { email } : undefined)] })).body.results[0].serverRefs.displayId;
+  const receipt = (code: string, body?: unknown) => call(`orders/${code}/receipt-email`, body);
+  const address = () => `r121a-${randomUUID()}@example.com`;
+  const tokenWith = async (permissions: string[]) => { // sales-report.e2e.ts's: a role in this channel, an administrator, its login
+    const { activeChannel } = await adminClient.query(parse('query { activeChannel { id } }')), emailAddress = `${randomUUID()}@till.example`;
+    const { createRole } = await adminClient.query(parse('mutation($input: CreateRoleInput!) { createRole(input: $input) { id } }'),
+      { input: { code: `r121a-${randomUUID()}`, description: '12.1a', permissions, channelIds: [activeChannel.id] } });
+    await adminClient.query(parse('mutation($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }'),
+      { input: { firstName: 'Till', lastName: '12.1a', emailAddress, password: 'till-password', roleIds: [createRole.id] } });
+    const login = await fetch(`${await server.app.getUrl()}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: `mutation { login(username: "${emailAddress}", password: "till-password") { ... on CurrentUser { id } } }` }) });
+    return { Authorization: `Bearer ${login.headers.get('vendure-auth-token')}` };
+  };
+  it('sends the till customer one receipt, and the automatic confirmation sends nothing', async () => {
+    const a = address(), code = await sale(a);
+    expect(await receipt(code)).toEqual({ status: 202, body: { queued: true, emailAddress: a } });
+    expect(await mailpit(a)).toMatchObject({ messages_count: 1, messages: [{ Subject: `Receipt for order #${code}` }] });
+  });
+  it('a walk-in sale needs a typed address, and the walk-in customer keeps its email', async () => {
+    const b = address(), code = await sale();
+    expect(await receipt(code, {})).toMatchObject({ status: 422, body: { code: 'no_recipient' } });
+    expect(await receipt(code, { emailAddress: ` ${b} ` })).toEqual({ status: 202, body: { queued: true, emailAddress: b } });
+    expect((await mailpit(b)).messages_count).toBe(1);
+    const { orders } = await adminClient.query(parse('query($code: String!) { orders(options: { filter: { code: { eq: $code } } }) { items { customer { emailAddress } } } }'), { code });
+    expect(orders.items[0].customer.emailAddress).toBe(WALK_IN_EMAIL);
+  });
+  it('refuses an unknown order, a bad address, an extra key and a storefront order', async () => {
+    const a = address(), code = await sale(a), shop = await guestOrder(shopClient, variantIds.mug[0], address());
+    expect(await receipt('NO-SUCH-ORDER')).toMatchObject({ status: 404, body: { code: 'order_not_found' } });
+    expect(await receipt(code, { emailAddress: 'not-an-email' })).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
+    expect(await receipt(code, { emailAddress: a, extra: 1 })).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
+    expect(await receipt(shop.added.code!)).toMatchObject({ status: 409, body: { code: 'not_till_order' } });
+  });
+  it('GET /tally/v1/info advertises receiptEmail', async () => {
+    expect(await call('info', undefined, 'GET')).toMatchObject({ status: 200, body: { receiptEmail: { v: 1 } } });
+  });
+  it('sends at most perOrder receipts, and never to a list, a quoted or named address or an injected header', async () => {
+    const a = address(), code = await sale(a), n = randomUUID().slice(0, 8); // a per-run tag, as a reused Mailpit keeps earlier runs' mail
+    for (const emailAddress of [`a-${n}@b.co\r\nBcc: x-${n}@y.co`, `a-${n}@b.co\nx`, `a-${n}@b.co\r\n`, `a-${n}@b.co,c-${n}@d.co`, `a-${n}@b.co; c-${n}@d.co`,
+      '"a b"@c.co', `A <a-${n}@b.co>`, `a,c-${n}@d.co`, `A<a-${n}@b.co>`, '=?utf-8?B?ZXZpbEBldmlsLmNvbQ==?=x@example.com', 'x@127.0.0.1']) {
+      expect(await receipt(code, { emailAddress }), JSON.stringify(emailAddress)).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
+    }
+    expect([await receipt(code), await receipt(code), await receipt(code)]).toMatchObject([{ status: 202 }, { status: 202 }, { status: 429, body: { code: 'order_send_limit' } }]);
+    expect((await mailpit(a, 2)).messages_count).toBe(2);
+    expect(await Promise.all([`x-${n}@y.co`, `c-${n}@d.co`, `a-${n}@b.co`].map(async to => (await mailpit(to, 0)).messages_count))).toEqual([0, 0, 0]);
+  });
+  it('finds no order of another channel, even for the superadmin', async () => {
+    const code = await sale(address()), { zones } = await adminClient.query(parse('query { zones { items { id } } }')), zone = zones.items[0].id;
+    await adminClient.query(parse('mutation($input: CreateChannelInput!) { createChannel(input: $input) { ... on Channel { id } } }'), { input: { code: 'r121a-second',
+      token: 'r121a-second', defaultLanguageCode: 'en', pricesIncludeTax: false, defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: zone, defaultShippingZoneId: zone } });
+    expect(await call(`orders/${code}/receipt-email`, undefined, 'POST', { 'vendure-token': 'r121a-second' })).toMatchObject({ status: 404, body: { code: 'order_not_found' } });
+  });
+  it('refuses a user without ReadOrder, whichever permission let it in', async () => {
+    const code = await sale(address()), post = async (permissions: string[]) => call(`orders/${code}/receipt-email`, undefined, 'POST', await tokenWith(permissions));
+    for (const permissions of [['TallyPosSell'], ['CreateOrder']]) expect(await post(permissions), permissions[0]).toMatchObject({ status: 403, body: { code: 'forbidden' } });
+    expect(await post(['TallyPosSell', 'ReadOrder'])).toMatchObject({ status: 202, body: { queued: true } });
+  });
+  it('refuses a user past perUserPerMinute requests a minute, refusals included (last: it spends the minute)', async () => {
+    const answers: Array<{ status: number; body: { code: string } }> = [];
+    while (answers.length < 41 && answers.at(-1)?.status !== 429) answers.push(await receipt('NO-SUCH-ORDER'));
+    expect([answers.pop(), await receipt('NO-SUCH-ORDER')]).toMatchObject(Array(2).fill({ status: 429, body: { code: 'rate_limited' } }));
+    expect(answers.map(answer => answer.body.code)).toEqual(answers.map(() => 'order_not_found'));
+  });
+});
