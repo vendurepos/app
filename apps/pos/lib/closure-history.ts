@@ -19,9 +19,10 @@ export type TallyClosureRead = {
   expected: Record<string, number>; variance: Record<string, number>; periodSalesTotalMinor: number; periodRefundsTotalMinor: number;
   perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number; unsyncedCount: number; unsyncedTotalMinor: number;
   softwareVersion: string; orderIds: string[]; movementIds: string[]; receivedAt: string;
+  countedFloatMinor?: number; paidInMinor?: number; paidOutMinor?: number; // an older plugin lacks these
 };
 
-/** A server closure as TallyUI's Closure: no breakdowns (the read has none, so no cash at open) and no print state. */
+/** A server closure as TallyUI's Closure: its float as the only breakdown (none from an older plugin) and no print state. */
 export function closureFromRead(read: TallyClosureRead, storeKey: string): Closure {
   return {
     id: read.closureId, server_closure_id: read.closureId, session_id: read.sessionId, register_id: read.registerId, store_key: storeKey,
@@ -29,7 +30,9 @@ export function closureFromRead(read: TallyClosureRead, storeKey: string): Closu
     till_expected: read.tillExpected, expected: read.expected, counted: read.counted, variance: read.variance,
     period_sales_total_minor: read.periodSalesTotalMinor, period_refunds_total_minor: read.periodRefundsTotalMinor,
     perpetual_sales_total_minor: read.perpetualSalesTotalMinor, perpetual_refunds_total_minor: read.perpetualRefundsTotalMinor,
-    unsynced_count: read.unsyncedCount, unsynced_total_minor: read.unsyncedTotalMinor, software_version: read.softwareVersion, breakdowns: {},
+    unsynced_count: read.unsyncedCount, unsynced_total_minor: read.unsyncedTotalMinor, software_version: read.softwareVersion,
+    breakdowns: typeof read.countedFloatMinor === 'number'
+      ? { opening_float: { expected_minor: null, counted_minor: read.countedFloatMinor, variance_minor: null } } : {},
     order_ids: read.orderIds, movement_ids: read.movementIds, printed_at: null, print_count: 0, number_retried: false, corrections_count: 0,
   };
 }
@@ -40,16 +43,20 @@ export function mergeClosures(local: readonly Closure[], remote: readonly Closur
   return [...local, ...remote.filter((row) => !held.has(row.id))];
 }
 
-/** Every listed register's closures (one page of 100 each: the 92-day window at one a day) and each register's label. */
-export async function fetchChannelClosures(session: Session, storeKey: string): Promise<{ closures: Closure[]; names: Record<string, string>; registers: ListedRegister[] }> {
+/** Every listed register's closures (one page of 100 each: the 92-day window at one a day), each register's label and its live session's float. */
+export async function fetchChannelClosures(session: Session, storeKey: string): Promise<{
+  closures: Closure[]; names: Record<string, string>; registers: ListedRegister[]; floats: Record<string, number>;
+}> {
   const listed = await fetchRegisters(session);
   const pages = await Promise.all(listed.map(async ({ id }) => {
     const response = await fetch(`${session.url}/tally/v1/registers/${encodeURIComponent(id)}?take=100`, { headers: sessionContext(session).headers });
     if (!response.ok) throw new Error(`GET /tally/v1/registers/${id} answered ${response.status}`);
-    const body: { closures: { items: TallyClosureRead[] } } = await response.json();
-    return body.closures.items.map((read) => closureFromRead(read, storeKey));
+    const body: { session: { countedFloatMinor?: unknown } | null; closures: { items: TallyClosureRead[] } } = await response.json();
+    const float = body.session?.countedFloatMinor;
+    return { id, float: typeof float === 'number' ? float : undefined, closures: body.closures.items.map((read) => closureFromRead(read, storeKey)) };
   }));
-  return { closures: pages.flat(), names: Object.fromEntries(listed.map((register) => [register.id, registerLabel(register)])), registers: listed };
+  return { closures: pages.flatMap((page) => page.closures), names: Object.fromEntries(listed.map((register) => [register.id, registerLabel(register)])),
+    registers: listed, floats: Object.fromEntries(pages.flatMap(({ id, float }) => float === undefined ? [] : [[id, float]])) };
 }
 
 // The keys are TallyUI exportCsv's label keys.
@@ -100,16 +107,25 @@ export function openSessionRows(registers: readonly ListedRegister[], { ownRegis
   }] : []);
 }
 
-/** v2's Closures tiles over the listed closures: sessions (open and closed), the summed cash variance and the summed cash counted. */
-export function closureSummary(closures: readonly Closure[], { open, storeKey, currency, timezone, today, blind }: {
-  open: number; storeKey: string; currency: string; timezone: string; today: string; blind: boolean;
-}): { sessions: string; sessionsNote: string; discrepancy: string; cashAtClose: string } {
+/**
+ * v2's Closures tiles over the listed closures: sessions (open and closed), the summed cash variance, the floats of the open
+ * sessions and the listed closures, the listed closures' expected cash less float (signed) and the summed cash counted.
+ */
+export function closureSummary(closures: readonly Closure[], { open, openFloats = [], storeKey, currency, timezone, today, blind }: {
+  open: number; openFloats?: readonly (number | undefined)[]; storeKey: string; currency: string; timezone: string; today: string; blind: boolean;
+}): { sessions: string; sessionsNote: string; discrepancy: string; cashAtOpen: string; cashActivity: string; cashAtClose: string } {
   const listed = listedClosures(closures, { storeKey, timezone, today });
   const sum = (pick: (row: Closure) => unknown) => blind || listed.length === 0 ? '—'
     : formatMoney({ amount: listed.reduce((total, row) => total + (typeof pick(row) === 'number' ? pick(row) as number : 0), 0), currency }) ?? '—';
+  const float = (row: Closure) => (row.breakdowns.opening_float as { counted_minor?: unknown } | undefined)?.counted_minor;
+  const floats = [...openFloats, ...listed.map(float)].filter((amount): amount is number => typeof amount === 'number');
+  const moved = listed.flatMap((row) => { const cash = row.expected.cash, at = float(row); return typeof cash === 'number' && typeof at === 'number' ? [cash - at] : []; });
+  const activity = moved.reduce((total, amount) => total + amount, 0);
   return {
     sessions: String(open + listed.length), sessionsNote: `${open} open · ${listed.length} closed`,
     discrepancy: sum((row) => row.variance.cash), cashAtClose: sum((row) => row.counted.cash),
+    cashAtOpen: blind || floats.length === 0 ? '—' : formatMoney({ amount: floats.reduce((total, amount) => total + amount, 0), currency }) ?? '—',
+    cashActivity: blind || (listed.length > 0 && moved.length === 0) ? '—' : `${activity >= 0 ? '+' : ''}${formatMoney({ amount: activity, currency }) ?? ''}`,
   };
 }
 

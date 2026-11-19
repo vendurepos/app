@@ -149,7 +149,7 @@ function seededClosure(): TallyClosureRead {
     businessDay: at(12).toLocaleDateString('en-CA'), openedAt: at(8).toISOString(), closedAt: at(17, 30).toISOString(), closedBy: null,
     approvedBy: null, tillExpected: cash, counted: cash, expected: cash, variance: { cash: 0 }, periodSalesTotalMinor: 24550, periodRefundsTotalMinor: 0,
     perpetualSalesTotalMinor: 24550, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: 'demo', orderIds: [],
-    movementIds: [], receivedAt: at(17, 30).toISOString() };
+    movementIds: [], receivedAt: at(17, 30).toISOString(), countedFloatMinor: 12000 };
 }
 
 /** A stock entry's next updatedAt: now, and always later than the last. */
@@ -213,9 +213,13 @@ export class DemoStore {
     const listed = this.registers().find(item => item.id === id);
     if (!listed) return null;
     const stored = this.state.closures.filter(closure => closure.registerId === id).reverse().map(({ approval: _approval, ...p }): TallyClosureRead => ({
-      ...p, businessDay: p.businessDay ?? null, closedBy: p.closedBy ?? null, approvedBy: p.approvedBy ?? null, ...this.closureFigures(p), receivedAt: p.closedAt }));
+      ...p, businessDay: p.businessDay ?? null, closedBy: p.closedBy ?? null, approvedBy: p.approvedBy ?? null, ...this.closureFigures(p), receivedAt: p.closedAt,
+      countedFloatMinor: this.state.sessions[p.sessionId].countedFloatMinor }));
     const items = stored.length || id !== DEMO_FRONT_COUNTER.id ? stored : [seededClosure()];
-    return { version: 1, register: { id, receivedAt: listed.receivedAt }, counters: {}, session: null,
+    const live = Object.values(this.state.sessions).find(session => session.registerId === id && session.status !== 'closed');
+    const session = live ? { id: live.sessionId, status: live.status, openedAt: live.openedAt, openedBy: live.openedBy ?? null,
+      deviceName: live.deviceName ?? null, countedFloatMinor: live.countedFloatMinor, ...this.figures(live.sessionId) } : null;
+    return { version: 1, register: { id, receivedAt: listed.receivedAt }, counters: {}, session,
       closures: { items: items.slice(skip, skip + take), totalItems: items.length, skip, take } };
   }
 

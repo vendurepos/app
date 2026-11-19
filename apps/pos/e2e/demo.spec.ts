@@ -1351,11 +1351,10 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   const history = page.getByTestId('closure-history');
   await expect(history.getByTestId('closure-history-row-1')).toContainText('This device · Closure #1');
   await expect(history.getByTestId('closure-history-row-1')).toContainText('Sales €0.00 · Cash at open €100.00 · Cash at close €100.00 · Exact');
-  // The demo's Front counter closed yesterday (lib/demo/store.ts seededClosure); the server read has no cash at open.
+  // The demo's Front counter closed yesterday (lib/demo/store.ts seededClosure); the server read carries the session's float.
   const front = history.getByTestId('closure-history-row-demo-front-counter-1');
   await expect(front).toContainText('Front counter · Closure #1');
-  await expect(front).toContainText('Sales €245.50 · Cash at close €150.00 · Exact');
-  await expect(front).not.toContainText('Cash at open');
+  await expect(front).toContainText('Sales €245.50 · Cash at open €120.00 · Cash at close €150.00 · Exact');
   await expect(history.getByTestId('closure-history-remote-error')).toHaveCount(0);
   // The demo-pairs size, as 13f; the PNG is made docs/v2-parity/demo-pairs/10c-closures-all-registers-vendurepos.webp (cwebp -q 80).
   await page.setViewportSize({ width: 960, height: 600 });
@@ -1368,14 +1367,14 @@ test('a closed till lists its closures and reprints a Z as a copy', async ({ pag
   expect(printed[1]).toMatch(/^Copy · printed /);
   expect(printed).toEqual(expect.arrayContaining(['Opening float €100.00', 'Cash expected €100.00', 'Cash counted €100.00']));
   await expect(history.getByTestId('closure-history-print-error')).toHaveCount(0);
-  // The Front counter's Z copy, from a server read that has no sales count and no opening float.
+  // The Front counter's Z copy, from a server read that carries the opening float and still has no sales count.
   await history.getByTestId('closure-history-print-demo-front-counter-1').click();
   const frontPrint = page.frameLocator('#vendurepos-print').locator('p');
   await expect(frontPrint.filter({ hasText: 'Sales total €245.50' })).toHaveCount(1);
   const frontPrinted = await frontPrint.allTextContents();
   expect(frontPrinted[0]).toBe('Z report · Closure #1');
-  expect(frontPrinted).toEqual(expect.arrayContaining(['Sales total €245.50', 'Cash counted €150.00']));
-  expect(frontPrinted.filter((line) => line.includes('undefined') || line.startsWith('Opening float'))).toEqual([]);
+  expect(frontPrinted).toEqual(expect.arrayContaining(['Sales total €245.50', 'Cash counted €150.00', 'Opening float €120.00']));
+  expect(frontPrinted.filter((line) => line.includes('undefined'))).toEqual([]);
   const [download] = await Promise.all([page.waitForEvent('download'), history.getByTestId('closure-history-export').click()]);
   // Yesterday's Front counter closure to today's own one.
   const fileName = /^closures-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.csv$/;
@@ -1415,6 +1414,9 @@ test("Reports › Closures lists every register's closures and opens one to its 
   await expect(panel.getByTestId('closures-tile-sessions')).toContainText('1 open · 2 closed');
   await expect(panel.getByTestId('closures-tile-cash-at-close')).toContainText('€250.00');
   await expect(panel.getByTestId('closures-tile-discrepancy')).toContainText('€0.00');
+  // Floats: the open session's €50, closure #1's €100 and Front counter's €120; activity (100 − 100) + (150 − 120).
+  await expect(panel.getByTestId('closures-tile-cash-at-open')).toContainText('€270.00');
+  await expect(panel.getByTestId('closures-tile-cash-activity')).toContainText('+€30.00');
   const openRow = panel.locator('[data-testid^="closures-open-"]').first();
   await expect(openRow).toContainText('This device · Open since');
   const days = panel.locator('[data-testid^="closures-day-"]');
