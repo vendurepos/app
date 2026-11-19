@@ -1,8 +1,9 @@
 import {
   api, Button, defineDashboardExtension, Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle, Input, Label, useChannel,
+  DialogFooter, DialogHeader, DialogTitle, Input, Label, Link, Page, PageBlock, PageLayout, PageTitle,
+  PermissionGuard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, useChannel,
 } from '@vendure/dashboard';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type Role = { id: string; code: string; description: string };
 
@@ -14,7 +15,140 @@ export default defineDashboardExtension({
     requiresPermission: 'SuperAdmin',
     component: NewPosTillKey,
   }],
+  routes: [{
+    path: '/vendurepos-needs-admin',
+    // tallyNeedsAdminCommands and tallyResolveNeedsAdmin are SuperAdmin only.
+    navMenuItem: {
+      sectionId: 'sales', id: 'vendurepos-needs-admin', title: 'POS sales to resolve', requiresPermission: 'SuperAdmin',
+    },
+    component: () => <PermissionGuard requires="SuperAdmin"><NeedsAdminPage /></PermissionGuard>,
+  }],
 });
+
+type NeedsAdminRow = {
+  id: string; clientOrderId: string | null; channelId: string; orderId: string | null; orderCode: string | null; createdAt: string;
+};
+type Resolution = 'applied' | 'rejected';
+
+// What each resolution does (ADR 0002, needs_admin).
+const RESOLUTIONS: Record<Resolution, { label: string; effect: string }> = {
+  applied: {
+    label: 'Keep the sale',
+    effect: "The order stays as recorded. The till's resend is answered as already recorded.",
+  },
+  rejected: {
+    label: 'Cancel the sale',
+    effect: "The order and its POS payments are cancelled. The till's sale is refused with your note, and the till can send it again as a new sale. Switch the Dashboard to this sale's channel first.",
+  },
+};
+
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+function NeedsAdminPage() {
+  const [rows, setRows] = useState<NeedsAdminRow[] | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [target, setTarget] = useState<{ row: NeedsAdminRow; resolution: Resolution } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { tallyNeedsAdminCommands } = await api.query(
+        'query { tallyNeedsAdminCommands { id clientOrderId channelId orderId orderCode createdAt } }', {},
+      ) as { tallyNeedsAdminCommands: NeedsAdminRow[] };
+      setRows(tallyNeedsAdminCommands);
+      setLoadError('');
+    } catch (error) {
+      setLoadError(errorText(error));
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  return <Page pageId="vendurepos-needs-admin">
+    <PageTitle>POS sales to resolve</PageTitle>
+    <p className="text-sm text-muted-foreground">
+      A till's sale stopped part-way through recording. The till cannot resend it until you resolve it here.
+    </p>
+    <PageLayout>
+      <PageBlock column="full" blockId="vendurepos-needs-admin-list">
+        {loadError && <p role="alert" data-testid="vendurepos-needs-admin-load-error">{loadError}</p>}
+        {rows?.length === 0 && <p data-testid="vendurepos-needs-admin-empty">No POS sales need you.</p>}
+        {!!rows?.length && <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Created</TableHead>
+              <TableHead>Order</TableHead>
+              <TableHead>Till sale</TableHead>
+              <TableHead>Channel</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(row => <TableRow key={row.id} data-testid="vendurepos-needs-admin-row">
+              <TableCell>{new Date(row.createdAt).toLocaleString()}</TableCell>
+              <TableCell>{row.orderId ? <Link className="text-primary hover:underline" to={`/orders/${row.orderId}`}>{row.orderCode ?? row.orderId}</Link> : '—'}</TableCell>
+              <TableCell className="whitespace-normal break-all">{row.clientOrderId ?? '—'}</TableCell>
+              <TableCell>{row.channelId}</TableCell>
+              <TableCell className="space-x-2 text-right">
+                <Button variant="outline" data-testid="vendurepos-needs-admin-apply"
+                  onClick={() => setTarget({ row, resolution: 'applied' })}>{RESOLUTIONS.applied.label}</Button>
+                <Button variant="destructive" data-testid="vendurepos-needs-admin-reject"
+                  onClick={() => setTarget({ row, resolution: 'rejected' })}>{RESOLUTIONS.rejected.label}</Button>
+              </TableCell>
+            </TableRow>)}
+          </TableBody>
+        </Table>}
+      </PageBlock>
+    </PageLayout>
+    {target && <ResolveDialog key={`${target.row.id}-${target.resolution}`} {...target}
+      onClose={() => setTarget(null)} onResolved={() => { setTarget(null); void load(); }} />}
+  </Page>;
+}
+
+function ResolveDialog({ row, resolution, onClose, onResolved }: {
+  row: NeedsAdminRow; resolution: Resolution; onClose: () => void; onResolved: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const { label, effect } = RESOLUTIONS[resolution];
+
+  async function resolve() {
+    setPending(true);
+    setError('');
+    try {
+      await api.mutate(
+        `mutation Resolve($commandId: String!, $resolution: TallyNeedsAdminResolution!, $note: String!) {
+          tallyResolveNeedsAdmin(commandId: $commandId, resolution: $resolution, note: $note) { id status }
+        }`,
+        { commandId: row.id, resolution, note: note.trim() },
+      );
+      onResolved();
+    } catch (error) {
+      setError(errorText(error));
+      setPending(false);
+    }
+  }
+
+  return <Dialog open onOpenChange={open => { if (!open && !pending) onClose(); }}>
+    <DialogContent>
+      <form onSubmit={event => { event.preventDefault(); void resolve(); }} className="space-y-4">
+        <DialogHeader>
+          <DialogTitle>{label}</DialogTitle>
+          <DialogDescription>{effect}</DialogDescription>
+        </DialogHeader>
+        <p>{`Order ${row.orderCode ?? '—'}, till sale ${row.clientOrderId ?? '—'}`}</p>
+        <Label htmlFor="vendurepos-needs-admin-note">Note</Label>
+        <Input id="vendurepos-needs-admin-note" data-testid="vendurepos-needs-admin-note" required
+          value={note} onChange={event => setNote(event.target.value)} />
+        {error && <p role="alert" data-testid="vendurepos-needs-admin-error">{error}</p>}
+        <DialogFooter>
+          <Button type="submit" data-testid="vendurepos-needs-admin-confirm" aria-busy={pending}
+            variant={resolution === 'rejected' ? 'destructive' : 'default'}
+            disabled={!note.trim() || pending}>{pending ? 'Resolving…' : label}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>;
+}
 
 function NewPosTillKey() {
   const { activeChannel } = useChannel();
