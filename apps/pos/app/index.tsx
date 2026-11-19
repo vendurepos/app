@@ -19,6 +19,8 @@ import { accessRefused } from '../lib/access-refused';
 import { AddToast, useAddToast } from '../lib/add-toast';
 import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { useCameraScanner } from '../lib/camera-scan';
+import { nativeCamera } from '../lib/native-camera';
+import { cameraScanShown, permissionHook } from '../lib/native-camera-core';
 import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { removeCatalogueDatabaseWithin } from '../lib/catalogue';
@@ -95,6 +97,8 @@ const FRAME_WIDE_MIN_HEIGHT = 480;
 const CART_HIGHLIGHT_MS = 600;
 /** The one filter pill the till shows (CHECKLIST 1.6). */
 const IN_STOCK_PILL = ['inStock'] as const;
+// Fixed at load (nativeCamera never changes), so the hook order is stable.
+const useNativeCameraPermission = permissionHook(nativeCamera);
 
 export default function HomeScreen() {
   const { session, signOut } = useSession();
@@ -630,6 +634,7 @@ function Sale({
   useEffect(() => { if (!settingsOpen) rereadSettings(); }, [rereadSettings, settingsOpen]);
   useWedgeScanner(onScan, focused && !settingsOpen);
   const camera = useCameraScanner(onScan);
+  const cameraPermission = useNativeCameraPermission();
   const catalogueHidden = (!wide && tab === 'cart') || (wide && stage.kind === 'tender');
   const [cameraHeight] = useState(() => loadCameraPanelHeight());
   const notice = scanNotice === 'finish-sale' ? (
@@ -668,9 +673,10 @@ function Sale({
         <Catalogue
           {...catalogueView}
           {...catalogueFilters}
-          cameraScan={Platform.OS === 'web'}
+          cameraScan={cameraScanShown(Platform.OS, nativeCamera)}
           // The panel unmounts while the catalogue is hidden, so the camera is let go.
-          cameraScanner={catalogueHidden ? undefined : { ...camera, height: cameraHeight, onHeightChange: (height) => saveCameraPanelHeight(height) }}
+          cameraScanner={catalogueHidden ? undefined : { ...camera, height: cameraHeight, onHeightChange: (height) => saveCameraPanelHeight(height),
+            viewfinder: nativeCamera?.Viewfinder, permission: cameraPermission }}
           showCategoryNav
           showViewToggle
           // v2's filter row with its In Stock pill alone, on by default (TallyUI's default filters); the other pills need TallyUI or a ruling (CHECKLIST 1.6).

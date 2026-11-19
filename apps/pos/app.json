@@ -6,7 +6,7 @@
     "scheme": "vendurepos",
     "userInterfaceStyle": "automatic",
     "web": { "bundler": "metro", "output": "single" },
-    "plugins": ["expo-router"],
+    "plugins": ["expo-router", ["expo-camera", { "cameraPermission": "VendurePOS uses the camera to scan product barcodes.", "recordAudioAndroid": false }]],
     "experiments": { "typedRoutes": true }
   }
 }
