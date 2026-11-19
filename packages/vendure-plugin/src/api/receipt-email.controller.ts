@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Inject, Param, Post, Res } from '@nestjs/common';
-import { Allow, Ctx, EventBus, OrderService, Permission, RequestContext } from '@vendure/core';
+import { Allow, Ctx, EventBus, Logger, OrderService, Permission, RequestContext } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
 import { TallyReceiptEmailEvent } from '../events/receipt-email.event';
 import { WALK_IN_EMAIL } from '../service/constants';
@@ -14,7 +14,8 @@ export const receiptEmailCaps = (option?: boolean | { perOrder?: number; perUser
   return !!given && { perOrder: given.perOrder ?? PER_ORDER, perUserPerMinute: given.perUserPerMinute ?? PER_USER_PER_MINUTE };
 };
 // One plain ASCII address (no list, quote, space or header character), and at most 254 characters, RFC 5321's longest path.
-const EMAIL = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+// No `=` or `?`, so no RFC 2047 encoded word, and an alphabetic top-level label, so no IP-shaped domain.
+const EMAIL = /^[A-Za-z0-9.!#$%&'*+/^_`{|}~-]{1,64}@([A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$/;
 /** 12.1a: a cashier's explicit receipt email, not ADR 0002's automatic confirmation. It writes nothing; each request sends one. */
 @Controller('tally/v1')
 export class TallyReceiptEmailController {
@@ -28,6 +29,8 @@ export class TallyReceiptEmailController {
   async send(@Ctx() ctx: RequestContext, @Param('code') code: string, @Body() body: unknown, @Res({ passthrough: true }) res: { status(code: number): unknown }) {
     const refuse = (status: number, refusal: string, message: string) => (res.status(status), { code: refusal, message });
     if (!this.caps) return refuse(404, 'receipt_email_disabled', 'The plugin was set up without receiptEmail');
+    // It sends the order's receipt and can echo its customer's email, so Vendure's order-list read access too; the till preset holds it.
+    if (!ctx.userHasAllPermissions([Permission.ReadOrder])) return refuse(403, 'forbidden', 'The receipt email needs ReadOrder as well');
     const user = String(ctx.activeUserId), now = Date.now(), recent = (this.recent.get(user) ?? []).filter(at => now - at < 60_000);
     if (recent.length >= this.caps.perUserPerMinute) return refuse(429, 'rate_limited', `At most ${this.caps.perUserPerMinute} requests a minute`);
     this.recent.set(user, [...recent, now]);
@@ -46,6 +49,8 @@ export class TallyReceiptEmailController {
     if (sent >= this.caps.perOrder) return refuse(429, 'order_send_limit', `At most ${this.caps.perOrder} receipt emails per order`);
     await this.eventBus.publish(new TallyReceiptEmailEvent(ctx, order, recipient));
     this.sent.set(key, (this.sent.get(key) ?? 0) + 1);
+    if (this.sent.size > 10_000) this.sent.delete(this.sent.keys().next().value!); // a dropped order only loses its in-memory count
+    Logger.info(`Receipt email queued for order ${order.code} by user ${user}`, 'TallyPosPlugin');
     return { queued: true, emailAddress: recipient };
   }
 }
