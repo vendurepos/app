@@ -1419,6 +1419,7 @@ test("Reports › Closures lists every register's closures and opens one to its 
   await expect(panel.getByTestId('closures-tile-cash-activity')).toContainText('+€30.00');
   const openRow = panel.locator('[data-testid^="closures-open-"]').first();
   await expect(openRow).toContainText('This device · Open since');
+  await expect(panel.locator('[data-testid^="closures-open-print-x-"]')).toHaveCount(0);
   const days = panel.locator('[data-testid^="closures-day-"]');
   await expect(days.first()).toContainText('Today');
   await expect(days.first().getByTestId('closure-history-row-1')).toBeVisible();
