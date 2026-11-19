@@ -280,6 +280,11 @@ export class RegisterService {
         return conflict('register_session_already_open', `Register ${p.registerId} already has session ${live.id} open`, data);
       }
       if (await this.resolveSession(tx, p.sessionId)) throw unstored(`sessionId: session ${p.sessionId} is already recorded`);
+      // #334: while approval is required, a fresh session (a take-over included) opens only at v3; resumes above still apply.
+      if (this.options.registerApproval && command.version < 3) {
+        throw new Unstored(refuse(commandId, 'unsupported_version',
+          `register version ${command.version} cannot open a new session while manager approval is required; this server needs 3`, { register: 3 }));
+      }
       if (takeover) await repo(TallyRegisterSessionStatus).insert({ channelId, sessionId: live.id, status: 'superseded', at: p.openedAt,
         counted: null, closedBy: null, approvedBy: null, commandId });
       // ADR-068 d8: an unknown register id creates the register.
