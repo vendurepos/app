@@ -75,3 +75,10 @@ export function redownloadSummary(count: number): string {
   if (count === 0) return 'No products are on this device yet; they download again from your store.';
   return `${count} ${count === 1 ? 'product is' : 'products are'} removed from this device and downloaded again from your store.`;
 }
+
+/** Why Clear & re-download is off: mid-run, or the store has not answered (an offline till must not clear what it cannot re-download). */
+export function redownloadBlocked(redownloading: boolean, serverProducts: number | null): string | null {
+  if (redownloading) return 'Re-downloading…';
+  if (serverProducts === null) return 'Needs your store to answer, so the products can download again.';
+  return null;
+}

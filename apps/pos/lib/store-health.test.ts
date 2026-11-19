@@ -1,12 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionReason, attentionRows, canSendAgain, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice, redownloadSummary } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
 
 it("words Clear & re-download's confirm for no product, one and several", () => {
   expect(redownloadSummary(0)).toBe('No products are on this device yet; they download again from your store.');
   expect(redownloadSummary(1)).toBe('1 product is removed from this device and downloaded again from your store.');
   expect(redownloadSummary(3)).toBe('3 products are removed from this device and downloaded again from your store.');
+});
+
+it.each([
+  [true, 5, 'Re-downloading…'],
+  [false, null, 'Needs your store to answer, so the products can download again.'],
+  [false, 0, null],
+  [false, 5, null],
+] as const)('blocks Clear & re-download (redownloading %s, server products %s) with %s', (redownloading, serverProducts, reason) => {
+  expect(redownloadBlocked(redownloading, serverProducts)).toBe(reason);
 });
 
 describe('readyToSell', () => {

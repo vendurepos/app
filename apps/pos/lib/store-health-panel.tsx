@@ -7,7 +7,7 @@ import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
-import { coveragePercent, readServerTotals, recordsOnDevice, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
+import { coveragePercent, readServerTotals, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
 export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
   session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
@@ -36,6 +36,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
     void readServerTotals(sessionContext(session)).then(result => { if (!cancelled) setTotals(result); });
     return () => { cancelled = true; };
   }, [session]);
+  const blocked = redownloadBlocked(redownloading, totals.products);
   const rows = [
     { key: 'products', name: 'Products', note: 'the whole catalogue, kept in step with the store', count: productCount,
       server: totals.products, coverage: coveragePercent(productCount, totals.products) ?? (catalogueSynced ? 100 : 0) },
@@ -102,9 +103,11 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                   <Text className="font-medium">{row.name}</Text>
                   <Text className="text-xs text-muted-foreground">{row.note}</Text>
                   {row.key === 'products' ? <Button testID="store-health-redownload" variant="link" size="sm" className="self-start px-0"
-                    disabled={redownloading} onPress={() => setConfirming(true)}>
+                    disabled={blocked !== null} onPress={() => setConfirming(true)}>
                     <Text>{redownloading ? 'Re-downloading…' : 'Clear & re-download'}</Text>
                   </Button> : null}
+                  {row.key === 'products' && !redownloading && blocked !== null
+                    ? <Text testID="store-health-redownload-blocked" className="text-xs text-muted-foreground">{blocked}</Text> : null}
                 </VStack></TableCell>
                 <TableCell className="w-28"><Text testID={`store-health-count-${row.key}`} className="text-right">{row.count ?? '—'}</Text></TableCell>
                 <TableCell className="w-28"><Text testID={`store-health-server-${row.key}`} className="text-right text-muted-foreground">{row.server ?? '—'}</Text></TableCell>
