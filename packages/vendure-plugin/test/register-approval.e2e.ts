@@ -4,7 +4,7 @@ import { Logger, RequestContextService, Role, TransactionalConnection } from '@v
 import { parse } from 'graphql';
 import { IsNull } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { RegisterService, TallyCommand, TallyPosPlugin, TallyRegisterApproval } from '../src';
+import { RegisterService, TallyCommand, TallyPosPlugin, TallyRegisterApproval, TallyRegisterClosure } from '../src';
 import type { RegisterEnvelope } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import type { RegisterCommandType } from '../src/vendored/commands';
@@ -303,8 +303,12 @@ describe('register approval (contract 3)', () => {
     const command = closure(s, r, 0, { tillExpected: {}, counted: {} });
     await refused(command, 'register_approval_required', `Session ${s} needs a manager's approval: its cash variance is over ${THRESHOLD}`,
       { sessionId: s, thresholdMinor: THRESHOLD, variance: { cash: -10000 } });
-    expect(await send(resend(command, await proofFor(s, { cash: -10000 })))).toMatchObject({ status: 'applied',
-      register: { closure: { approvalVerified: true } } });
+    const applied = await send(resend(command, await proofFor(s, { cash: -10000 })));
+    expect(applied).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: true } } });
+    expect((applied as { register: { closure: { variance: unknown } } }).register.closure.variance).toEqual({});
+    // The stored and applied variance stay deriveVariance's output (counted has no keys), not the approval's cash figure.
+    const row = await connection.rawConnection.getRepository(TallyRegisterClosure).findOneByOrFail({ id: String(command.payload.closureId) });
+    expect(row.variance).toEqual({});
   });
 
   let approvedAfterTransition: string;
@@ -342,12 +346,18 @@ describe('register approval (contract 3)', () => {
   it("21. a SuperAdmin approves, and the closure stores the superadmin's user id as approvedBy", async () => {
     const { me } = await adminClient.query<{ me: { id: string } }>(parse('query { me { id } }'));
     const { s, r } = await session();
+    const asCashier = await cashier();
     // Vendure gives the SuperAdmin role every assignable permission; take ours off so only SuperAdmin itself can admit it.
     const roles = connection.rawConnection.getRepository(Role);
     const role = await roles.findOneByOrFail({ code: SUPER_ADMIN_ROLE_CODE });
     await roles.update(role.id, { permissions: role.permissions.filter(permission => String(permission) !== 'ApproveTallyPosVariance') });
-    const { status, body } = await approve(request(s, { username: 'superadmin', password: 'superadmin' }), await cashier())
-      .finally(() => roles.update(role.id, { permissions: role.permissions }));
+    let result: Awaited<ReturnType<typeof approve>>;
+    try {
+      result = await approve(request(s, { username: 'superadmin', password: 'superadmin' }), asCashier);
+    } finally {
+      await roles.update(role.id, { permissions: role.permissions });
+    }
+    const { status, body } = result;
     expect(role.permissions).toContain('ApproveTallyPosVariance');
     expect(status).toBe(200);
     expect(await send(closure(s, r, 10600, { approval: body.approval }))).toMatchObject({ status: 'applied' });
