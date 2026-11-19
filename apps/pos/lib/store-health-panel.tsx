@@ -7,7 +7,7 @@ import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
-import { coveragePercent, readServerTotals, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
+import { confirmRedownload, coveragePercent, readServerTotals, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
 export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
   session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
@@ -17,6 +17,11 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
 }): JSX.Element {
   const [checking, setChecking] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [checkingStore, setCheckingStore] = useState(false);
+  async function confirmYes() {
+    setCheckingStore(true);
+    try { await confirmRedownload(() => readServerTotals(sessionContext(session)), setTotals, onRedownload); } finally { setCheckingStore(false); setConfirming(false); }
+  }
   async function checkNow() {
     setChecking(true);
     try { await onCheckNow(); } finally { setChecking(false); }
@@ -132,8 +137,8 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
           </Text>
           <HStack space="sm" className="justify-end">
             <Button testID="store-health-redownload-cancel" variant="outline" onPress={() => setConfirming(false)}><Text>Cancel</Text></Button>
-            <Button testID="store-health-redownload-yes" variant="destructive" onPress={() => { setConfirming(false); void onRedownload(); }}>
-              <Text>Clear & re-download</Text>
+            <Button testID="store-health-redownload-yes" variant="destructive" disabled={checkingStore} onPress={() => void confirmYes()}>
+              <Text>{checkingStore ? 'Checking the store…' : 'Clear & re-download'}</Text>
             </Button>
           </HStack>
         </DialogContent>

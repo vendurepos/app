@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionReason, attentionRows, canSendAgain, changesWaiting, coveragePercent, readServerTotals, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, readServerTotals, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
 
 it("words Clear & re-download's confirm for no product, one and several", () => {
   expect(redownloadSummary(0)).toBe('No products are on this device yet; they download again from your store.');
@@ -113,4 +113,19 @@ describe('attentionReason and canSendAgain', () => {
     const order = { ...sale, ...fields } as PosOrder;
     expect([attentionReason(order), canSendAgain(order)]).toEqual([reason, retry]);
   });
+});
+
+it('refuses to clear on Yes when the store no longer answers', async () => {
+  const totals = { products: null, orders: null };
+  const onTotals = vi.fn();
+  const onRedownload = vi.fn(async () => {});
+  expect(await confirmRedownload(async () => totals, onTotals, onRedownload)).toBe('refused');
+  expect(onTotals).toHaveBeenCalledWith(totals);
+  expect(onRedownload).not.toHaveBeenCalled();
+});
+
+it('clears on Yes when the store answers', async () => {
+  const onRedownload = vi.fn(async () => {});
+  expect(await confirmRedownload(async () => ({ products: 5, orders: 2 }), vi.fn(), onRedownload)).toBe('cleared');
+  expect(onRedownload).toHaveBeenCalledTimes(1);
 });

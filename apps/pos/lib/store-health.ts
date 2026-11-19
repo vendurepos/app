@@ -82,3 +82,16 @@ export function redownloadBlocked(redownloading: boolean, serverProducts: number
   if (serverProducts === null) return 'Needs your store to answer, so the products can download again.';
   return null;
 }
+
+/** Clear & re-download's Yes asks the store again, so a till that went offline after the panel opened keeps its catalogue. */
+export async function confirmRedownload(
+  readTotals: () => Promise<ServerTotals>,
+  onTotals: (totals: ServerTotals) => void,
+  onRedownload: () => Promise<void>,
+): Promise<'cleared' | 'refused'> {
+  const totals = await readTotals();
+  onTotals(totals);
+  if (totals.products === null) return 'refused';
+  await onRedownload();
+  return 'cleared';
+}
