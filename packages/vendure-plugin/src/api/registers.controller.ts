@@ -11,6 +11,12 @@ export type TallyRegisterRead = {
     id: string; status: 'open' | 'counting'; openedAt: string; openedBy: string | null;
     deviceId: string | null; deviceName: string | null; countedFloatMinor: number;
     expected: Record<string, number>; salesCount: number;
+    /** Every movement row of the session, oldest first by `createdAt` then `id`. `paidInMinor` and `paidOutMinor` follow the
+     * closure item's rule over all of them, so `expected.cash` equals `countedFloatMinor` + the session's cash payments
+     * + `paidInMinor` − `paidOutMinor` − its cash refunds. The three fields are additive at version 1. */
+    paidInMinor: number; paidOutMinor: number;
+    movements: { id: string; type: 'paid_in' | 'paid_out' | 'no_sale' | 'void'; amountMinor: number; reason: string | null;
+      voids: string | null; createdAt: string; createdBy: string | null }[];
   };
   closures: { items: TallyClosureRead[]; totalItems: number; skip: number; take: number };
 };

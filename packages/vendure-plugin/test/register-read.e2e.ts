@@ -79,7 +79,7 @@ describe('GET /tally/v1/registers/:id', () => {
       register: { id: r, receivedAt: expect.any(String) },
       counters: { lastClosureNumber: 0, perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0 },
       session: { id: s, status: 'open', openedAt: opening.payload.openedAt, openedBy: null, deviceId: 'read-till', deviceName: 'Front till',
-        countedFloatMinor: 10000, expected: { cash: 10000 }, salesCount: 0 },
+        countedFloatMinor: 10000, expected: { cash: 10000 }, salesCount: 0, paidInMinor: 0, paidOutMinor: 0, movements: [] },
       closures: { items: [], totalItems: 0, skip: 0, take: 20 },
     });
     expect(isIso(body.register.receivedAt)).toBe(true);
@@ -132,6 +132,39 @@ describe('GET /tally/v1/registers/:id', () => {
     expect(status).toBe(200);
     expect(body.session.salesCount).toBe(1);
     expect(body.session.expected.cash).toBe(10000 + sale.payload.totalMinor);
+  });
+
+  it('a live session carries its movements oldest first and the cash paid in and out that its expected counts', async () => {
+    const [s, r, s2, r2] = [uuid(), uuid(), uuid(), uuid()];
+    await applied(open(s, r));
+    const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);
+    sale.payload.sessionId = s;
+    sale.payload.registerId = r;
+    sale.createdAt = now();
+    sale.payload.createdAt = sale.createdAt;
+    await applied(sale);
+    const start = Date.now() - 60_000;
+    const at = (seconds: number) => new Date(start + seconds * 1000).toISOString();
+    const movement = (sessionId: string, type: string, amountMinor: number, seconds: number, reason = 'float') => envelope(
+      'register.movement.record', { movementId: uuid(), sessionId, type, amountMinor, reason, createdAt: at(seconds) });
+    const [m1, m2, m3] = [movement(s, 'paid_in', 500, 1, 'float top-up'), movement(s, 'paid_out', 200, 2), movement(s, 'paid_in', 400, 3)];
+    const v3 = envelope('register.movement.void', { movementId: uuid(), sessionId: s, voids: m3.payload.movementId, createdAt: at(4) });
+    // Recorded out of order, so only the read's sort puts them oldest first.
+    for (const command of [m3, m1, v3, m2]) await applied(command);
+    await applied(open(s2, r2));
+    const x1 = movement(s2, 'paid_in', 900, 0);
+    await applied(x1);
+    const { status, body } = await get(r);
+    expect(status).toBe(200);
+    const { session } = body;
+    expect(session.movements.map((row: { id: string }) => row.id)).toEqual([m1, m2, m3, v3].map(command => command.payload.movementId));
+    expect(session.movements[0]).toEqual({ id: m1.payload.movementId, type: 'paid_in', amountMinor: 500, reason: 'float top-up',
+      voids: null, createdAt: m1.payload.createdAt, createdBy: null });
+    expect(session.movements[3]).toMatchObject({ type: 'void', voids: m3.payload.movementId });
+    expect(session.paidInMinor).toBe(500);
+    expect(session.paidOutMinor).toBe(200);
+    expect(session.expected.cash).toBe(session.countedFloatMinor + sale.payload.totalMinor + session.paidInMinor - session.paidOutMinor);
+    expect(session.expected.cash).toBe(10000 + sale.payload.totalMinor + 300);
   });
 
   it('a closure read carries the session\'s float and the cash paid in and out that its expected counted', async () => {
