@@ -444,6 +444,8 @@ test('Notifications at the foot of the rail shows the empty state and closes', a
   await expect(page.getByTestId('notifications-sheet')).toBeVisible();
   await expect(page.getByTestId('notifications-empty')).toContainText('No notifications');
   await expect(page.getByTestId('notifications-empty')).toContainText('Plugin updates and notices about VendurePOS arrive here.');
+  await expect(page.getByTestId('notifications-about')).toHaveAttribute('href', 'https://vendurepos.com/docs/notifications');
+  await expect(page.getByTestId('notifications-about')).toHaveText('About notifications');
   await page.getByTestId('notifications-close').click();
   await expect(page.getByTestId('notifications-sheet')).toHaveCount(0);
 });

@@ -1,8 +1,12 @@
 import type { JSX } from 'react';
 import { ScrollView, View } from 'react-native';
+import { Link } from 'expo-router';
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, Text, VStack, XIcon } from '@tallyui/components';
 import { BellIcon } from './nav-icons';
 import type { TillNotice } from './notices';
+
+// The marketing site's notifications docs (v2's "About notifications" link).
+const ABOUT_NOTIFICATIONS_URL = 'https://vendurepos.com/docs/notifications';
 
 /** v2's Notifications sheet (CHECKLIST 11.1), a right-hand side sheet as TallyUI's RegisterPanel presentation="side"; its notices come from lib/notices.ts. */
 export function NotificationsSheet({ open, onOpenChange, notices }: {
@@ -29,7 +33,8 @@ export function NotificationsSheet({ open, onOpenChange, notices }: {
             </VStack>
           ))}
         </ScrollView>
-        <View className="items-end border-t border-border pt-4">
+        <View className="flex-row items-center justify-between border-t border-border pt-4">
+          <Link href={ABOUT_NOTIFICATIONS_URL} target="_blank" rel="noopener" testID="notifications-about" className="text-sm text-primary">About notifications</Link>
           <Button testID="notifications-close" variant="outline" onPress={() => onOpenChange(false)}><Text>Close</Text></Button>
         </View>
       </DialogContent>
