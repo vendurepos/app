@@ -586,6 +586,19 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   expect(summary.slice(0, 1)).toEqual(['Sales summary']);
   expect(summary).toEqual(expect.arrayContaining(['Total €9.52', 'Orders 1', 'Items 1', 'Payments']));
   await expect(page.getByTestId('reports-print-error')).toHaveCount(0);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('reports-export-csv').click()]);
+  expect(download.suggestedFilename()).toMatch(/^sales-summary-(\d{4}-\d{2}-\d{2})-\1\.csv$/);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  expect(csv.startsWith('"Section","Name","Quantity","Amount"')).toBe(true);
+  expect(csv).toContain('"Summary","Total","","9.52"');
+  expect(csv).toContain('"Products","Tally Fixture Mug","1",');
+  await expect(page.getByTestId('reports-export-error')).toHaveCount(0);
+  // The demo-pairs size, as 10d; the PNG is made docs/v2-parity/demo-pairs/10e-reports-export-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.getByTestId('reports-export-csv').scrollIntoViewIfNeeded();
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('10e-reports-export-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await expect(page.getByTestId('reports-close')).toHaveCount(0);
   await expect(page.getByTestId('reports-panel')).not.toContainText('Back to sale');
   await expect(page.getByTestId('sales-hero')).not.toContainText('—');
