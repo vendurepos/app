@@ -1,11 +1,21 @@
 import { minorUnitDigits, moneyToMajor, resolvePrice, type ProductTraits, type StockStatus } from '@tallyui/core';
-import { catalogueEntries, searchProducts, variantPriceLabel } from '@tallyui/pos';
+import { catalogueEntries, searchProducts, sortProducts, variantPriceLabel, type ProductSort, type ProductSortValue } from '@tallyui/pos';
 import { stockTarget, type StockTarget, type VendureVariantStock } from './product-edit';
 
 /** One variant's row in the Products panel (CHECKLIST 10.2), with display and edit fields. */
 export interface ProductRow { id: string; name: string; sku: string; price: string; stock: string;
   imageUrl: string | null; stockStatus: StockStatus; categories: string; categoryIds: string[];
   priceText: string; stockText: string; managed: boolean; stockTarget: StockTarget | null }
+/** The Products panel's header sort value for a row (v2's sortable headers): Name, SKU, Stock and Price; a missing value sorts last. */
+export function productRowSortValue(row: ProductRow, field: string): ProductSortValue {
+  if (field === 'name') return row.name;
+  if (field === 'sku') return row.sku === '—' ? undefined : row.sku;
+  if (field === 'stock') return row.stockText === '' ? undefined : Number(row.stockText);
+  if (field === 'price') return row.priceText === '' ? undefined : Number(row.priceText);
+  return undefined;
+}
+/** The whole filtered list in header-sort order, before the panel's page slice; null keeps catalogue order (the same array). */
+export function sortProductRows(rows: ProductRow[], sort: ProductSort | null): ProductRow[] { return sortProducts(rows, sort, productRowSortValue); }
 
 /** v2's stock-status labels (products table); unknown shows a dash. */
 export const STOCK_STATUS_LABELS: Record<StockStatus, string> = {

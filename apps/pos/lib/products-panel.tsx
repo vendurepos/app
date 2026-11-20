@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 import { Image, View } from 'react-native';
 import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
-import { filterProductRows, productCategories, productRows, STOCK_STATUS_LABELS, type ProductRow, type ProductRowFilters } from './product-rows';
+import { type ProductSort } from '@tallyui/pos';
+import { filterProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow, type ProductRowFilters } from './product-rows';
 import { refreshCatalogue } from './catalogue';
 import { sessionContext, type Session } from './session';
 import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveStock, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
@@ -52,9 +53,9 @@ export function ProductsPanel({ products, traits, currency, session }: { product
     { id: 'image', header: 'Image', hideHeader: true, flex: 0.6, render: row => row.imageUrl ?
       <Image source={{ uri: row.imageUrl }} testID={`product-image-${row.id}`} accessibilityLabel={row.name}
         resizeMode="cover" className="h-10 w-10 rounded" /> : <View testID={`product-image-${row.id}`} className="h-10 w-10 rounded bg-muted" /> },
-    { id: 'name', header: 'Name', flex: 3, render: row => <Text>{row.name}</Text> },
-    { id: 'sku', header: 'SKU', render: row => <Text>{row.sku}</Text> },
-    { id: 'stock', header: 'Stock', align: 'center', flex: 1, render: row => editable ? <VStack className="items-center gap-1">
+    { id: 'name', header: 'Name', flex: 3, sortValue: row => productRowSortValue(row, 'name'), render: row => <Text>{row.name}</Text> },
+    { id: 'sku', header: 'SKU', sortValue: row => productRowSortValue(row, 'sku'), render: row => <Text>{row.sku}</Text> },
+    { id: 'stock', header: 'Stock', align: 'center', flex: 1, sortValue: row => productRowSortValue(row, 'stock'), render: row => editable ? <VStack className="items-center gap-1">
       <EditField testID={`product-stock-${row.id}`} label={`Stock of ${row.name}`} value={row.stockText} keyboardType="number-pad"
         disabled={!row.managed || !row.stockTarget}
         onSave={text => row.stockTarget ? save(row, { field: 'stock', text, target: row.stockTarget }) : Promise.resolve(false)} />
@@ -67,12 +68,13 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       <Text testID={`product-stock-status-${row.id}`}>{STOCK_STATUS_LABELS[row.stockStatus]}</Text>
     </HStack> },
     { id: 'categories', header: 'Categories', flex: 1.5, render: row => <Text numberOfLines={1} testID={`product-categories-${row.id}`}>{row.categories}</Text> },
-    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable ?
+    { id: 'price', header: 'Price', align: 'right', sortValue: row => productRowSortValue(row, 'price'), render: row => priceEditable ?
       <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
         keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
   ], [editable, priceEditable, save, currency]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
+  const [sort, setSort] = useState<ProductSort | null>(null);
   // v2's Products screen lists out-of-stock products, unlike the till, whose In Stock starts on.
   const [filters, setFilters] = useState<ProductRowFilters>({ inStock: false, categoryId: null });
   const [categoryOpen, setCategoryOpen] = useState(false);
@@ -80,7 +82,8 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   const rows = useMemo(() => productRows(products, search, traits, currency, threshold), [products, search, traits, currency, threshold]);
   const categories = useMemo(() => productCategories(products, traits), [products, traits]);
   const filtered = useMemo(() => filterProductRows(rows, filters), [rows, filters]);
-  const shown = filtered.slice(0, limit);
+  const sorted = useMemo(() => sortProductRows(filtered, sort), [filtered, sort]);
+  const shown = sorted.slice(0, limit);
   return (
     <VStack testID="products-panel" className="flex-1">
       <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2">
@@ -102,7 +105,7 @@ export function ProductsPanel({ products, traits, currency, session }: { product
           selectedId={filters.categoryId ?? ALL_CATEGORIES}
           onSelect={id => { setFilters(f => ({ ...f, categoryId: id === ALL_CATEGORIES ? null : id })); setLimit(PAGE_SIZE); setCategoryOpen(false); }} />
       </View> : null}
-      <ProductTable items={shown} columns={COLUMNS} sortItems={false} showUnsellable emptyState={
+      <ProductTable items={shown} columns={COLUMNS} sort={sort} onSortChange={next => { setSort(next); setLimit(PAGE_SIZE); }} sortItems={false} showUnsellable emptyState={
         <Text testID="products-empty" className="p-4 text-muted-foreground">
           {search.trim() ? 'No products match this search.' : filters.inStock || filters.categoryId ? 'No products match these filters.' : 'No products on this device yet.'}
         </Text>
