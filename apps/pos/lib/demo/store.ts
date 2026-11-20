@@ -2,6 +2,7 @@ import type {
   CommandResult, OrderCreatePayload, OrderRefundPayload, OrderRefundResult, RegisterClosureSubmitPayload, RegisterCommandResult, RegisterSessionOpenPayload,
 } from '@tallyui/core';
 import { barcodeOf, CATALOGUE } from './catalogue';
+import { demoFacetValues } from './facets';
 import { demoProductImage } from './product-images';
 import type { TallyClosureRead } from '../closure-history';
 import type { ListedRegister } from '../register-choice';
@@ -279,7 +280,7 @@ export class DemoStore {
     return CATALOGUE.map((product, index) => ({
       id: String(index + 1), createdAt: SEED_TIME, updatedAt: SEED_TIME,
       name: product.name, slug: product.slug, description: `${product.name} (VendurePOS dev seed)`, enabled: true,
-      featuredAsset: assets[index], assets: [assets[index]], collections: DEMO_COLLECTIONS.filter(collection => collection.name === product.category), facetValues: [],
+      featuredAsset: assets[index], assets: [assets[index]], collections: DEMO_COLLECTIONS.filter(collection => collection.name === product.category), facetValues: demoFacetValues(product),
       variants: product.variants.map(variant => {
         const id = String(++variantIndex);
         const category = DEMO_CATEGORIES.find(category => category.name === product.taxCategory)!;

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Image, View } from 'react-native';
+import { Image, ScrollView, View } from 'react-native';
 import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { type ProductSort } from '@tallyui/pos';
 import { filterProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow, type ProductRowFilters } from './product-rows';
+import { productFacets, usePublicFacetIds } from './product-facets';
 import { refreshCatalogue } from './catalogue';
 import { sessionContext, type Session } from './session';
 import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveStock, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
@@ -76,11 +77,15 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [sort, setSort] = useState<ProductSort | null>(null);
   // v2's Products screen lists out-of-stock products, unlike the till, whose In Stock starts on.
-  const [filters, setFilters] = useState<ProductRowFilters>({ inStock: false, categoryId: null });
+  const [filters, setFilters] = useState<ProductRowFilters>({ inStock: false, categoryId: null, facets: {} });
   const [categoryOpen, setCategoryOpen] = useState(false);
   const threshold = session.stock.outOfStockThreshold;
   const rows = useMemo(() => productRows(products, search, traits, currency, threshold), [products, search, traits, currency, threshold]);
   const categories = useMemo(() => productCategories(products, traits), [products, traits]);
+  const shownFacets = usePublicFacetIds(session);
+  const facets = useMemo(() => productFacets(products, shownFacets), [products, shownFacets]);
+  const [facetOpen, setFacetOpen] = useState<string | null>(null);
+  const openFacet = facets.find(facet => facet.id === facetOpen);
   const filtered = useMemo(() => filterProductRows(rows, filters), [rows, filters]);
   const sorted = useMemo(() => sortProductRows(filtered, sort), [filtered, sort]);
   const shown = sorted.slice(0, limit);
@@ -94,20 +99,39 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       <HStack dataSet={{ print: 'hide' }} className="items-center gap-2 border-b border-border px-4 py-2" testID="products-filters">
         <ProductFilterBar value={{ ...DEFAULT_PRODUCT_FILTERS, inStock: filters.inStock }} chips={FILTER_CHIPS}
           onChange={next => { setFilters(f => ({ ...f, inStock: next.inStock })); setLimit(PAGE_SIZE); }}
-          onTermPress={() => setCategoryOpen(open => !open)} />
+          onTermPress={() => { setFacetOpen(null); setCategoryOpen(open => !open); }} />
         {filters.categoryId ? <View testID="products-category-chip">
           <FilterChip label={categories.find(category => category.id === filters.categoryId)?.name ?? 'Category'} active
             onPress={() => { setFilters(f => ({ ...f, categoryId: null })); setLimit(PAGE_SIZE); }} />
         </View> : null}
+        {/* Many facets scroll sideways; the row never wraps the panel taller (Front desk ruling, 2026-11-21). */}
+        {facets.length ? <ScrollView horizontal testID="products-facet-pills" className="flex-1" contentContainerClassName="items-center gap-2"
+          showsHorizontalScrollIndicator={false}>
+          {facets.map(facet => {
+            const value = facet.values.find(v => v.id === filters.facets?.[facet.id]);
+            return <View key={facet.id} testID={`products-facet-${facet.id}`}>
+              <FilterChip label={value ? `${facet.name}: ${value.name}` : facet.name} active={!!value} onPress={() => {
+                if (value) {
+                  setFilters(f => ({ ...f, facets: Object.fromEntries(Object.entries(f.facets ?? {}).filter(([id]) => id !== facet.id)) }));
+                  setLimit(PAGE_SIZE);
+                } else { setCategoryOpen(false); setFacetOpen(open => open === facet.id ? null : facet.id); }
+              }} />
+            </View>;
+          })}
+        </ScrollView> : null}
       </HStack>
       {categoryOpen ? <View testID="products-category-picker" className="border-b border-border px-4 py-2">
         <CategoryNav categories={[{ id: ALL_CATEGORIES, name: 'All categories' }, ...categories]} orientation="horizontal"
           selectedId={filters.categoryId ?? ALL_CATEGORIES}
           onSelect={id => { setFilters(f => ({ ...f, categoryId: id === ALL_CATEGORIES ? null : id })); setLimit(PAGE_SIZE); setCategoryOpen(false); }} />
       </View> : null}
+      {openFacet ? <View testID={`products-facet-picker-${openFacet.id}`} className="border-b border-border px-4 py-2">
+        <CategoryNav categories={openFacet.values} orientation="horizontal" selectedId=""
+          onSelect={id => { setFilters(f => ({ ...f, facets: { ...f.facets, [openFacet.id]: id } })); setLimit(PAGE_SIZE); setFacetOpen(null); }} />
+      </View> : null}
       <ProductTable items={shown} columns={COLUMNS} sort={sort} onSortChange={next => { setSort(next); setLimit(PAGE_SIZE); }} sortItems={false} showUnsellable emptyState={
         <Text testID="products-empty" className="p-4 text-muted-foreground">
-          {search.trim() ? 'No products match this search.' : filters.inStock || filters.categoryId ? 'No products match these filters.' : 'No products on this device yet.'}
+          {search.trim() ? 'No products match this search.' : filters.inStock || filters.categoryId || Object.keys(filters.facets ?? {}).length ? 'No products match these filters.' : 'No products on this device yet.'}
         </Text>
       } />
       {error ? <Text testID="products-save-error" className="border-t border-border px-4 py-2 text-sm text-destructive">{error}</Text> : null}
