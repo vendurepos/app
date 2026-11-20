@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The till role preset (`tallyEnsurePosTillRole`) gains `UpdateCustomer`, so a till can edit a customer; it still holds no `DeleteCustomer`. An existing `vendurepos-pos-till` role gains it the next time **New POS till key** runs (or `tallyEnsurePosTillRole` is called), keeping the merchant's own additions, or a merchant can add Update customer to the role under Settings → Roles. No migration.
 - Receipt email: the per-order cap and the new daily caps (perUserPerDay, perChannelPerDay) are kept in the database (migration TallyPosReceiptEmail1791400000000), so they hold across restarts and server instances (#345).
 - `POST /tally/v1/variants/:id/stock` sets a variant's saleable stock only while it still equals the figure the till showed, under the same stock lock as a sale (10.2).
 - The receipt-email route's per-user rate limit keeps at most 10,000 users in memory, dropping the least recently seen (#318).

@@ -44,6 +44,8 @@ describe('POS till API keys', () => {
     roleId = first.id;
     expect(first).toMatchObject({ code: POS_TILL_ROLE_CODE, description: 'VendurePOS till' });
     expect(new Set(first.permissions)).toEqual(new Set([...POS_TILL_PERMISSIONS, 'Authenticated']));
+    expect(first.permissions).toContain('UpdateCustomer');
+    expect(first.permissions).not.toContain('DeleteCustomer');
     expect(second).toEqual(first);
     const { roles, channels } = await adminClient.query(parse(`query {
       roles(options: { filter: { code: { eq: "${POS_TILL_ROLE_CODE}" } } }) { totalItems items { id } }
@@ -139,6 +141,24 @@ describe('POS till API keys', () => {
       createCustomer(input: $input) { __typename ... on Customer { id emailAddress } ... on ErrorResult { message } }
     }`, { input: { firstName: 'Till', lastName: 'Customer', emailAddress } });
     expect(createCustomer).toEqual({ __typename: 'Customer', id: expect.any(String), emailAddress });
+    const { updateCustomer } = await keyQuery(`mutation Customer($input: UpdateCustomerInput!) {
+      updateCustomer(input: $input) { __typename ... on Customer { id phoneNumber } ... on ErrorResult { message } }
+    }`, { input: { id: createCustomer.id, phoneNumber: '0400 000 000' } });
+    expect(updateCustomer).toEqual({ __typename: 'Customer', id: createCustomer.id, phoneNumber: '0400 000 000' });
+
+    const deleteResponse = await fetch(`${base}/admin-api`, {
+      method: 'POST', headers: { ...keyHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: 'mutation DeleteCustomer($id: ID!) { deleteCustomer(id: $id) { result } }',
+        variables: { id: createCustomer.id } }),
+    });
+    expect(deleteResponse.status).toBe(200);
+    const deleteBody = await deleteResponse.json();
+    expect(deleteBody.errors[0].extensions.code).toBe('FORBIDDEN');
+
+    const { customer } = await adminClient.query(parse(`query Customer($id: ID!) {
+      customer(id: $id) { id }
+    }`), { id: createCustomer.id });
+    expect(customer).toEqual({ id: createCustomer.id });
   });
 
   it('the audit trail of a sale made with an API key', async () => {
