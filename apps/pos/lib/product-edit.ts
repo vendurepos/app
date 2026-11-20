@@ -105,7 +105,8 @@ export async function saveStock(context: SyncContext, variantId: string, shown: 
     const body = await response.json().catch(() => null);
     const code = typeof body?.code === 'string' ? body.code : undefined;
     if (response.status === 404 && !code) return false;
-    if (response.ok) return null;
+    // Saved only when the route echoes the figure sent: a 200 from anything else (a proxy's HTML page) wrote nothing.
+    if (response.ok) return body?.saleable === saleable ? null : PRODUCT_SAVE_FAILED_TEXT;
     // The store already holds the figure sent (a resend after a lost answer): the edit is saved.
     if (response.status === 409 && code === 'stock_changed') return body.saleable === saleable ? null : STOCK_CHANGED_TEXT;
     return PRODUCT_SAVE_FAILED_TEXT;

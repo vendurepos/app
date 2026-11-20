@@ -118,16 +118,19 @@ it('saves one variant update and names a refusal', async () => {
 it('saves stock as one compare-and-set POST on the plugin route', async () => {
   const fetch = vi.fn(async () => new Response(JSON.stringify({ saleable: 9, stockOnHand: 12 }), { status: 200 }));
   vi.stubGlobal('fetch', fetch);
-  expect(await saveStock(context, '7', '5', ' 9 ')).toBeNull();
+  expect(await saveStock({ ...context, headers: { Authorization: 'Bearer t', 'vendure-token': 'pos' } } as SyncContext, '7', '5', ' 9 ')).toBeNull();
   expect(fetch).toHaveBeenCalledTimes(1);
   const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe('https://store.test/tally/v1/variants/7/stock');
   expect(init.method).toBe('POST');
+  expect(init.headers).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer t', 'vendure-token': 'pos' });
   expect(JSON.parse(init.body as string)).toEqual({ expectedSaleable: 5, saleable: 9 });
 });
 
 it.each([
   [200, { saleable: 9, stockOnHand: 9 }, null],
+  [200, '<html>ok</html>', PRODUCT_SAVE_FAILED_TEXT],
+  [200, { saleable: 8, stockOnHand: 8 }, PRODUCT_SAVE_FAILED_TEXT],
   [409, { code: 'stock_changed', message: 'x', saleable: 3 }, STOCK_CHANGED_TEXT],
   [409, { code: 'stock_changed', message: 'x', saleable: 9 }, null],
   [404, { statusCode: 404, message: 'Cannot POST /tally/v1/variants/7/stock', error: 'Not Found' }, false],
