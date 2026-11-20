@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createVendureConnector, vendureProductTraits } from '@tallyui/connector-vendure';
-import { productRows } from './product-rows';
+import { productRows, STOCK_STATUS_LABELS } from './product-rows';
 
 const variant = (id: string, sku: string, price: number, name: string, stockOnHand?: number) =>
   ({ id, name, sku, price, currencyCode: 'EUR', enabled: true, trackInventory: stockOnHand === undefined ? 'FALSE' : 'TRUE', stockOnHand });
@@ -15,12 +15,33 @@ describe('productRows', () => {
     const rows = productRows(products, '', vendureProductTraits, 'EUR', 0);
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
     expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
+      imageUrl: null, stockStatus: 'in_stock', categories: '—',
       priceText: '8.00', stockText: '50', managed: true, stockTarget: null });
     expect([rows[3].managed, rows[3].stockText]).toEqual([false, '']);
     expect(rows[1].name).toBe('Espresso Beans · 250 g');
     expect(rows[1].stock).toBe('20');
     expect(rows[2].stock).toBe('0');
     expect(rows[3].stock).toBe('—');
+  });
+
+  it('includes the product image and categories and each variant\'s stock status', () => {
+    const rows = productRows([
+      { ...products[0], featuredAsset: { preview: 'https://example.test/mug.jpg' },
+        collections: [{ id: '1', name: 'Kitchen' }, { id: '2', name: 'Gifts' }] },
+      products[1],
+    ], '', vendureProductTraits, 'EUR', 0);
+    expect(rows[0].imageUrl).toBe('https://example.test/mug.jpg');
+    expect(rows[1].imageUrl).toBeNull();
+    expect(rows[0].categories).toBe('Kitchen, Gifts');
+    expect(rows[1].categories).toBe('—');
+    expect(rows[0].stockStatus).toBe('in_stock');
+    expect(rows[2].stockStatus).toBe('out_of_stock');
+  });
+
+  it('labels all four stock statuses as in v2', () => {
+    expect(STOCK_STATUS_LABELS).toEqual({
+      in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'On backorder', unknown: '—',
+    });
   });
 
   it('keeps each Espresso Beans variant\'s own id, price and stock edit values', () => {
