@@ -80,3 +80,11 @@ export const SlidersIcon = createSvgIcon('SlidersIcon', () => (
     <Path d="M4 18l11 0" /><Path d="M19 18l1 0" />
   </>
 ));
+
+// Refresh: tabler's `refresh` (v2's ↻ after the Orders count, 07b).
+export const RefreshIcon = createSvgIcon('RefreshIcon', () => (
+  <>
+    <Path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" />
+    <Path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+  </>
+));

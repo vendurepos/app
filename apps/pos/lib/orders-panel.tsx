@@ -1,17 +1,19 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
 import {
-  Button, HStack, OrderFilterBar, OrdersList, OrderStatusBadge, SearchInput,
+  Button, HStack, IconButton, OrderFilterBar, OrdersList, OrderStatusBadge, SearchInput,
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, ToggleGroup, ToggleGroupItem, VStack,
   type OrderFilterOption, type OrderHistoryRow,
 } from '@tallyui/components';
 import { searchVendureCustomers } from '@tallyui/connector-vendure';
 import { formatMoney } from '@tallyui/core';
 import { needsAttention, type OrderFilterValue, type OutboxState, type PosOrder } from '@tallyui/pos';
+import { RefreshIcon } from './nav-icons';
 import {
   groupOrdersByDay, ORDER_SEARCH_DEBOUNCE_MS, ORDER_STATUS_OPTIONS, storeDayOf,
   toOrderTableRow, useOrderList, VENDURE_ORDER_FILTER_FIELDS, type OrderListQuery, type OrderTableRow,
 } from './order-list';
+import { fetchRegisters, registerFilterOptions, type ListedRegister } from './register-choice';
 import { sessionContext, type Session } from './session';
 
 export type OrdersScope = 'store' | 'till';
@@ -25,6 +27,16 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
   const wide = useWindowDimensions().width >= 640;
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<OrderFilterValue>({});
+  const [registers, setRegisters] = useState<ListedRegister[]>([]);
+  useEffect(() => {
+    let live = true;
+    void fetchRegisters(session).then(
+      (listed) => { if (live) setRegisters(listed); },
+      () => { if (live) setRegisters([]); },
+    );
+    return () => { live = false; };
+  }, [session]);
+  const registerOptions = useMemo(() => registerFilterOptions(registerId, registers), [registerId, registers]);
   const query = useMemo<OrderListQuery>(() => ({ search, filters }), [search, filters]);
   const { orders, totalItems, notice, loading, loadMore, reload } = useOrderList(session, scope === 'store', query, timezone);
   const rows = useMemo(() => orders.map(order => toOrderTableRow(order, timezone)), [orders, timezone]);
@@ -77,7 +89,7 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
         <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
           <OrderFilterBar fields={VENDURE_ORDER_FILTER_FIELDS} value={filters} onChange={setFilters} initial={{}}
             timezone={timezone} onCustomerSearch={onCustomerSearch} options={{ status: ORDER_STATUS_OPTIONS,
-              customer: customerOptions, cashier: cashierOptions, register: [{ value: registerId, label: 'This till' }] }} />
+              customer: customerOptions, cashier: cashierOptions, register: registerOptions }} />
         </View>
         {notice ? (
           <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
@@ -109,7 +121,12 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
               ? 'No orders match this search and these filters.' : 'No orders on the store yet.'}
           </Text> : null}
           {rows.length > 0 ? <HStack className="items-center justify-between px-4 py-3">
-            <Text testID="orders-count">{`Showing ${orders.length} of ${totalItems} orders`}</Text>
+            <HStack className="items-center gap-1">
+              <Text testID="orders-count">{`Showing ${orders.length} of ${totalItems} orders`}</Text>
+              <IconButton testID="orders-refresh" variant="ghost" size="sm" accessibilityLabel="Refresh orders" disabled={loading} onPress={reload}>
+                <RefreshIcon size={16} />
+              </IconButton>
+            </HStack>
             {orders.length < totalItems ? <Button testID="orders-more" variant="secondary" size="sm" disabled={loading} onPress={loadMore}>
               <Text>Show more</Text>
             </Button> : null}
