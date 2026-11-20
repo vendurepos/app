@@ -542,7 +542,9 @@ function Sale({
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
-  useEffect(() => { if (stage.kind === 'cart') setTenderDrawer(null); }, [stage.kind]);
+  // Before the tender the cart follows the binding: a pin whose tender never started (startTender returns silently on a
+  // locked sale, an empty cart or unpriced coupons) is dropped, so a later rebind is never stamped with the old drawer.
+  useEffect(() => { if (stage.kind === 'cart' && tenderDrawer !== null) setTenderDrawer(null); }, [stage.kind, tenderDrawer]);
   const tender = useTillTender(sale);
   const currency = session.settings.currency;
   const configuredFloatMinor = loadOpeningFloatMinor(boundRegisterId);
