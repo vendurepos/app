@@ -49,10 +49,10 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   const COLUMNS = useMemo<ProductTableColumn<ProductRow>[]>(() => [
     { id: 'name', header: 'Name', flex: 3, render: row => <Text>{row.name}</Text> },
     { id: 'sku', header: 'SKU', render: row => <Text>{row.sku}</Text> },
-    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable && row.editable ?
+    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable ?
       <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
         keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
-    { id: 'stock', header: 'Stock', align: 'center', flex: 1, render: row => editable && row.editable ? <VStack className="items-center gap-1">
+    { id: 'stock', header: 'Stock', align: 'center', flex: 1, render: row => editable ? <VStack className="items-center gap-1">
       <EditField testID={`product-stock-${row.id}`} label={`Stock of ${row.name}`} value={row.stockText} keyboardType="number-pad"
         disabled={!row.managed || !row.stockTarget}
         onSave={text => row.stockTarget ? save(row, { field: 'stock', text, target: row.stockTarget }) : Promise.resolve(false)} />
