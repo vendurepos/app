@@ -3314,3 +3314,17 @@ test("the cart header's settings button opens Settings › General at the Cart c
   await expect(page.getByTestId('price-edit-toggle')).toBeInViewport();
   await expect(page.getByTestId('settings-cart-card')).not.toBeInViewport();
 });
+
+test("the product pane's settings button opens Settings › General at the Products card, as v2's product settings (02f)", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await expect(page.getByTestId('product-settings-open')).toHaveAttribute('aria-label', 'Product settings');
+  await page.getByTestId('product-settings-open').click();
+  await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tile-size')).toBeInViewport();
+  // Scrolled to Products: the Prices card above it has left the top of the panel.
+  await expect(page.getByTestId('price-edit-toggle')).not.toBeInViewport();
+});
