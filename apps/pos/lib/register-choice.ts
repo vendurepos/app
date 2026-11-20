@@ -38,6 +38,12 @@ export function registerChoices(ownId: string, listed: readonly ListedRegister[]
   ];
 }
 
+/** The cashier sheet's Register row (CHECKLIST 6.1): the bound register as the picker labels it, "Register <first 8>" when unlisted. */
+export function boundRegisterLabel(ownId: string, listed: readonly ListedRegister[], boundId: string): string {
+  return registerChoices(ownId, listed, new Date()).find((c) => c.id === boundId)?.label
+    ?? registerLabel({ id: boundId, lastDeviceName: null });
+}
+
 let tillHoldsSession = false;
 
 /** Set by app/index.tsx, which stays mounted under the Settings panel: the till holds a live session on its bound register. */

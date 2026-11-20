@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { holdsRegister, pickRefusal, registerChoices, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
+import { boundRegisterLabel, holdsRegister, pickRefusal, registerChoices, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
 
 const now = new Date(2026, 10, 17, 18, 0);
 const at = new Date(2026, 10, 17, 14, 38).toISOString();
@@ -60,6 +60,21 @@ describe('registerChoices', () => {
     const unlisted = registerChoices('mine', [b, c], now);
     expect(unlisted.map(choice => choice.id)).toEqual(['mine', 'b', 'c']);
     expect(unlisted[0]).toEqual({ id: 'mine', label: 'This device', status: null });
+  });
+});
+
+describe('boundRegisterLabel', () => {
+  it('labels the own register This device, even offline or when it has a device name', () => {
+    expect(boundRegisterLabel('own', [], 'own')).toBe('This device');
+    expect(boundRegisterLabel('own', [listedRegister('own')], 'own')).toBe('This device');
+  });
+
+  it('labels another listed register by its last device name', () => {
+    expect(boundRegisterLabel('own', [listedRegister('other')], 'other')).toBe('Till other');
+  });
+
+  it('labels an unlisted bound register by the first 8 of its id', () => {
+    expect(boundRegisterLabel('own', [], '0193abcd-1111-7000-8000-000000000000')).toBe('Register 0193abcd');
   });
 });
 
