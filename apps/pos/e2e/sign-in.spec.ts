@@ -527,7 +527,7 @@ test('a store error badges Store health on the rail until the sync log is opened
   await expect(page.getByTestId('store-health-panel')).toBeVisible();
   await page.setViewportSize({ width: 960, height: 600 });
   await page.mouse.move(480, 0);
-  await page.screenshot({ path: test.info().outputPath('13g-store-health-error-badge-vendurepos.png') });
+  await page.screenshot({ path: test.info().outputPath('13h-store-health-error-badge-vendurepos.png') });
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   if (await page.getByTestId('store-health-attention-view-log').isVisible()) {
     await page.getByTestId('store-health-attention-view-log').click();
