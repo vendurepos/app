@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { devices, expect, test, type Page } from '@playwright/test';
+import { FONT_FACES } from '@tallyui/theme';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
@@ -1750,6 +1751,37 @@ test('Settings › Theme sets the scale, and keeps it after a reload', async ({ 
   await expect.poll(textBase).toBe('16px');
   await page.getByTestId('scale-auto').click();
   await expect.poll(textBase).toBe('14px');
+});
+
+test('Settings › Theme sets the fonts from the bundled faces, and keeps the choice after a reload', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'theme');
+  await expect(page.getByTestId('font-auto')).toHaveAttribute('aria-pressed', 'true');
+  const expectedFaces = Object.entries(FONT_FACES).flatMap(([family, faces]) =>
+    faces.map(({ weight, style }) => `${family}|${weight}|${style ?? 'normal'}`)).sort();
+  await expect.poll(() => page.evaluate(() => {
+    const faces: string[] = [];
+    document.fonts.forEach((f) => { if (f.status === 'loaded') faces.push(`${f.family.replace(/"/g, '')}|${f.weight}|${f.style}`); });
+    return faces.sort();
+  })).toEqual(expectedFaces);
+  const fontOf = () => page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="font-help"]')!).fontFamily);
+  expect(await fontOf()).not.toContain('Manrope');
+  await page.getByTestId('font-manrope').click();
+  await expect(page.getByTestId('font-manrope')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(fontOf).toContain('Manrope');
+  // The demo-pairs size, as 10e; the PNG is made docs/v2-parity/demo-pairs/11-settings-theme-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('11-settings-theme-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.reload();
+  await openSettings(page, 'theme');
+  await expect(page.getByTestId('font-manrope')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(fontOf).toContain('Manrope');
+  await page.getByTestId('font-auto').click();
+  await expect.poll(fontOf).not.toContain('Manrope');
 });
 
 test("Settings › Tax shows the channel's tax, read-only: prices without tax and the zone's rates", async ({ page }) => {

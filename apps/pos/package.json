@@ -18,6 +18,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo-google-fonts/dm-sans": "0.4.2",
+    "@expo-google-fonts/fraunces": "0.4.1",
+    "@expo-google-fonts/instrument-serif": "0.4.1",
+    "@expo-google-fonts/jetbrains-mono": "0.4.1",
+    "@expo-google-fonts/manrope": "0.4.3",
+    "@expo-google-fonts/space-grotesk": "0.4.1",
     "@expo/metro-runtime": "~6.1.2",
     "@sqlite.org/sqlite-wasm": "3.53.4-build1",
     "@tallyui/components": "3.20.0",
@@ -29,8 +35,10 @@
     "@tallyui/storage-sqlite": "3.20.0",
     "@tallyui/theme": "3.20.0",
     "expo": "~54.0.37",
+    "expo-asset": "~12.0.13",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.14",
+    "expo-font": "~14.0.12",
     "expo-linking": "~8.0.12",
     "expo-router": "~6.0.24",
     "expo-status-bar": "~3.0.9",
