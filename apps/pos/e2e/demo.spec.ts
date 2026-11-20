@@ -655,7 +655,7 @@ test("the Products panel sorts by its headers, across every page, as v2's produc
   const variants = CATALOGUE.flatMap(p => p.variants).sort((a, b) => a.priceMinor - b.priceMinor);
   const cheapestSku = variants[0].sku;
   const dearestSku = variants[variants.length - 1].sku;
-  await expect(rows).toHaveCount(25);
+  await expect(panel.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants.length} products`);
   const unsortedFirst = (await rows.first().textContent()) ?? '';
   await panel.getByTestId('product-table-sort-price').click();
   await expect(rows.first()).toContainText(cheapestSku);
