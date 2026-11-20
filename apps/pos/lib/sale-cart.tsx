@@ -10,6 +10,7 @@ import { cartTotals } from './cart-totals';
 import { OrderDetailsSheet } from './order-details-sheet';
 import { MIN_ORDER_CREATE_CHARGES, MIN_ORDER_CREATE_NOTE } from './use-sale-settings';
 import { loadQuickDiscounts } from './quick-discounts-setting';
+import { loadCartColumns } from './cart-columns-setting';
 
 // Vendure keeps one ShippingLine per order, and the plugin refuses a second as `shipping_single` (docs/adr/0005-order-create-v5.md).
 const MAX_SHIPPING_LINES = 1;
@@ -68,6 +69,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
     <MoneyRow key={testID} label={label} amount={money(amount)} testID={testID} strong={strong} />;
   const empty = !order.lineItems.length; // Checkout stays disabled: the plugin refuses a fees-only order (ADR 0005).
   const quickDiscounts = loadQuickDiscounts();
+  const columns = loadCartColumns();
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_CHARGES;
   const noteOffered = (sale.capabilities?.orderCreate ?? 0) >= MIN_ORDER_CREATE_NOTE;
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -83,7 +85,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
     ? [{ discountId: order.discounts[0].id, amountMinor: order.display.orderDiscountMinor }] : [];
   return (
     <View className="flex-1 min-h-0" onLayout={(event) => setCartWidth(event.nativeEvent.layout.width)}>
-    <CartColumnHeads showPrice={showPrice} />
+    <CartColumnHeads showPrice={showPrice} columns={columns} />
     <CartPanel testID="cart" items={order.lineItems}
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
       afterItems={empty && !chargesOffered ? undefined : (
@@ -138,6 +140,8 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
           <CartLine name={line.name} attributes={line.attributes} quantity={line.quantity} unitPrice={amount(line.unitPriceMinor)}
             regularUnitPrice={line.regularUnitPriceMinor === undefined ? undefined : amount(line.regularUnitPriceMinor)}
             lineTotal={amount(display(line.id).amountMinor)} showPrice={showPrice}
+            columns={columns} sku={line.sku || undefined} imageUrl={line.imageUrl}
+            onSplit={locked ? undefined : () => setRemoveError(sale.splitLine(line.id))}
             quantitySlot={locked ? undefined : <LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
               onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }}
               actions={lineActionIds({ canEditPrice, priceShown: showPrice }).map((id) => {

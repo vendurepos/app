@@ -1143,6 +1143,68 @@ test('Settings › General puts the cart on the left or the right of the till', 
   await expect.poll(cartLeft).toBe(false);
 });
 
+test("Settings › General › Cart columns show an item's image and SKU, and Split splits a line", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  // The demo store gives the mug its bundled image and the TALLY-MUG SKU.
+  const product = page.getByTestId('product-tile-Tally Fixture Mug');
+  await product.click();
+  await product.click();
+  const cart = page.getByTestId('cart');
+  const lines = cart.getByTestId('cart-line-TALLY-MUG');
+  await expect(lines).toHaveCount(1);
+  await expect(lines.getByTestId('quantity-popover-trigger')).toHaveText('2');
+  for (const id of ['cart-line-image', 'cart-line-sku', 'cart-line-split']) {
+    await expect(cart.getByTestId(id)).toHaveCount(0);
+  }
+  const total = await cart.getByTestId('cart-total').innerText();
+  const priceHead = page.getByTestId('till-cart').getByRole('columnheader').getByText('Price', { exact: true });
+  await expect(priceHead).toBeVisible();
+  await openSettings(page, 'general');
+  for (const id of ['image', 'name-sku', 'quantity-split']) {
+    const toggle = page.getByTestId(`cart-column-${id}`);
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  }
+  for (const [column, option] of [['quantity', 'quantity-split'], ['name', 'name-sku']]) {
+    await page.getByTestId(`cart-column-${column}`).click();
+    await expect(page.getByTestId(`cart-column-${column}`)).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByTestId(`cart-column-${option}`)).toBeDisabled();
+    await page.getByTestId(`cart-column-${column}`).click();
+    await expect(page.getByTestId(`cart-column-${column}`)).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId(`cart-column-${option}`)).toBeEnabled();
+    await expect(page.getByTestId(`cart-column-${option}`)).toHaveAttribute('aria-checked', 'true');
+  }
+  await page.getByText('Columns', { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('04h-cart-columns-settings.png') });
+  await page.getByTestId('settings-back').click();
+  await expect(lines.getByTestId('cart-line-image')).toBeVisible();
+  await expect(lines.getByTestId('cart-line-sku')).toHaveText('TALLY-MUG');
+  await page.screenshot({ path: test.info().outputPath('04h-cart-columns-cart.png') });
+  await lines.getByTestId('cart-line-split').click();
+  await expect(lines).toHaveCount(2);
+  await expect(lines.getByTestId('cart-line-sku')).toHaveText(['TALLY-MUG', 'TALLY-MUG']);
+  await expect(lines.getByTestId('quantity-popover-trigger')).toHaveText(['1', '1']);
+  await expect(cart.getByTestId('cart-total')).toHaveText(total);
+  await openSettings(page, 'general');
+  await page.getByTestId('cart-column-price').click();
+  await expect(page.getByTestId('cart-column-price')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('settings-back').click();
+  await expect(priceHead).toHaveCount(0);
+  await page.reload();
+  await expectSignedIn(page);
+  await openSettings(page, 'general');
+  for (const id of ['quantity', 'quantity-split', 'image', 'name', 'name-sku', 'total']) {
+    await expect(page.getByTestId(`cart-column-${id}`)).toHaveAttribute('aria-checked', 'true');
+  }
+  for (const id of ['sku', 'price']) {
+    await expect(page.getByTestId(`cart-column-${id}`)).toHaveAttribute('aria-checked', 'false');
+  }
+});
+
 test('Settings › General picks the register this device is at, and the till follows it', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
