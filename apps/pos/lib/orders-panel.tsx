@@ -12,6 +12,7 @@ import {
   groupOrdersByDay, ORDER_SEARCH_DEBOUNCE_MS, ORDER_STATUS_OPTIONS, storeDayOf,
   toOrderTableRow, useOrderList, VENDURE_ORDER_FILTER_FIELDS, type OrderListQuery, type OrderTableRow,
 } from './order-list';
+import { fetchRegisters, registerFilterOptions, type ListedRegister } from './register-choice';
 import { sessionContext, type Session } from './session';
 
 export type OrdersScope = 'store' | 'till';
@@ -25,6 +26,16 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
   const wide = useWindowDimensions().width >= 640;
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<OrderFilterValue>({});
+  const [registers, setRegisters] = useState<ListedRegister[]>([]);
+  useEffect(() => {
+    let live = true;
+    void fetchRegisters(session).then(
+      (listed) => { if (live) setRegisters(listed); },
+      () => { if (live) setRegisters([]); },
+    );
+    return () => { live = false; };
+  }, [session]);
+  const registerOptions = useMemo(() => registerFilterOptions(registerId, registers), [registerId, registers]);
   const query = useMemo<OrderListQuery>(() => ({ search, filters }), [search, filters]);
   const { orders, totalItems, notice, loading, loadMore, reload } = useOrderList(session, scope === 'store', query, timezone);
   const rows = useMemo(() => orders.map(order => toOrderTableRow(order, timezone)), [orders, timezone]);
@@ -77,7 +88,7 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
         <View dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
           <OrderFilterBar fields={VENDURE_ORDER_FILTER_FIELDS} value={filters} onChange={setFilters} initial={{}}
             timezone={timezone} onCustomerSearch={onCustomerSearch} options={{ status: ORDER_STATUS_OPTIONS,
-              customer: customerOptions, cashier: cashierOptions, register: [{ value: registerId, label: 'This till' }] }} />
+              customer: customerOptions, cashier: cashierOptions, register: registerOptions }} />
         </View>
         {notice ? (
           <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2" space="sm">
