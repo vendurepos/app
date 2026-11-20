@@ -33,7 +33,7 @@ it('keeps the opening float per register id, and a cleared or bad value reads as
   saveOpeningFloatMinor('reg-a', undefined, store);
   expect(loadOpeningFloatMinor('reg-a', store)).toBeUndefined();
   expect(store.getItem(floatKey('reg-a'))).toBeNull();
-  for (const value of ['1.5', '-1', 'abc', '100000001']) {
+  for (const value of ['1.5', '-1', 'abc', '100000001', '1e3', '0x10', ' 150', '150 ']) {
     store.setItem(floatKey('reg-a'), value);
     expect(loadOpeningFloatMinor('reg-a', store)).toBeUndefined();
   }
