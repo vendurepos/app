@@ -1148,6 +1148,7 @@ test("Settings › General › Cart columns show an item's image and SKU, and Sp
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
+  await openRegister(page); // so the shot shows the cart lines, not the open-register card
   // The demo store gives the mug its bundled image and the TALLY-MUG SKU.
   const product = page.getByTestId('product-tile-Tally Fixture Mug');
   await product.click();
