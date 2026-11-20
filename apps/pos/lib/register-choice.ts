@@ -44,9 +44,13 @@ export function registerChoices(ownId: string, listed: readonly ListedRegister[]
   ];
 }
 
-/** The Orders register filter (CHECKLIST 7.2): every listed register, named as the register picker names them, this device's own first; only the own register when the list is empty or could not be read. */
-export function registerFilterOptions(ownId: string, listed: readonly ListedRegister[]): { value: string; label: string }[] {
-  return registerChoices(ownId, listed, new Date()).map(({ id, label }) => ({ value: id, label }));
+/** The Orders register filter (CHECKLIST 7.2): the bound drawer first, under its listed name ("This device" only while the list lacks it), then the other listed registers in list order (Front desk, 2026-11-20: no "This device" duplicate). */
+export function registerFilterOptions(boundId: string, listed: readonly Pick<ListedRegister, 'id' | 'lastDeviceName'>[]): { value: string; label: string }[] {
+  const bound = listed.find((register) => register.id === boundId);
+  return [
+    { value: boundId, label: bound ? registerLabel(bound) : OWN_REGISTER_LABEL },
+    ...listed.filter((register) => register.id !== boundId).map((register) => ({ value: register.id, label: registerLabel(register) })),
+  ];
 }
 
 /** The cashier sheet's Register row (CHECKLIST 6.1): the bound register as the picker labels it, "Register <first 8>" when unlisted. */

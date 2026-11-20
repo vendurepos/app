@@ -74,19 +74,29 @@ describe('registerChoices', () => {
 });
 
 describe('registerFilterOptions', () => {
-  it('puts this device first without repeating it, then names the others in list order', () => {
-    expect(registerFilterOptions('own', [listedRegister('b'), listedRegister('own'), listedRegister('c')])).toEqual([
-      { value: 'own', label: 'This device' },
+  it('names the bound drawer as listed and first, then the others in list order', () => {
+    expect(registerFilterOptions('own', [{ ...listedRegister('b') }, { ...listedRegister('own'), lastDeviceName: 'Front till' }, listedRegister('c')])).toEqual([
+      { value: 'own', label: 'Front till' },
       { value: 'b', label: 'Till b' },
       { value: 'c', label: 'Till c' },
     ]);
   });
 
-  it('keeps this device as the only option when the list is empty', () => {
-    expect(registerFilterOptions('own', [])).toEqual([{ value: 'own', label: 'This device' }]);
+  it('names a listed bound drawer without a device name by the first 8 of its id, never This device', () => {
+    expect(registerFilterOptions('abcdef1234', [{ ...listedRegister('abcdef1234'), lastDeviceName: null }])).toEqual([
+      { value: 'abcdef1234', label: 'Register abcdef12' },
+    ]);
   });
 
-  it('names a register without a device name by the first 8 of its id', () => {
+  it('calls the bound drawer This device only while the list lacks it', () => {
+    expect(registerFilterOptions('own', [])).toEqual([{ value: 'own', label: 'This device' }]);
+    expect(registerFilterOptions('own', [listedRegister('b')])).toEqual([
+      { value: 'own', label: 'This device' },
+      { value: 'b', label: 'Till b' },
+    ]);
+  });
+
+  it('names another register without a device name by the first 8 of its id', () => {
     expect(registerFilterOptions('own', [{ ...listedRegister('abcdef1234'), lastDeviceName: null }])).toEqual([
       { value: 'own', label: 'This device' },
       { value: 'abcdef1234', label: 'Register abcdef12' },

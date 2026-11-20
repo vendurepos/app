@@ -937,6 +937,12 @@ test("the Orders register filter lists the store's registers by name, as v2's or
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page);
+  const drawer = await page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'));
+  expect(drawer).toBeTruthy();
+  // The header reads "VendurePOS · <register>" (test 'the header bar names the till's register…'); the register part is the listed name.
+  await expect(page.getByTestId('register-bar-name')).toHaveText(/^VendurePOS · /);
+  const place = (await page.getByTestId('register-bar-name').textContent())!.trim().replace(/^VendurePOS · /, '');
+  expect(place).not.toBe('This device');
 
   const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
   await page.getByTestId(`product-tile-${mug.name}`).click();
@@ -954,7 +960,10 @@ test("the Orders register filter lists the store's registers by name, as v2's or
   await expect(rows.and(page.getByTestId('orders-row-1'))).toBeVisible();
   await page.getByTestId('order-filter-register').click();
   const menu = page.getByTestId('order-filter-register-menu');
-  await expect(menu.getByTestId(/^order-filter-register-/)).toHaveText(['This device', 'Front counter']);
+  // Front desk, 2026-11-20: the bound drawer under its listed name (the header's), no "This device" beside it.
+  await expect(menu.getByTestId(/^order-filter-register-/)).toHaveText([place, 'Front counter']);
+  await expect(menu.getByTestId(`order-filter-register-${drawer}`)).toHaveText(place);
+  await expect(menu.getByText('This device', { exact: true })).toHaveCount(0);
   await expect(menu.getByTestId('order-filter-register-demo-front-counter')).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath('07h-orders-register-filter-vendurepos.png') });
 
@@ -962,7 +971,7 @@ test("the Orders register filter lists the store's registers by name, as v2's or
   await expect(page.getByTestId('orders-store-empty')).toBeVisible();
   await expect(page.getByTestId('orders-row-4')).toHaveCount(0);
   await page.getByTestId('order-filter-register').click();
-  await menu.getByText('This device', { exact: true }).click();
+  await menu.getByTestId(`order-filter-register-${drawer}`).click();
   await expect(page.getByTestId('orders-row-4')).toBeVisible();
   await expect(page.getByTestId('orders-row-1')).toHaveCount(0);
 });
@@ -1063,6 +1072,10 @@ test("the order sheet names the customer, and the sale's day, time and cashier, 
   await expect(customer).toHaveText('Guest');
   await expect(meta).toHaveText(/^Today · [^·]+ · [^·]+ · [^·]+$/);
   await expect(meta).not.toContainText('Front counter');
+  // The restored register segment names the drawer the sale was stamped with (#370), as the header names it.
+  await expect(page.getByTestId('register-bar-name')).toHaveText(/^VendurePOS · /);
+  const place = (await page.getByTestId('register-bar-name').textContent())!.trim().replace(/^VendurePOS · /, '');
+  await expect(meta).toHaveText(new RegExp(` · ${place.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
 });
 
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
