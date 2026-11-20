@@ -14,6 +14,7 @@ import { loadOpenOrdersPosition, saveOpenOrdersPosition } from '../lib/open-orde
 import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
 import { ScannerExtraSettings } from '../lib/scanner-extra-settings';
 import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-setting';
+import { PrinterSettings } from '../lib/printer-settings';
 import { formatQuickDiscounts, loadQuickDiscounts, parseQuickDiscounts, saveQuickDiscounts } from '../lib/quick-discounts-setting';
 import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { RegisterChoiceSettings } from '../lib/register-choice-settings';
@@ -247,12 +248,15 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Printing</CardTitle></CardHeader>
           <CardContent>
+            <VStack space="lg">
+              <PrinterSettings />
             <SettingsRow label="Show receipt after each sale" description="When off, a finished sale goes straight to a new one."
               action={<Switch testID="auto-show-receipt-toggle" accessibilityLabel="Show receipt after each sale" checked={autoShowReceipt}
                 onCheckedChange={(on) => { saveAutoShowReceipt(on); setAutoShowReceipt(on); }} />} />
             <SettingsRow label="Print after each sale" description="Open the print dialog when a sale's receipt shows."
               action={<Switch testID="auto-print-toggle" accessibilityLabel="Print after each sale" checked={autoPrint}
                 onCheckedChange={(on) => { saveAutoPrint(on); setAutoPrint(on); }} />} />
+            </VStack>
           </CardContent>
         </Card>
       ) : null}
