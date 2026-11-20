@@ -19,17 +19,17 @@ export function RegisterSwitchRows({ session, store, held, onSwitched }: {
     onSwitched();
   };
   return (
-    <VStack testID="cashier-switch-rows" className="w-full">
+    <VStack testID="cashier-switch-rows" className="w-full pt-3" space="sm">
       <HStack testID="cashier-store-row" className="w-full items-start justify-between">
-        <Text className="text-sm text-muted-foreground">Store</Text>
-        <Text testID="cashier-store-name">{store}</Text>
+        <Text className="w-[120px] text-sm text-muted-foreground">Store</Text>
+        <Text testID="cashier-store-name" className="flex-1">{store}</Text>
       </HStack>
       <HStack testID="cashier-register-row" className="w-full items-start justify-between">
-        <VStack>
+        <VStack className="w-[120px]">
           <Text className="text-sm text-muted-foreground">Register</Text>
-          {held ? <Text testID="cashier-register-held" className="max-w-[160px] text-xs text-muted-foreground">{CLOSE_FIRST_TEXT}</Text> : null}
+          {held ? <Text testID="cashier-register-held" className="text-xs text-muted-foreground">{CLOSE_FIRST_TEXT}</Text> : null}
         </VStack>
-        <Text testID="cashier-register-name">{boundRegisterLabel(ownRegisterId(defaultStore()), listed, bound)}</Text>
+        <Text testID="cashier-register-name" className="flex-1">{boundRegisterLabel(ownRegisterId(defaultStore()), listed, bound)}</Text>
         <Button testID="cashier-register-switch" variant="ghost" size="sm" disabled={held} onPress={() => setPickerOpen(true)}><Text>Switch</Text></Button>
       </HStack>
       <Dialog open={pickerOpen} onOpenChange={(open) => { if (!open) close(); }}>
