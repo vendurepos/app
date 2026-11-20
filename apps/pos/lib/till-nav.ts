@@ -9,10 +9,10 @@ export interface TillNavEntry {
 
 /**
  * The frame's nav items: POS and Products always for the local catalogue; Orders, Customers and Reports where the orders store is open, Orders badged with those
- * needing attention; Customers where the role can read the store's customers; Register while the session is open; Notifications (badged with the notice count), Store health, Settings and Support at the foot.
+ * needing attention; Customers where the role can read the store's customers; Register while the session is open; Notifications (badged with the notice count), Store health (badged with the unread errors), Settings and Support at the foot.
  */
-export function tillNavEntries({ ordersShown, customersShown, registerShown, rejected, notices }: {
-  ordersShown: boolean; customersShown: boolean; registerShown: boolean; rejected: number; notices?: number;
+export function tillNavEntries({ ordersShown, customersShown, registerShown, rejected, notices, unreadErrors }: {
+  ordersShown: boolean; customersShown: boolean; registerShown: boolean; rejected: number; notices?: number; unreadErrors?: number;
 }): TillNavEntry[] {
   const entries: TillNavEntry[] = [{ id: 'pos', label: 'POS' }];
   entries.push({ id: 'products', label: 'Products' });
@@ -20,7 +20,7 @@ export function tillNavEntries({ ordersShown, customersShown, registerShown, rej
     ...(customersShown ? [{ id: 'customers' as const, label: 'Customers' }] : []), { id: 'reports', label: 'Reports' });
   if (registerShown) entries.push({ id: 'register', label: 'Register' });
   entries.push({ id: 'notifications', label: 'Notifications', group: 'bottom', ...(notices ? { badge: notices } : {}) });
-  entries.push({ id: 'health', label: 'Store health', group: 'bottom' });
+  entries.push({ id: 'health', label: 'Store health', group: 'bottom', ...(unreadErrors ? { badge: unreadErrors } : {}) });
   entries.push({ id: 'settings', label: 'Settings', group: 'bottom' });
   entries.push({ id: 'support', label: 'Support', group: 'bottom' });
   return entries;

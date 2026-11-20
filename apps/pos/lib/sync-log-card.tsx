@@ -1,10 +1,11 @@
-import { useState, useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 import { Platform, ScrollView, Share, View } from 'react-native';
 import { Button, Card, CardContent, CardHeader, CardTitle, HStack, Text, VStack } from '@tallyui/components';
-import { filterLogEntries, formatLogLine, logCopyText, logEntries, subscribeLogEntries, type LogFilter } from './log-buffer';
+import { filterLogEntries, formatLogLine, logCopyText, logEntries, markLogSeen, subscribeLogEntries, type LogFilter } from './log-buffer';
 
 export function SyncLogCard(): JSX.Element {
   const entries = useSyncExternalStore(subscribeLogEntries, logEntries, logEntries);
+  useEffect(() => { markLogSeen(); }, [entries]);
   const [filter, setFilter] = useState<LogFilter>('all');
   const [copied, setCopied] = useState<boolean | null>(null);
   const shown = filterLogEntries(entries, filter);

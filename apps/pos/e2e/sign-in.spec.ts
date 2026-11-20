@@ -501,6 +501,48 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   expect(cspConsole).toEqual([]);
 });
 
+test('a store error badges Store health on the rail until the sync log is opened', async ({ page }) => {
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const commands: { id: string }[] = route.request().postDataJSON().commands;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
+      id, status: 'rejected', error: { code: 'unsupported_version', message: 'test refusal' },
+    })) }) });
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('nav-item-health-badge')).toHaveText('1');
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13g-store-health-error-badge-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  if (await page.getByTestId('store-health-attention-view-log').isVisible()) {
+    await page.getByTestId('store-health-attention-view-log').click();
+  } else {
+    await page.getByTestId('settings-open').click();
+    await page.getByTestId('settings-section-sync-log').click();
+  }
+  const syncLog = page.getByTestId('sync-log');
+  await expect(syncLog).toBeVisible();
+  await expect(syncLog.getByTestId('sync-log-entry').filter({ hasText: 'Order refused by the store' }).first()).toBeVisible();
+  await expect(page.getByTestId('nav-item-health-badge')).toHaveCount(0);
+  await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('nav-item-health-badge')).toHaveCount(0);
+});
+
 test("Store health's Fix record opens a refused sale whose Retry sends it again", async ({ page }) => {
   // The store rejects every order with invalid_payload, which Retry can fix, as in "a rejected sale needs attention…".
   const sent: { id: string; type: string; payload: { clientOrderId: string } }[] = [];

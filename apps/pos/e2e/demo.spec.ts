@@ -416,6 +416,7 @@ test("Store health shows Ready to sell, nothing waiting, the products on this de
   await openRegister(page);
   await page.getByTestId('store-health-open').click();
   await expect(page.getByTestId('store-health-panel')).toBeVisible();
+  await expect(page.getByTestId('nav-item-health-badge')).toHaveCount(0);
   await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
   await expect(page.getByTestId('store-health-waiting')).toHaveText('0');
   await expect(page.getByTestId('store-health-count-products')).toHaveText(String(CATALOGUE.length));

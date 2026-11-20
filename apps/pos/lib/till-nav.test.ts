@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { activeTillNav, tillNavEntries } from './till-nav';
 
 describe('tillNavEntries', () => {
+  it('badges Store health with the unread errors, and not at 0', () => {
+    const input = { ordersShown: true, customersShown: true, registerShown: true, rejected: 0 };
+    expect(tillNavEntries({ ...input, unreadErrors: 2 }).find(entry => entry.id === 'health'))
+      .toEqual({ id: 'health', label: 'Store health', group: 'bottom', badge: 2 });
+    expect(tillNavEntries({ ...input, unreadErrors: 0 }).find(entry => entry.id === 'health'))
+      .toEqual({ id: 'health', label: 'Store health', group: 'bottom' });
+    expect(tillNavEntries(input).find(entry => entry.id === 'health'))
+      .toEqual({ id: 'health', label: 'Store health', group: 'bottom' });
+  });
+
   it('shows POS and Settings alone before the orders store opens and with no open session', () => {
     expect(tillNavEntries({ ordersShown: false, customersShown: true, registerShown: false, rejected: 0 })).toEqual([
       { id: 'pos', label: 'POS' },

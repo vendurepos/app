@@ -2,13 +2,40 @@ import type { LogEntry, LogLevel } from '@tallyui/pos';
 import { beforeEach, expect, it, vi } from 'vitest';
 import {
   clearLogEntries, filterLogEntries, formatLogLine, keepLogEntry, LOG_BUFFER_SIZE, logCopyText,
-  logEntries, redactLogData, subscribeLogEntries,
+  logEntries, markLogSeen, redactLogData, subscribeLogEntries, unreadErrorCount,
 } from './log-buffer';
 
 const entry = (patch: Partial<LogEntry> = {}): LogEntry => ({
   level: 'debug', scope: 'register-commands', message: 'Register command result', timestamp: 0, ...patch,
 });
 beforeEach(() => clearLogEntries());
+
+it('counts errors kept since the log was last seen, never warnings', () => {
+  markLogSeen();
+  for (const level of ['info', 'warn', 'error', 'error'] as LogLevel[]) keepLogEntry(entry({ level }));
+  expect(unreadErrorCount()).toBe(2);
+  markLogSeen();
+  expect(unreadErrorCount()).toBe(0);
+  keepLogEntry(entry({ level: 'error' }));
+  keepLogEntry(entry({ level: 'warn' }));
+  expect(unreadErrorCount()).toBe(1);
+});
+
+it('marking the log seen notifies once, and not when nothing is new', async () => {
+  markLogSeen();
+  const listener = vi.fn();
+  const unsubscribe = subscribeLogEntries(listener);
+  keepLogEntry(entry({ level: 'error' }));
+  await Promise.resolve();
+  listener.mockClear();
+  markLogSeen();
+  await Promise.resolve();
+  expect(listener).toHaveBeenCalledTimes(1);
+  markLogSeen();
+  await Promise.resolve();
+  expect(listener).toHaveBeenCalledTimes(1);
+  unsubscribe();
+});
 
 it('keeps entries newest first and only the last 500', () => {
   for (let i = 0; i < 501; i++) keepLogEntry(entry({ message: `event ${i}` }));
