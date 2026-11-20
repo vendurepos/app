@@ -2401,6 +2401,38 @@ test('the ⋮ beside Checkout opens Order details, and Void drops the sale', asy
   await expect(page.getByTestId('order-details-error')).toHaveCount(0);
 });
 
+test("Order details › Print prints the open sale as a bill, not paid: no payment, no change, no order number, and the sale is unchanged, as v2's 04i", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  const total = await page.getByTestId('cart-total').textContent();
+  await page.evaluate(() => { (window as any).printCalls = 0; window.print = () => { (window as any).printCalls += 1; }; });
+  await page.getByTestId('order-details-open').click();
+  await page.getByTestId('order-details-print').click();
+  await expect.poll(() => page.evaluate(() => (window as any).printCalls)).toBe(1);
+  await expect(page.getByTestId('bill')).toBeHidden();
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.getByTestId('bill-title')).toHaveText('Bill — not paid');
+  await expect(page.getByTestId('bill')).toContainText('Tally Fixture Mug');
+  await expect(page.getByTestId('bill-total')).toContainText(total!);
+  await expect(page.locator('[data-testid^="bill-payment-"]')).toHaveCount(0);
+  await expect(page.getByTestId('bill-change')).toHaveCount(0);
+  await expect(page.getByTestId('bill-order')).toHaveCount(0);
+  await expect(page.getByTestId('bill')).not.toContainText(/tendered|Change|Paid|Receipt|Order /);
+  await expect(page.getByTestId('order-details-print')).toBeHidden();
+  await expect(page.getByTestId('order-details-void')).toBeHidden();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeHidden();
+  await expect(page.getByTestId('checkout')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+  await page.getByTestId('order-details-close').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
+  await expect(page.getByTestId('cart-total')).toHaveText(total!);
+  expect(await page.evaluate(() => (window as any).printCalls)).toBe(1);
+});
+
 test('Order details keeps a customer note on the sale and sends it to the store with the order', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

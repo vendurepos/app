@@ -8,6 +8,7 @@ import { lineActionIds } from './cart-line-actions';
 import { cartShowsPrice } from './cart-price-column';
 import { cartTotals } from './cart-totals';
 import { OrderDetailsSheet } from './order-details-sheet';
+import { SaleBill } from './sale-receipt';
 import { MIN_ORDER_CREATE_CHARGES, MIN_ORDER_CREATE_NOTE } from './use-sale-settings';
 import { loadQuickDiscounts } from './quick-discounts-setting';
 import { loadCartColumns } from './cart-columns-setting';
@@ -52,9 +53,9 @@ export function TaxRows({ label, amount, testID, rates }: {
  * replaces Checkout, and `payError` says why checkout was refused. `locked` shows the cart beside a tender without edits or checkout.
  * `highlightSku` lights up that line, as an add confirms in place.
  */
-export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, canEditPrice, taxClasses, locked }: {
+export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, canEditPrice, taxClasses, locked, store }: {
   sale: ReturnType<typeof useSale>; onCheckout(): void; payGate?: ReactNode; payError?: string; locked?: boolean;
-  highlightSku?: string; canEditPrice: boolean;
+  highlightSku?: string; canEditPrice: boolean; store?: string;
   taxClasses: { id: string; label: string }[];
 }) {
   const format = useCurrencyFormatter();
@@ -200,6 +201,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
       }
     />
     <OrderDetailsSheet open={detailsOpen} onOpenChange={setDetailsOpen} onVoid={() => sale.closeSale()}
+      bill={store ? <SaleBill order={sale.order} store={store} /> : undefined}
       note={order.note} onNote={noteOffered ? (note) => sale.setNote(note) : undefined} />
     </View>
   );
