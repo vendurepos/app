@@ -1,10 +1,13 @@
 import { useState, type JSX } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, Text, ToggleGroup, ToggleGroupItem, VStack } from '@tallyui/components';
+import { Card, CardContent, CardHeader, CardTitle, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack } from '@tallyui/components';
 import { loadCartSide, saveCartSide } from './cart-side-setting';
+import { cartColumnShown, loadCartColumns, saveCartColumns } from './cart-columns-setting';
 
 /** Settings › General: v2's Cart settings Panel position (CHECKLIST 9.10). */
 export function CartSideSettings(): JSX.Element {
   const [side, setSide] = useState(() => loadCartSide());
+  const [columns, setColumns] = useState(() => loadCartColumns());
+  const shown = cartColumnShown(columns);
   return (
     <Card className="w-full max-w-[420px]">
       <CardHeader><CardTitle aria-level={2}>Cart</CardTitle></CardHeader>
@@ -22,6 +25,28 @@ export function CartSideSettings(): JSX.Element {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          <Text className="font-semibold">Columns</Text>
+          <Text>Which columns the cart shows on this device. Price still folds on a narrow cart.</Text>
+          <VStack space="none">
+            {([
+              ['quantity', 'show', 'Qty', shown.quantity, false],
+              ['quantity', 'split', 'Split', shown.quantitySplit, !shown.quantity],
+              ['image', 'show', 'Image', shown.image, false],
+              ['name', 'show', 'Name', shown.name, false],
+              ['name', 'sku', 'SKU under the name', shown.nameSku, !shown.name],
+              ['sku', 'show', 'SKU', shown.sku, false],
+              ['price', 'show', 'Price', shown.price, false],
+              ['total', 'show', 'Total', shown.total, false],
+            ] as const).map(([column, field, label, checked, disabled]) => (
+              <SettingsRow key={`${column}-${field}`} label={label} className={field === 'show' ? undefined : 'pl-6'}
+                action={<Switch testID={`cart-column-${column}${field === 'show' ? '' : `-${field}`}`} accessibilityLabel={label}
+                  checked={checked} disabled={disabled} onCheckedChange={(on) => {
+                    const next = { ...columns, [column]: { ...columns[column], [field]: on } };
+                    saveCartColumns(next);
+                    setColumns(next);
+                  }} />} />
+            ))}
+          </VStack>
         </VStack>
       </CardContent>
     </Card>
