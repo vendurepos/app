@@ -282,7 +282,9 @@ test('a scanner connected directly over HID-POS adds to the sale, is reopened af
     }
     return delay;
   });
-  expect(wedgeDelay).toBeLessThanOrEqual(100);
+  // The wedge copy must land inside SCAN_DEDUP_WINDOW_MS (500 ms, @tallyui/pos) of the direct report, or a quantity of 2 would be right;
+  // 400 leaves room for the keys typed after it. Not a speed check: a loaded machine measured 128 ms.
+  expect(wedgeDelay).toBeLessThan(400);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
   await expect(page.getByTestId('cart-line-TALLY-MUG').getByTestId('quantity-popover-trigger')).toHaveText('1');
   await page.reload();
