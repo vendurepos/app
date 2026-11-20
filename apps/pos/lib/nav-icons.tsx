@@ -69,6 +69,18 @@ export const SupportIcon = createSvgIcon('SupportIcon', () => (
   </>
 ));
 
+// Sliders: tabler's `adjustments-horizontal` (v2's cart and product settings button, 04h and 02f).
+export const SlidersIcon = createSvgIcon('SlidersIcon', () => (
+  <>
+    <Path d="M12 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <Path d="M4 6l8 0" /><Path d="M16 6l4 0" />
+    <Path d="M6 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <Path d="M4 12l2 0" /><Path d="M10 12l10 0" />
+    <Path d="M15 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <Path d="M4 18l11 0" /><Path d="M19 18l1 0" />
+  </>
+));
+
 // Refresh: tabler's `refresh` (v2's ↻ after the Orders count, 07b).
 export const RefreshIcon = createSvgIcon('RefreshIcon', () => (
   <>

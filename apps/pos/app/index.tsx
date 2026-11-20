@@ -14,6 +14,7 @@ import {
 import { Portal } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { SettingsPanel } from '../components/settings-panel';
+import type { SettingsCardId } from '../components/settings-panel';
 import type { SettingsSectionId } from '../lib/settings-sections';
 import { accessRefused } from '../lib/access-refused';
 import { useApprovalSheet } from '../lib/approval-sheet';
@@ -138,7 +139,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [settingsOpen, setSettingsOpen] = useState(false);
   // The section Settings opens on: the sync log from Store health's View log, General every other way.
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
-  useEffect(() => { if (!settingsOpen) setSettingsSection('general'); }, [settingsOpen]);
+  const [settingsCard, setSettingsCard] = useState<SettingsCardId | undefined>(undefined);
+  useEffect(() => { if (!settingsOpen) { setSettingsSection('general'); setSettingsCard(undefined); } }, [settingsOpen]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
@@ -417,6 +419,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           if (result === 'timed_out' && Platform.OS === 'web') window.location.reload();
         }} /> : null}
       {settingsOpen ? <SettingsPanel session={session} onClose={() => setSettingsOpen(false)} tillUpdatesPending={registerOutbox.state.pending} customerDisplay={customerDisplay}
+        initialCard={settingsCard}
         initialSection={settingsSection} /> : null}
       {/* Hidden, never unmounted, while the orders panel shows: the cart, tender or receipt in progress is kept. */}
       <View className="flex-1" style={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen ? { display: 'none' } : undefined}>
@@ -431,6 +434,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels} settingsOpen={settingsOpen}
+                  onCartSettings={() => { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setSettingsSection('general'); setSettingsCard('cart'); setSettingsOpen(true); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} customerDisplay={customerDisplay?.service ?? null} />
               </TaxProvider>
@@ -499,6 +503,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 function Sale({
   session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
+  onCartSettings,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -511,6 +516,8 @@ function Sale({
   panelOpen: boolean; onClosePanels(): void;
   /** The Settings panel covers the sale: no scan reaches it, and its close re-reads the till's settings. */
   settingsOpen: boolean;
+  /** Opens Settings › General at the Cart card (the cart header's sliders, v2 04h) */
+  onCartSettings(): void;
   /** The register is counting, closing or showing its Z. */
   registerClosing: boolean;
   /** The Z sheet shows: the scan notice goes over it. */
@@ -632,7 +639,7 @@ function Sale({
           <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
         </Button>
       ) : null}
-      <SaleCustomer sale={sale} connector={connector} session={session} />
+      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={onCartSettings} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={highlightSku} store={storeLabel(session)} />
       {openOrdersPosition === 'bottom' ? openSaleTabs : null}

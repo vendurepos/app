@@ -3291,3 +3291,26 @@ test('the header bar names the till\'s register once the store lists more than o
   const drawer = await page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id')!);
   await expect(page.getByTestId('register-bar-name')).toHaveText(`VendurePOS · Register ${drawer.slice(0, 8)}`);
 });
+
+test("the cart header's settings button opens Settings › General at the Cart card, as v2's cart settings (04h)", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await expect(page.getByTestId('cart-settings-open')).toHaveAttribute('aria-label', 'Cart settings');
+  await page.getByTestId('cart-settings-open').click();
+  await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('settings-cart-card')).toBeInViewport();
+  await expect(page.getByTestId('cart-side')).toBeVisible();
+  // The rail's Settings still opens at the top of General: the Cart card is below the fold at this size.
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('settings-cart-card')).toHaveCount(0);
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
+  // The jump runs from the card's onLayout, which react-native-web delivers a frame after paint: let two frames pass first.
+  await expect(page.getByTestId('settings-cart-card')).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByTestId('price-edit-toggle')).toBeInViewport();
+  await expect(page.getByTestId('settings-cart-card')).not.toBeInViewport();
+});
