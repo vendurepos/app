@@ -967,6 +967,104 @@ test("the Orders register filter lists the store's registers by name, as v2's or
   await expect(page.getByTestId('orders-row-1')).toHaveCount(0);
 });
 
+test("a till sale is stamped with the till's drawer, and the Orders register filter finds it", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const ids = await page.evaluate(() => ({ device: localStorage.getItem('vendurepos.register_id'), drawer: localStorage.getItem('vendurepos.bound_register_id') }));
+  expect(ids.device).toBeTruthy();
+  expect(ids.drawer).toBeTruthy();
+  expect(ids.drawer).not.toBe(ids.device);
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+
+  const rows = await storeRows(page);
+  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
+  await expect(rows.and(page.getByTestId('orders-row-1'))).toBeVisible();
+  await page.getByTestId('order-filter-register').click();
+  await page.getByTestId(`order-filter-register-${ids.drawer}`).click();
+  // The filtered list first (the unfiltered one is still on screen until the refetch), then the till's sale in it.
+  await expect(rows.and(page.getByTestId('orders-row-1'))).toHaveCount(0);
+  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
+});
+
+test('a register rebind mid-tender leaves the sale on the drawer its tender pinned, with its session', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const drawer = await page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'));
+  expect(drawer).toBeTruthy();
+  expect(drawer).not.toBe('demo-front-counter');
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+
+  await page.evaluate(() => localStorage.setItem('vendurepos.bound_register_id', 'demo-front-counter'));
+  await openSettings(page, 'general');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'))).toBe('demo-front-counter');
+
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  const state = await demoState(page);
+  const sale = state!.orders.at(-1)! as { registerId?: string; sessionId?: string };
+  // Front desk, 2026-11-20: the drawer taken at tender start stays, and the sale's register and its session name it.
+  expect(sale.registerId).toBe(drawer);
+  expect(state!.sessions[sale.sessionId!].registerId).toBe(drawer);
+});
+
+test("the order sheet names the customer, and the sale's day, time and cashier, as v2's order detail", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('orders-open').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000003' }).click();
+  const customer = page.getByTestId('order-sheet-customer');
+  const meta = page.getByTestId('order-sheet-meta');
+  await expect(customer).toHaveText('Ada Lovelace');
+  await expect(meta).toContainText('· cashier@demo.vendurepos.com');
+  await expect(meta).toHaveText(/^[^·]+ · [^·]+ · cashier@demo\.vendurepos\.com$/);
+  await page.screenshot({ path: test.info().outputPath('07e-order-sheet-header-vendurepos.png') });
+  await page.getByTestId('order-sheet-close').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000002' }).click();
+  await expect(customer).toHaveText('Guest');
+  await page.getByTestId('order-sheet-close').click();
+  await page.getByTestId('orders-open').click();
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await expect(customer).toHaveText('Guest');
+  await expect(meta).toHaveText(/^Today · [^·]+ · [^·]+$/);
+  await expect(meta).not.toContainText('Front counter');
+});
+
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
 test('a scan over an open order closes the Orders panel, and Orders reopens on the list', async ({ page }) => {
   await page.goto('/demo');
@@ -3091,4 +3189,14 @@ test('the demo build has no customer display: /display lands on /', async ({ pag
   await expect(page).toHaveURL(/\/demo$/);
   await expect(page.getByTestId('demo-enter')).toBeVisible();
   await expect(page.getByTestId('display-store-url')).toHaveCount(0);
+});
+
+test('the header bar names the till\'s register once the store lists more than one, as v2\'s "Store · Register"', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('register-bar-name')).toHaveText('VendurePOS');
+  await openRegister(page);
+  const drawer = await page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id')!);
+  await expect(page.getByTestId('register-bar-name')).toHaveText(`VendurePOS · Register ${drawer.slice(0, 8)}`);
 });

@@ -54,7 +54,7 @@ import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { loadCloseBy } from '../lib/register-close-by';
 import { loadOpeningFloatMinor } from '../lib/register-float';
-import { fetchRegisters, holdsRegister, registerTitle, setTillHoldsSession } from '../lib/register-choice';
+import { fetchRegisters, headerPlace, holdsRegister, registerTitle, setTillHoldsSession, type ListedRegister } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
@@ -237,6 +237,17 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     );
     return () => { live = false; };
   }, [registerNameWanted, boundRegisterId, session]);
+  const [listedRegisters, setListedRegisters] = useState<ListedRegister[]>([]);
+  // The bar names the bound register only when the store lists more than one (lib/register-choice.ts headerPlace); re-read when this till's session or its unsent register commands change, so an open reaches the list.
+  useEffect(() => {
+    let live = true;
+    fetchRegisters(session).then(
+      (rows) => { if (live) setListedRegisters(rows); },
+      () => { if (live) setListedRegisters([]); },
+    );
+    return () => { live = false; };
+  }, [session, boundRegisterId, sessionStatus, registerOutbox.state.pending]);
+  const place = headerPlace(listedRegisters, boundRegisterId);
   const printZ = async () => {
     const closure = register.lastClosure;
     if (!closure) return;
@@ -281,7 +292,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // keeps today's rule (an open session) and the `register-open-panel` id the e2e specs press; TallyUI fixes its id.
   const registerBar = (
     <View dataSet={{ print: 'hide' }}>
-      <RegisterBar register={register} registerId={boundRegisterId} multiRegister={false} storeName="VendurePOS"
+      <RegisterBar register={register} registerId={boundRegisterId} multiRegister={place.multiRegister} registerName={place.registerName} storeName="VendurePOS"
         // The till's online signal (as lib/sale-customer.tsx): the browser's, read at render.
         online={typeof navigator === 'undefined' || navigator.onLine !== false}
         onOpenPanel={() => setRegisterOpen(true)} cashier={{ name: identity, onPress: () => setCashierOpen(true) }}
@@ -370,14 +381,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {ordersOpen ? (
         <VStack testID="orders-panel" className="flex-1">
-          {openOrder ? <OrderSheet session={session} row={openOrder} onClose={() => setOpenOrder(null)} onRetry={outbox.requeue} footer={(order, reload) => <RefundSheet order={order}
+          {openOrder ? <OrderSheet session={session} row={openOrder} timezone={TIMEZONE} onClose={() => setOpenOrder(null)} onRetry={outbox.requeue} footer={(order, reload) => <RefundSheet order={order}
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
             capabilities={readSettingsCapabilities} onRefunded={reload} />}
             receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back} />} /> : null}
           <View className="flex-1" style={openOrder ? { display: 'none' } : undefined}>
             <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
               till={{ orders: outbox.recent, onRetry: outbox.requeue, stuck: outbox.state.stuck }}
-              registerId={registerId} cashier={identity} onOpen={setOpenOrder} />
+              registerId={boundRegisterId} cashier={identity} onOpen={setOpenOrder} />
           </View>
         </VStack>
       ) : null}
@@ -413,7 +424,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           {saleSettings.status === 'ready' ? (
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
-                <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
+                <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue}
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onHolds={setSaleHolds}
@@ -486,10 +497,10 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 }
 
 function Sale({
-  session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
+  session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
 }: {
-  session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
+  session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
   drafts: RxCollection | null;
   taxClasses: { id: string; label: string }[];
@@ -512,9 +523,12 @@ function Sale({
   const catalogueFilters = useCatalogueFilters(settingsOpen);
   const approvalSheet = useApprovalSheet({ session, register, capabilities });
   const identity = tillIdentity(session);
+  const [tenderDrawer, setTenderDrawer] = useState<string | null>(null);
+  // The sale's register: the drawer its tender pinned (pay-gate), else the bound one (Front desk, 2026-11-20).
+  const saleRegisterId = tenderDrawer ?? boundRegisterId;
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
-    registerId, cashierRef: identity, capabilities, session: register.saleSession,
+    registerId: saleRegisterId, cashierRef: identity, capabilities, session: register.saleSession,
     onSaleCompleted: session.url === DEMO_STORE_ORIGIN ? withDemoSaleEvent(outbox.record) : outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
@@ -539,6 +553,9 @@ function Sale({
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
+  // Before the tender the cart follows the binding: a pin whose tender never started (startTender returns silently on a
+  // locked sale, an empty cart or unpriced coupons) is dropped, so a later rebind is never stamped with the old drawer.
+  useEffect(() => { if (stage.kind === 'cart' && tenderDrawer !== null) setTenderDrawer(null); }, [stage.kind, tenderDrawer]);
   const tender = useTillTender(sale);
   const currency = session.settings.currency;
   const configuredFloatMinor = loadOpeningFloatMinor(boundRegisterId);
@@ -550,7 +567,7 @@ function Sale({
   const [payError, setPayError] = useState<string>();
   async function checkout() {
     setPayError(undefined);
-    setPayError(await startTenderInSession(register, sale, 'cash'));
+    setPayError(await startTenderInSession(register, sale, 'cash', (id) => setTenderDrawer((current) => current ?? id)));
   }
   const format = useCurrencyFormatter();
   // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes a
@@ -732,7 +749,7 @@ function Sale({
             highlightSku={highlightSku} />
         ) : tenderPane) : stage.kind === 'receipt' ? (
           <ScrollView>
-            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
+            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId} />
           </ScrollView>
         ) : register.session?.status === 'conflict' ? cart(
           <RegisterConflictCard register={register} registerContract={capabilities?.register} onChoseAnother={onRebindRegister} className="mt-2 border border-border" />

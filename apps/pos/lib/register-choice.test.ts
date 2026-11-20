@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundRegisterLabel, holdsRegister, pickRefusal, registerChoices, registerFilterOptions, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
+import { boundRegisterLabel, headerPlace, holdsRegister, pickRefusal, registerChoices, registerFilterOptions, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
 
 const now = new Date(2026, 10, 17, 18, 0);
 const at = new Date(2026, 10, 17, 14, 38).toISOString();
@@ -37,6 +37,16 @@ describe('registerTitle', () => {
   it('has no title for an empty list', () => {
     expect(registerTitle([], 'b')).toBeUndefined();
   });
+});
+
+it('the header names the bound register only when the store lists more than one', () => {
+  const front = { id: 'front', lastDeviceName: 'Front till' };
+  const unnamed = { id: '0123456789abcdef', lastDeviceName: null };
+  expect(headerPlace([], front.id)).toStrictEqual({ multiRegister: false });
+  expect(headerPlace([front], front.id)).toStrictEqual({ multiRegister: false });
+  expect(headerPlace([front, unnamed], front.id)).toStrictEqual({ multiRegister: true, registerName: 'Front till' });
+  expect(headerPlace([front, unnamed], unnamed.id)).toStrictEqual({ multiRegister: true, registerName: 'Register 01234567' });
+  expect(headerPlace([front, unnamed], 'fedcba9876543210')).toStrictEqual({ multiRegister: true, registerName: 'Register fedcba98' });
 });
 
 describe('registerStatus', () => {
