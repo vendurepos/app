@@ -17,8 +17,9 @@ const frozenLine = (minor: unknown, label: string, display: string): string[] =>
 
 /**
  * The Z report as printed lines, from TallyUI's closure document (`buildClosureDocument`): every figure is the closure's
- * own, frozen by `writeClosure`, and nothing is recomputed here. The period's refunds and the register's perpetual totals print in v2's order, each only when the closure was frozen with it. The mixed tax rounding note is printed when the
- * document carries it (TallyUI #318).
+ * own, frozen by `writeClosure`, and nothing is recomputed here. The period's refunds and the register's perpetual
+ * totals print in v2's order, each only when the closure was frozen with it. The mixed tax rounding note is printed
+ * when the document carries it (TallyUI #318).
  */
 export function zReportLines(closure: Closure, { store, currency, timezone, printedAt }: {
   store: string; currency: string; timezone: string; printedAt: string;
