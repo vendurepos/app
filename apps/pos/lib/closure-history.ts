@@ -102,12 +102,16 @@ export function closureHistoryRows(rows: readonly Closure[], { ownRegisterId, na
     }));
 }
 
-/** One row per listed register with a live session: this device's as "This device", the others by name. */
-export function openSessionRows(registers: readonly ListedRegister[], { ownRegisterId, timezone }: { ownRegisterId: string; timezone: string }): OpenSessionRow[] {
-  return registers.flatMap((listed) => listed.session ? [{
+/** One row per listed register with a live session, this device's as "This device"; given `own` (its local session or null), that row comes from it. */
+export function openSessionRows(registers: readonly ListedRegister[], { ownRegisterId, timezone, own }: {
+  ownRegisterId: string; timezone: string; own?: { status: string; openedAt: string } | null;
+}): OpenSessionRow[] {
+  const local: OpenSessionRow[] = own && (own.status === 'open' || own.status === 'counting')
+    ? [{ registerId: ownRegisterId, register: OWN_REGISTER_LABEL, status: own.status, since: formatClosureDate(own.openedAt, { timezone, locale: 'en' }).datetime }] : [];
+  return [...local, ...registers.flatMap((listed) => listed.session && !(own !== undefined && listed.id === ownRegisterId) ? [{
     registerId: listed.id, register: listed.id === ownRegisterId ? OWN_REGISTER_LABEL : registerLabel(listed), status: listed.session.status,
     since: formatClosureDate(listed.session.openedAt, { timezone, locale: 'en' }).datetime,
-  }] : []);
+  }] : [])];
 }
 
 /**
