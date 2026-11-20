@@ -607,6 +607,43 @@ test("the Products panel shows each variant's image, stock status and categories
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
 });
 
+test("the Products panel filters by In Stock and by category, as v2's filter pills", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  await expect(panel.getByTestId('filter-chip-inStock')).toHaveAttribute('aria-pressed', 'false');
+  await expect(panel.getByTestId('filter-chip-featured')).toHaveCount(0);
+  await page.getByTestId('products-search').fill('TALLY-MUG');
+  const stock = panel.getByTestId(`product-stock-${MUG_VARIANT_ID}`);
+  await stock.fill('0');
+  await stock.press('Enter');
+  await expect.poll(async () => (await demoState(page))?.stock[MUG_VARIANT_ID].quantity).toBe(0);
+  await expect(panel.getByTestId(`product-stock-status-${MUG_VARIANT_ID}`)).toHaveText('Out of stock');
+  await panel.getByTestId('filter-chip-inStock').click();
+  await expect(panel.getByTestId(`product-row-${MUG_VARIANT_ID}`)).toHaveCount(0);
+  await expect(panel.getByTestId('products-empty')).toHaveText('No products match this search.');
+  await panel.getByTestId('filter-chip-inStock').click();
+  await expect(panel.getByTestId(`product-row-${MUG_VARIANT_ID}`)).toBeVisible();
+  await page.getByTestId('products-search').fill('');
+  await panel.getByTestId('filter-chip-category').click();
+  await panel.getByTestId('products-category-picker').getByText('Drinkware', { exact: true }).click();
+  await expect(panel.getByTestId('products-category-picker')).toHaveCount(0);
+  await expect(panel.getByTestId('products-category-chip')).toContainText('Drinkware');
+  const n = CATALOGUE.filter(product => product.category === 'Drinkware').flatMap(product => product.variants).length;
+  await expect(panel.locator('[data-testid^="product-categories-"]')).toHaveText(Array(n).fill('Drinkware'));
+  await expect(panel.getByTestId('products-count')).toHaveText(`Showing ${n} of ${n} products`);
+  // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/08f-products-filters-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.screenshot({ path: test.info().outputPath('08f-products-filters-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await panel.getByTestId('products-category-chip').getByText('Drinkware', { exact: true }).click();
+  await expect(panel.getByTestId('products-category-chip')).toHaveCount(0);
+  await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
+});
+
 test("the Products panel edits the mug's price and stock inline, and the sell screen sells it at the new price", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

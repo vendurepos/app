@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createVendureConnector, vendureProductTraits } from '@tallyui/connector-vendure';
-import { productRows, STOCK_STATUS_LABELS } from './product-rows';
+import { filterProductRows, productCategories, productRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
 
 const variant = (id: string, sku: string, price: number, name: string, stockOnHand?: number) =>
   ({ id, name, sku, price, currencyCode: 'EUR', enabled: true, trackInventory: stockOnHand === undefined ? 'FALSE' : 'TRUE', stockOnHand });
@@ -15,7 +15,7 @@ describe('productRows', () => {
     const rows = productRows(products, '', vendureProductTraits, 'EUR', 0);
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
     expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
-      imageUrl: null, stockStatus: 'in_stock', categories: '—',
+      imageUrl: null, stockStatus: 'in_stock', categories: '—', categoryIds: [],
       priceText: '8.00', stockText: '50', managed: true, stockTarget: null });
     expect([rows[3].managed, rows[3].stockText]).toEqual([false, '']);
     expect(rows[1].name).toBe('Espresso Beans · 250 g');
@@ -34,6 +34,8 @@ describe('productRows', () => {
     expect(rows[1].imageUrl).toBeNull();
     expect(rows[0].categories).toBe('Kitchen, Gifts');
     expect(rows[1].categories).toBe('—');
+    expect(rows[0].categoryIds).toEqual(['1', '2']);
+    expect(rows[1].categoryIds).toEqual([]);
     expect(rows[0].stockStatus).toBe('in_stock');
     expect(rows[2].stockStatus).toBe('out_of_stock');
   });
@@ -78,5 +80,42 @@ describe('productRows', () => {
       createVendureConnector({ pricesIncludeTax: false, globalTrackInventory, globalOutOfStockThreshold: 0 }).traits.product, 'EUR', 0)[0];
     expect([row(true).managed, row(true).stockText]).toEqual([true, '5']);
     expect([row(false).managed, row(false).stock]).toEqual([false, '—']);
+  });
+});
+
+describe('filterProductRows', () => {
+  const base = productRows(products, '', vendureProductTraits, 'EUR', 0);
+  const rows: ProductRow[] = [
+    { ...base[0], stockStatus: 'in_stock', categoryIds: ['kitchen'] },
+    { ...base[2], stockStatus: 'out_of_stock', categoryIds: ['kitchen'] },
+    { ...base[1], stockStatus: 'backorder', categoryIds: ['coffee'] },
+    { ...base[3], stockStatus: 'unknown', categoryIds: [] },
+  ];
+
+  it('drops only out-of-stock rows when In Stock is on', () => {
+    expect(filterProductRows(rows, { inStock: true, categoryId: null })).toEqual([rows[0], rows[2], rows[3]]);
+  });
+
+  it('keeps only rows with the selected category id', () => {
+    expect(filterProductRows(rows, { inStock: false, categoryId: 'kitchen' })).toEqual([rows[0], rows[1]]);
+  });
+
+  it('applies In Stock and category together', () => {
+    expect(filterProductRows(rows, { inStock: true, categoryId: 'kitchen' })).toEqual([rows[0]]);
+  });
+
+  it('keeps every row in order when neither filter is set', () => {
+    expect(filterProductRows(rows, { inStock: false, categoryId: null })).toEqual(rows);
+  });
+});
+
+describe('productCategories', () => {
+  it('dedupes collections by id and sorts them by name', () => {
+    const kitchen = { id: '1', name: 'Kitchen' };
+    const coffee = { id: '2', name: 'Coffee' };
+    expect(productCategories([
+      { ...products[0], collections: [kitchen] },
+      { ...products[1], collections: [kitchen, coffee] },
+    ], vendureProductTraits)).toEqual([coffee, kitchen]);
   });
 });
