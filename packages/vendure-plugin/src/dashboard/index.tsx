@@ -38,16 +38,21 @@ const RESOLUTIONS: Record<Resolution, { label: string; effect: string }> = {
   },
   rejected: {
     label: 'Cancel the sale',
-    effect: "The order and its POS payments are cancelled. The till's sale is refused with your note, and the till can send it again as a new sale. Switch the Dashboard to this sale's channel first.",
+    effect: "The order and its POS payments are cancelled. The till's sale is refused with your note, and the till can send it again as a new sale.",
   },
 };
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
+// A sale's channel by its code, or its raw id when the Dashboard does not list that channel.
+const channelCode = (channels: Array<{ id: string; code: string }>, channelId: string) =>
+  channels.find(channel => channel.id === channelId)?.code ?? channelId;
+
 function NeedsAdminPage() {
   const [rows, setRows] = useState<NeedsAdminRow[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [target, setTarget] = useState<{ row: NeedsAdminRow; resolution: Resolution } | null>(null);
+  const { channels } = useChannel();
 
   const load = useCallback(async () => {
     try {
@@ -86,7 +91,7 @@ function NeedsAdminPage() {
               <TableCell>{new Date(row.createdAt).toLocaleString()}</TableCell>
               <TableCell>{row.orderId ? <Link className="text-primary hover:underline" to={`/orders/${row.orderId}`}>{row.orderCode ?? row.orderId}</Link> : '—'}</TableCell>
               <TableCell className="whitespace-normal break-all">{row.clientOrderId ?? '—'}</TableCell>
-              <TableCell>{row.channelId}</TableCell>
+              <TableCell>{channelCode(channels, row.channelId)}</TableCell>
               <TableCell className="space-x-2 text-right">
                 <Button variant="outline" data-testid="vendurepos-needs-admin-apply"
                   onClick={() => setTarget({ row, resolution: 'applied' })}>{RESOLUTIONS.applied.label}</Button>
@@ -110,6 +115,10 @@ function ResolveDialog({ row, resolution, onClose, onResolved }: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const { label, effect } = RESOLUTIONS[resolution];
+  const { channels, activeChannel, setActiveChannel } = useChannel();
+  const saleCode = channelCode(channels, row.channelId);
+  // The server cancels only from the sale's channel (ADR 0002, needs_admin); Keep works from any.
+  const otherChannel = resolution === 'rejected' && activeChannel?.id !== row.channelId;
 
   async function resolve() {
     setPending(true);
@@ -136,6 +145,13 @@ function ResolveDialog({ row, resolution, onClose, onResolved }: {
           <DialogDescription>{effect}</DialogDescription>
         </DialogHeader>
         <p>{`Order ${row.orderCode ?? '—'}, till sale ${row.clientOrderId ?? '—'}`}</p>
+        {otherChannel && <div className="space-y-2">
+          <p role="status" data-testid="vendurepos-needs-admin-channel-warning">
+            {`This sale is in the ${saleCode} channel, and the Dashboard is in ${activeChannel?.code}. Cancelling works only from the sale's channel.`}
+          </p>
+          <Button type="button" variant="outline" data-testid="vendurepos-needs-admin-switch-channel"
+            onClick={() => setActiveChannel(row.channelId)}>{`Switch to ${saleCode}`}</Button>
+        </div>}
         <Label htmlFor="vendurepos-needs-admin-note">Note</Label>
         <Input id="vendurepos-needs-admin-note" data-testid="vendurepos-needs-admin-note" required
           value={note} onChange={event => setNote(event.target.value)} />
@@ -143,7 +159,7 @@ function ResolveDialog({ row, resolution, onClose, onResolved }: {
         <DialogFooter>
           <Button type="submit" data-testid="vendurepos-needs-admin-confirm" aria-busy={pending}
             variant={resolution === 'rejected' ? 'destructive' : 'default'}
-            disabled={!note.trim() || pending}>{pending ? 'Resolving…' : label}</Button>
+            disabled={!note.trim() || pending || otherChannel}>{pending ? 'Resolving…' : label}</Button>
         </DialogFooter>
       </form>
     </DialogContent>
