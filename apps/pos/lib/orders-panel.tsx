@@ -1,13 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
 import {
-  Button, HStack, OrderFilterBar, OrdersList, OrderStatusBadge, SearchInput,
+  Button, HStack, IconButton, OrderFilterBar, OrdersList, OrderStatusBadge, SearchInput,
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, ToggleGroup, ToggleGroupItem, VStack,
   type OrderFilterOption, type OrderHistoryRow,
 } from '@tallyui/components';
 import { searchVendureCustomers } from '@tallyui/connector-vendure';
 import { formatMoney } from '@tallyui/core';
 import { needsAttention, type OrderFilterValue, type OutboxState, type PosOrder } from '@tallyui/pos';
+import { RefreshIcon } from './nav-icons';
 import {
   groupOrdersByDay, ORDER_SEARCH_DEBOUNCE_MS, ORDER_STATUS_OPTIONS, storeDayOf,
   toOrderTableRow, useOrderList, VENDURE_ORDER_FILTER_FIELDS, type OrderListQuery, type OrderTableRow,
@@ -120,7 +121,12 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
               ? 'No orders match this search and these filters.' : 'No orders on the store yet.'}
           </Text> : null}
           {rows.length > 0 ? <HStack className="items-center justify-between px-4 py-3">
-            <Text testID="orders-count">{`Showing ${orders.length} of ${totalItems} orders`}</Text>
+            <HStack className="items-center gap-1">
+              <Text testID="orders-count">{`Showing ${orders.length} of ${totalItems} orders`}</Text>
+              <IconButton testID="orders-refresh" variant="ghost" size="sm" accessibilityLabel="Refresh orders" disabled={loading} onPress={reload}>
+                <RefreshIcon size={16} />
+              </IconButton>
+            </HStack>
             {orders.length < totalItems ? <Button testID="orders-more" variant="secondary" size="sm" disabled={loading} onPress={loadMore}>
               <Text>Show more</Text>
             </Button> : null}

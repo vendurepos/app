@@ -68,3 +68,11 @@ export const SupportIcon = createSvgIcon('SupportIcon', () => (
     <Path d="M12 15v.01" />
   </>
 ));
+
+// Refresh: tabler's `refresh` (v2's ↻ after the Orders count, 07b).
+export const RefreshIcon = createSvgIcon('RefreshIcon', () => (
+  <>
+    <Path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" />
+    <Path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+  </>
+));
