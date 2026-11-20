@@ -3,13 +3,35 @@ import type { OrderHistoryRow, OrderStatus } from '@tallyui/components';
 import { getVendureOrder, type VendureOrder } from '@tallyui/connector-vendure';
 import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
+import { WALK_IN_EMAIL } from './customer-list';
 import { orderHistoryNotice, orderStateLabel, type OrderHistoryNotice } from './order-history';
+import { storeDayOf } from './order-list';
 import { sessionContext, type Session } from './session';
 
 export const ORDER_NOT_SYNCED_TEXT = "This sale hasn't reached the store yet. You can open it here once it has synced.";
 const ORDER_GONE_TEXT = "This order isn't in the store any more.";
 export const ORDER_DETAIL_FAILED_TEXT = "Can't load this order.";
 export const ORDER_LOADING_TEXT = 'Loading the order…';
+
+/** The order sheet's customer line: the customer's name, or "Guest" without one or for the plugin's walk-in. */
+export function orderCustomerName(order: Pick<VendureOrder, 'customer'>): string {
+  if (!order.customer || order.customer.emailAddress === WALK_IN_EMAIL) return 'Guest';
+  return `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress;
+}
+
+/** The order sheet's second header line, v2's "Today · 14:31 · …": day · time · cashier. */
+export function orderHeaderMeta(order: Pick<VendureOrder, 'orderPlacedAt' | 'updatedAt' | 'customFields'>,
+  { timezone, now, locale }: { timezone: string; now: Date; locale?: string }): string {
+  const instant = order.customFields?.tallySaleAt ?? order.orderPlacedAt ?? order.updatedAt;
+  const tz = timezone === 'device' ? undefined : timezone;
+  const day = storeDayOf(instant, timezone), today = storeDayOf(now.toISOString(), timezone);
+  const yesterday = new Date(`${today}T00:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const label = day === today ? 'Today' : day === yesterday.toISOString().slice(0, 10) ? 'Yesterday'
+    : new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz }).format(new Date(instant));
+  const parts = [label, new Date(instant).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: tz }), order.customFields?.tallyCashierRef?.trim()].filter(Boolean);
+  return parts.join(' · ');
+}
 
 /** The Vendure id to read for a row, or the note shown instead when the store has no order for it yet. */
 export function orderDetailTarget(row: PosOrder | OrderHistoryRow): { orderId: string } | { note: string } {

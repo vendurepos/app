@@ -995,6 +995,41 @@ test('a register rebind mid-tender leaves the sale on the drawer its tender pinn
   expect(state!.sessions[sale.sessionId!].registerId).toBe(drawer);
 });
 
+test("the order sheet names the customer, and the sale's day, time and cashier, as v2's order detail", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('orders-open').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000003' }).click();
+  const customer = page.getByTestId('order-sheet-customer');
+  const meta = page.getByTestId('order-sheet-meta');
+  await expect(customer).toHaveText('Ada Lovelace');
+  await expect(meta).toContainText('· cashier@demo.vendurepos.com');
+  await expect(meta).toHaveText(/^[^·]+ · [^·]+ · cashier@demo\.vendurepos\.com$/);
+  await page.screenshot({ path: test.info().outputPath('07e-order-sheet-header-vendurepos.png') });
+  await page.getByTestId('order-sheet-close').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000002' }).click();
+  await expect(customer).toHaveText('Guest');
+  await page.getByTestId('order-sheet-close').click();
+  await page.getByTestId('orders-open').click();
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await expect(customer).toHaveText('Guest');
+  await expect(meta).toHaveText(/^Today · [^·]+ · [^·]+$/);
+  await expect(meta).not.toContainText('Front counter');
+});
+
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
 test('a scan over an open order closes the Orders panel, and Orders reopens on the list', async ({ page }) => {
   await page.goto('/demo');
