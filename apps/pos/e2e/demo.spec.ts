@@ -3192,5 +3192,9 @@ test("the cart header's settings button opens Settings › General at the Cart c
   await expect(page.getByTestId('settings-cart-card')).toHaveCount(0);
   await page.getByTestId('settings-open').click();
   await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
+  // The jump runs from the card's onLayout, which react-native-web delivers a frame after paint: let two frames pass first.
+  await expect(page.getByTestId('settings-cart-card')).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByTestId('price-edit-toggle')).toBeInViewport();
   await expect(page.getByTestId('settings-cart-card')).not.toBeInViewport();
 });
