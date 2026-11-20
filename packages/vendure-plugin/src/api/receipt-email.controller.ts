@@ -8,6 +8,7 @@ import { WALK_IN_EMAIL } from '../service/constants';
 export const TALLY_RECEIPT_EMAIL = Symbol('TALLY_RECEIPT_EMAIL');
 export type ReceiptEmailCaps = false | { perOrder: number; perUserPerMinute: number };
 const PER_ORDER = 3; // successful sends per order: a resend or two after a typo, not a mail cannon
+const TRACKED = 10_000; // the most orders (`sent`) and users (`recent`) each map holds
 const PER_USER_PER_MINUTE = 20; // requests per user per minute, refusals included: a busy till, not an order-code probe
 export const receiptEmailCaps = (option?: boolean | { perOrder?: number; perUserPerMinute?: number }): ReceiptEmailCaps => {
   const given = option === true ? {} : option;
@@ -33,7 +34,9 @@ export class TallyReceiptEmailController {
     if (!ctx.userHasAllPermissions([Permission.ReadOrder])) return refuse(403, 'forbidden', 'The receipt email needs ReadOrder as well');
     const user = String(ctx.activeUserId), now = Date.now(), recent = (this.recent.get(user) ?? []).filter(at => now - at < 60_000);
     if (recent.length >= this.caps.perUserPerMinute) return refuse(429, 'rate_limited', `At most ${this.caps.perUserPerMinute} requests a minute`);
+    this.recent.delete(user); // so the map runs from the least to the most recently let-through user
     this.recent.set(user, [...recent, now]);
+    if (this.recent.size > TRACKED) this.recent.delete(this.recent.keys().next().value!); // a dropped user only loses its in-memory minute
     const input = (body ?? {}) as { emailAddress?: unknown }, given = input.emailAddress;
     const typed = typeof given === 'string' ? given.replace(/^ +| +$/g, '') : undefined; // spaces only, so a CR or LF is refused
     if (typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'emailAddress')
@@ -49,7 +52,7 @@ export class TallyReceiptEmailController {
     if (sent >= this.caps.perOrder) return refuse(429, 'order_send_limit', `At most ${this.caps.perOrder} receipt emails per order`);
     await this.eventBus.publish(new TallyReceiptEmailEvent(ctx, order, recipient));
     this.sent.set(key, (this.sent.get(key) ?? 0) + 1);
-    if (this.sent.size > 10_000) this.sent.delete(this.sent.keys().next().value!); // a dropped order only loses its in-memory count
+    if (this.sent.size > TRACKED) this.sent.delete(this.sent.keys().next().value!); // a dropped order only loses its in-memory count
     Logger.info(`Receipt email queued for order ${order.code} by user ${user}`, 'TallyPosPlugin');
     return { queued: true, emailAddress: recipient };
   }

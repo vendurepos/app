@@ -88,11 +88,11 @@ function displaysBodyParser(): Middleware['handler'] {
   })) as Middleware['handler'];
 }
 
-/** `receiptEmail` (12.1a): `true` or an object turns on the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. The object overrides the caps: `perOrder` sends per order (default 3), `perUserPerMinute` requests per user (default 20). */
+/** `receiptEmail` (12.1a): `true` or an object turns on the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. The object overrides the caps: `perOrder` sends per order (default 3), `perUserPerMinute` requests per user (default 20). Both caps are kept in memory, per server process: a restart resets them, and each server instance counts on its own (#318). */
 export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; receiptEmail?: boolean | { perOrder?: number; perUserPerMinute?: number };
   /** Off by default (#332). With it set, a register v3 closure whose server cash variance is over `thresholdMinor` (minor units,
    * either way) needs a manager's proof from `POST /tally/v1/register-approvals`, and `/info` advertises the threshold. Do not set
-   * this before the VendurePOS app version that asks a manager for approval: until then such a close cannot complete. */
+   * this yet: with it set, a register opens only at v3 (#334), and TallyUI's till still opens at v1 or v2 until TallyUI/tallyui#1105 ships. */
   registerApproval?: { thresholdMinor: number } };
 
 /** VendurePOS: TallyUI's order.create (ADR 0002) and register commands (ADR 0003), one Postgres transaction per command. */

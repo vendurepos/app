@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { Button, Dialog, DialogContent, DialogTitle, Tabs, TabsList, TabsTrigger, Text } from '@tallyui/components';
-import { formatClosureDate, recordRegisterFact, watchFresh, type Actor, type Closure, type ClosureCollection, type useRegisterSession } from '@tallyui/pos';
+import { formatClosureDate, recordRegisterFact, watchFresh, type Actor, type Closure, type ClosureCollection, type RegisterSession, type useRegisterSession } from '@tallyui/pos';
 import {
   closureCsvFileName, closureHistoryCsv, closureHistoryRows, closureSummary, fetchChannelClosures, mergeClosures, openSessionRows, zCopyLines, type ClosureHistoryRow,
 } from './closure-history';
@@ -15,9 +15,10 @@ const NO_REMOTE: Awaited<ReturnType<typeof fetchChannelClosures>> = { closures: 
 // The table view's figure columns (Expected, Counted, Result) and its Print again column, the same widths in the head and the rows.
 const CELL = 'w-32 text-right', PRINT = 'w-36';
 
-export function ClosureList({ closures, session, registerId, storeKey, store, currency, timezone, blind, active: open, view = 'list', actor }: {
+export function ClosureList({ closures, session, registerId, storeKey, store, currency, timezone, blind, active: open, view = 'list', actor, ownSession }: {
   closures: ClosureCollection | null; session: Session | null; registerId: string;
   storeKey: string; store: string; currency: string; timezone: string; blind: boolean; active: boolean; view?: 'list' | 'table'; actor?: Actor;
+  ownSession?: RegisterSession | null;
 }) {
   const [filter, setFilter] = useState('all');
   const [found, setFound] = useState<Closure[]>([]);
@@ -93,8 +94,11 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
       <Button testID="closure-detail-back" variant="secondary" onPress={() => setOpenId(null)}><Text>Back</Text></Button>
     </View>
   );
-  const openRows = openSessionRows(remote.registers, { ownRegisterId: registerId, timezone });
-  const summary = closureSummary(merged, { open: openRows.length, openFloats: openRows.map((row) => remote.floats[row.registerId]), storeKey, currency, timezone, today, blind });
+  // This till's own session is read locally (the server has it only once the outbox sends the open); left out, the server's is used.
+  const own = ownSession === undefined ? undefined : ownSession && { status: ownSession.status, openedAt: ownSession.opened_at_gmt };
+  const openRows = openSessionRows(remote.registers, { ownRegisterId: registerId, timezone, own });
+  const openFloats = openRows.map((row) => row.registerId === registerId && ownSession ? ownSession.counted_float_minor : remote.floats[row.registerId]);
+  const summary = closureSummary(merged, { open: openRows.length, openFloats, storeKey, currency, timezone, today, blind });
   const tiles = [['discrepancy', 'Discrepancy', summary.discrepancy, 'counted − expected'], ['sessions', 'Sessions', summary.sessions, summary.sessionsNote],
     ['cash-at-open', 'Cash at open', summary.cashAtOpen, 'floats'], ['cash-activity', 'Cash activity', summary.cashActivity, 'sales − refunds ± movements'],
     ['cash-at-close', 'Cash at close', summary.cashAtClose, 'counted']];
@@ -206,7 +210,7 @@ export function ClosureHistory({ closures, session, register, registerId, storeK
         <Dialog open onOpenChange={onOpenChange}>
           <DialogContent testID="closure-history">
             <DialogTitle>Closures</DialogTitle>
-            <ClosureList closures={closures} session={session} registerId={registerId} storeKey={storeKey} store={store} currency={currency} timezone={timezone} blind={register.blind} active={open} />
+            <ClosureList closures={closures} session={session} registerId={registerId} storeKey={storeKey} store={store} currency={currency} timezone={timezone} blind={register.blind} active={open} ownSession={register.session} />
             <Button testID="closure-history-close" onPress={() => onOpenChange(false)}><Text>Close</Text></Button>
           </DialogContent>
         </Dialog>
