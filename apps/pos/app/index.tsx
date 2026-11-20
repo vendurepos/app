@@ -51,6 +51,7 @@ import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { loadCloseBy } from '../lib/register-close-by';
+import { loadOpeningFloatMinor } from '../lib/register-float';
 import { fetchRegisters, holdsRegister, registerTitle, setTillHoldsSession } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
@@ -533,6 +534,7 @@ function Sale({
   const { stage } = sale;
   const tender = useTillTender(sale);
   const currency = session.settings.currency;
+  const configuredFloatMinor = loadOpeningFloatMinor(boundRegisterId);
   // The register refuses to count or close under a tender.
   useEffect(() => {
     onTender(stage.kind === 'tender');
@@ -728,12 +730,13 @@ function Sale({
         ) : register.session ? (
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
           <RegisterColumn register={register} registerId={boundRegisterId} registers={[]} onPick={() => undefined} currency={currency}
+            configuredFloatMinor={configuredFloatMinor ?? null}
             countSlot={<RegisterCount register={register} currency={currency} approve={approvalSheet.approve} />} cartEmpty={!sale.order.lineItems.length}>
             {cart()}
           </RegisterColumn>
         ) : cart(registerReady
           // The cart stays usable with no session; only Checkout waits for the register to open (INTEGRATION.md).
-          ? <OpenRegisterCard register={register} currency={currency} className="mt-2 border border-border" />
+          ? <OpenRegisterCard register={register} currency={currency} configuredFloatMinor={configuredFloatMinor ?? null} className="mt-2 border border-border" />
           : <Text className="mt-2 text-sm text-muted-foreground">Opening the register…</Text>)}
       </View>
       {approvalSheet.dialog}
