@@ -238,7 +238,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     return () => { live = false; };
   }, [registerNameWanted, boundRegisterId, session]);
   const [listedRegisters, setListedRegisters] = useState<ListedRegister[]>([]);
-  // The bar names the bound register only when the store lists more than one (lib/register-choice.ts headerPlace).
+  // The bar names the bound register only when the store lists more than one (lib/register-choice.ts headerPlace); re-read when this till's session or its unsent register commands change, so an open reaches the list.
   useEffect(() => {
     let live = true;
     fetchRegisters(session).then(
@@ -246,7 +246,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       () => { if (live) setListedRegisters([]); },
     );
     return () => { live = false; };
-  }, [session, boundRegisterId, sessionStatus]);
+  }, [session, boundRegisterId, sessionStatus, registerOutbox.state.pending]);
   const place = headerPlace(listedRegisters, boundRegisterId);
   const printZ = async () => {
     const closure = register.lastClosure;
