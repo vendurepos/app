@@ -16,6 +16,7 @@ import type { RxCollection } from 'rxdb';
 import { SettingsPanel } from '../components/settings-panel';
 import type { SettingsSectionId } from '../lib/settings-sections';
 import { accessRefused } from '../lib/access-refused';
+import { useApprovalSheet } from '../lib/approval-sheet';
 import { AddToast, useAddToast } from '../lib/add-toast';
 import { loadAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { useCameraScanner } from '../lib/camera-scan';
@@ -75,7 +76,6 @@ import { NotificationsSheet } from '../lib/notifications-sheet';
 import { tillNotices } from '../lib/notices';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
 import { tenderTyped, useTillTender } from '../lib/till-tender';
-import { useTypedApproval } from '../lib/typed-approval';
 import { useCatalogue } from '../lib/use-catalogue';
 import { useCatalogueView } from '../lib/use-catalogue-view';
 import { useCatalogueFilters } from '../lib/use-catalogue-filters';
@@ -196,6 +196,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     enabled: (readSettingsCapabilities?.register ?? 0) >= MIN_REGISTER, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
     varianceThreshold: loadVarianceLimitMinor(),
   });
+  // #332: the "approval needed again" card's button, only where the store has the approval route.
+  const approvalSheet = useApprovalSheet({ session, register, capabilities: readSettingsCapabilities });
+  const storeApproves = (readSettingsCapabilities?.register ?? 0) >= 3 && readSettingsCapabilities?.registerApproval !== undefined;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [closuresOpen, setClosuresOpen] = useState(false);
   const [cashierOpen, setCashierOpen] = useState(false);
@@ -426,7 +429,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {/* Dialogs, drawn through the root PortalHost. */}
       {/* Mounted only while open, so a scan that closes it closes a cash-movement sheet within it for good. */}
       {registerPanelShown ? <RegisterPanel register={register} currency={currency} open onOpenChange={setRegisterOpen} presentation="side" storeName={store} registerName={registerName}
+        reapprove={storeApproves ? approvalSheet.reapprove : undefined}
         onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })} /> : null}
+      {approvalSheet.dialog}
       {closureShown && register.lastClosure ? (
         <>
           <ClosureSheet register={register} currency={currency} onPrint={printZ} onDone={() => setClosingSessionId(null)} />
@@ -493,7 +498,7 @@ function Sale({
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const catalogueView = useCatalogueView(settingsOpen);
   const catalogueFilters = useCatalogueFilters(settingsOpen);
-  const typedApproval = useTypedApproval();
+  const approvalSheet = useApprovalSheet({ session, register, capabilities });
   const identity = tillIdentity(session);
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
@@ -719,7 +724,7 @@ function Sale({
         ) : register.session ? (
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
           <RegisterColumn register={register} registerId={boundRegisterId} registers={[]} onPick={() => undefined} currency={currency}
-            countSlot={<RegisterCount register={register} currency={currency} approve={typedApproval.approve} />} cartEmpty={!sale.order.lineItems.length}>
+            countSlot={<RegisterCount register={register} currency={currency} approve={approvalSheet.approve} />} cartEmpty={!sale.order.lineItems.length}>
             {cart()}
           </RegisterColumn>
         ) : cart(registerReady
@@ -727,7 +732,7 @@ function Sale({
           ? <OpenRegisterCard register={register} currency={currency} className="mt-2 border border-border" />
           : <Text className="mt-2 text-sm text-muted-foreground">Opening the register…</Text>)}
       </View>
-      {typedApproval.dialog}
+      {approvalSheet.dialog}
       <ParkedSales sale={sale} parked={parked}
         onDiscard={async (id) => { await drafts!.findOne(id).exec().then((doc) => doc?.remove()); }}
         currency={session.settings.currency} open={parkedOpen} onOpenChange={setParkedOpen} />

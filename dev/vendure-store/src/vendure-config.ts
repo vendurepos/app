@@ -73,7 +73,10 @@ export const config: VendureConfig = {
     DefaultSearchPlugin.init({ bufferUpdates: false, indexStockStatus: true }),
     // POST /tally/v1/commands. Its tables and columns come from the seed's synchronize (no migrations
     // here); on start it gives every channel the POS payment and shipping methods and the walk-in customer.
-    TallyPosPlugin,
+    // Dev knob for the #332 approval sheet: a non-negative integer turns on the store's register approval threshold.
+    /^\d+$/.test(process.env.VENDURE_REGISTER_APPROVAL_MINOR ?? '')
+      ? TallyPosPlugin.init({ registerApproval: { thresholdMinor: Number(process.env.VENDURE_REGISTER_APPROVAL_MINOR) } })
+      : TallyPosPlugin,
     // npm run dashboard:build builds it; without the build, /dashboard shows Vendure's default page and nothing else changes.
     DashboardPlugin.init({ route: 'dashboard', appDir: path.join(__dirname, '../dist/dashboard') }),
   ],
