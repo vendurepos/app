@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, CustomerDisplaySettings, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
+  Button, Card, CardContent, CardHeader, CardTitle, CustomerDisplaySettings, CustomerPicker, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
 import { useTillDisplays, useTillPairing } from '@tallyui/pos';
 import { minorUnitDigits } from '@tallyui/core';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadAutoShowReceipt, saveAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { CartSideSettings } from '../lib/cart-side-settings';
+import { resetCartSettings } from '../lib/cart-settings-reset';
 import type { TillCustomerDisplay } from '../lib/customer-display';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadOpenOrdersPosition, saveOpenOrdersPosition } from '../lib/open-orders-position-setting';
@@ -62,6 +63,8 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
   const [autoPrint, setAutoPrint] = useState(() => loadAutoPrint());
   const [autoShowReceipt, setAutoShowReceipt] = useState(() => loadAutoShowReceipt());
   const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [cartKey, setCartKey] = useState(0);
   const connector = useCatalogueConnector(session);
   const sections = settingsSections({ printing: Platform.OS === 'web', customerDisplay: !!customerDisplay });
   // Opens on the section asked for (Store health's View log asks for the sync log) when this till lists it.
@@ -191,7 +194,7 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
         </CardContent>
       </Card>
       <TileSizeSettings />
-      <CartSideSettings />
+      <CartSideSettings key={cartKey} />
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Open orders</CardTitle></CardHeader>
         <CardContent>
@@ -205,6 +208,26 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
           </ToggleGroup>
         </CardContent>
       </Card>
+      <Button testID="cart-settings-restore" variant="outline" onPress={() => setRestoreOpen(true)}><Text>Restore default cart settings</Text></Button>
+      <Dialog open={restoreOpen} onOpenChange={setRestoreOpen}>
+        <DialogContent testID="cart-settings-restore-confirm" className="max-w-md">
+          <DialogTitle>Restore the default cart settings?</DialogTitle>
+          <DialogDescription>{"On this device, the cart's side, sort, columns and open orders, the quick discounts, and Printing's show and print after each sale go back to their defaults."}</DialogDescription>
+          <HStack space="sm" className="justify-end">
+            <Button testID="cart-settings-restore-cancel" variant="outline" onPress={() => setRestoreOpen(false)}><Text>Cancel</Text></Button>
+            <Button testID="cart-settings-restore-yes" variant="destructive" onPress={() => {
+              resetCartSettings();
+              setOpenOrdersPosition(loadOpenOrdersPosition());
+              setQuickText(formatQuickDiscounts(loadQuickDiscounts()));
+              setQuickSaved(null);
+              setAutoShowReceipt(loadAutoShowReceipt());
+              setAutoPrint(loadAutoPrint());
+              setCartKey(k => k + 1);
+              setRestoreOpen(false);
+            }}><Text>Restore</Text></Button>
+          </HStack>
+        </DialogContent>
+      </Dialog>
       {connector?.searchCustomers ? (
         <Card className="w-full max-w-[420px]">
           <CardHeader><CardTitle aria-level={2}>Customers</CardTitle></CardHeader>
