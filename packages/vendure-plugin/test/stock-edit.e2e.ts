@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { StockLevel, StockMovement, TransactionalConnection } from '@vendure/core';
+import { ChannelService, StockLevel, StockMovement, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { OrderCreateService } from '../src';
@@ -146,11 +146,11 @@ describe('10.2: POST /tally/v1/variants/:id/stock', () => {
     expect((await adjustments()).length - before).toBe(1);
   });
 
-  it('7: refusals: a bad body, an unknown variant, a till-only user and a variant at two stock locations', async () => {
+  it('7: refusals: a bad body or a figure over int4, an unknown variant, a till-only user, two stock locations; UpdateProduct is enough', async () => {
     await setOnHand(10);
     const before = (await adjustments()).length;
     for (const body of [{ expectedSaleable: 10, saleable: 7, extra: 1 }, { expectedSaleable: 10, saleable: -1 },
-      { expectedSaleable: 10, saleable: 1.5 }, { saleable: 7 }]) {
+      { expectedSaleable: 10, saleable: 1.5 }, { saleable: 7 }, { expectedSaleable: 10, saleable: 2147483648 }]) {
       expect(await stock(body), JSON.stringify(body)).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
     }
     for (const id of ['not-an-id', 'T_999999']) {
@@ -158,6 +158,14 @@ describe('10.2: POST /tally/v1/variants/:id/stock', () => {
     }
     expect((await stock({ expectedSaleable: 10, saleable: 7 }, mug, await tokenWith(['TallyPosSell']))).status).toBe(403);
     expect({ onHand: (await level()).stockOnHand, added: (await adjustments()).length - before }).toEqual({ onHand: 10, added: 0 });
+    await setOnHand(0);
+    await setAllocated(2); // on-hand would be 2147483647 + 2, over int4
+    expect(await stock({ expectedSaleable: 0, saleable: 2147483647 })).toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
+    expect((await level()).stockOnHand).toBe(0);
+    await setAllocated(0);
+    await setOnHand(10);
+    expect(await stock({ expectedSaleable: 10, saleable: 7 }, mug, await tokenWith(['UpdateProduct'])))
+      .toEqual({ status: 200, body: { saleable: 7, stockOnHand: 7 } });
 
     const { stockLocations } = await adminClient.query(parse('query { stockLocations { items { id } } }'));
     const { createStockLocation } = await adminClient.query(parse('mutation { createStockLocation(input: { name: "s102-second" }) { id } }'));
@@ -165,5 +173,34 @@ describe('10.2: POST /tally/v1/variants/:id/stock', () => {
       { stockLocationId: stockLocations.items[0].id, stockOnHand: 2 }, { stockLocationId: createStockLocation.id, stockOnHand: 1 }] });
     expect(await stock({ expectedSaleable: 2, saleable: 3 }, variantIds.print[0]))
       .toMatchObject({ status: 409, body: { code: 'stock_level_not_single' } });
+  });
+
+  // Print and a channel of its own, never the Mug, so tests 1-7 are unaffected in any order; test 7's Print 409 holds with this location too.
+  it('8: a second channel counts only its own stock location', async () => {
+    const { zones } = await adminClient.query(parse('query { zones { items { id name } } }'));
+    const denmark = zones.items.find((zone: { name: string }) => zone.name === 'Denmark').id, print = variantIds.print[0];
+    const { createChannel } = await adminClient.query(parse(`mutation Channel($input: CreateChannelInput!) {
+      createChannel(input: $input) { ... on Channel { id token } ... on ErrorResult { message } } }`), { input: {
+      code: 's102-second', token: 's102-second-token', defaultLanguageCode: 'en', pricesIncludeTax: false,
+      defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: denmark, defaultShippingZoneId: denmark } });
+    await adminClient.query(parse(`mutation Assign($input: AssignProductVariantsToChannelInput!) {
+      assignProductVariantsToChannel(input: $input) { id } }`), { input: { productVariantIds: [print], channelId: createChannel.id } });
+    adminClient.setChannelToken(createChannel.token);
+    try {
+      const { createStockLocation } = await adminClient.query(parse('mutation { createStockLocation(input: { name: "s102-channel" }) { id } }'));
+      await updateVariant({ id: print, stockLevels: [{ stockLocationId: createStockLocation.id, stockOnHand: 1 }] });
+    } finally {
+      adminClient.setChannelToken((await server.app.get(ChannelService).getDefaultChannel()).token);
+    }
+    const levels = async () => (await connection.rawConnection.getRepository(StockLevel).find({
+      where: { productVariantId: serviceIds.print[0] }, order: { stockLocationId: 'ASC' } })).map(row => row.stockOnHand);
+    const before = await levels();
+    expect(await stock({ expectedSaleable: 1, saleable: 4 }, print, { 'vendure-token': createChannel.token }))
+      .toEqual({ status: 200, body: { saleable: 4, stockOnHand: 4 } });
+    // The second channel's location is the newest, so the last level; every other Print level is unchanged.
+    expect(await levels()).toEqual([...before.slice(0, -1), 4]);
+    // Vendure assigns a location created in any channel to the default channel too (channel.service.js assignToCurrentChannel),
+    // so the default channel lists both locations and the edit there is refused.
+    expect(await stock({ expectedSaleable: 4, saleable: 5 }, print)).toMatchObject({ status: 409, body: { code: 'stock_level_not_single' } });
   });
 });
