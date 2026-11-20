@@ -258,6 +258,22 @@ The active channel's POS sales and refunds in a time range, every figure a SQL a
 
 A cashier's explicit request (12.1a), not ADR 0002's automatic confirmation: set `TallyPosPlugin.init({ receiptEmail: true })` and install `tallyReceiptEmailHandler` from `@vendurepos/plugin/email` beside `tallyOrderConfirmationHandler` in `EmailPlugin`'s handlers; `GET /tally/v1/info` then holds `receiptEmail: { v: 1 }`. It renders with your existing order-confirmation template, subject `Receipt for order #<code>`. The body is `{ emailAddress? }`; without it, the order customer's email is used. `emailAddress` is one plain address only: no list, display name, quotes, line break, encoded words or IP addresses. Answers: 202 `{ queued: true, emailAddress }` (each request sends one email), 404 `receipt_email_disabled`, 403 `forbidden` (the user lacks `ReadOrder`), 400 `invalid_payload`, 404 `order_not_found`, 409 `not_till_order`, 422 `no_recipient` (a walk-in sale and no address, or a stored email that is not one plain address), 429 `rate_limited` (more than `perUserPerMinute` requests from one user in a minute, refusals included; default 20) and 429 `order_send_limit` (the order already had `perOrder` receipts sent; default 3). Override the caps with `TallyPosPlugin.init({ receiptEmail: { perOrder, perUserPerMinute } })`. The counts are kept in memory, per server process. It changes no customer or order.
 
+### Stock edit: POST /tally/v1/variants/:id/stock
+
+The till's stock edit (10.2): it sets a variant's saleable stock only while the store's figure still equals the one the till showed, under the same stock lock as a sale. It needs `UpdateCatalog` or `UpdateProduct`, as Vendure's `updateProductVariants` does. `:id` is the Admin API's variant id. The body is strictly `{ expectedSaleable, saleable }`, both whole numbers of 0 or more. Saleable is `max(stockOnHand − stockAllocated − threshold, 0)`, the threshold being the global `outOfStockThreshold` unless the variant opts out; on-hand is written as `saleable + stockAllocated + threshold` through Vendure's own stock adjustment.
+
+| Status | Body | When |
+|---|---|---|
+| 200 | `{ saleable, stockOnHand }` | written, or nothing to change |
+| 400 | `invalid_payload` | a bad body |
+| 403 | Vendure's own FORBIDDEN | no `UpdateCatalog` or `UpdateProduct` |
+| 404 | `variant_not_found` | the variant is not in the active channel |
+| 409 | `stock_level_not_single` | the variant does not have exactly one stock level |
+| 409 | `stock_changed` `{ code, message, saleable }` | the figure changed; `saleable` is the store's current figure |
+| 503 | `stock_busy` | a sale held the stock past the lock timeout; nothing is written |
+
+`/tally/v1/info` does not list the route; a plugin without it answers 404 with Vendure's own body, which has no `code`.
+
 ### Customer display: pairing and signalling
 
 A till can pair a customer display on a second device (TallyUI ADR-085). The till-side routes under

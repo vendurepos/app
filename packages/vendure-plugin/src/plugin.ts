@@ -11,6 +11,7 @@ import { TallyInfoController } from './api/info.controller';
 import { TALLY_RECEIPT_EMAIL, TallyReceiptEmailController, receiptEmailCaps } from './api/receipt-email.controller';
 import { TallyRegistersController } from './api/registers.controller';
 import { TallyReportsController } from './api/reports.controller';
+import { TallyStockEditController } from './api/stock-edit.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import { tallyPosSell, tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund } from './config/permissions';
 import {
@@ -101,7 +102,8 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; 
   dashboard: './dashboard/index.tsx',
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES, ...DISPLAY_ENTITIES],
-  controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController],
+  controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController,
+    TallyStockEditController],
   providers: [OrderCreateService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
     { provide: TALLY_PLUGIN_OPTIONS, useFactory: () => TallyPosPlugin.options },
