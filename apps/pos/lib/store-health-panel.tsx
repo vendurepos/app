@@ -7,6 +7,7 @@ import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
+import { SyncCadenceCard } from './sync-cadence-card';
 import { confirmRedownload, coveragePercent, formatStorageUsed, readServerTotals, readStorageUsed, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
 export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
@@ -145,6 +146,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
             </Button>
           </CardContent>
         </Card>
+        <View className="mt-4"><SyncCadenceCard /></View>
       </ScrollView>
       <Dialog open={confirming} onOpenChange={open => (open ? setConfirming(true) : closeConfirm())}>
         <DialogContent testID="store-health-redownload-confirm" className="max-w-md">

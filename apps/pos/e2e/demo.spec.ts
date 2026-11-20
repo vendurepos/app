@@ -511,6 +511,39 @@ test('Store health checks everything now, and Clear & re-download empties and re
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("Store health › Sync cadence keeps this till's choice, and Custom clamps to TallyUI's limits", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('sync-cadence-standard')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByTestId('sync-cadence-standard-summary')).toHaveText('Every 60 s, up to 100 records a check, 60 checks an hour');
+  await page.getByTestId('sync-cadence-eco').click();
+  await expect(page.getByTestId('sync-cadence-eco')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByTestId('sync-cadence-standard')).toHaveAttribute('aria-checked', 'false');
+  await page.reload();
+  await expectSignedIn(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('sync-cadence-eco')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('sync-cadence-custom').click();
+  await page.getByTestId('sync-cadence-custom-seconds').fill('2');
+  await page.getByTestId('sync-cadence-custom-records').fill('500');
+  await page.getByTestId('sync-cadence-custom-save').click();
+  await expect(page.getByTestId('sync-cadence-custom-summary')).toHaveText('Every 5 s, 100 records a check, 720 checks an hour');
+  await expect(page.getByTestId('sync-cadence-custom')).toHaveAttribute('aria-checked', 'true');
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.getByTestId('sync-cadence').scrollIntoViewIfNeeded();
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13j-store-health-sync-cadence-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.getByTestId('sync-cadence-standard').click();
+  await page.reload();
+  await expectSignedIn(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('sync-cadence-standard')).toHaveAttribute('aria-checked', 'true');
+});
+
 test('Notifications at the foot of the rail shows the empty state and closes', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

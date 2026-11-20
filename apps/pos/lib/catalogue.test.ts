@@ -99,6 +99,58 @@ afterEach(async () => {
 });
 
 describe('catalogue sync lifecycle', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('with no stored cadence, starts the replication with no page size and re-pulls every 60 s', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { catalogueConnector, startCatalogueSync } = await import('./catalogue');
+    const { replication } = await startCatalogueSync(session, catalogueConnector(session));
+    expect(vi.mocked(startReplication).mock.calls[0][0].pullBatchSize).toBeUndefined();
+    const calls = vi.mocked(replication.reSync).mock.calls.length;
+    vi.advanceTimersByTime(59_999);
+    expect(replication.reSync).toHaveBeenCalledTimes(calls);
+    vi.advanceTimersByTime(1);
+    expect(replication.reSync).toHaveBeenCalledTimes(calls + 1);
+  });
+
+  it('follows a stored Eco cadence: page size 25, a re-pull every 5 minutes', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { catalogueConnector, startCatalogueSync } = await import('./catalogue');
+    const { saveSyncCadence } = await import('./sync-cadence');
+    const { defaultStore } = await import('./session');
+    saveSyncCadence(defaultStore(), 'eco');
+    const { replication } = await startCatalogueSync(session, catalogueConnector(session));
+    expect(vi.mocked(startReplication).mock.calls[0][0].pullBatchSize).toBe(25);
+    const calls = vi.mocked(replication.reSync).mock.calls.length;
+    vi.advanceTimersByTime(60_000);
+    expect(replication.reSync).toHaveBeenCalledTimes(calls);
+    vi.advanceTimersByTime(240_000);
+    expect(replication.reSync).toHaveBeenCalledTimes(calls + 1);
+  });
+
+  it('re-arms the timer when the cadence changes, and not after the sync stops', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const cadence = await import('./sync-cadence');
+    const subscribe = cadence.onSyncCadenceChange;
+    const unlisten = vi.fn();
+    vi.spyOn(cadence, 'onSyncCadenceChange').mockImplementation(listener => {
+      const unsubscribe = subscribe(listener);
+      return () => { unlisten(); unsubscribe(); };
+    });
+    const { defaultStore } = await import('./session');
+    const { catalogueConnector, startCatalogueSync, stopCatalogueSync } = await import('./catalogue');
+    const { replication } = await startCatalogueSync(session, catalogueConnector(session));
+    const calls = vi.mocked(replication.reSync).mock.calls.length;
+    cadence.saveSyncCadence(defaultStore(), 'realtime');
+    vi.advanceTimersByTime(10_000);
+    expect(replication.reSync).toHaveBeenCalledTimes(calls + 1);
+    await stopCatalogueSync();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    cadence.saveSyncCadence(defaultStore(), 'eco');
+    vi.advanceTimersByTime(600_000);
+    expect(replication.reSync).toHaveBeenCalledTimes(calls + 1);
+  });
+
   it('starts without listeners where window has no addEventListener (React Native)', async () => {
     vi.stubGlobal('window', {});
     vi.stubGlobal('document', undefined);

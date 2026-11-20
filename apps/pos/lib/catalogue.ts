@@ -3,14 +3,13 @@ import type { TallyConnector } from '@tallyui/core';
 import type { TallyDatabase, TallyReplicationState, STOCK_LEVELS_COLLECTION, getStorageHealth } from '@tallyui/database';
 import { sessionContext, storeKeyHash, type Session } from './session';
 import { appStorage } from './app-storage';
+import { loadSyncCadence, onSyncCadenceChange } from './sync-cadence';
 
 // One database per store, channel and barcode field so rows and checkpoints cannot be reused across settings.
 export function databaseName({ url, channelToken, barcodeField }: Pick<Session, 'url' | 'channelToken' | 'barcodeField'>): string {
   const key = `${url}\n${channelToken ?? ''}${barcodeField ? `\n${barcodeField}` : ''}`;
   return `vendurepos_${storeKeyHash(key)}`;
 }
-// Vendure's feeds have no push stream, so re-pull on this interval.
-export const RESYNC_INTERVAL_MS = 60_000;
 // The default skips the start pass and restarts a 24 h wait on every start, so a till reloaded daily would never run one.
 export const PRICE_RECONCILE_START_DELAY_MS = 60_000;
 // A hung storage worker must not prevent the cashier from signing out.
@@ -68,14 +67,23 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
   });
   const controller = new AbortController();
   const context = { ...sessionContext(session), signal: controller.signal };
+  const cadence = loadSyncCadence();
   const replication = startReplication({
     collection: db.products,
     adapter: connector.replication!.products!,
     context,
     live: true,
+    pullBatchSize: cadence.pullBatchSize,
   });
   const stockLevels = db[STOCK_LEVELS_COLLECTION];
-  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), RESYNC_INTERVAL_MS), unlisten: () => {}, refresh: () => {} };
+  sync = { replication, controller, runners: [], timer: setInterval(() => replication.reSync(), cadence.checkIntervalMs), unlisten: () => {}, refresh: () => {} };
+  const currentSync = sync;
+  // RxDB fixes the page size at start; a changed page size applies only at the next start.
+  const unlistenCadence = onSyncCadenceChange(next => {
+    if (sync !== currentSync) return;
+    clearInterval(sync.timer);
+    sync.timer = setInterval(() => replication.reSync(), next.checkIntervalMs);
+  });
   const stock = startStockReconcile({ collection: stockLevels, adapter: connector.reconcile!.stock!, context });
   sync.runners.push({ stop: stock.stop, runNow: stock.reconcileStock });
   const ids = startIdReconcile({ collection: db.products, adapter: connector.reconcile!.ids!, context, reSync: () => replication.reSync() });
@@ -95,6 +103,7 @@ async function startUnqueued(session: Session, connector: TallyConnector) {
   visibility?.addEventListener('visibilitychange', onVisibilityChange);
   network?.addEventListener('online', refresh);
   sync.unlisten = () => {
+    unlistenCadence();
     visibility?.removeEventListener('visibilitychange', onVisibilityChange);
     network?.removeEventListener('online', refresh);
   };
