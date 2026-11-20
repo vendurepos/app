@@ -41,7 +41,7 @@ function CustomerDisplaySection({ handles }: { handles: TillCustomerDisplay }) {
   );
 }
 
-export type SettingsCardId = 'cart';
+export type SettingsCardId = 'cart' | 'products';
 /** Settings' sections and cards: a covering panel of the till (CHECKLIST 9.1, the rail stays beside it), and the /settings route. */
 export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay, initialSection, initialCard }: {
   session: Session; onClose(): void; tillUpdatesPending?: number; customerDisplay?: TillCustomerDisplay | null;
@@ -199,7 +199,10 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
           </VStack>
         </CardContent>
       </Card>
-      <TileSizeSettings />
+      <View testID="settings-products-card" className="w-full items-center"
+        onLayout={(event) => { if (pendingCard.current === 'products') scroll.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false }); }}>
+        <TileSizeSettings />
+      </View>
       <View testID="settings-cart-card" className="w-full items-center"
         onLayout={(event) => { if (pendingCard.current === 'cart') scroll.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false }); }}>
         <CartSideSettings key={cartKey} />

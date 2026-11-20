@@ -5,6 +5,7 @@ import Constants from 'expo-constants';
 import {
   AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OpenSaleTabs, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   SyncStatus, TabsTrigger, TenderPane, Text, VStack, type OrderHistoryRow,
+  IconButton,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
@@ -37,6 +38,7 @@ import { DEMO_MODE } from '../lib/demo/mode';
 import { HandOverConfirm } from '../lib/hand-over';
 import { subscribeLogEntries, unreadErrorCount } from '../lib/log-buffer';
 import { logout } from '../lib/logout';
+import { SlidersIcon } from '../lib/nav-icons';
 import { loadOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
@@ -434,7 +436,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels} settingsOpen={settingsOpen}
-                  onCartSettings={() => { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setSettingsSection('general'); setSettingsCard('cart'); setSettingsOpen(true); }}
+                  onSettingsCard={(card) => { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setSettingsSection('general'); setSettingsCard(card); setSettingsOpen(true); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
                   overSheet={closureShown} customerDisplay={customerDisplay?.service ?? null} />
               </TaxProvider>
@@ -503,7 +505,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 function Sale({
   session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
-  onCartSettings,
+  onSettingsCard,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -516,8 +518,8 @@ function Sale({
   panelOpen: boolean; onClosePanels(): void;
   /** The Settings panel covers the sale: no scan reaches it, and its close re-reads the till's settings. */
   settingsOpen: boolean;
-  /** Opens Settings › General at the Cart card (the cart header's sliders, v2 04h) */
-  onCartSettings(): void;
+  /** Opens Settings › General at a card: the cart header's sliders (v2 04h) and the product pane's (v2 02f) */
+  onSettingsCard(card: SettingsCardId): void;
   /** The register is counting, closing or showing its Z. */
   registerClosing: boolean;
   /** The Z sheet shows: the scan notice goes over it. */
@@ -639,7 +641,7 @@ function Sale({
           <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
         </Button>
       ) : null}
-      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={onCartSettings} />
+      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={() => onSettingsCard('cart')} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
         highlightSku={highlightSku} store={storeLabel(session)} />
       {openOrdersPosition === 'bottom' ? openSaleTabs : null}
@@ -743,6 +745,7 @@ function Sale({
           onSelect={add}
           cartLines={sale.order.lineItems}
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
+          statusAccessory={<IconButton testID="product-settings-open" variant="ghost" size="sm" accessibilityLabel="Product settings" onPress={() => onSettingsCard('products')}><SlidersIcon size={18} /></IconButton>}
         />
       </View>
       {wide && stage.kind === 'tender' ? (
