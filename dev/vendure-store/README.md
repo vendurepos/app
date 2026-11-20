@@ -44,6 +44,7 @@ superadmin. System → API keys → **New POS till key** mints a till's device k
 | Vendure (Admin and Shop API) | `127.0.0.1:3000` | `VENDURE_PORT` |
 | Postgres | `127.0.0.1:5442` | `VENDURE_DB_PORT` |
 | Postgres database | `vendure` | `VENDURE_DB_NAME` |
+| Register approval threshold, minor units (#332; off when unset) | unset | `VENDURE_REGISTER_APPROVAL_MINOR` |
 
 `pnpm e2e` (`scripts/e2e.sh`, plan VA6) runs a copy of this store in a temporary directory with the plugin
 `npm pack`ed and `npm install`ed from the tarball, on :3100 with the database `vendurepos_e2e` on :5501
