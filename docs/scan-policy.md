@@ -23,6 +23,13 @@ shortest scan length is dropped silently. An item resting in view is added once 
 (the narrow Cart tab, a wide tender), the panel is unmounted and the camera let go; showing the catalogue again reopens
 it. On iOS and Android the same panel uses expo-camera's viewfinder (1.7b, not yet proven on a device: #319); where the camera module is absent the button is hidden.
 
+A scanner connected directly (web, Settings › Barcode scanning › Direct connection: USB HID-POS over WebHID or USB
+serial over Web Serial, TallyUI's `ScanHubProvider`) also goes through the same `onScan`, only while the till is in
+front, so every row below applies. TallyUI drops a code under the shortest scan length, and on serial takes off the prefix and suffix (a HID-POS report
+carries the bare code).
+If the scanner also types the code as a keyboard, the copy from the other source within 500 ms is dropped
+(`createScanDedupe`, `lib/device-scanner.ts`, TallyUI's rule) and plays no sound. Not yet proven on a real scanner.
+
 | Surface | What a scan does | Where |
 |---|---|---|
 | Products tab (narrow), cart stage | Adds; the Cart tab lights up and Products stays shown. | `Sale`, `add(entry, !onProducts)` |

@@ -36,8 +36,9 @@ function setValue(input: HTMLInputElement, value: string) {
  * a scan too, and never reaches the field; typing at human speed stays typing.
  * Web only: a native hardware keyboard is out of scope, so on native this does nothing.
  * While `active` is false the listener leaves every key alone: it prevents nothing, scans nothing and plays nothing.
+ * An `onScan` that returns null dropped the scan as a duplicate of a direct one (lib/device-scanner.ts): no sound.
  */
-export function useWedgeScanner(onScan: (code: string) => boolean | void, active = true) {
+export function useWedgeScanner(onScan: (code: string) => boolean | void | null, active = true) {
   const latest = useRef(onScan);
   useEffect(() => { latest.current = onScan; });
   const activeRef = useRef(active);
@@ -98,7 +99,7 @@ export function useWedgeScanner(onScan: (code: string) => boolean | void, active
         clearTimeout(release);
         held = '';
         const added = latest.current(code);
-        if (loadScanSounds()) playScanSound(added === true ? 'hit' : 'miss');
+        if (added !== null && loadScanSounds()) playScanSound(added === true ? 'hit' : 'miss');
       } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
         if (!fast) {
           flush();
