@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createVendureConnector, vendureProductTraits } from '@tallyui/connector-vendure';
-import { filterProductRows, productCategories, productRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
+import { filterProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
 
 const variant = (id: string, sku: string, price: number, name: string, stockOnHand?: number) =>
   ({ id, name, sku, price, currencyCode: 'EUR', enabled: true, trackInventory: stockOnHand === undefined ? 'FALSE' : 'TRUE', stockOnHand });
@@ -106,6 +106,45 @@ describe('filterProductRows', () => {
 
   it('keeps every row in order when neither filter is set', () => {
     expect(filterProductRows(rows, { inStock: false, categoryId: null })).toEqual(rows);
+  });
+});
+
+describe('Products panel header sorting', () => {
+  const row = (values: Partial<ProductRow> = {}): ProductRow => ({
+    id: '1', name: 'Mug', sku: '—', price: '—', stock: '—', imageUrl: null,
+    stockStatus: 'unknown', categories: '—', categoryIds: [], priceText: '', stockText: '',
+    managed: false, stockTarget: null, ...values,
+  });
+
+  it('extracts header values, leaving missing and unsortable values undefined', () => {
+    expect(productRowSortValue(row(), 'name')).toBe('Mug');
+    expect(productRowSortValue(row(), 'sku')).toBeUndefined();
+    expect(productRowSortValue(row({ stockText: '12' }), 'stock')).toBe(12);
+    expect(productRowSortValue(row(), 'stock')).toBeUndefined();
+    expect(productRowSortValue(row({ priceText: '8.50' }), 'price')).toBe(8.5);
+    expect(productRowSortValue(row(), 'price')).toBeUndefined();
+    expect(productRowSortValue(row(), 'categories')).toBeUndefined();
+  });
+
+  it('keeps the same catalogue array when no sort is selected', () => {
+    const rows = [row(), row({ id: '2' })];
+    expect(sortProductRows(rows, null)).toBe(rows);
+  });
+
+  it('sorts prices numerically and keeps missing prices last in either direction', () => {
+    const rows = [row({ id: '10', priceText: '10.00' }), row(), row({ id: '9', priceText: '9.00' })];
+    expect(sortProductRows(rows, { field: 'price', dir: 'asc' })).toEqual([rows[2], rows[0], rows[1]]);
+    expect(sortProductRows(rows, { field: 'price', dir: 'desc' })).toEqual([rows[0], rows[2], rows[1]]);
+  });
+
+  it('sorts names descending and keeps equal names in input order', () => {
+    const rows = [row({ id: 'a', name: 'a' }), row({ id: 'b1', name: 'b' }), row({ id: 'b2', name: 'b' })];
+    expect(sortProductRows(rows, { field: 'name', dir: 'desc' })).toEqual([rows[1], rows[2], rows[0]]);
+  });
+
+  it('brings the cheapest row from beyond the first page to the front', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => row({ id: String(i), priceText: i === 29 ? '1.00' : '10.00' }));
+    expect(sortProductRows(rows, { field: 'price', dir: 'asc' })[0]).toBe(rows[29]);
   });
 });
 

@@ -644,6 +644,41 @@ test("the Products panel filters by In Stock and by category, as v2's filter pil
   await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
 });
 
+test("the Products panel sorts by its headers, across every page, as v2's products table", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  const rows = panel.locator('[data-testid^="product-row-"]');
+  const variants = CATALOGUE.flatMap(p => p.variants).sort((a, b) => a.priceMinor - b.priceMinor);
+  const cheapestSku = variants[0].sku;
+  const dearestSku = variants[variants.length - 1].sku;
+  await expect(panel.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants.length} products`);
+  const unsortedFirst = await rows.first().getAttribute('data-testid');
+  await panel.getByTestId('product-table-sort-price').click();
+  await expect(rows.first()).toContainText(cheapestSku);
+  await expect(panel.getByTestId('product-table-sort-price')).toContainText('▲');
+  await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
+  await panel.getByTestId('product-table-sort-price').click();
+  await expect(rows.first()).toContainText(dearestSku);
+  await expect(panel.getByTestId('product-table-sort-price')).toContainText('▼');
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.screenshot({ path: test.info().outputPath('08g-products-header-sort-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await panel.getByTestId('product-table-sort-price').click();
+  await expect(rows.first()).toHaveAttribute('data-testid', unsortedFirst ?? '');
+  await expect(panel.getByTestId('product-table-sort-price')).not.toContainText(/[▲▼]/);
+  await panel.getByTestId('product-table-sort-name').click();
+  await expect(panel.getByTestId('product-table-sort-name')).toContainText('▲');
+  // The alphabetically last product is the last unsorted row, beyond the first 25: Name ▼ brings it to the top.
+  const lastByName = [...CATALOGUE].sort((a, b) => a.name.localeCompare(b.name)).at(-1)!.name;
+  await panel.getByTestId('product-table-sort-name').click();
+  await expect(panel.getByTestId('product-table-sort-name')).toContainText('▼');
+  await expect(rows.first()).toContainText(lastByName);
+});
+
 test("the Products panel edits the mug's price and stock inline, and the sell screen sells it at the new price", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
