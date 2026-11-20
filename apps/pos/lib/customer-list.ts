@@ -31,9 +31,17 @@ export type CustomerRow = {
   createdAt: string;
 };
 
-export function customerListOptions(search: string, skip: number) {
+export type CustomerSortField = 'firstName' | 'lastName' | 'emailAddress' | 'createdAt';
+export type CustomerSort = { field: CustomerSortField; dir: 'ASC' | 'DESC' };
+// v2's customers table opens sorted by last name, ascending ("LAST NAME ^").
+export const DEFAULT_CUSTOMER_SORT: CustomerSort = { field: 'lastName', dir: 'ASC' };
+/** A press on the sorted column flips it; a press on another column sorts that one ascending. */
+export function nextCustomerSort(current: CustomerSort, field: CustomerSortField): CustomerSort {
+  return { field, dir: current.field === field && current.dir === 'ASC' ? 'DESC' : 'ASC' };
+}
+export function customerListOptions(search: string, skip: number, sort = DEFAULT_CUSTOMER_SORT) {
   const q = search.trim();
-  return { skip, take: CUSTOMER_PAGE_SIZE, sort: { lastName: 'ASC' }, filter: {
+  return { skip, take: CUSTOMER_PAGE_SIZE, sort: { [sort.field]: sort.dir }, filter: {
     emailAddress: { notEq: WALK_IN_EMAIL },
     ...(q ? { _or: [{ firstName: { contains: q } }, { lastName: { contains: q } },
       { emailAddress: { contains: q } }, { phoneNumber: { contains: q } }] } : {}),
@@ -105,14 +113,14 @@ export function customerListNotice(error: unknown): OrderHistoryNotice {
   }
   return { text: CUSTOMERS_FAILED_TEXT, retry: true };
 }
-export async function loadCustomerPage(session: Session, search: string, skip: number): Promise<{ customers: CustomerRow[]; totalItems: number } | { notice: OrderHistoryNotice }> {
+export async function loadCustomerPage(session: Session, search: string, skip: number, sort = DEFAULT_CUSTOMER_SORT): Promise<{ customers: CustomerRow[]; totalItems: number } | { notice: OrderHistoryNotice }> {
   try {
-    const { items, totalItems } = await listVendureCustomerPage(sessionContext(session), customerListOptions(search, skip));
+    const { items, totalItems } = await listVendureCustomerPage(sessionContext(session), customerListOptions(search, skip, sort));
     return { customers: items.map(toCustomerRow), totalItems };
   } catch (error) { return { notice: customerListNotice(error) }; }
 }
 
-export function useCustomerList(session: Session, open: boolean, search: string): {
+export function useCustomerList(session: Session, open: boolean, search: string, sort = DEFAULT_CUSTOMER_SORT): {
   customers: CustomerRow[]; totalItems: number; notice: OrderHistoryNotice | null; loading: boolean; loadMore(): void; reload(): void;
 } {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
@@ -125,7 +133,7 @@ export function useCustomerList(session: Session, open: boolean, search: string)
     counter.current += 1;
     const id = counter.current;
     setLoading(true);
-    void loadCustomerPage(session, search, skip).then(result => {
+    void loadCustomerPage(session, search, skip, sort).then(result => {
       if (id !== counter.current) return;
       if ('customers' in result) {
         setCustomers(rows => skip === 0 ? result.customers : [...rows, ...result.customers.filter(customer => !rows.some(row => row.id === customer.id))]);
@@ -134,11 +142,11 @@ export function useCustomerList(session: Session, open: boolean, search: string)
       } else setNotice(result.notice);
       setLoading(false);
     });
-  }, [session, search]);
+  }, [session, search, sort]);
   useEffect(() => {
     // Only a search-only change waits; opening and reloads run immediately.
-    const inputs = [open, session, attempt, search];
-    const debounce = search !== previous.current[3] && inputs.slice(0, 3).every((value, index) => value === previous.current[index]);
+    const inputs = [open, session, attempt, sort, search];
+    const debounce = search !== previous.current[4] && inputs.slice(0, 4).every((value, index) => value === previous.current[index]);
     previous.current = inputs;
     if (!open) return;
     setLoading(true);
@@ -146,7 +154,7 @@ export function useCustomerList(session: Session, open: boolean, search: string)
     if (debounce) timer = setTimeout(() => request(0), CUSTOMER_SEARCH_DEBOUNCE_MS);
     else request(0);
     return () => { clearTimeout(timer); counter.current += 1; };
-  }, [open, session, attempt, search, request]);
+  }, [open, session, attempt, sort, search, request]);
   return { customers, totalItems, notice, loading,
     loadMore: () => { if (open && !loading && customers.length < totalItems) request(customers.length); },
     reload: () => { if (open) setAttempt(value => value + 1); },
