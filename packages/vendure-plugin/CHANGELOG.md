@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The receipt-email route's per-user rate limit keeps at most 10,000 users in memory, dropping the least recently seen (#318).
 - Dashboard: **POS sales to resolve** shows each sale's channel by its code. **Cancel the sale** says when the Dashboard is in another channel, offers a switch to the sale's channel and stays disabled until they match, as the server cancels only from the sale's channel. No migration.
 - `GET /tally/v1/registers/:id`: the live `session` gains `movements` (every movement of the session, oldest first) and `paidInMinor` and `paidOutMinor` (the cash paid in and out its `expected` counts), additive at version 1. No migration.
 - Dashboard: **POS sales to resolve** (Sales, SuperAdmin only) lists the sales kept `needs_admin` and resolves each with a note: **Keep the sale** (`applied`) or **Cancel the sale** (`rejected`), through the existing `tallyNeedsAdminCommands` and `tallyResolveNeedsAdmin`. No migration.
