@@ -543,6 +543,27 @@ it('creates a demo customer and refuses its email twice, as Vendure does', async
   expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[3].customer).toEqual(payload.customer);
 });
 
+it('updates only the given customer fields and persists them', () => {
+  const store = new DemoStore(storage);
+  const before = structuredClone(store.customer('c1'));
+  expect(store.updateCustomer({ id: 'c1', lastName: 'King', phoneNumber: '' })).toEqual({ ...before, lastName: 'King', phoneNumber: '' });
+  expect(new DemoStore(storage).customer('c1')).toEqual({ ...before, lastName: 'King', phoneNumber: '' });
+  expect(store.updateCustomer({ id: 'unknown', lastName: 'Nobody' })).toBeNull();
+});
+
+it('refuses another customer email without changing either customer, but accepts its own', () => {
+  const store = new DemoStore(storage);
+  const ada = structuredClone(store.customer('c1'))!;
+  const other = structuredClone(store.customer('c2'))!;
+  expect(store.updateCustomer({ id: ada.id, emailAddress: other.emailAddress, lastName: 'Wrong' }))
+    .toEqual({ __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.' });
+  for (const customer of [ada, other]) {
+    expect(store.customer(customer.id)).toEqual(customer);
+    expect(new DemoStore(storage).customer(customer.id)).toEqual(customer);
+  }
+  expect(store.updateCustomer({ id: ada.id, emailAddress: ada.emailAddress })).toEqual(ada);
+});
+
 it('Reset demo removes created customers', async () => {
   const context = sessionContext(await signedIn());
   const connector = createVendureConnector();

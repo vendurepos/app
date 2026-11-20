@@ -254,6 +254,19 @@ export class DemoStore {
     return customer;
   }
 
+  updateCustomer(input: { id: string; firstName?: string; lastName?: string; emailAddress?: string; phoneNumber?: string }) {
+    const customer = this.state.customers.find(customer => customer.id === input.id);
+    if (!customer) return null;
+    if (input.emailAddress !== undefined && this.state.customers.some(other => other.id !== input.id && other.emailAddress === input.emailAddress)) return {
+      __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
+    };
+    for (const field of ['firstName', 'lastName', 'emailAddress', 'phoneNumber'] as const) {
+      if (input[field] !== undefined) customer[field] = input[field];
+    }
+    this.save();
+    return customer;
+  }
+
   products() {
     let variantIndex = 0;
     // Each product's bundled picture; variants keep featuredAsset null and fall back to it, as in Vendure.
