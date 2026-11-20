@@ -28,3 +28,4 @@ export { TallyPosRegisterV21791000000000 } from './migrations/1791000000000-Tall
 export { TallyPosRegisterOpenVersion1791100000000 } from './migrations/1791100000000-TallyPosRegisterOpenVersion';
 export { TallyPosDisplay1791200000000 } from './migrations/1791200000000-TallyPosDisplay';
 export { TallyPosRegisterApproval1791300000000 } from './migrations/1791300000000-TallyPosRegisterApproval';
+export { TallyPosReceiptEmail1791400000000 } from './migrations/1791400000000-TallyPosReceiptEmail';

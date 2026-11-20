@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Receipt email: the per-order cap and the new daily caps (perUserPerDay, perChannelPerDay) are kept in the database (migration TallyPosReceiptEmail1791400000000), so they hold across restarts and server instances (#345).
 - `POST /tally/v1/variants/:id/stock` sets a variant's saleable stock only while it still equals the figure the till showed, under the same stock lock as a sale (10.2).
 - The receipt-email route's per-user rate limit keeps at most 10,000 users in memory, dropping the least recently seen (#318).
 - Dashboard: **POS sales to resolve** shows each sale's channel by its code. **Cancel the sale** says when the Dashboard is in another channel, offers a switch to the sale's channel and stays disabled until they match, as the server cancels only from the sale's channel. No migration.
