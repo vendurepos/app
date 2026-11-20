@@ -50,6 +50,7 @@ import { printLines } from '../lib/print-lines';
 import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
+import { loadCloseBy } from '../lib/register-close-by';
 import { fetchRegisters, holdsRegister, registerTitle, setTillHoldsSession } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
@@ -197,6 +198,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     deviceName: session.kind === 'api-key' ? session.device ?? null : null,
     enabled: (readSettingsCapabilities?.register ?? 0) >= MIN_REGISTER, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
     varianceThreshold: loadVarianceLimitMinor(),
+    expectedCloseTime: loadCloseBy(boundRegisterId),
   });
   // #332: the "approval needed again" card's button, only where the store has the approval route.
   const approvalSheet = useApprovalSheet({ session, register, capabilities: readSettingsCapabilities });

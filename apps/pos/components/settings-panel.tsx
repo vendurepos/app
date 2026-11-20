@@ -16,11 +16,13 @@ import { loadPriceEditAllowed, savePriceEditAllowed } from '../lib/price-edit-se
 import { formatQuickDiscounts, loadQuickDiscounts, parseQuickDiscounts, saveQuickDiscounts } from '../lib/quick-discounts-setting';
 import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { RegisterChoiceSettings } from '../lib/register-choice-settings';
-import { sessionContext, type Session } from '../lib/session';
+import { loadCloseBy, parseCloseBy, saveCloseBy } from '../lib/register-close-by';
+import { defaultStore, sessionContext, type Session } from '../lib/session';
 import { settingsSections, type SettingsSectionId } from '../lib/settings-sections';
 import { SyncLogCard } from '../lib/sync-log-card';
 import { TaxSettings } from '../lib/tax-settings-card';
 import { ThemeSettings } from '../lib/theme-settings';
+import { boundRegisterId } from '../lib/till-ids';
 import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
@@ -44,6 +46,8 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
   const [saved, setSaved] = useState<boolean | null>(null);
   const [varianceText, setVarianceText] = useState(() => formatVarianceLimit(loadVarianceLimitMinor()));
   const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
+  const [closeByText, setCloseByText] = useState(() => loadCloseBy(boundRegisterId(defaultStore())) ?? '');
+  const [closeBySaved, setCloseBySaved] = useState<boolean | null>(null);
   const [quickText, setQuickText] = useState(() => formatQuickDiscounts(loadQuickDiscounts()));
   const [quickSaved, setQuickSaved] = useState<boolean | null>(null);
   const [canEditPrice, setCanEditPrice] = useState(() => loadPriceEditAllowed());
@@ -125,6 +129,20 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
             }}><Text>Save</Text></Button>
             {varianceSaved === true && <Text testID="variance-saved">Saved.</Text>}
             {varianceSaved === false && <Text testID="variance-error">Enter an amount such as 5.00, or leave it empty.</Text>}
+            <Label nativeID="close-by-label">Close by</Label>
+            <Input><InputField testID="close-by-time" placeholder="21:30" value={closeByText} onChangeText={setCloseByText}
+              accessibilityLabel="Close by" accessibilityLabelledBy="close-by-label" /></Input>
+            <Text>This device offers Close register after this time, once the cart is empty (24-hour, such as 21:30). Each device keeps its own. Leave empty for none.</Text>
+            <Button testID="close-by-save" onPress={() => {
+              const result = parseCloseBy(closeByText);
+              if (result.ok) {
+                saveCloseBy(boundRegisterId(defaultStore()), result.time);
+                setCloseByText(result.time ?? '');
+              }
+              setCloseBySaved(result.ok);
+            }}><Text>Save</Text></Button>
+            {closeBySaved === true && <Text testID="close-by-saved">Saved.</Text>}
+            {closeBySaved === false && <Text testID="close-by-error">Enter a time such as 21:30, or leave it empty.</Text>}
           </VStack>
         </CardContent>
       </Card>
