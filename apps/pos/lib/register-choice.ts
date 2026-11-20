@@ -38,6 +38,11 @@ export function registerChoices(ownId: string, listed: readonly ListedRegister[]
   ];
 }
 
+/** The Orders register filter (CHECKLIST 7.2): every listed register, named as the register picker names them, this device's own first; only the own register when the list is empty or could not be read. */
+export function registerFilterOptions(ownId: string, listed: readonly ListedRegister[]): { value: string; label: string }[] {
+  return registerChoices(ownId, listed, new Date()).map(({ id, label }) => ({ value: id, label }));
+}
+
 /** The cashier sheet's Register row (CHECKLIST 6.1): the bound register as the picker labels it, "Register <first 8>" when unlisted. */
 export function boundRegisterLabel(ownId: string, listed: readonly ListedRegister[], boundId: string): string {
   return registerChoices(ownId, listed, new Date()).find((c) => c.id === boundId)?.label

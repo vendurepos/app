@@ -932,6 +932,41 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await expect(detail).toContainText(mug.name);
 });
 
+test("the Orders register filter lists the store's registers by name, as v2's orders", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+
+  const rows = await storeRows(page);
+  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
+  await expect(rows.and(page.getByTestId('orders-row-1'))).toBeVisible();
+  await page.getByTestId('order-filter-register').click();
+  const menu = page.getByTestId('order-filter-register-menu');
+  await expect(menu.getByTestId(/^order-filter-register-/)).toHaveText(['This device', 'Front counter']);
+  await expect(menu.getByTestId('order-filter-register-demo-front-counter')).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath('07h-orders-register-filter-vendurepos.png') });
+
+  await menu.getByTestId('order-filter-register-demo-front-counter').click();
+  await expect(page.getByTestId('orders-store-empty')).toBeVisible();
+  await expect(page.getByTestId('orders-row-4')).toHaveCount(0);
+  await page.getByTestId('order-filter-register').click();
+  await menu.getByText('This device', { exact: true }).click();
+  await expect(page.getByTestId('orders-row-4')).toBeVisible();
+  await expect(page.getByTestId('orders-row-1')).toHaveCount(0);
+});
+
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
 test('a scan over an open order closes the Orders panel, and Orders reopens on the list', async ({ page }) => {
   await page.goto('/demo');
