@@ -672,6 +672,11 @@ test("the Products panel sorts by its headers, across every page, as v2's produc
   await expect(panel.getByTestId('product-table-sort-price')).not.toContainText(/[▲▼]/);
   await panel.getByTestId('product-table-sort-name').click();
   await expect(panel.getByTestId('product-table-sort-name')).toContainText('▲');
+  // The alphabetically last product is the last unsorted row, beyond the first 25: Name ▼ brings it to the top.
+  const lastByName = [...CATALOGUE].sort((a, b) => a.name.localeCompare(b.name)).at(-1)!.name;
+  await panel.getByTestId('product-table-sort-name').click();
+  await expect(panel.getByTestId('product-table-sort-name')).toContainText('▼');
+  await expect(rows.first()).toContainText(lastByName);
 });
 
 test("the Products panel edits the mug's price and stock inline, and the sell screen sells it at the new price", async ({ page }) => {
