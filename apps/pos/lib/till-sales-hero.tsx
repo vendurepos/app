@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { Pressable, Text, useWindowDimensions, View } from 'react-native';
-import { Card, type SalesFilters } from '@tallyui/components';
+import { Card, ToggleGroup, ToggleGroupItem, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import type { SalesFigures } from '@tallyui/pos';
-import { compareLabel, isOneDay, type OrderSpread } from './till-reports';
+import { compareLabel, isOneDay, runningTotal, type OrderSpread } from './till-reports';
 
 const signed = (diff: number, format: (n: number) => string) =>
   diff === 0 ? '±0' : `${diff > 0 ? '+' : '−'}${format(Math.abs(diff))}`;
@@ -12,6 +13,7 @@ export function TillSalesHero({ figures, filters, onFiltersChange, currency, hou
   hourly: { hours: number[]; compareHours: number[] } | null;
   spread: { current: OrderSpread; comparison: OrderSpread | undefined };
 }) {
+  const [shape, setShape] = useState<'bars' | 'running'>('bars');
   const wide = useWindowDimensions().width >= 640;
   const money = (minor: number) => formatMoney({ amount: minor, currency }) ?? '';
   const { totals, series } = figures;
@@ -26,8 +28,10 @@ export function TillSalesHero({ figures, filters, onFiltersChange, currency, hou
     { id: 'largest', name: 'Largest order', value: spread.current.largestMinor, prev: before ? spread.comparison?.largestMinor : undefined, format: money },
     { id: 'items', name: 'Items', value: totals.items, prev: before?.items, format: String },
   ];
-  const values = hourly ? hourly.hours : series.map((point) => point.grossMinor);
-  const compareValues = hourly ? hourly.compareHours : (figures.comparison?.series ?? []).map((point) => point.grossMinor);
+  const barValues = hourly ? hourly.hours : series.map((point) => point.grossMinor);
+  const barCompareValues = hourly ? hourly.compareHours : (figures.comparison?.series ?? []).map((point) => point.grossMinor);
+  const values = shape === 'running' ? runningTotal(barValues) : barValues;
+  const compareValues = shape === 'running' ? runningTotal(barCompareValues) : barCompareValues;
   const max = Math.max(0, ...values, ...compareValues);
   const height = (gross: number) => `${max > 0 ? (Math.max(0, gross) / max) * 100 : 0}%` as const;
   const mode = hourly ? 'hour' : 'day';
@@ -53,11 +57,21 @@ export function TillSalesHero({ figures, filters, onFiltersChange, currency, hou
           ))}
         </View>
       </View>
-      <Pressable testID="hero-compare" accessibilityRole="button" disabled={!isOneDay(filters)}
-        onPress={() => onFiltersChange({ ...filters, compare: filters.compare === 'previous' ? 'week' : 'previous' })}
-        className="self-start rounded-md border border-border px-3 py-1">
-        <Text className="text-sm text-muted-foreground">⇄ {label}</Text>
-      </Pressable>
+      <View className="flex-row flex-wrap items-center justify-between gap-2">
+        <Pressable testID="hero-compare" accessibilityRole="button" disabled={!isOneDay(filters)}
+          onPress={() => onFiltersChange({ ...filters, compare: filters.compare === 'previous' ? 'week' : 'previous' })}
+          className="self-start rounded-md border border-border px-3 py-1">
+          <Text className="text-sm text-muted-foreground">⇄ {label}</Text>
+        </Pressable>
+        <ToggleGroup type="single" accessibilityLabel="Chart" value={shape} onValueChange={(value) => { if (value === 'bars' || value === 'running') setShape(value); }}>
+          <ToggleGroupItem value="bars" testID="hero-shape-bars" className={shape === 'bars' ? 'bg-secondary' : undefined}>
+            <Text>{hourly ? 'By hour' : 'By day'}</Text>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="running" testID="hero-shape-running" className={shape === 'running' ? 'bg-secondary' : undefined}>
+            <Text>Running total</Text>
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </View>
       <View testID="hero-chart" className="w-full">
         <View className="h-40 flex-row items-end border-b border-border">
           {values.map((gross, i) => (

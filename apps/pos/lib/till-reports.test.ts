@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
 import { presetRange, type PosOrder, type PosRefund, type ReportOrder } from '@tallyui/pos';
-import { cashierSalesToday, compareLabel, hourlyGross, initialSalesFilters, reportOptions, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
+import { cashierSalesToday, compareLabel, hourlyGross, initialSalesFilters, reportOptions, runningTotal, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
+
+it('runningTotal sums each value with every value before it', () => {
+  expect(runningTotal([])).toStrictEqual([]);
+  expect(runningTotal([0, 500, 0, 250])).toStrictEqual([0, 500, 500, 750]);
+  expect(runningTotal([100, -40])).toStrictEqual([100, 60]);
+});
 
 const timezone = 'Europe/Madrid';
 const today = '2026-11-16T12:00:00.000Z';
