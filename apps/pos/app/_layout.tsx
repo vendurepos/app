@@ -4,6 +4,7 @@ import { installLogSinks } from '../lib/logging';
 import '../global.css';
 import { FontProvider, ScaleProvider } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
+import { ScanHubProvider } from '@tallyui/pos';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -17,6 +18,11 @@ import { SessionProvider } from '../lib/session-context';
 import { statusBarStyle } from '../lib/status-bar-style';
 import { useStackColors } from '../lib/theme-colors';
 import { applyTheme, loadTheme } from '../lib/theme-setting';
+import { liveScannerSettings, reportScannerError } from '../lib/device-scanner';
+import { scannerProfileStore } from '../lib/scanner-profiles';
+
+const scannerProfiles = scannerProfileStore();
+const scannerSettings = liveScannerSettings();
 
 // The money-path loggers write nowhere until a sink is installed.
 installLogSinks();
@@ -36,10 +42,12 @@ export default function RootLayout() {
     <ScaleProvider scale={scale} scope={Platform.OS === 'web' ? undefined : ScopedVariables}>
       <FontProvider font={font} loadFonts={loadAppFonts}>
         <SessionProvider>
-          <StatusBar style={statusBarStyle(theme)} />
-          <Stack screenOptions={stackColors} />
-          {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
-          <PortalHost />
+          <ScanHubProvider profiles={scannerProfiles} settings={scannerSettings} onError={reportScannerError}>
+            <StatusBar style={statusBarStyle(theme)} />
+            <Stack screenOptions={stackColors} />
+            {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
+            <PortalHost />
+          </ScanHubProvider>
         </SessionProvider>
       </FontProvider>
     </ScaleProvider>

@@ -84,6 +84,8 @@ import { useCatalogueView } from '../lib/use-catalogue-view';
 import { useCatalogueFilters } from '../lib/use-catalogue-filters';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
+import { createScanDedupe } from '../lib/device-scanner';
+import { useDeviceScans } from '../lib/use-device-scans';
 import { tenderName, unsyncedNote, zReportLines } from '../lib/z-report';
 
 // Stamped on each closure; the plugin needs a non-empty softwareVersion.
@@ -622,7 +624,7 @@ function Sale({
   // says so. From the receipt it starts the next sale (New sale), and from a tender with no payment it goes back to the
   // cart (Back to the cart), then adds. A payment taken, cash typed on the keypad (a cleared entry does not count), or
   // saving is this sale being finished: the scan changes nothing and says so. An unknown code only says so, whatever the stage.
-  /** A scanned code, from the wedge or the camera: docs/scan-policy.md. Returns true only when it added. */
+  /** A scanned code, from the wedge, camera or directly connected scanner: docs/scan-policy.md. Returns true only when it added. */
   function onScan(code: string): true | void {
     const entry = findEntryByCode(catalogueEntries(scannable, connector.traits.product), code);
     const paying = stage.kind === 'tender' && (sale.saving || sale.order.payments.length > 0 || tenderTyped(tender.state));
@@ -651,7 +653,9 @@ function Sale({
     return () => setFocused(false);
   }, [rereadSettings]));
   useEffect(() => { if (!settingsOpen) rereadSettings(); }, [rereadSettings, settingsOpen]);
-  useWedgeScanner(onScan, focused && !settingsOpen);
+  const [scanDedupe] = useState(() => createScanDedupe());
+  useWedgeScanner((code) => scanDedupe.run(code, 'wedge', onScan), focused && !settingsOpen);
+  useDeviceScans((code, kind) => scanDedupe.run(code, kind, onScan), focused && !settingsOpen);
   const camera = useCameraScanner(onScan);
   const cameraPermission = useNativeCameraPermission();
   const catalogueHidden = (!wide && tab === 'cart') || (wide && stage.kind === 'tender');

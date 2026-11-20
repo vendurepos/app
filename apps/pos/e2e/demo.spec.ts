@@ -20,6 +20,10 @@ declare global {
     printCalls: number; scanTones: number[];
     cameraStreams: MediaStream[];
     cameraSees: { code: string; format: string } | null;
+    chooserCalls: { kind: string; options: unknown }[];
+    HID: { prototype: { requestDevice(options: unknown): Promise<unknown[]>; getDevices(): Promise<unknown[]> } };
+    Serial: { prototype: { requestPort(options?: unknown): Promise<unknown> } };
+    fakeScanner: EventTarget;
   }
 }
 
@@ -193,6 +197,116 @@ test("Settings' barcode test shows a scan and its last key, and adds nothing to 
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
   await wedgeScan(page, 'TALLY-MUG');
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test("Settings › Barcode scanning offers a direct connection, and Connect opens the browser's HID-POS and serial choosers", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.chooserCalls = [];
+    window.HID.prototype.requestDevice = async (options) => {
+      window.chooserCalls.push({ kind: 'hid', options });
+      return [];
+    };
+    window.Serial.prototype.requestPort = async (options) => {
+      window.chooserCalls.push({ kind: 'serial', options });
+      throw new DOMException('No port selected by the user.', 'NotFoundError');
+    };
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'barcode');
+  await expect(page.getByTestId('direct-scanner-hid-status')).toHaveText('Not connected');
+  await expect(page.getByTestId('direct-scanner-serial-status')).toHaveText('Not connected');
+  await expect(page.getByTestId('direct-scanner-unsupported')).toHaveCount(0);
+  await page.getByTestId('direct-scanner-hid-connect').click();
+  await page.getByTestId('direct-scanner-serial-connect').click();
+  await expect.poll(() => page.evaluate(() => window.chooserCalls[0])).toEqual({ kind: 'hid', options: { filters: [{ usagePage: 140 }] } });
+  await expect.poll(() => page.evaluate(() => window.chooserCalls[1]?.kind)).toBe('serial');
+  await expect(page.getByTestId('direct-scanner-error')).toHaveCount(0);
+  await expect(page.getByTestId('direct-scanner-hid-status')).toHaveText('Not connected');
+  await expect(page.getByTestId('direct-scanner-serial-status')).toHaveText('Not connected');
+  await page.getByTestId('direct-scanner').scrollIntoViewIfNeeded();
+  // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/11-settings-barcode-scanning-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('11-settings-barcode-scanning-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+});
+
+test('a scanner connected directly over HID-POS adds to the sale, is reopened after a reload, and Disconnect forgets it', async ({ page }) => {
+  await page.addInitScript(() => {
+    const fake = new class extends EventTarget {
+      vendorId = 0x0c2e; productId = 0x0b61; productName = 'Fake HID-POS scanner';
+      opened = false; collections = [];
+      async open() {
+        if (this.opened) throw new DOMException('Failed to open the device.', 'InvalidStateError');
+        this.opened = true;
+      }
+      async close() { this.opened = false; }
+    }();
+    window.fakeScanner = fake;
+    window.HID.prototype.requestDevice = async () => [fake];
+    window.HID.prototype.getDevices = async () => [fake];
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'barcode');
+  await page.getByTestId('direct-scanner-hid-connect').click();
+  await expect(page.getByTestId('direct-scanner-hid-status')).toHaveText('Connected');
+  await expect(page.getByTestId('direct-scanner-hid-disconnect')).toBeVisible();
+  await page.getByTestId('settings-back').click();
+  const wedgeDelay = await page.evaluate(async () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    const addedDirectly = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector('[data-testid="cart"]')?.textContent?.includes('Tally Fixture Mug')) return;
+        observer.disconnect(); resolve();
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    const data = new DataView(Uint8Array.from([9, ...Array.from('TALLY-MUG', (char) => char.charCodeAt(0))]).buffer);
+    const reportedAt = performance.now();
+    window.fakeScanner.dispatchEvent(Object.assign(new Event('inputreport'), { data, reportId: 0 }));
+    await addedDirectly;
+    // First prove the direct report added; then send the wedge copy with wedgeScan's default key actions.
+    const delay = performance.now() - reportedAt;
+    for (const key of [...'TALLY-MUG', 'Enter']) {
+      const target = document.activeElement ?? document.body;
+      const init = { key, bubbles: true, cancelable: true };
+      const typed = target.dispatchEvent(new KeyboardEvent('keydown', init));
+      if (typed && key.length === 1 && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+        document.execCommand('insertText', false, key);
+      } else if (typed && key === 'Enter' && target instanceof HTMLButtonElement) target.click();
+      target.dispatchEvent(new KeyboardEvent('keyup', init));
+    }
+    return delay;
+  });
+  expect(wedgeDelay).toBeLessThanOrEqual(100);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+  await expect(page.getByTestId('cart-line-TALLY-MUG').getByTestId('quantity-popover-trigger')).toHaveText('1');
+  await page.reload();
+  await openSettings(page, 'barcode');
+  await expect(page.getByTestId('direct-scanner-hid-status')).toHaveText('Connected');
+  await page.getByTestId('direct-scanner-hid-disconnect').click();
+  await expect(page.getByTestId('direct-scanner-hid-status')).toHaveText('Not connected');
+  await page.reload();
+  await openSettings(page, 'barcode');
+  await expect(page.getByTestId('direct-scanner-hid-status')).toHaveText('Not connected');
+});
+
+test('a browser without WebHID or Web Serial shows the plain fallback, not Connect buttons', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'hid', { get: () => undefined, configurable: true });
+    Object.defineProperty(Navigator.prototype, 'serial', { get: () => undefined, configurable: true });
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'barcode');
+  await expect(page.getByTestId('direct-scanner-unsupported')).toHaveText("This browser can't connect a scanner directly. Pair the scanner as a keyboard instead, or use Chrome or Edge on a computer.");
+  await expect(page.getByTestId('direct-scanner-hid-connect')).toHaveCount(0);
+  await expect(page.getByTestId('direct-scanner-serial-connect')).toHaveCount(0);
 });
 
 test('Settings opens beside the rail, and a scan there adds nothing to the sale', async ({ page }) => {

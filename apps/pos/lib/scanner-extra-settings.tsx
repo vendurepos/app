@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { Input, InputField, Label, SettingsRow, Switch, Text } from '@tallyui/components';
 import { loadScannerAffixes, loadScanSounds, saveScannerAffixes, saveScanSounds } from './scanner-settings';
 import { ScannerTestArea } from './scanner-test-area';
+import { DirectScannerSettings } from './direct-scanner-settings';
 
 /** Settings › Scanner: the prefix and suffix taken off each scan, and scan sounds. */
 export function ScannerExtraSettings(): JSX.Element {
@@ -29,6 +30,7 @@ export function ScannerExtraSettings(): JSX.Element {
         action={<Switch testID="scan-sounds-toggle" accessibilityLabel="Scan sounds" checked={sounds}
           onCheckedChange={(on) => { saveScanSounds(on); setSounds(on); }} />} />
     </>}
+    <DirectScannerSettings />
     <ScannerTestArea />
   </>;
 }
