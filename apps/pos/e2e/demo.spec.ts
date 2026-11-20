@@ -2136,6 +2136,41 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
 });
 
+test('Settings › Printing adds, edits and removes a printer kept on this device', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'printing');
+  await expect(page.getByTestId('printers-empty')).toBeVisible();
+  await page.getByTestId('printer-add').click();
+  await page.getByTestId('printer-name').fill('Front counter');
+  await page.getByTestId('printer-address').fill('192.168.1.50');
+  await page.getByTestId('printer-save').click();
+  await expect(page.getByTestId('printer-row')).toHaveCount(1);
+  await expect(page.getByTestId('printer-name-text')).toHaveText('Front counter');
+  await expect(page.getByTestId('printer-summary')).toHaveText('Network · 192.168.1.50:9100 · 80 mm');
+  await expect(page.getByTestId('printers-empty')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('11-settings-printing-vendurepos.png') });
+  await page.getByTestId('printer-edit').click();
+  await page.getByTestId('printer-name').fill('Back office');
+  await page.getByTestId('printer-connection-usb').click();
+  await page.getByTestId('printer-address').fill('/dev/usb/lp0');
+  await page.getByTestId('printer-paper-58mm').click();
+  await expect(page.getByTestId('printer-port')).toHaveCount(0);
+  await page.getByTestId('printer-save').click();
+  await expect(page.getByTestId('printer-row')).toHaveCount(1);
+  await expect(page.getByTestId('printer-name-text')).toHaveText('Back office');
+  await expect(page.getByTestId('printer-summary')).toHaveText('USB · /dev/usb/lp0 · 58 mm');
+  await page.reload();
+  await expectSignedIn(page);
+  await openSettings(page, 'printing');
+  await expect(page.getByTestId('printer-name-text')).toHaveText('Back office');
+  await expect(page.getByTestId('printer-summary')).toHaveText('USB · /dev/usb/lp0 · 58 mm');
+  await page.getByTestId('printer-remove').click();
+  await expect(page.getByTestId('printer-row')).toHaveCount(0);
+  await expect(page.getByTestId('printers-empty')).toBeVisible();
+});
+
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
