@@ -44,5 +44,8 @@ describe('the Dashboard extension is packaged where the Dashboard looks for it',
     expect(source).toMatch(/path:\s*(['"])\/vendurepos-needs-admin\1/);
     expect(source).toContain('tallyNeedsAdminCommands');
     expect(source).toContain('tallyResolveNeedsAdmin');
+    expect(source).toContain('vendurepos-needs-admin-channel-warning');
+    expect(source).toContain('vendurepos-needs-admin-switch-channel');
+    expect(source).toContain('setActiveChannel');
   });
 });
