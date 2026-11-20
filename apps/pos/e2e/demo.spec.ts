@@ -958,8 +958,9 @@ test("a till sale is stamped with the till's drawer, and the Orders register fil
   await expect(rows.and(page.getByTestId('orders-row-1'))).toBeVisible();
   await page.getByTestId('order-filter-register').click();
   await page.getByTestId(`order-filter-register-${ids.drawer}`).click();
-  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
+  // The filtered list first (the unfiltered one is still on screen until the refetch), then the till's sale in it.
   await expect(rows.and(page.getByTestId('orders-row-1'))).toHaveCount(0);
+  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
 });
 
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
