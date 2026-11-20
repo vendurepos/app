@@ -1,14 +1,20 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
+import { Platform } from 'react-native';
+import { FONT_SETTINGS, TYPE_SETS, fontFamilyStyle } from '@tallyui/theme';
 import {
   Card, CardContent, CardHeader, CardTitle, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
 import { UI_SCALES, UI_THEMES } from '@tallyui/pos';
+import { ALL_FONT_FAMILIES, loadAppFonts } from './app-fonts';
+import { FONT_LABELS, loadFont, saveFont } from './font-setting';
 import { loadScale, saveScale } from './scale-setting';
 import { applyTheme, loadTheme, saveTheme } from './theme-setting';
 
 export function ThemeSettings(): JSX.Element {
   const [theme, setTheme] = useState(() => loadTheme());
   const [scale, setScale] = useState(() => loadScale());
+  const [font, setFont] = useState(() => loadFont());
+  useEffect(() => { loadAppFonts(ALL_FONT_FAMILIES).catch(() => undefined); }, []);
   return (
     <Card className="w-full max-w-[420px]">
       <CardHeader><CardTitle aria-level={2}>Appearance</CardTitle></CardHeader>
@@ -40,6 +46,20 @@ export function ThemeSettings(): JSX.Element {
             {UI_SCALES.map((item) => (
               <ToggleGroupItem key={item} value={item} testID={`scale-${item}`} className={item === scale ? 'bg-secondary' : undefined}>
                 <Text>{item === 'auto' ? 'Auto' : item === 'compact' ? 'Compact' : item === 'regular' ? 'Regular' : 'Spacious'}</Text>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <Text testID="font-help">{"Fonts sets the typeface of the app's text on this device. Match theme uses the theme's own type, which is the system font."}</Text>
+          <ToggleGroup type="single" className="flex-wrap justify-start" accessibilityLabel="Fonts" testID="font"
+            value={font} onValueChange={(value) => {
+              if (value === '') return;
+              const id = FONT_SETTINGS.find((id) => id === value)!;
+              saveFont(id);
+              setFont(id);
+            }}>
+            {FONT_SETTINGS.map((id) => (
+              <ToggleGroupItem key={id} value={id} testID={`font-${id}`} className={id === font ? 'bg-secondary' : undefined}>
+                <Text style={id === 'auto' ? undefined : fontFamilyStyle(TYPE_SETS[id].body, Platform.OS === 'web')}>{FONT_LABELS[id]}</Text>
               </ToggleGroupItem>
             ))}
           </ToggleGroup>

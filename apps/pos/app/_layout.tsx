@@ -2,13 +2,15 @@
 import '../lib/demo/install';
 import { installLogSinks } from '../lib/logging';
 import '../global.css';
-import { ScaleProvider } from '@tallyui/components';
+import { FontProvider, ScaleProvider } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { ScopedVariables, useUniwind } from 'uniwind';
+import { loadAppFonts } from '../lib/app-fonts';
+import { useStoredFont } from '../lib/font-setting';
 import { printInLightScheme } from '../lib/print-light';
 import { useStoredScale } from '../lib/scale-setting';
 import { SessionProvider } from '../lib/session-context';
@@ -23,6 +25,7 @@ const startTheme = loadTheme();
 if (startTheme !== 'system') applyTheme(startTheme);
 
 export default function RootLayout() {
+  const font = useStoredFont();
   const scale = useStoredScale();
   const stackColors = useStackColors();
   const { theme } = useUniwind();
@@ -31,12 +34,12 @@ export default function RootLayout() {
   return (
     // The web uses TallyUI's root mirror.
     <ScaleProvider scale={scale} scope={Platform.OS === 'web' ? undefined : ScopedVariables}>
-      <SessionProvider>
+      <FontProvider font={font} loadFonts={loadAppFonts}><SessionProvider>
         <StatusBar style={statusBarStyle(theme)} />
         <Stack screenOptions={stackColors} />
         {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
         <PortalHost />
-      </SessionProvider>
+      </SessionProvider></FontProvider>
     </ScaleProvider>
   );
 }
