@@ -1500,6 +1500,55 @@ test('Settings › General › Cart sorts the items newest or oldest at top', as
   await expect.poll(lineOrder).toEqual(['cart-line-APP-APRON', 'cart-line-TALLY-MUG']);
 });
 
+test('Settings › General › Restore default cart settings puts every cart setting back, after a confirm', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'general');
+  const quickDefault = await page.getByTestId('quick-discounts').inputValue();
+  await page.getByTestId('cart-side-left').click();
+  await page.getByTestId('cart-sort-newest').click();
+  await page.getByTestId('cart-column-image').click();
+  await expect(page.getByTestId('cart-column-image')).toHaveAttribute('aria-checked', 'true');
+  const topPressed = await page.getByTestId('open-orders-top').getAttribute('aria-pressed') === 'true';
+  const openOrdersDefault = topPressed ? 'open-orders-top' : 'open-orders-bottom';
+  await page.getByTestId(topPressed ? 'open-orders-bottom' : 'open-orders-top').click();
+  await page.getByTestId('quick-discounts').fill('7');
+  await page.getByTestId('quick-discounts-save').click();
+
+  await page.getByTestId('settings-section-printing').click();
+  const showDefault = await page.getByTestId('auto-show-receipt-toggle').getAttribute('aria-checked');
+  await page.getByTestId('auto-show-receipt-toggle').click();
+  const printDefault = await page.getByTestId('auto-print-toggle').getAttribute('aria-checked');
+  await page.getByTestId('auto-print-toggle').click();
+  await page.getByTestId('settings-section-general').click();
+  await page.getByTestId('cart-settings-restore').click();
+  await page.getByTestId('cart-settings-restore-cancel').click();
+  await expect(page.getByTestId('cart-settings-restore-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('cart-side-left')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('cart-settings-restore').click();
+  await expect(page.getByTestId('cart-settings-restore-confirm')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('04h-cart-restore-vendurepos.png') });
+  await page.getByTestId('cart-settings-restore-yes').click();
+
+  for (const id of ['cart-side-right', 'cart-sort-oldest', openOrdersDefault]) {
+    await expect(page.getByTestId(id)).toHaveAttribute('aria-pressed', 'true');
+  }
+  await expect(page.getByTestId('cart-column-image')).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByTestId('quick-discounts')).toHaveValue(quickDefault);
+  await page.getByTestId('settings-section-printing').click();
+  await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', showDefault!);
+  await expect(page.getByTestId('auto-print-toggle')).toHaveAttribute('aria-checked', printDefault!);
+  await page.getByTestId('settings-back').click();
+  const cartLeft = async () => {
+    const cart = await page.getByTestId('till-cart').boundingBox();
+    const catalogue = await page.getByTestId('till-catalogue').boundingBox();
+    return cart && catalogue ? cart.x < catalogue.x : null;
+  };
+  await expect.poll(cartLeft).toBe(false);
+});
+
 test('Settings › General picks the register this device is at, and the till follows it', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
