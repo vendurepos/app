@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 import { Platform, ScrollView, Share, View } from 'react-native';
 import { Button, Card, CardContent, CardHeader, CardTitle, HStack, Text, VStack } from '@tallyui/components';
-import { filterLogEntries, formatLogLine, logCopyText, logEntries, markLogSeen, subscribeLogEntries, type LogFilter } from './log-buffer';
+import { filterLogEntries, formatLogLine, logActorName, logCopyText, logEntries, markLogSeen, subscribeLogEntries, type LogFilter } from './log-buffer';
 
 export function SyncLogCard(): JSX.Element {
   const entries = useSyncExternalStore(subscribeLogEntries, logEntries, logEntries);
@@ -18,8 +18,10 @@ export function SyncLogCard(): JSX.Element {
           <HStack space="sm">
             <Button size="sm" testID="sync-log-filter-all" variant={filter === 'all' ? 'default' : 'secondary'}
               onPress={() => { setFilter('all'); setCopied(null); }}><Text>All</Text></Button>
-            <Button size="sm" testID="sync-log-filter-problems" variant={filter === 'problems' ? 'default' : 'secondary'}
-              onPress={() => { setFilter('problems'); setCopied(null); }}><Text>Warnings and errors</Text></Button>
+            <Button size="sm" testID="sync-log-filter-actions" variant={filter === 'actions' ? 'default' : 'secondary'}
+              onPress={() => { setFilter('actions'); setCopied(null); }}><Text>Actions</Text></Button>
+            <Button size="sm" testID="sync-log-filter-errors" variant={filter === 'errors' ? 'default' : 'secondary'}
+              onPress={() => { setFilter('errors'); setCopied(null); }}><Text>Errors</Text></Button>
           </HStack>
           {(Platform.OS !== 'web' || (typeof navigator !== 'undefined' && !!navigator.clipboard)) && (
             <Button testID="sync-log-copy" variant="secondary" onPress={() => {
@@ -38,10 +40,10 @@ export function SyncLogCard(): JSX.Element {
               {shown.map((entry) => (
                 <Text key={entry.id} testID="sync-log-entry" selectable
                   className={`text-xs ${entry.level === 'error' ? 'text-destructive' : entry.level === 'warn' ? 'text-foreground' : 'text-muted-foreground'}`}>
-                  {`${new Date(entry.timestamp).toLocaleTimeString()} ${formatLogLine(entry)}`}
+                  {`${new Date(entry.timestamp).toLocaleTimeString()} ${formatLogLine(entry)}${logActorName(entry) !== null ? ` · ${logActorName(entry)}` : ''}`}
                 </Text>
               ))}
-              {shown.length === 0 && <Text testID="sync-log-empty">{filter === 'all' ? 'Nothing logged yet.' : 'No warnings or errors.'}</Text>}
+              {shown.length === 0 && <Text testID="sync-log-empty">{filter === 'all' ? 'Nothing logged yet.' : filter === 'actions' ? 'No actions yet.' : 'No errors.'}</Text>}
             </ScrollView>
           </View>
         </VStack>
