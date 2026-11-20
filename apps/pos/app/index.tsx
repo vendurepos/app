@@ -371,7 +371,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {reportsOpen ? <ReportsPanel orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}
         closures={registerStore && boundRegisterId ? <ClosureList view="table" closures={registerStore.closures} session={session} registerId={boundRegisterId}
-          storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} blind={register.blind} active actor={actor} /> : undefined}
+          storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} blind={register.blind} active actor={actor} ownSession={register.session} /> : undefined}
         timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
