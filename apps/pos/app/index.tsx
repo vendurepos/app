@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { Redirect, Stack, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
@@ -32,6 +32,7 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { HandOverConfirm } from '../lib/hand-over';
+import { subscribeLogEntries, unreadErrorCount } from '../lib/log-buffer';
 import { logout } from '../lib/logout';
 import { loadOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
@@ -119,6 +120,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const saleSettings = useSaleSettings(session, connector);
   const customerDisplay = useTillCustomerDisplay(session, saleSettings.status === 'ready' ? saleSettings.capabilities : undefined);
   const notices = tillNotices({ capabilities: saleSettings.capabilities });
+  const unreadErrors = useSyncExternalStore(subscribeLogEntries, unreadErrorCount, unreadErrorCount);
   const [pending, setPending] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [ordersScope, setOrdersScope] = useState<OrdersScope>('store');
@@ -309,7 +311,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     // A printed receipt is the receipt alone: the till's chrome carries print: 'hide' (lib/sale-receipt.tsx), and the
     // rail, which takes no dataSet, is hidden by the shell's print variant.
     <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
-      rejected: outbox.state.rejected ?? 0, notices: notices.length }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown, notificationsOpen, settingsOpen })}
+      rejected: outbox.state.rejected ?? 0, notices: notices.length, unreadErrors }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown, notificationsOpen, settingsOpen })}
       onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />

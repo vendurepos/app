@@ -52,6 +52,7 @@ export function redactLogData(data: Record<string, unknown> | undefined): KeptLo
 
 let entries: readonly KeptLogEntry[] = [];
 let nextId = 0;
+let seenThrough = 0;
 const listeners = new Set<() => void>();
 let notifyQueued = false;
 
@@ -76,6 +77,19 @@ export function keepLogEntry(entry: LogEntry): void {
 
 /** Newest first; the same array until the next keep or clear. */
 export function logEntries(): readonly KeptLogEntry[] { return entries; }
+
+/** The rail's Store health badge counts kept errors the cashier has not seen. */
+export function unreadErrorCount(): number {
+  return entries.filter(({ level, id }) => level === 'error' && id > seenThrough).length;
+}
+
+/** Mark the newest entry seen while the sync log is on screen. */
+export function markLogSeen(): void {
+  const newestId = entries[0]?.id;
+  if (newestId === undefined || newestId <= seenThrough) return;
+  seenThrough = newestId;
+  notify();
+}
 
 export function subscribeLogEntries(listener: () => void): () => void {
   listeners.add(listener);
