@@ -61,7 +61,7 @@ export type PricingStage = 'addItemToOrder' | 'setShippingMethod' | 'surchargeSa
 
 export { WALK_IN_EMAIL };
 // Front desk ruling 6: the wait for the sale's stock rows; a timeout is a 503 (transient timeout).
-const STOCK_LOCK_TIMEOUT = '5s';
+export const STOCK_LOCK_TIMEOUT = '5s';
 /** The environment variable that enables the test hooks; production never sets it. */
 export const TEST_HOOKS_ENV = 'VENDUREPOS_PLUGIN_TEST_HOOKS';
 // platformCode of an admin's `rejected` resolution of a needs_admin row.
