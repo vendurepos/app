@@ -4,9 +4,11 @@ import { Avatar, avatarInitials, Button, CustomerPicker, HStack, IconButton, Tex
 import type { TallyConnector } from '@tallyui/core';
 import type { useSale } from '@tallyui/pos';
 import { sessionContext, type Session } from './session';
+import { SlidersIcon } from './nav-icons';
 
-export function SaleCustomer({ sale, connector, session }: {
+export function SaleCustomer({ sale, connector, session, onSettings }: {
   sale: ReturnType<typeof useSale>; connector: TallyConnector; session: Session;
+  onSettings?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   if (!connector.searchCustomers) return null;
@@ -28,6 +30,12 @@ export function SaleCustomer({ sale, connector, session }: {
             <XIcon size={16} />
           </IconButton>
         ) : null}
+        {onSettings ? <>
+          <View className="flex-1" />
+          <IconButton testID="cart-settings-open" variant="ghost" size="sm" accessibilityLabel="Cart settings" onPress={onSettings}>
+            <SlidersIcon size={18} />
+          </IconButton>
+        </> : null}
       </HStack>
       {open ? (
         <View testID="customer-picker" className="rounded-md border border-border p-3">

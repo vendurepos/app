@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerDisplaySettings, CustomerPicker, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
@@ -41,11 +41,15 @@ function CustomerDisplaySection({ handles }: { handles: TillCustomerDisplay }) {
   );
 }
 
+export type SettingsCardId = 'cart';
 /** Settings' sections and cards: a covering panel of the till (CHECKLIST 9.1, the rail stays beside it), and the /settings route. */
-export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay, initialSection }: {
+export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay, initialSection, initialCard }: {
   session: Session; onClose(): void; tillUpdatesPending?: number; customerDisplay?: TillCustomerDisplay | null;
   initialSection?: SettingsSectionId;
+  initialCard?: SettingsCardId;
 }) {
+  const scroll = useRef<ScrollView>(null);
+  const pendingCard = useRef<SettingsCardId | null>(initialCard ?? null);
   const [text, setText] = useState(() => String(loadScannerMinLength()));
   const [saved, setSaved] = useState<boolean | null>(null);
   const [varianceText, setVarianceText] = useState(() => formatVarianceLimit(loadVarianceLimitMinor()));
@@ -81,7 +85,7 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
           return (
             <Pressable key={id} testID={`settings-section-${id}`} accessibilityRole="tab"
               aria-selected={selected} className={`rounded-md px-3 py-2${selected ? ' bg-muted' : ''}`}
-              onPress={() => setSection(id)}>
+              onPress={() => { pendingCard.current = null; setSection(id); }}>
               <Text className={`text-sm text-foreground${selected ? ' font-medium' : ''}`}>{label}</Text>
             </Pressable>
           );
@@ -89,6 +93,8 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
       </View>
     } contentSlot={
     <ScrollView className="flex-1 bg-background"
+      ref={scroll}
+      onStartShouldSetResponderCapture={() => { pendingCard.current = null; return false; }}
       // The chosen section's cards; the sections are v2's Settings tabs (parity 9.1).
       contentContainerStyle={{ flexGrow: 1 }}>
     <VStack className="flex-1 items-center bg-background p-6" space="lg">
@@ -194,7 +200,10 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
         </CardContent>
       </Card>
       <TileSizeSettings />
-      <CartSideSettings key={cartKey} />
+      <View testID="settings-cart-card" className="w-full items-center"
+        onLayout={(event) => { if (pendingCard.current === 'cart') scroll.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false }); }}>
+        <CartSideSettings key={cartKey} />
+      </View>
       <Card className="w-full max-w-[420px]">
         <CardHeader><CardTitle aria-level={2}>Open orders</CardTitle></CardHeader>
         <CardContent>
