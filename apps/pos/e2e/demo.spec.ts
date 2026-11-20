@@ -1195,6 +1195,27 @@ test("over the till's limit, a close needs a typed approver, recorded as typed",
   await page.getByTestId('settings-back').click();
 });
 
+test('a Close by time in the past makes the open register overdue, and its Close register starts the count', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'register');
+  await page.getByTestId('close-by-time').fill('0:00');
+  await page.getByTestId('close-by-save').click();
+  await expect(page.getByTestId('close-by-saved')).toBeVisible();
+  await expect(page.getByTestId('close-by-time')).toHaveValue('00:00');
+  await page.getByTestId('settings-back').click();
+  await openRegister(page);
+  await expect(page.getByTestId('register-column-overdue')).toContainText('This register is overdue for closing.');
+  await expect(page.getByTestId('register-bar-pill')).toHaveText('Overdue');
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('09f-register-overdue-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.getByTestId('register-column-close-overdue').click();
+  await expect(page.getByTestId('register-count')).toBeVisible();
+});
+
 test('a demo till prints an X report mid-shift and stays open', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
