@@ -1631,10 +1631,30 @@ test("the sync log in Settings keeps a till update's outcome, never its figures"
   await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'Register command result' }).first()).toContainText('status=applied');
   // The open's result carries the session's expected cash, which a blind count hides from the cashier.
   await expect(log).not.toContainText('expected');
-  await page.getByTestId('sync-log-filter-problems').click();
+  await page.getByTestId('sync-log-filter-errors').click();
   await expect(log.getByTestId('sync-log-entry').filter({ hasText: 'Register command result' })).toHaveCount(0);
   await page.getByTestId('sync-log-filter-all').click();
   await expect(log.getByTestId('sync-log-entry').first()).toBeVisible();
+});
+
+test("the sync log's Actions preset shows what the cashier did, and Errors hides it", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page, '10.00');
+  await openSettings(page, 'sync-log');
+  const entries = page.getByTestId('sync-log-entry');
+  await page.getByTestId('sync-log-filter-actions').click();
+  const opened = entries.filter({ hasText: 'Register session opened' }).first();
+  await expect(opened).toBeVisible();
+  await expect(opened).toHaveText(/Register session opened.* · \S+$/);
+  await expect(entries.filter({ hasText: 'Register command result' })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('13k-store-health-log-presets-vendurepos.png') });
+  await page.getByTestId('sync-log-filter-errors').click();
+  await expect(entries.filter({ hasText: 'Register session opened' })).toHaveCount(0);
+  await page.getByTestId('sync-log-filter-all').click();
+  await expect(entries.filter({ hasText: 'Register command result' }).first()).toBeVisible();
 });
 
 test("over the till's limit, a close needs a typed approver, recorded as typed", async ({ page }) => {

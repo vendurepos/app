@@ -1,7 +1,7 @@
 import type { LogEntry, LogLevel } from '@tallyui/pos';
 import { beforeEach, expect, it, vi } from 'vitest';
 import {
-  clearLogEntries, filterLogEntries, formatLogLine, keepLogEntry, LOG_BUFFER_SIZE, logCopyText,
+  clearLogEntries, filterLogEntries, formatLogLine, keepLogEntry, LOG_BUFFER_SIZE, logActorName, logCopyText,
   logEntries, markLogSeen, redactLogData, subscribeLogEntries, unreadErrorCount,
 } from './log-buffer';
 
@@ -110,10 +110,37 @@ it('masks emails and bearer tokens and shortens long text', () => {
   expect(redactLogData({ reason: 'a'.repeat(195) + ' Bearer secret' })!.reason).toBe('a'.repeat(195) + ' Bea…');
 });
 
-it('filters to warnings and errors', () => {
+it('filters All, Actions and Errors presets', () => {
   for (const level of ['debug', 'info', 'warn', 'error'] as LogLevel[]) keepLogEntry(entry({ level }));
-  expect(filterLogEntries(logEntries(), 'all')).toBe(logEntries());
-  expect(filterLogEntries(logEntries(), 'problems').map(({ level }) => level)).toEqual(['error', 'warn']);
+  keepLogEntry(entry({ level: 'info', actor: { id: 'c1', name: 'Ann' } }));
+  keepLogEntry(entry({ level: 'debug', actor: { id: '', name: '' } }));
+  const list = logEntries();
+  expect(filterLogEntries(list, 'all')).toBe(list);
+  expect(filterLogEntries(list, 'errors')).toEqual([list[2]]);
+  expect(filterLogEntries(list, 'actions')).toEqual([list[1]]);
+  expect(list[0]).not.toHaveProperty('actor');
+});
+
+it('keeps only the actor id and name, unmasked and bounded, for display', () => {
+  keepLogEntry(entry({ actor: { id: 'c1', name: 'ann@example.com', role: 'cashier' } }));
+  expect(logEntries()[0].actor).toEqual({ id: 'c1', name: 'ann@example.com' });
+  expect(logActorName(logEntries()[0])).toBe('ann@example.com');
+  keepLogEntry(entry({ actor: { name: 'a'.repeat(300) } }));
+  expect(logEntries()[0].actor?.name).toHaveLength(200);
+  expect(logEntries()[0].actor?.name).toBe('a'.repeat(199) + '…');
+  keepLogEntry(entry({ actor: { id: 'c1' } }));
+  expect(logActorName(logEntries()[0])).toBe('c1');
+  keepLogEntry(entry());
+  expect(logEntries()[0]).not.toHaveProperty('actor');
+  expect(logActorName(logEntries()[0])).toBeNull();
+});
+
+it('omits the actor from formatted lines and Copy/Share text', () => {
+  keepLogEntry(entry({ actor: { id: 'c1', name: 'ann@example.com' } }));
+  for (const text of [formatLogLine(logEntries()[0]), logCopyText(logEntries())]) {
+    expect(text).not.toContain('ann@example.com');
+    expect(text).not.toContain('c1');
+  }
 });
 
 it('formats one line per entry, newest first, with ISO times for copying', () => {

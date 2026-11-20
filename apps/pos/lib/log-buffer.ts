@@ -1,10 +1,10 @@
-import type { LogEntry, LogLevel } from '@tallyui/pos';
+import { matchesPresetFilters, presetFilters, type LogEntry, type LogLevel, type LogPreset } from '@tallyui/pos';
 
 /** How many entries the till keeps in memory, newest first. */
 export const LOG_BUFFER_SIZE = 500;
 export type KeptLogData = Record<string, string | number | boolean>;
-export interface KeptLogEntry { id: number; level: LogLevel; scope: string; message: string; data?: KeptLogData; timestamp: number }
-export type LogFilter = 'all' | 'problems';
+export interface KeptLogEntry { id: number; level: LogLevel; scope: string; message: string; data?: KeptLogData; timestamp: number; actor?: { id?: string; name?: string } }
+export type LogFilter = LogPreset;
 
 // The only data keys kept as they are: ids and short values, never figures or customer details.
 const KEPT_KEYS = ['orderId', 'commandId', 'storedCommandId', 'recordedCommandId', 'paymentId', 'sessionId', 'registerId', 'key', 'type', 'taxClass', 'from', 'to', 'stage', 'reason', 'method', 'status'];
@@ -69,8 +69,14 @@ function notify(): void {
 /** The sync log's sink callback: keeps a redacted copy of the entry, never the entry itself. */
 export function keepLogEntry(entry: LogEntry): void {
   const data = redactLogData(entry.data);
+  // The actor is this till's own signed-in cashier: shown on this till only, never scrubbed or in Copy/Share text.
+  const actor: NonNullable<KeptLogEntry['actor']> = {};
+  for (const key of ['id', 'name'] as const) {
+    const value = entry.actor?.[key];
+    if (typeof value === 'string' && value) actor[key] = value.length > MAX_TEXT ? `${value.slice(0, MAX_TEXT - 1)}…` : value;
+  }
   const kept: KeptLogEntry = { id: ++nextId, level: entry.level, scope: entry.scope, message: scrub(entry.message),
-    ...(data ? { data } : {}), timestamp: entry.timestamp };
+    ...(data ? { data } : {}), ...(Object.keys(actor).length > 0 ? { actor } : {}), timestamp: entry.timestamp };
   entries = [kept, ...entries.slice(0, LOG_BUFFER_SIZE - 1)];
   notify();
 }
@@ -102,8 +108,10 @@ export function clearLogEntries(): void {
 }
 
 export function filterLogEntries(list: readonly KeptLogEntry[], filter: LogFilter): readonly KeptLogEntry[] {
-  return filter === 'all' ? list : list.filter(({ level }) => level === 'warn' || level === 'error');
+  return filter === 'all' ? list : list.filter((entry) => matchesPresetFilters(entry, presetFilters(filter, true)));
 }
+
+export function logActorName(entry: KeptLogEntry): string | null { return entry.actor?.name || entry.actor?.id || null; }
 
 export function formatLogLine(entry: KeptLogEntry): string {
   const data = Object.entries(entry.data ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
