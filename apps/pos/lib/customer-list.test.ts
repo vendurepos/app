@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
-import { CUSTOMERS_FAILED_TEXT, CUSTOMERS_FORBIDDEN_TEXT, customerListNotice, customerListOptions,
+import { CUSTOMERS_FAILED_TEXT, CUSTOMERS_FORBIDDEN_TEXT, DEFAULT_CUSTOMER_SORT, nextCustomerSort, customerListNotice, customerListOptions,
   customersReadable, listVendureCustomerPage, toCustomerRow, type VendureCustomerListItem } from './customer-list';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -17,6 +17,20 @@ it('trims search across names, email and phone while excluding the walk-in custo
     _or: [{ firstName: { contains: 'mead' } }, { lastName: { contains: 'mead' } },
       { emailAddress: { contains: 'mead' } }, { phoneNumber: { contains: 'mead' } }],
   } });
+});
+
+it('passes the selected sort to the store for the first page and a searched next page', () => {
+  expect(customerListOptions('', 0, { field: 'createdAt', dir: 'DESC' })).toEqual({ skip: 0, take: 25, sort: { createdAt: 'DESC' },
+    filter: { emailAddress: { notEq: 'walk-in@vendurepos.local' } } });
+  expect(customerListOptions('ada', 25, { field: 'emailAddress', dir: 'ASC' }).sort).toEqual({ emailAddress: 'ASC' });
+});
+
+it('defaults to last name ascending and toggles only the current column', () => {
+  expect(DEFAULT_CUSTOMER_SORT).toEqual({ field: 'lastName', dir: 'ASC' });
+  expect(nextCustomerSort({ field: 'lastName', dir: 'ASC' }, 'lastName')).toEqual({ field: 'lastName', dir: 'DESC' });
+  expect(nextCustomerSort({ field: 'lastName', dir: 'DESC' }, 'lastName')).toEqual({ field: 'lastName', dir: 'ASC' });
+  expect(nextCustomerSort({ field: 'lastName', dir: 'DESC' }, 'firstName')).toEqual({ field: 'firstName', dir: 'ASC' });
+  expect(nextCustomerSort({ field: 'firstName', dir: 'ASC' }, 'createdAt')).toEqual({ field: 'createdAt', dir: 'ASC' });
 });
 
 const customer: VendureCustomerListItem = { id: 'c1', firstName: 'Ada', lastName: 'Lovelace',

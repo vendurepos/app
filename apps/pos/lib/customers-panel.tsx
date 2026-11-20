@@ -1,9 +1,9 @@
 import { useState, type JSX } from 'react';
-import { ScrollView, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
 import {
   Avatar, avatarInitials, Button, HStack, SearchInput, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
 } from '@tallyui/components';
-import { useCustomerList, type CustomerRow } from './customer-list';
+import { DEFAULT_CUSTOMER_SORT, nextCustomerSort, useCustomerList, type CustomerRow, type CustomerSort, type CustomerSortField } from './customer-list';
 import { useCustomerAccess } from './customer-edit';
 import { CustomerSheet } from './customer-sheet';
 import type { Session } from './session';
@@ -15,9 +15,10 @@ const COLUMN_CLASS = ['w-16 flex-none', undefined, undefined, 'flex-[2]', undefi
 export function CustomersPanel({ session, timezone }: { session: Session; timezone: string }): JSX.Element {
   const wide = useWindowDimensions().width >= 640;
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<CustomerSort>(DEFAULT_CUSTOMER_SORT);
   const access = useCustomerAccess(session);
   const [sheet, setSheet] = useState<{ row: CustomerRow | null } | null>(null);
-  const { customers, totalItems, notice, loading, loadMore, reload } = useCustomerList(session, true, search);
+  const { customers, totalItems, notice, loading, loadMore, reload } = useCustomerList(session, true, search, sort);
   const dateFormat = new Intl.DateTimeFormat(undefined, {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: timezone === 'device' ? undefined : timezone,
   });
@@ -38,8 +39,12 @@ export function CustomersPanel({ session, timezone }: { session: Session; timezo
       <ScrollView className="flex-1">
         <Table>
           {wide ? <TableHeader><TableRow>
-            {['', 'First name', 'Last name', 'Email', 'Billing address', 'Date created', ...(access.update ? [''] : [])].map((label, index) => (
-              <TableHead key={index} className={COLUMN_CLASS[index]}><Text>{label}</Text></TableHead>
+            {([{ label: '' }, { label: 'First name', field: 'firstName' }, { label: 'Last name', field: 'lastName' }, { label: 'Email', field: 'emailAddress' },
+              { label: 'Billing address' }, { label: 'Date created', field: 'createdAt' }, ...(access.update ? [{ label: '' }] : [])] as { label: string; field?: CustomerSortField }[]).map(({ label, field }, index) => (
+              <TableHead key={index} className={COLUMN_CLASS[index]} aria-sort={field ? (sort.field === field ? (sort.dir === 'ASC' ? 'ascending' : 'descending') : 'none') : undefined}>
+                {field ? <Pressable accessibilityRole="button" accessibilityLabel={'Sort by ' + label} testID={'customers-sort-' + field} onPress={() => setSort(current => nextCustomerSort(current, field))}>
+                  <Text>{label}{sort.field === field ? (sort.dir === 'ASC' ? ' ▲' : ' ▼') : ''}</Text>
+                </Pressable> : <Text>{label}</Text>}</TableHead>
             ))}
           </TableRow></TableHeader> : null}
           <TableBody>

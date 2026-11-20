@@ -468,6 +468,44 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("the Customers panel sorts by its headers on the store, as v2's customers table", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const rows = page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]');
+  const order = () => rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-testid')!.replace('customers-row-', '')));
+  await expect(page.getByTestId('customers-sort-lastName')).toContainText('▲');
+  await expect(page.getByTestId('customers-sort-firstName')).not.toContainText(/[▲▼]/);
+  await expect.poll(order).toEqual(['c2', 'c4', 'c6', 'c5', 'c1', 'c7', 'c3', 'c8']);
+
+  await page.getByTestId('customers-sort-lastName').click();
+  await expect(page.getByTestId('customers-sort-lastName')).toContainText('▼');
+  await expect.poll(order).toEqual(['c8', 'c3', 'c7', 'c1', 'c5', 'c6', 'c4', 'c2']);
+  await page.getByTestId('customers-sort-firstName').click();
+  await expect(page.getByTestId('customers-sort-firstName')).toContainText('▲');
+  await expect(page.getByTestId('customers-sort-lastName')).not.toContainText(/[▲▼]/);
+  await expect.poll(order).toEqual(['c1', 'c3', 'c5', 'c6', 'c8', 'c2', 'c4', 'c7']);
+  await page.getByTestId('customers-sort-emailAddress').click();
+  await page.getByTestId('customers-sort-emailAddress').click();
+  await expect(page.getByTestId('customers-sort-emailAddress')).toContainText('▼');
+  await expect.poll(order).toEqual(['c7', 'c4', 'c2', 'c8', 'c6', 'c5', 'c3', 'c1']);
+
+  await page.getByTestId('customers-sort-createdAt').click();
+  await expect(page.getByTestId('customers-sort-createdAt')).toContainText('▲');
+  await expect.poll(order).toEqual(['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8']);
+  await page.getByTestId('customers-sort-createdAt').click();
+  await expect(page.getByTestId('customers-sort-createdAt')).toContainText('▼');
+  await expect.poll(order).toEqual(['c8', 'c7', 'c6', 'c5', 'c4', 'c3', 'c2', 'c1']);
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 8 of 8 customers');
+  await page.screenshot({ path: test.info().outputPath('06e-customers-header-sort-vendurepos.png') });
+
+  await page.getByTestId('customers-search').fill('ar');
+  await expect.poll(order).toEqual(['c7', 'c5']);
+  await expect(page.getByTestId('customers-sort-createdAt')).toContainText('▼');
+});
+
 test('the Customers panel adds and edits customers on the store; a refused save leaves the row as the store has it', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
