@@ -963,7 +963,7 @@ test("the order sheet names the customer, and the sale's day, time and cashier, 
   await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
   await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
   await expect(customer).toHaveText('Guest');
-  await expect(meta).toHaveText(/^Today · [^·]+ · [^·]+ · [^·]+$/);
+  await expect(meta).toHaveText(/^Today · [^·]+ · [^·]+$/);
   await expect(meta).not.toContainText('Front counter');
 });
 
