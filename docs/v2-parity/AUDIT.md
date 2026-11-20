@@ -379,25 +379,27 @@ Captured 2026-11-10. VendurePOS is the live demo (demo.vendurepos.com, 1280×800
 | Closure / Z | ![](screenshots/vendurepos-register-closure-report.png) | ![](screenshots/wcpos-v2-gallery-v2-dialog--footer-register.png) (dialog footer, gallery) |
 | Settings | ![](screenshots/vendurepos-settings-full.png) | — |
 
-## What this repo builds next (app-local or plugin, no shared wait)
+## What this repo built next (app-local or plugin, no shared wait)
 
-Ordered top down: money and the cashier's day first.
+This was the build order on 2026-11-10, money and the cashier's day first. By 2026-11-20 every item had shipped, on `@tallyui/*` 3.20.0. Each is listed below with the `CHECKLIST.md` row that records its PRs.
 
-1. **Order detail from an Orders row** (app). `getVendureOrder` + `OrderDetail`. Needs the 3.12.0 bump first, for `OrdersList onOpen`.
-2. **Till refunds** (app). Builds on 1, using the shipped refund pieces. Needs 3.12.0 too, for `vendureLineRefundWithTax`.
-3. **X report mid-shift** (app). `buildXReportDocument`.
-4. **Closure history and Z reprint from this till** (app). The local closure collection.
-5. **Closures read route** (plugin). `GET /tally/v1/registers/:id/closures`.
-6. **Sales report route** (plugin), then a **Reports screen** (app).
-7. **Sync log viewer and "Sync now"** (app).
-8. **Email receipt** (plugin route, then an app button).
-9. **System dark mode** (app).
-10. **Tile size, scan prefix/suffix, scan sounds** (app settings).
-11. **Customers screen** (app).
-12. **Camera scan** (app).
-13. **The needs-admin queue page in the Vendure dashboard** (plugin).
+1. **Order detail from an Orders row** (app): 7.3, done.
+2. **Till refunds** (app): 7.4, done.
+3. **X report mid-shift** (app): 6.2, done. Another register's X report is in Reports › Closures (8.1, 4.2x).
+4. **Closure history and Z reprint from this till** (app): 8.2, done. It lists every register's closures.
+5. **Closures read route** (plugin): shipped as the `closures` of `GET /tally/v1/registers/:id`, not as a route of its own (8.2).
+6. **Sales report route** (plugin), then a **Reports screen** (app). 8.1 is partly done: the till's own figures, Closures, and v2's drawer card. Store-wide figures from sales report v2 wait on a published @tallyui version (8.1f).
+7. **Sync log viewer and "Sync now"** (app): 10.3 and 1.2, done.
+8. **Email receipt:** the plugin route is done (12.1a, #317). The app button waits on a published @tallyui version (12.1b).
+9. **System dark mode** (app): 9.2, done.
+10. **Tile size, scan prefix and suffix, scan sounds** (app settings): 9.4, done; tile size is in Settings › General.
+11. **Customers screen** (app): 10.1. List and search are done. Adding and editing a customer wait on a shared TallyUI editor.
+12. **Camera scan** (app): 1.7, done. The native device proof is owed in #319.
+13. **The needs-admin queue page in the Vendure dashboard** (plugin): done in #327, with each sale's channel in #338.
 
-**Also:** a `@tallyui/*` bump from 3.9.1 to 3.12.0, a deliberate PR of its own. It is checked against the carry-over rules before any unit that needs a newer shared piece.
+The register approval gap in §4 is done on the app side by #339 (a manager signs in at the till). The store setting stays off until a till opens its register at v3 (TallyUI/tallyui#1105).
+
+**What's next now:** this audit is a snapshot. The live list is each row's *Left:* in `CHECKLIST.md`. On 2026-11-20 every *Left:* waits on a TallyUI change, a published @tallyui version or a ruling.
 
 ## Needs from shared packages
 
