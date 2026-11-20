@@ -1216,6 +1216,37 @@ test('a Close by time in the past makes the open register overdue, and its Close
   await expect(page.getByTestId('register-count')).toBeVisible();
 });
 
+test('an opening float set in Settings prefills Open register and offers it as a chip', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openSettings(page, 'register');
+  await page.getByTestId('opening-float').fill('150');
+  await page.getByTestId('opening-float-save').click();
+  await expect(page.getByTestId('opening-float-saved')).toBeVisible();
+  await expect(page.getByTestId('opening-float')).toHaveValue('150.00');
+  await page.getByTestId('settings-back').click();
+
+  const card = page.getByTestId('open-register-card');
+  await expect(card.getByTestId('open-register-amount')).toHaveValue('150.00');
+  await expect(card.getByTestId('open-register-chip-configured')).toContainText('150.00');
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('09g-register-open-float-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await card.getByTestId('open-register-amount').fill('90.00');
+  await expect(card.getByTestId('opening-variance')).toBeVisible();
+  await card.getByTestId('open-register-chip-configured').click();
+  await expect(card.getByTestId('open-register-amount')).toHaveValue('150.00');
+  await expect(card.getByTestId('opening-variance')).toHaveCount(0);
+
+  await openSettings(page, 'register');
+  await page.getByTestId('opening-float').fill('');
+  await page.getByTestId('opening-float-save').click();
+  await expect(page.getByTestId('opening-float-saved')).toBeVisible();
+  await page.getByTestId('settings-back').click();
+});
+
 test('a demo till prints an X report mid-shift and stays open', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

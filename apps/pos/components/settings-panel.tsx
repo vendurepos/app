@@ -4,6 +4,7 @@ import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerDisplaySettings, CustomerPicker, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
 import { useTillDisplays, useTillPairing } from '@tallyui/pos';
+import { minorUnitDigits } from '@tallyui/core';
 import { loadAutoPrint, saveAutoPrint } from '../lib/auto-print-setting';
 import { loadAutoShowReceipt, saveAutoShowReceipt } from '../lib/auto-show-receipt-setting';
 import { CartSideSettings } from '../lib/cart-side-settings';
@@ -17,6 +18,7 @@ import { formatQuickDiscounts, loadQuickDiscounts, parseQuickDiscounts, saveQuic
 import { formatVarianceLimit, loadVarianceLimitMinor, parseVarianceLimit, saveVarianceLimitMinor } from '../lib/register-approval';
 import { RegisterChoiceSettings } from '../lib/register-choice-settings';
 import { loadCloseBy, parseCloseBy, saveCloseBy } from '../lib/register-close-by';
+import { formatOpeningFloat, loadOpeningFloatMinor, parseOpeningFloat, saveOpeningFloatMinor } from '../lib/register-float';
 import { defaultStore, sessionContext, type Session } from '../lib/session';
 import { settingsSections, type SettingsSectionId } from '../lib/settings-sections';
 import { SyncLogCard } from '../lib/sync-log-card';
@@ -48,6 +50,9 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
   const [varianceSaved, setVarianceSaved] = useState<boolean | null>(null);
   const [closeByText, setCloseByText] = useState(() => loadCloseBy(boundRegisterId(defaultStore())) ?? '');
   const [closeBySaved, setCloseBySaved] = useState<boolean | null>(null);
+  const digits = minorUnitDigits(session.settings.currency);
+  const [openingFloatText, setOpeningFloatText] = useState(() => formatOpeningFloat(loadOpeningFloatMinor(boundRegisterId(defaultStore())), digits));
+  const [openingFloatSaved, setOpeningFloatSaved] = useState<boolean | null>(null);
   const [quickText, setQuickText] = useState(() => formatQuickDiscounts(loadQuickDiscounts()));
   const [quickSaved, setQuickSaved] = useState<boolean | null>(null);
   const [canEditPrice, setCanEditPrice] = useState(() => loadPriceEditAllowed());
@@ -143,6 +148,20 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
             }}><Text>Save</Text></Button>
             {closeBySaved === true && <Text testID="close-by-saved">Saved.</Text>}
             {closeBySaved === false && <Text testID="close-by-error">Enter a time such as 21:30, or leave it empty.</Text>}
+            <Label nativeID="opening-float-label">Opening float</Label>
+            <Input><InputField testID="opening-float" keyboardType="decimal-pad" placeholder={formatOpeningFloat(10000, digits)} value={openingFloatText} onChangeText={setOpeningFloatText}
+              accessibilityLabel="Opening float" accessibilityLabelledBy="opening-float-label" /></Input>
+            <Text>Open register starts from this amount and offers it as a chip. Each device keeps its own. Leave empty for none.</Text>
+            <Button testID="opening-float-save" onPress={() => {
+              const result = parseOpeningFloat(openingFloatText, digits);
+              if (result.ok) {
+                saveOpeningFloatMinor(boundRegisterId(defaultStore()), result.minor);
+                setOpeningFloatText(formatOpeningFloat(result.minor, digits));
+              }
+              setOpeningFloatSaved(result.ok);
+            }}><Text>Save</Text></Button>
+            {openingFloatSaved === true && <Text testID="opening-float-saved">Saved.</Text>}
+            {openingFloatSaved === false && <Text testID="opening-float-error">Enter an amount such as 100.00, or leave it empty.</Text>}
           </VStack>
         </CardContent>
       </Card>
