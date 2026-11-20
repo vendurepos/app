@@ -409,6 +409,44 @@ test("the Products panel edits the mug's price and stock inline, and the sell sc
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toContainText('€9.50');
 });
 
+test('the Products panel edits one variant of a multi-variant product, and its sibling keeps its price and stock', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  await page.getByTestId('products-search').fill('Espresso Beans');
+  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(2);
+  // lib/demo/store.ts assigns variant ids sequentially across the catalogue, starting at 1.
+  const variants = CATALOGUE.flatMap(product => product.variants);
+  const [smallId, largeId] = ['ESP-250', 'ESP-1000'].map(sku => String(variants.findIndex(variant => variant.sku === sku) + 1));
+  for (const id of [smallId, largeId]) {
+    const row = panel.getByTestId(`product-row-${id}`);
+    await expect(row.getByTestId(`product-price-${id}`)).toBeVisible();
+    await expect(row.getByTestId(`product-stock-${id}`)).toBeVisible();
+  }
+  const price = panel.getByTestId(`product-price-${largeId}`);
+  const stock = panel.getByTestId(`product-stock-${largeId}`);
+  await price.fill('31.50');
+  await price.press('Tab');
+  await stock.fill('7');
+  await stock.press('Enter');
+  await expect.poll(async () => (await demoState(page))?.stock[largeId].quantity).toBe(7);
+  await expect(price).toHaveValue('31.50');
+  await expect(stock).toHaveValue('7');
+  await expect(panel.getByTestId(`product-price-${smallId}`)).toHaveValue('8.99');
+  await expect(panel.getByTestId(`product-stock-${smallId}`)).toHaveValue('20');
+  await expect(page.getByTestId('products-save-error')).toHaveCount(0);
+  // The demo-pairs size, as 10e; the PNG is made docs/v2-parity/demo-pairs/08e-products-variant-edit-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.screenshot({ path: test.info().outputPath('08e-products-variant-edit-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.getByTestId('products-open').click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toBeVisible();
+});
+
 test("Store health shows Ready to sell, nothing waiting, the products on this device and the store's totals, and a scan closes it and adds", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

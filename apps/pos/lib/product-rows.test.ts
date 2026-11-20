@@ -15,12 +15,31 @@ describe('productRows', () => {
     const rows = productRows(products, '', vendureProductTraits, 'EUR', 0);
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
     expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
-      priceText: '8.00', stockText: '50', managed: true, editable: true, stockTarget: null });
-    expect([rows[1].editable, rows[3].managed, rows[3].stockText]).toEqual([false, false, '']);
+      priceText: '8.00', stockText: '50', managed: true, stockTarget: null });
+    expect([rows[3].managed, rows[3].stockText]).toEqual([false, '']);
     expect(rows[1].name).toBe('Espresso Beans · 250 g');
     expect(rows[1].stock).toBe('20');
     expect(rows[2].stock).toBe('0');
     expect(rows[3].stock).toBe('—');
+  });
+
+  it('keeps each Espresso Beans variant\'s own id, price and stock edit values', () => {
+    const rows = productRows(products, 'Espresso Beans', vendureProductTraits, 'EUR', 0);
+    expect(rows.map(({ id, priceText, stockText }) => ({ id, priceText, stockText }))).toEqual([
+      { id: '21', priceText: '8.99', stockText: '20' },
+      { id: '22', priceText: '29.99', stockText: '0' },
+    ]);
+  });
+
+  it('builds each row\'s stock target from its own variant\'s stock level', () => {
+    const stocked = products.map(product => ({ ...product, variants: product.variants.map((v, index) => ({ ...v,
+      stockLevels: [{ stockLocationId: `location-${v.id}`, stockOnHand: v.stockOnHand ?? 0, stockAllocated: index + 1 }],
+    })) }));
+    const rows = productRows(stocked, 'Espresso Beans', vendureProductTraits, 'EUR', 3);
+    expect(rows.map(({ id, stockTarget }) => ({ id, stockTarget }))).toEqual([
+      { id: '21', stockTarget: { stockLocationId: 'location-21', stockAllocated: 1, threshold: 3 } },
+      { id: '22', stockTarget: { stockLocationId: 'location-22', stockAllocated: 2, threshold: 3 } },
+    ]);
   });
 
   it.each([
