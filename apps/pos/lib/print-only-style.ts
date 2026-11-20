@@ -9,6 +9,6 @@ export function injectPrintOnlyStyle(): void {
   const style = document.createElement('style');
   style.id = 'pos-print-only-style';
   style.textContent = '@media screen { [data-print="only"] { display: none !important } } '
-    + '@media print { [data-print="sheet"] { position: static !important; height: auto !important; max-width: none !important; border: 0 !important } }';
+    + '@media print { [data-print="sheet"] { height: auto !important; max-width: none !important; border: 0 !important; box-shadow: none !important } }';
   document.head.appendChild(style);
 }
