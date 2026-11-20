@@ -56,6 +56,7 @@ import { fetchRegisters, holdsRegister, registerTitle, setTillHoldsSession } fro
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
+import { RegisterSwitchRows } from '../lib/register-switch';
 import { ReportsDrawerCard } from '../lib/reports-drawer-card';
 import { ReportsPanel } from '../lib/reports-panel';
 import { SaleCart } from '../lib/sale-cart';
@@ -325,6 +326,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         openedAt={register.session?.status === 'open' ? register.session.opened_at_gmt : null} pending={pending} onSignOut={handleSignOut}>
         <CashierShift register={register} currency={currency} onClosing={() => setCashierOpen(false)}
           orders={outbox.orders} refunds={registerStore?.refunds ?? null} cashierRef={identity} timezone={TIMEZONE} />
+        <RegisterSwitchRows session={session} store={store} held={holdsRegister(sessionStatus, closureShown)}
+          onSwitched={() => setBoundRegisterId(mintBoundRegisterId(defaultStore()))} />
         <ClosureHistory closures={registerStore?.closures ?? null} session={session} register={register} registerId={boundRegisterId} storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} open={closuresOpen} onOpenChange={setClosuresOpen} />
         {framePhone ? sync : null}
       </CashierSheet>

@@ -1867,6 +1867,36 @@ test('the cashier sheet and the hand-over name the register the till is at', asy
   expect(printed[2]).toMatch(/^Front counter · open since \d{2}:\d{2}/);
 });
 
+test('the cashier sheet switches the register the till is at, and holds it while the register is open', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  const bound = () => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'));
+  await page.getByTestId('register-bar-cashier').click();
+  const sheet = page.getByTestId('cashier-sheet');
+  await expect(sheet.getByTestId('cashier-store-name')).toBeVisible();
+  await expect(sheet.getByTestId('cashier-register-name')).toHaveText('This device');
+  await expect(sheet.getByTestId('cashier-register-switch')).toBeEnabled();
+  await expect(sheet.getByTestId('cashier-register-held')).toHaveCount(0);
+  await sheet.getByTestId('cashier-register-switch').click();
+  const picker = page.getByTestId('cashier-register-picker');
+  await picker.getByTestId('register-choice-demo-front-counter').click();
+  await expect(picker.getByTestId('register-choice-demo-front-counter')).toHaveAttribute('aria-checked', 'true');
+  await picker.getByTestId('cashier-register-picker-done').click();
+  await expect(picker).toHaveCount(0);
+  await expect(sheet.getByTestId('cashier-register-name')).toHaveText('Front counter');
+  await expect.poll(bound).toBe('demo-front-counter');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await openRegister(page);
+  await page.getByTestId('register-bar-cashier').click();
+  await expect(sheet.getByTestId('cashier-register-name')).toHaveText('Front counter');
+  await expect(sheet.getByTestId('cashier-register-switch')).toBeDisabled();
+  await expect(sheet.getByTestId('cashier-register-held')).toHaveText('Close the register first');
+  await page.screenshot({ path: test.info().outputPath('09h-register-switch-vendurepos.png') });
+});
+
 test('a closed till lists its closures and reprints a Z as a copy', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
