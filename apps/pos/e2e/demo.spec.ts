@@ -1650,6 +1650,9 @@ test("the sync log's Actions preset shows what the cashier did, and Errors hides
   await expect(opened).toBeVisible();
   await expect(opened).toHaveText(/Register session opened.* · \S+$/);
   await expect(entries.filter({ hasText: 'Register command result' })).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  // Let the chips' colour transition settle before the shot.
+  await page.waitForTimeout(500);
   await page.screenshot({ path: test.info().outputPath('13k-store-health-log-presets-vendurepos.png') });
   await page.getByTestId('sync-log-filter-errors').click();
   await expect(entries.filter({ hasText: 'Register session opened' })).toHaveCount(0);
