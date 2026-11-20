@@ -12,6 +12,9 @@ export type ClosureHistoryRow = {
 /** A register with a live session (GET /tally/v1/registers), as the Closures view's open row. */
 export type OpenSessionRow = { registerId: string; register: string; status: 'open' | 'counting'; since: string };
 
+/** The Closures view's filters (v2 10b): a period of store days, a register and a cashier (`closed_by`), each null for all. */
+export type ClosureFilters = { from: string; to: string; registerId: string | null; cashier: string | null };
+
 /** One closure of the plugin's GET /tally/v1/registers/:id (packages/vendure-plugin/src/api/registers.controller.ts). */
 export type TallyClosureRead = {
   closureId: string; sessionId: string; registerId: string; number: number; businessDay: string | null; openedAt: string; closedAt: string;
@@ -71,18 +74,22 @@ const CSV_LABELS: Record<string, string> = {
   'reports.csv_status': 'Status', 'register.unsynced': 'Unsynced', 'reports.corrected': 'Corrected',
 };
 
-function listedClosures(rows: readonly Closure[], { storeKey, timezone, today }: { storeKey: string; timezone: string; today: string }): Closure[] {
-  return selectClosureRows(rows, clampClosureScope({ from: '0000-01-01', to: today, registerId: '', storeKey }, today), timezone);
+function listedClosures(rows: readonly Closure[], { storeKey, timezone, today, filters }: {
+  storeKey: string; timezone: string; today: string; filters?: ClosureFilters;
+}): Closure[] {
+  return selectClosureRows(rows, clampClosureScope({
+    from: filters?.from ?? '0000-01-01', to: filters?.to ?? today, registerId: filters?.registerId ?? '', storeKey, cashier: filters?.cashier ?? undefined,
+  }, today), timezone);
 }
 
-export function closureHistoryRows(rows: readonly Closure[], { ownRegisterId, names, storeKey, currency, timezone, today, blind }: {
-  ownRegisterId: string; names: Record<string, string>; storeKey: string; currency: string; timezone: string; today: string; blind: boolean;
+export function closureHistoryRows(rows: readonly Closure[], { ownRegisterId, names, storeKey, currency, timezone, today, blind, filters }: {
+  ownRegisterId: string; names: Record<string, string>; storeKey: string; currency: string; timezone: string; today: string; blind: boolean; filters?: ClosureFilters;
 }): ClosureHistoryRow[] {
   const exponent = minorUnitDigits(currency);
   const words: Record<string, string> = { 'register.exact': 'Exact', 'register.short': 'short', 'register.over': 'over' };
   const cash = (amount: unknown) => blind || typeof amount !== 'number' ? '' : formatMoney({ amount, currency }) ?? '';
   const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-  return listedClosures(rows, { storeKey, timezone, today })
+  return listedClosures(rows, { storeKey, timezone, today, filters })
     .map((row) => ({ row, closed: formatClosureDate(row.closed_at, { timezone, locale: 'en' }) }))
     .map(({ row, closed }) => ({
       id: row.id,
@@ -118,10 +125,10 @@ export function openSessionRows(registers: readonly ListedRegister[], { ownRegis
  * v2's Closures tiles over the listed closures: sessions (open and closed), the summed cash variance, the floats of the open
  * sessions and the listed closures, the listed closures' expected cash less float (signed) and the summed cash counted.
  */
-export function closureSummary(closures: readonly Closure[], { open, openFloats = [], storeKey, currency, timezone, today, blind }: {
-  open: number; openFloats?: readonly (number | undefined)[]; storeKey: string; currency: string; timezone: string; today: string; blind: boolean;
+export function closureSummary(closures: readonly Closure[], { open, openFloats = [], storeKey, currency, timezone, today, blind, filters }: {
+  open: number; openFloats?: readonly (number | undefined)[]; storeKey: string; currency: string; timezone: string; today: string; blind: boolean; filters?: ClosureFilters;
 }): { sessions: string; sessionsNote: string; discrepancy: string; cashAtOpen: string; cashActivity: string; cashAtClose: string } {
-  const listed = listedClosures(closures, { storeKey, timezone, today });
+  const listed = listedClosures(closures, { storeKey, timezone, today, filters });
   const sum = (pick: (row: Closure) => unknown) => blind || listed.length === 0 ? '—'
     : formatMoney({ amount: listed.reduce((total, row) => total + (typeof pick(row) === 'number' ? pick(row) as number : 0), 0), currency }) ?? '—';
   const float = (row: Closure) => (row.breakdowns.opening_float as { counted_minor?: unknown } | undefined)?.counted_minor;
@@ -138,17 +145,22 @@ export function closureSummary(closures: readonly Closure[], { open, openFloats 
 
 /** v2's closures CSV (TallyUI exportCsv, WCPOS's own) of the closures this sheet lists, in English. */
 export function closureHistoryCsv(rows: readonly Closure[], options: {
-  ownRegisterId: string; names: Record<string, string>; storeKey: string; currency: string; timezone: string; today: string; store: string;
+  ownRegisterId: string; names: Record<string, string>; storeKey: string; currency: string; timezone: string; today: string; store: string; filters?: ClosureFilters;
 }): string {
   return exportCsv(listedClosures(rows, options), minorUnitDigits(options.currency), (key) => CSV_LABELS[key] ?? key,
     { ...options.names, [options.ownRegisterId]: OWN_REGISTER_LABEL }, options.store);
 }
 
 /** The closures CSV's file name: the listed closures' oldest to newest close date in the store's zone; today's when none. */
-export function closureCsvFileName(rows: readonly Closure[], options: { storeKey: string; timezone: string; today: string }): string {
+export function closureCsvFileName(rows: readonly Closure[], options: { storeKey: string; timezone: string; today: string; filters?: ClosureFilters }): string {
   const days = listedClosures(rows, options).map((row) => formatClosureDate(row.closed_at, { timezone: options.timezone, locale: 'en' }).date_ymd).sort();
   if (days.length === 0) return `closures-${options.today}.csv`;
   return `closures-${days[0]}-to-${days[days.length - 1]}.csv`;
+}
+
+/** The cashiers who closed a closure in the 92-day reach, any register, for the Closures view's cashier filter. */
+export function closureCashiers(rows: readonly Closure[], options: { storeKey: string; timezone: string; today: string }): string[] {
+  return [...new Set(listedClosures(rows, options).flatMap((row) => row.closed_by ? [row.closed_by] : []))].sort();
 }
 
 export function zCopyLines(closure: Closure, context: { store: string; currency: string; timezone: string; printedAt: string }): string[] {

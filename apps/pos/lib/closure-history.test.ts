@@ -2,8 +2,8 @@ import { formatMoney } from '@tallyui/core';
 import type { Closure } from '@tallyui/pos';
 import { describe, expect, it } from 'vitest';
 import {
-  closureCsvFileName, closureFromRead, closureHistoryCsv, closureHistoryRows, closureSummary, mergeClosures, openSessionRows, zCopyLines,
-  type TallyClosureRead,
+  closureCashiers, closureCsvFileName, closureFromRead, closureHistoryCsv, closureHistoryRows, closureSummary, mergeClosures, openSessionRows, zCopyLines,
+  type ClosureFilters, type TallyClosureRead,
 } from './closure-history';
 import { zReportLines } from './z-report';
 
@@ -94,6 +94,29 @@ it("names the closures CSV by the listed closures' dates", () => {
   expect(closureCsvFileName([{ ...closure, closed_at: '2026-09-30T23:30:00.000Z' }], {
     ...options, timezone: 'Europe/Berlin', today: '2026-10-01',
   })).toBe('closures-2026-10-01-to-2026-10-01.csv');
+});
+
+it('lists, sums and exports only the closures the filters show, as v2 10b', () => {
+  const yesterday = {
+    ...closure, id: 'session-2', number: 2, business_day: '2026-09-29', opened_at: '2026-09-29T07:00:00.000Z',
+    closed_at: '2026-09-29T17:00:00.000Z', counted: { cash: 5000 },
+  };
+  const front = { ...closure, id: 'front-1', register_id: 'front-counter', number: 1, closed_by: 'sam@example.com', closed_at: '2026-09-30T18:00:00.000Z', counted: { cash: 20000 } };
+  const all = [closure, yesterday, front];
+  const today: ClosureFilters = { from: '2026-09-30', to: '2026-09-30', registerId: null, cashier: null };
+  const ids = (filters: ClosureFilters) => closureHistoryRows(all, { ...options, filters }).map((row) => row.id);
+  expect(ids(today)).toEqual(['front-1', 'session-1']);
+  expect(ids({ ...today, registerId: 'front-counter' })).toEqual(['front-1']);
+  expect(ids({ ...today, cashier: 'cashier@example.com' })).toEqual(['session-1']);
+  expect(ids({ ...today, from: '2026-09-29', to: '2026-09-29' })).toEqual(['session-2']);
+  expect(closureSummary(all, { ...options, open: 0, filters: today })).toMatchObject({ sessions: '2', cashAtClose: '€304.52' });
+  const exported = (filters: ClosureFilters) => closureHistoryCsv(all, { ...options, store: 'Demo store', filters })
+    .split('\r\n').filter(Boolean).slice(1).map((line) => line.split(',')[1]).sort();
+  expect(exported(today)).toEqual(['"1"', '"3"']);
+  expect(exported({ ...today, registerId: 'front-counter' })).toEqual(['"1"']);
+  expect(exported({ ...today, from: '2026-09-29', to: '2026-09-29' })).toEqual(['"2"']);
+  expect(closureCsvFileName(all, { ...options, filters: { ...today, from: '2026-09-29', to: '2026-09-29' } })).toBe('closures-2026-09-29-to-2026-09-29.csv');
+  expect(closureCashiers(all, options)).toEqual(['cashier@example.com', 'sam@example.com']);
 });
 
 it('marks a reprinted Z as a copy', () => {
