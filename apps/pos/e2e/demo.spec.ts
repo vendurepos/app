@@ -655,7 +655,8 @@ test("the Products panel sorts by its headers, across every page, as v2's produc
   const variants = CATALOGUE.flatMap(p => p.variants).sort((a, b) => a.priceMinor - b.priceMinor);
   const cheapestSku = variants[0].sku;
   const dearestSku = variants[variants.length - 1].sku;
-  await expect(rows.first()).toContainText('TALLY-MUG');
+  await expect(rows).toHaveCount(25);
+  const unsortedFirst = (await rows.first().textContent()) ?? '';
   await panel.getByTestId('product-table-sort-price').click();
   await expect(rows.first()).toContainText(cheapestSku);
   await expect(panel.getByTestId('product-table-sort-price')).toContainText('▲');
@@ -667,7 +668,8 @@ test("the Products panel sorts by its headers, across every page, as v2's produc
   await page.screenshot({ path: test.info().outputPath('08g-products-header-sort-vendurepos.png') });
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await panel.getByTestId('product-table-sort-price').click();
-  await expect(rows.first()).toContainText('TALLY-MUG');
+  await expect(rows.first()).toHaveText(unsortedFirst);
+  await expect(panel.getByTestId('product-table-sort-price')).not.toContainText(/[▲▼]/);
   await panel.getByTestId('product-table-sort-name').click();
   await expect(panel.getByTestId('product-table-sort-name')).toContainText('▲');
 });
