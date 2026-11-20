@@ -634,7 +634,7 @@ function Sale({
       ) : null}
       <SaleCustomer sale={sale} connector={connector} session={session} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
-        highlightSku={highlightSku} />
+        highlightSku={highlightSku} store={storeLabel(session)} />
       {openOrdersPosition === 'bottom' ? openSaleTabs : null}
     </>
   );
@@ -743,7 +743,7 @@ function Sale({
           {tenderPane}
         </View>
       ) : null}
-      <View testID="till-cart" className={wide ? (cartSide === 'left' ? 'w-96 border-r border-border' : 'w-96 border-l border-border') : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
+      <View testID="till-cart" dataSet={sale.stage.kind === 'receipt' ? undefined : { print: 'hide' }} className={wide ? (cartSide === 'left' ? 'w-96 border-r border-border' : 'w-96 border-l border-border') : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
         {stage.kind === 'tender' ? (wide ? (
           <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
             highlightSku={highlightSku} />

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { Button, discountLabel, orderReference, Text } from '@tallyui/components';
-import { buildReceiptData, type useSale } from '@tallyui/pos';
+import { buildReceiptData, CurrencyProvider, type useSale } from '@tallyui/pos';
 import { loadAutoPrint } from './auto-print-setting';
 import { ReceiptView } from './receipt-view';
 
@@ -37,5 +37,16 @@ export function SaleReceipt({ sale, store, cashier, registerId, till }: {
           </Button>
         </>
       )} />
+  );
+}
+
+/** The open sale as an unpaid bill (v2's Order details › Print, CHECKLIST 2.11b): read only, it changes nothing in the sale. */
+export function SaleBill({ order, store }: { order: ReturnType<typeof useSale>['order']; store: string }) {
+  const receipt = buildReceiptData(order, { storeName: store });
+  return (
+    <CurrencyProvider currencyCode={receipt.currency}>
+      <ReceiptView receipt={receipt} testID="bill" bill customer={order.customer?.name}
+        lineDiscountLabel={(i, j) => `${discountLabel(order.lineItems[i].discounts[j], receipt.currency)} off`} />
+    </CurrencyProvider>
   );
 }

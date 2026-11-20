@@ -5,9 +5,10 @@ import { taxRowLabel } from './cart-totals';
 import { MoneyRow, TaxRows } from './sale-cart';
 
 /** A receipt's layout, shared by the live sale's receipt and a stored order's reprint; every testid is built from testID. */
-export function ReceiptView({ receipt, testID, orderLine, customer, lineDiscountLabel, actions }: {
-  receipt: ReceiptData; testID: string; orderLine: string; customer?: string;
-  lineDiscountLabel(lineIndex: number, discountIndex: number): string; actions: ReactNode;
+export function ReceiptView({ receipt, testID, orderLine, customer, lineDiscountLabel, actions, bill }: {
+  receipt: ReceiptData; testID: string; orderLine?: string; customer?: string;
+  lineDiscountLabel(lineIndex: number, discountIndex: number): string; actions?: ReactNode;
+  /** An unpaid bill (CHECKLIST 2.11b): titled "Bill — not paid", with no order number, payments or change. */ bill?: boolean;
 }): JSX.Element {
   const format = useCurrencyFormatter();
   // TallyUI's print style, as its Receipt: what carries print: 'hide' stays off the page, so the receipt prints alone.
@@ -18,7 +19,7 @@ export function ReceiptView({ receipt, testID, orderLine, customer, lineDiscount
   return (
     <VStack testID={testID} space="none" className="gap-1.5 p-3">
       <Text className="font-semibold">{receipt.header.storeName}</Text>
-      <Text testID={`${testID}-order`} className="text-xs text-muted-foreground">{orderLine}</Text>
+      {bill ? <Text testID={`${testID}-title`} className="font-semibold">Bill — not paid</Text> : <Text testID={`${testID}-order`} className="text-xs text-muted-foreground">{orderLine}</Text>}
       {customer ? <Text testID={`${testID}-customer`} className="text-xs text-muted-foreground">Customer: {customer}</Text> : null}
       {receipt.lineItems.map((line, index) => (
         <VStack key={index} space="none" className="border-b border-border py-1">
@@ -49,14 +50,18 @@ export function ReceiptView({ receipt, testID, orderLine, customer, lineDiscount
         amount: money(tax.amountMinor),
       }))} />
       <MoneyRow label="Total" amount={money(totals.totalMinor)} testID={`${testID}-total`} strong />
+      {!bill && <>
       {receipt.payments.map((payment, index) => (
         <MoneyRow key={index} label={payment.method === 'cash' ? 'Cash tendered' : 'Card'} amount={money(payment.amountMinor)}
           testID={`${testID}-payment-${payment.method}`} />
       ))}
       <MoneyRow label="Change" amount={money(receipt.changeDueMinor)} testID={`${testID}-change`} strong />
+      </>}
+      {actions && (
       <HStack dataSet={{ print: 'hide' }} space="sm" className="mt-2">
         {actions}
       </HStack>
+      )}
     </VStack>
   );
 }
