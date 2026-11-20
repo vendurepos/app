@@ -1088,6 +1088,16 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await page.getByTestId('hero-compare').click();
   await expect(page.getByTestId('hero-compare')).toHaveText(/vs last \w+day/);
   await expect(page.getByTestId('hero-chart').locator('[data-testid^="hero-hour-bar-"]')).toHaveCount(24);
+  // v2 10-reports: By hour | Running total. One sale today: by hour, one bar is full; as a running total, the last hour holds the whole day.
+  const barHeight = (i: number) => page.getByTestId(`hero-hour-bar-${i}`).evaluate((el) => (el as HTMLElement).style.height);
+  const fullBars = async () => (await Promise.all(Array.from({ length: 24 }, (_, i) => barHeight(i)))).filter((h) => h === '100%').length;
+  await expect(page.getByTestId('hero-shape-bars')).toHaveText('By hour');
+  await expect.poll(fullBars).toBe(1);
+  await page.getByTestId('hero-shape-running').click();
+  await expect.poll(() => barHeight(23)).toBe('100%');
+  await expect.poll(fullBars).toBeGreaterThanOrEqual(1);
+  await page.getByTestId('hero-shape-bars').click();
+  await expect.poll(fullBars).toBe(1);
   await page.getByTestId('reports-open').click();
   await expect(page.getByTestId('reports-panel')).toHaveCount(0);
   await page.getByTestId('reports-open').click();

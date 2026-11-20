@@ -111,3 +111,9 @@ export function tillOrderSpread({ orders, filters, timezone }: {
   const before = kept.filter((order) => inRange(order.at, compare, timezone)).map((order) => order.totalMinor);
   return { current: spread(current), comparison: before.length > 0 ? spread(before) : undefined };
 }
+
+/** The hero's "Running total" (v2 10-reports): each value is the sum of it and every value before it. */
+export function runningTotal(values: readonly number[]): number[] {
+  let sum = 0;
+  return values.map((value) => (sum += value));
+}
