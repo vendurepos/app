@@ -19,6 +19,7 @@ import {
   tallyShippingCalculator, tallyShippingChecker,
 } from './config/strategies';
 import { DISPLAY_ENTITIES } from './entities/display.entities';
+import { TallyReceiptEmailWindow } from './entities/receipt-email.entities';
 import { REGISTER_ENTITIES } from './entities/register.entities';
 import { TallyCommand } from './entities/tally-command.entity';
 import {
@@ -27,6 +28,7 @@ import {
 import type { CustomerDisplayOptions } from './service/display-signalling.service';
 import { loggerCtx } from './service/errors';
 import { OrderCreateService } from './service/order-create.service';
+import { ReceiptEmailLimits } from './service/receipt-email-limits.service';
 import { RegisterApprovalService } from './service/register-approval.service';
 import { RegisterService, TALLY_PLUGIN_OPTIONS } from './service/register.service';
 import { RefundService } from './service/refund.service';
@@ -88,8 +90,9 @@ function displaysBodyParser(): Middleware['handler'] {
   })) as Middleware['handler'];
 }
 
-/** `receiptEmail` (12.1a): `true` or an object turns on the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. The object overrides the caps: `perOrder` sends per order (default 3), `perUserPerMinute` requests per user (default 20). Both caps are kept in memory, per server process: a restart resets them, and each server instance counts on its own (#318). */
-export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; receiptEmail?: boolean | { perOrder?: number; perUserPerMinute?: number };
+/** `receiptEmail` (12.1a): `true` or an object turns on the receipt-email route and its `/info` key; set it only with `tallyReceiptEmailHandler` installed in EmailPlugin. The object overrides the caps: `perOrder` sends per order in 30 days (default 3), `perUserPerMinute` requests per user (default 20), `perUserPerDay` sends per user (default 500) and `perChannelPerDay` sends per channel (default 1000) in 24 hours. The per-minute cap is kept in memory, per server process (#318); `perOrder` and the two daily caps are kept in the database, so they hold across restarts and server instances (#345). */
+export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
+  receiptEmail?: boolean | { perOrder?: number; perUserPerMinute?: number; perUserPerDay?: number; perChannelPerDay?: number };
   /** Off by default (#332). With it set, a register v3 closure whose server cash variance is over `thresholdMinor` (minor units,
    * either way) needs a manager's proof from `POST /tally/v1/register-approvals`, and `/info` advertises the threshold. Do not set
    * this yet: with it set, a register opens only at v3 (#334), and TallyUI's till still opens at v1 or v2 until TallyUI/tallyui#1105 ships. */
@@ -101,10 +104,10 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions; 
   // The Dashboard's Vite plugin resolves this next to compiled dist/plugin.js, so the build copies src/dashboard/ there.
   dashboard: './dashboard/index.tsx',
   imports: [PluginCommonModule],
-  entities: [TallyCommand, ...REGISTER_ENTITIES, ...DISPLAY_ENTITIES],
+  entities: [TallyCommand, ...REGISTER_ENTITIES, ...DISPLAY_ENTITIES, TallyReceiptEmailWindow],
   controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController,
     TallyStockEditController],
-  providers: [OrderCreateService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService,
+  providers: [OrderCreateService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService, ReceiptEmailLimits,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
     { provide: TALLY_PLUGIN_OPTIONS, useFactory: () => TallyPosPlugin.options },
     { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],

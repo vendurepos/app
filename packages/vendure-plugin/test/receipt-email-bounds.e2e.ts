@@ -5,7 +5,7 @@ import { TallyReceiptEmailController } from '../src/api/receipt-email.controller
 // No database: the controller on its own, with stubs that fail if the route reaches an order or the event bus.
 const boom = () => new Proxy({}, { get: () => () => { throw new Error('must not be called'); } });
 const make = () => {
-  const controller = new TallyReceiptEmailController(boom() as never, boom() as never, { perOrder: 3, perUserPerMinute: 2 });
+  const controller = new TallyReceiptEmailController(boom() as never, boom() as never, { perOrder: 3, perUserPerMinute: 2, perUserPerDay: 500, perChannelPerDay: 1000 }, boom() as never);
   const recent = () => (controller as unknown as { recent: Map<string, number[]> }).recent;
   // `{ extra: 1 }` is refused invalid_payload after the rate-limit step and before any order lookup, so each call counts.
   const send = async (id: string) => (await controller.send({ activeUserId: id, userHasAllPermissions: () => true } as unknown as RequestContext,

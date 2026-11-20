@@ -53,14 +53,14 @@ auth, CORS, tax strategy and a first sale. Install it with
 `npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
-   of generating a migration for your store, register all eight below; do not run
+   of generating a migration for your store, register all nine below; do not run
    both approaches for the same schema changes:
 
    ```ts
    import {
      TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
      TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
-     TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000,
+     TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000,
    } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
@@ -71,7 +71,7 @@ auth, CORS, tax strategy and a first sale. Install it with
        migrations: [
          TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
          TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
-         TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000,
+         TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000,
          /* your own migrations */
        ],
        // …
@@ -81,8 +81,10 @@ auth, CORS, tax strategy and a first sale. Install it with
 
    The migrations create the `tally_command` ledger, the read-only `Order` and `OrderLine`
    custom-field columns, the unique index on `tallyClientOrderId`, and plain indexes on
-   `tallyRegisterId` and `tallySessionId`, recovery fields, the register tables and the customer-display tables.
+   `tallyRegisterId` and `tallySessionId`, recovery fields, the register tables, the customer-display tables and the receipt-email limit table.
    Run them with `runMigrations(config)` before starting Vendure.
+   Upgrading to `TallyPosReceiptEmail1791400000000`: run the migration before starting the new version. During a rolling deploy, instances still on the old version count receipt emails in their own memory until they stop, so the caps hold exactly only once every instance runs the new version.
+   To roll back, revert the plugin version and leave the `tally_receipt_email_window` table in place: the old version ignores it. To remove the table as well, stop every instance, run this migration's `down` with the new version's package (the old package does not contain the migration), then start the old version; never drop the table by hand, or its `migrations` row stays and a later upgrade skips the migration.
 
 2. POS orders send no order-confirmation email. If you use `@vendure/email-plugin` (an
    optional peer dependency), install `tallyOrderConfirmationHandler` from the
@@ -256,7 +258,7 @@ The active channel's POS sales and refunds in a time range, every figure a SQL a
 
 ### Receipt email: POST /tally/v1/orders/:code/receipt-email
 
-A cashier's explicit request (12.1a), not ADR 0002's automatic confirmation: set `TallyPosPlugin.init({ receiptEmail: true })` and install `tallyReceiptEmailHandler` from `@vendurepos/plugin/email` beside `tallyOrderConfirmationHandler` in `EmailPlugin`'s handlers; `GET /tally/v1/info` then holds `receiptEmail: { v: 1 }`. It renders with your existing order-confirmation template, subject `Receipt for order #<code>`. The body is `{ emailAddress? }`; without it, the order customer's email is used. `emailAddress` is one plain address only: no list, display name, quotes, line break, encoded words or IP addresses. Answers: 202 `{ queued: true, emailAddress }` (each request sends one email), 404 `receipt_email_disabled`, 403 `forbidden` (the user lacks `ReadOrder`), 400 `invalid_payload`, 404 `order_not_found`, 409 `not_till_order`, 422 `no_recipient` (a walk-in sale and no address, or a stored email that is not one plain address), 429 `rate_limited` (more than `perUserPerMinute` requests from one user in a minute, refusals included; default 20) and 429 `order_send_limit` (the order already had `perOrder` receipts sent; default 3). Override the caps with `TallyPosPlugin.init({ receiptEmail: { perOrder, perUserPerMinute } })`. The counts are kept in memory, per server process. It changes no customer or order.
+A cashier's explicit request (12.1a), not ADR 0002's automatic confirmation: set `TallyPosPlugin.init({ receiptEmail: true })` and install `tallyReceiptEmailHandler` from `@vendurepos/plugin/email` beside `tallyOrderConfirmationHandler` in `EmailPlugin`'s handlers; `GET /tally/v1/info` then holds `receiptEmail: { v: 1 }`. It renders with your existing order-confirmation template, subject `Receipt for order #<code>`. The body is `{ emailAddress? }`; without it, the order customer's email is used. `emailAddress` is one plain address only: no list, display name, quotes, line break, encoded words or IP addresses. Answers: 202 `{ queued: true, emailAddress }` (each request sends one email), 404 `receipt_email_disabled`, 403 `forbidden` (the user lacks `ReadOrder`), 400 `invalid_payload`, 404 `order_not_found`, 409 `not_till_order`, 422 `no_recipient` (a walk-in sale and no address, or a stored email that is not one plain address), 429 `rate_limited` (more than `perUserPerMinute` requests from one user in a minute, refusals included; default 20), 429 `order_send_limit` (the order already had `perOrder` receipts sent in the 30 days from its first; default 3), 429 `user_daily_limit` (the user already had `perUserPerDay` receipts sent; default 500) and 429 `channel_daily_limit` (the channel already had `perChannelPerDay` receipts sent, by all its users together; default 1000). Each daily window is 24 hours from its first send, and only accepted sends count towards these three caps; each of their 429s carries `retryAt`, the time a send can next pass. Override the caps with `TallyPosPlugin.init({ receiptEmail: { perOrder: 3, perUserPerMinute: 20, perUserPerDay: 500, perChannelPerDay: 1000 } })` (the defaults). The per-minute count is kept in memory, per server process; the per-order and daily counts are kept in the database, so they hold across restarts and across server instances. It changes no customer or order.
 
 ### Stock edit: POST /tally/v1/variants/:id/stock
 
