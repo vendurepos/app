@@ -22,6 +22,12 @@ export function registerTitle(listed: readonly Pick<ListedRegister, 'id' | 'last
   return listed.find((register) => register.id === boundId)?.lastDeviceName?.trim() || undefined;
 }
 
+/** The header bar's place (CHECKLIST 1.2, v2): the bound register is named only when the store lists more than one register. */
+export function headerPlace(listed: readonly Pick<ListedRegister, 'id' | 'lastDeviceName'>[], boundId: string): { multiRegister: boolean; registerName?: string } {
+  if (listed.length < 2) return { multiRegister: false };
+  return { multiRegister: true, registerName: registerLabel(listed.find((register) => register.id === boundId) ?? { id: boundId, lastDeviceName: null }) };
+}
+
 /** "Open since 14:38 on Front till" (openSince's form; no " on …" without a device name); null without a live session or a listed register. */
 export function registerStatus(register: ListedRegister | undefined, now: Date): string | null {
   const session = register?.session;

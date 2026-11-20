@@ -630,14 +630,14 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
   for (const id of ['receipt-subtotal', 'receipt-total', 'receipt-payment-cash', 'receipt-change']) {
     await expect(receipt.getByTestId(id)).toBeVisible();
   }
-  await expect(page.getByText('VendurePOS', { exact: true })).toBeHidden();
+  await expect(page.getByTestId('register-bar-name')).toBeHidden();
   for (const id of ['signed-in-store', 'sign-out', 'checkout', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
     await expect(page.getByTestId(id)).toBeHidden();
   }
   await expect(page.getByTestId('nav-rail')).toBeHidden();
   // On screen, all of it is back (Checkout is hidden during tender and receipt).
   await page.emulateMedia({ media: 'screen' });
-  await expect(page.getByText('VendurePOS', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('register-bar-name')).toBeVisible();
   for (const id of ['signed-in-store', 'sign-out', 'product-tile-Tally Fixture Mug', 'new-sale', 'receipt-print']) {
     await expect(page.getByTestId(id)).toBeVisible();
   }

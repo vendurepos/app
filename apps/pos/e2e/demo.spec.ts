@@ -3092,3 +3092,13 @@ test('the demo build has no customer display: /display lands on /', async ({ pag
   await expect(page.getByTestId('demo-enter')).toBeVisible();
   await expect(page.getByTestId('display-store-url')).toHaveCount(0);
 });
+
+test('the header bar names the till\'s register once the store lists more than one, as v2\'s "Store · Register"', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('register-bar-name')).toHaveText('VendurePOS');
+  await openRegister(page);
+  const drawer = await page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id')!);
+  await expect(page.getByTestId('register-bar-name')).toHaveText(`VendurePOS · Register ${drawer.slice(0, 8)}`);
+});

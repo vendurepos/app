@@ -54,7 +54,7 @@ import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
 import { loadCloseBy } from '../lib/register-close-by';
 import { loadOpeningFloatMinor } from '../lib/register-float';
-import { fetchRegisters, holdsRegister, registerTitle, setTillHoldsSession } from '../lib/register-choice';
+import { fetchRegisters, headerPlace, holdsRegister, registerTitle, setTillHoldsSession, type ListedRegister } from '../lib/register-choice';
 import { isClosingStatus } from '../lib/register-conflict';
 import { RegisterConflictCard } from '../lib/register-conflict-card';
 import { registerSyncNotice, useRejectedRegisterCommands } from '../lib/register-sync';
@@ -237,6 +237,17 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     );
     return () => { live = false; };
   }, [registerNameWanted, boundRegisterId, session]);
+  const [listedRegisters, setListedRegisters] = useState<ListedRegister[]>([]);
+  // The bar names the bound register only when the store lists more than one (lib/register-choice.ts headerPlace).
+  useEffect(() => {
+    let live = true;
+    fetchRegisters(session).then(
+      (rows) => { if (live) setListedRegisters(rows); },
+      () => { if (live) setListedRegisters([]); },
+    );
+    return () => { live = false; };
+  }, [session, boundRegisterId, sessionStatus]);
+  const place = headerPlace(listedRegisters, boundRegisterId);
   const printZ = async () => {
     const closure = register.lastClosure;
     if (!closure) return;
@@ -281,7 +292,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // keeps today's rule (an open session) and the `register-open-panel` id the e2e specs press; TallyUI fixes its id.
   const registerBar = (
     <View dataSet={{ print: 'hide' }}>
-      <RegisterBar register={register} registerId={boundRegisterId} multiRegister={false} storeName="VendurePOS"
+      <RegisterBar register={register} registerId={boundRegisterId} multiRegister={place.multiRegister} registerName={place.registerName} storeName="VendurePOS"
         // The till's online signal (as lib/sale-customer.tsx): the browser's, read at render.
         online={typeof navigator === 'undefined' || navigator.onLine !== false}
         onOpenPanel={() => setRegisterOpen(true)} cashier={{ name: identity, onPress: () => setCashierOpen(true) }}
