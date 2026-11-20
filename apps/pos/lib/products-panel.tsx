@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Image, View } from 'react-native';
-import { Button, HStack, Input, InputField, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
+import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
-import { productRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
+import { filterProductRows, productCategories, productRows, STOCK_STATUS_LABELS, type ProductRow, type ProductRowFilters } from './product-rows';
 import { refreshCatalogue } from './catalogue';
 import { sessionContext, type Session } from './session';
 import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveStock, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
 
 // Rows shown at a time, as the Customers panel's page.
 const PAGE_SIZE = 25;
+const FILTER_CHIPS = ['inStock', 'category'] as const;
+const ALL_CATEGORIES = 'all';
 
 function EditField({ testID, label, value, prefix, keyboardType, disabled, onSave }: {
   testID: string; label: string; value: string; prefix?: string; keyboardType: 'decimal-pad' | 'number-pad'; disabled?: boolean; onSave(text: string): Promise<boolean>;
@@ -71,9 +73,14 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   ], [editable, priceEditable, save, currency]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
+  // v2's Products screen lists out-of-stock products, unlike the till, whose In Stock starts on.
+  const [filters, setFilters] = useState<ProductRowFilters>({ inStock: false, categoryId: null });
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const threshold = session.stock.outOfStockThreshold;
   const rows = useMemo(() => productRows(products, search, traits, currency, threshold), [products, search, traits, currency, threshold]);
-  const shown = rows.slice(0, limit);
+  const categories = useMemo(() => productCategories(products, traits), [products, traits]);
+  const filtered = useMemo(() => filterProductRows(rows, filters), [rows, filters]);
+  const shown = filtered.slice(0, limit);
   return (
     <VStack testID="products-panel" className="flex-1">
       <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2">
@@ -81,15 +88,29 @@ export function ProductsPanel({ products, traits, currency, session }: { product
           <SearchInput testID="products-search" value={search} onChangeText={value => { setSearch(value); setLimit(PAGE_SIZE); }} placeholder="Name, SKU or barcode" />
         </View>
       </HStack>
+      <HStack dataSet={{ print: 'hide' }} className="items-center gap-2 border-b border-border px-4 py-2" testID="products-filters">
+        <ProductFilterBar value={{ ...DEFAULT_PRODUCT_FILTERS, inStock: filters.inStock }} chips={FILTER_CHIPS}
+          onChange={next => { setFilters(f => ({ ...f, inStock: next.inStock })); setLimit(PAGE_SIZE); }}
+          onTermPress={() => setCategoryOpen(open => !open)} />
+        {filters.categoryId ? <View testID="products-category-chip">
+          <FilterChip label={categories.find(category => category.id === filters.categoryId)?.name ?? 'Category'} active
+            onPress={() => { setFilters(f => ({ ...f, categoryId: null })); setLimit(PAGE_SIZE); }} />
+        </View> : null}
+      </HStack>
+      {categoryOpen ? <View testID="products-category-picker" className="border-b border-border px-4 py-2">
+        <CategoryNav categories={[{ id: ALL_CATEGORIES, name: 'All categories' }, ...categories]} orientation="horizontal"
+          selectedId={filters.categoryId ?? ALL_CATEGORIES}
+          onSelect={id => { setFilters(f => ({ ...f, categoryId: id === ALL_CATEGORIES ? null : id })); setLimit(PAGE_SIZE); setCategoryOpen(false); }} />
+      </View> : null}
       <ProductTable items={shown} columns={COLUMNS} sortItems={false} showUnsellable emptyState={
         <Text testID="products-empty" className="p-4 text-muted-foreground">
-          {search.trim() ? 'No products match this search.' : 'No products on this device yet.'}
+          {search.trim() ? 'No products match this search.' : filters.inStock || filters.categoryId ? 'No products match these filters.' : 'No products on this device yet.'}
         </Text>
       } />
       {error ? <Text testID="products-save-error" className="border-t border-border px-4 py-2 text-sm text-destructive">{error}</Text> : null}
-      {rows.length > 0 ? <HStack className="items-center justify-between border-t border-border px-4 py-3">
-        <Text testID="products-count">{`Showing ${shown.length} of ${rows.length} products`}</Text>
-        {shown.length < rows.length ? <Button testID="products-more" variant="secondary" size="sm" onPress={() => setLimit((n) => n + PAGE_SIZE)}>
+      {filtered.length > 0 ? <HStack className="items-center justify-between border-t border-border px-4 py-3">
+        <Text testID="products-count">{`Showing ${shown.length} of ${filtered.length} products`}</Text>
+        {shown.length < filtered.length ? <Button testID="products-more" variant="secondary" size="sm" onPress={() => setLimit((n) => n + PAGE_SIZE)}>
           <Text>Show more</Text>
         </Button> : null}
       </HStack> : null}

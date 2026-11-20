@@ -4,7 +4,7 @@ import { stockTarget, type StockTarget, type VendureVariantStock } from './produ
 
 /** One variant's row in the Products panel (CHECKLIST 10.2), with display and edit fields. */
 export interface ProductRow { id: string; name: string; sku: string; price: string; stock: string;
-  imageUrl: string | null; stockStatus: StockStatus; categories: string;
+  imageUrl: string | null; stockStatus: StockStatus; categories: string; categoryIds: string[];
   priceText: string; stockText: string; managed: boolean; stockTarget: StockTarget | null }
 
 /** v2's stock-status labels (products table); unknown shows a dash. */
@@ -27,9 +27,25 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
       stock: variant.stock.quantity == null ? '—' : String(variant.stock.quantity),
       imageUrl: traits.getImageUrl(product) ?? null, stockStatus: variant.stock.status,
       categories: traits.getCategoryNames(product).join(', ') || '—',
+      categoryIds: (traits.getCategories?.(product) ?? []).map(c => c.id),
       priceText: current ? moneyToMajor(current).toFixed(minorUnitDigits(current.currency)) : '',
       stockText: variant.stock.quantity == null ? '' : String(variant.stock.quantity), managed: variant.stock.quantity != null,
       stockTarget: stockTarget((product as { variants?: ({ id: string | number } & VendureVariantStock)[] }).variants?.find(v => String(v.id) === variant.id), outOfStockThreshold),
     };
   });
+}
+
+/** The panel's own filters (v2's In Stock and Category pills); null category means all. */
+export interface ProductRowFilters { inStock: boolean; categoryId: string | null }
+
+/** In Stock drops only out-of-stock rows (untracked and backorder variants stay sellable); a category keeps that category's rows. */
+export function filterProductRows(rows: ProductRow[], filters: ProductRowFilters): ProductRow[] {
+  return rows.filter(row => (!filters.inStock || row.stockStatus !== 'out_of_stock') &&
+    (!filters.categoryId || row.categoryIds.includes(filters.categoryId)));
+}
+
+/** The categories of the listed products, each once, by name (the Category pill's choices). */
+export function productCategories<Doc>(products: Doc[], traits: ProductTraits<Doc>): { id: string; name: string }[] {
+  const categories = new Map((products.flatMap(product => traits.getCategories?.(product) ?? [])).map(c => [c.id, c]));
+  return [...categories.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
