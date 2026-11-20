@@ -11,10 +11,15 @@ export const tenderName = (method: string) => method === 'cash' ? 'Cash' : metho
 export const closureMoney = (currency: string) => (value: string): string =>
   value === '' ? '' : formatMoney({ amount: Math.round(Number(value) * 10 ** minorUnitDigits(currency)), currency }) ?? '';
 
+// A figure the closure was frozen with prints; one it was frozen without (absent or null) prints no line, never 0.00.
+const frozenLine = (minor: unknown, label: string, display: string): string[] =>
+  typeof minor === 'number' && Number.isFinite(minor) ? [`${label} ${display}`] : [];
+
 /**
  * The Z report as printed lines, from TallyUI's closure document (`buildClosureDocument`): every figure is the closure's
- * own, frozen by `writeClosure`, and nothing is recomputed here. The mixed tax rounding note is printed when the
- * document carries it (TallyUI #318).
+ * own, frozen by `writeClosure`, and nothing is recomputed here. The period's refunds and the register's perpetual
+ * totals print in v2's order, each only when the closure was frozen with it. The mixed tax rounding note is printed
+ * when the document carries it (TallyUI #318).
  */
 export function zReportLines(closure: Closure, { store, currency, timezone, printedAt }: {
   store: string; currency: string; timezone: string; printedAt: string;
@@ -31,6 +36,7 @@ export function zReportLines(closure: Closure, { store, currency, timezone, prin
     `Closed ${z.closed_at.datetime}`,
     ...(typeof breakdowns.transaction_count === 'number' ? [`Sales ${breakdowns.transaction_count}`] : []),
     `Sales total ${z.period_sales_total_display}`,
+    ...frozenLine(closure.period_refunds_total_minor, 'Refunds total', z.period_refunds_total_display),
     ...(typeof breakdowns.opening_float.counted_display === 'string' && breakdowns.opening_float.counted_display !== ''
       ? [`Opening float ${breakdowns.opening_float.counted_display}`] : []),
     ...breakdowns.payment_methods.map((method) => `${tenderName(String(method.name))} sales ${method.sales_display}`),
@@ -42,6 +48,8 @@ export function zReportLines(closure: Closure, { store, currency, timezone, prin
       ...(tender.counted === '' ? [] : [`${tenderName(tender.name)} counted ${tender.counted_display}`,
         `${tenderName(tender.name)} variance ${tender.variance_display}`]),
     ]),
+    ...frozenLine(closure.perpetual_sales_total_minor, 'Perpetual sales', z.perpetual_sales_total_display),
+    ...frozenLine(closure.perpetual_refunds_total_minor, 'Perpetual refunds', z.perpetual_refunds_total_display),
     ...(typeof breakdowns.approved_by_name === 'string' && breakdowns.approved_by_name !== ''
       ? [`Approved by ${breakdowns.approved_by_name}`] : []),
     ...(closure.unsynced_count > 0 ? [unsyncedNote(closure.unsynced_count)] : []),

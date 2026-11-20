@@ -27,10 +27,30 @@ const context = { store: 'http://127.0.0.1:3200', currency: 'EUR', timezone: 'UT
 it("prints the closure document's own figures", () => {
   expect(zReportLines(closure, context)).toEqual([
     'Z report · Closure #3', 'http://127.0.0.1:3200', 'Opened Sep 30, 2026, 07:00', 'Closed Sep 30, 2026, 17:00',
-    'Sales 2', 'Sales total €19.04', 'Opening float €100.00', 'Cash sales €9.52', 'Card sales €9.52',
+    'Sales 2', 'Sales total €19.04', 'Refunds total €0.00', 'Opening float €100.00', 'Cash sales €9.52', 'Card sales €9.52',
     'Tax 19%: net €16.00, tax €3.04, gross €19.04', 'Paid out €5.00 Milk',
     'Cash expected €104.52', 'Cash counted €104.52', 'Cash variance €0.00', 'Card expected €9.52',
+    'Perpetual sales €19.04', 'Perpetual refunds €0.00',
   ]);
+});
+
+it("prints the period's refunds and the perpetual totals as frozen, and no line for a figure the closure was frozen without", () => {
+  const refunded = { ...closure, period_refunds_total_minor: 200, perpetual_sales_total_minor: 50000, perpetual_refunds_total_minor: 1200 };
+  const lines = zReportLines(refunded, context);
+  expect(lines[lines.indexOf('Sales total €19.04') + 1]).toBe('Refunds total €2.00');
+  const lastTender = lines.indexOf('Card expected €9.52');
+  expect(lines.slice(lastTender + 1, lastTender + 3)).toEqual(['Perpetual sales €500.00', 'Perpetual refunds €12.00']);
+  const older: Partial<Closure> = { ...closure };
+  delete older.period_refunds_total_minor;
+  delete older.perpetual_sales_total_minor;
+  delete older.perpetual_refunds_total_minor;
+  const withoutFigures = zReportLines(older as Closure, context);
+  const isNew = (line: string) => /^(Refunds total|Perpetual )/.test(line);
+  expect(withoutFigures.filter(isNew)).toEqual([]);
+  expect(withoutFigures.join('\n')).not.toContain('NaN');
+  expect(withoutFigures).toEqual(zReportLines(closure, context).filter((line) => !isNew(line)));
+  const nulls = { ...closure, period_refunds_total_minor: null, perpetual_sales_total_minor: null, perpetual_refunds_total_minor: null };
+  expect(zReportLines(nulls as unknown as Closure, context).filter(isNew)).toEqual([]);
 });
 
 it("notes the closure's orders still syncing when it was written, and nothing when there are none", () => {
