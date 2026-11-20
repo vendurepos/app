@@ -443,11 +443,14 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   // Store health's callout lists the sale and, once, v2's View log ›, which opens Settings › Sync log.
   await page.getByTestId('store-health-open').click();
   await expect(page.getByTestId('store-health-attention').getByTestId(`store-health-attention-${first.orderId}`)).toBeVisible();
+  await expect(page.getByTestId('store-health-stuck-orders')).toHaveText('1 stuck');
   await expect(page.getByTestId('store-health-attention-view-log')).toBeVisible();
   // The demo-pairs size (960 × 600, as 13d and 13e); the PNG is made a .webp for docs/v2-parity/demo-pairs by hand.
   await page.setViewportSize({ width: 960, height: 600 });
   await page.mouse.move(480, 0);
   await page.screenshot({ path: test.info().outputPath('13f-store-health-view-log-vendurepos.png') });
+  await page.getByTestId('store-health-row-orders').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('13i-store-health-stuck-vendurepos.png') });
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await page.getByTestId('store-health-attention-view-log').click();
   await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
