@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundRegisterLabel, headerPlace, holdsRegister, pickRefusal, registerChoices, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
+import { boundRegisterLabel, headerPlace, holdsRegister, pickRefusal, registerChoices, registerFilterOptions, registerLabel, registerStatus, registerTitle, setTillHoldsSession, type ListedRegister } from './register-choice';
 
 const now = new Date(2026, 10, 17, 18, 0);
 const at = new Date(2026, 10, 17, 14, 38).toISOString();
@@ -70,6 +70,37 @@ describe('registerChoices', () => {
     const unlisted = registerChoices('mine', [b, c], now);
     expect(unlisted.map(choice => choice.id)).toEqual(['mine', 'b', 'c']);
     expect(unlisted[0]).toEqual({ id: 'mine', label: 'This device', status: null });
+  });
+});
+
+describe('registerFilterOptions', () => {
+  it('names the bound drawer as listed and first, then the others in list order', () => {
+    expect(registerFilterOptions('own', [{ ...listedRegister('b') }, { ...listedRegister('own'), lastDeviceName: 'Front till' }, listedRegister('c')])).toEqual([
+      { value: 'own', label: 'Front till' },
+      { value: 'b', label: 'Till b' },
+      { value: 'c', label: 'Till c' },
+    ]);
+  });
+
+  it('names a listed bound drawer without a device name by the first 8 of its id, never This device', () => {
+    expect(registerFilterOptions('abcdef1234', [{ ...listedRegister('abcdef1234'), lastDeviceName: null }])).toEqual([
+      { value: 'abcdef1234', label: 'Register abcdef12' },
+    ]);
+  });
+
+  it('calls the bound drawer This device only while the list lacks it', () => {
+    expect(registerFilterOptions('own', [])).toEqual([{ value: 'own', label: 'This device' }]);
+    expect(registerFilterOptions('own', [listedRegister('b')])).toEqual([
+      { value: 'own', label: 'This device' },
+      { value: 'b', label: 'Till b' },
+    ]);
+  });
+
+  it('names another register without a device name by the first 8 of its id', () => {
+    expect(registerFilterOptions('own', [{ ...listedRegister('abcdef1234'), lastDeviceName: null }])).toEqual([
+      { value: 'own', label: 'This device' },
+      { value: 'abcdef1234', label: 'Register abcdef12' },
+    ]);
   });
 });
 

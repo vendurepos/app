@@ -28,7 +28,7 @@ it('names the customer, calls absent and walk-in customers Guest, and uses email
   expect(orderCustomerName({ customer: { ...customer, firstName: '', lastName: '', emailAddress: 'x@y.z' } })).toBe('x@y.z');
 });
 
-it('formats the sale instant in the store timezone, with the cashier and no register', () => {
+it('formats the sale instant in the store timezone, with the cashier and only a multi-register store’s register', () => {
   const customFields = {
     tallySaleAt: '2026-01-10T09:05:00Z', tallyCashierRef: 'sam@x', tallyRegisterId: null,
     tallyClientOrderId: null, tallySessionId: null, tallyRejected: null, tallyRejectedClientOrderId: null,
@@ -38,17 +38,21 @@ it('formats the sale instant in the store timezone, with the cashier and no regi
     orderPlacedAt: '2026-01-10T08:00:00Z', updatedAt: '2026-01-10T07:00:00Z', customFields,
   };
   const options: Parameters<typeof orderHeaderMeta>[1] = {
-    timezone: 'UTC', locale: 'en-GB', now: new Date('2026-01-10T12:00:00Z'),
+    timezone: 'UTC', locale: 'en-GB', now: new Date('2026-01-10T12:00:00Z'), registers: [],
   };
   const meta = (fields: Partial<NonNullable<typeof order.customFields>>, overrides: Partial<typeof options> = {}) =>
     orderHeaderMeta({ ...order, customFields: { ...customFields, ...fields } }, { ...options, ...overrides });
+  const registers = [{ id: 'r1', lastDeviceName: 'Front till' }, { id: 'r2', lastDeviceName: null }];
   expect(meta({})).toBe('Today · 09:05 · sam@x');
   expect(meta({ tallySaleAt: '2026-01-09T23:30:00Z' })).toBe('Yesterday · 23:30 · sam@x');
   expect(meta({ tallySaleAt: '2025-12-28T10:00:00Z' })).toBe('28 Dec 2025 · 10:00 · sam@x');
   expect(orderHeaderMeta({ ...order, customFields: undefined }, options)).toBe('Today · 08:00');
   expect(orderHeaderMeta({ ...order, customFields: undefined, orderPlacedAt: null }, options)).toBe('Today · 07:00');
   expect(meta({ tallySaleAt: '2026-01-09T23:30:00Z' }, { timezone: 'Australia/Sydney' })).toBe('Today · 10:30 · sam@x');
-  expect(meta({ tallyRegisterId: 'r1' })).toBe('Today · 09:05 · sam@x');
+  expect(meta({ tallyRegisterId: 'r1' }, { registers: [registers[0]] })).toBe('Today · 09:05 · sam@x');
+  expect(meta({ tallyRegisterId: 'r1' }, { registers })).toBe('Today · 09:05 · sam@x · Front till');
+  expect(meta({ tallyRegisterId: 'abcdef1234' }, { registers })).toBe('Today · 09:05 · sam@x · Register abcdef12');
+  expect(meta({ tallyRegisterId: null }, { registers })).toBe('Today · 09:05 · sam@x');
   expect(meta({ tallyCashierRef: '  sam@x  ' })).toBe('Today · 09:05 · sam@x');
   expect(meta({ tallyCashierRef: '   ' })).toBe('Today · 09:05');
   expect(meta({ tallyCashierRef: null })).toBe('Today · 09:05');
