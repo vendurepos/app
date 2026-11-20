@@ -24,6 +24,7 @@ declare global {
     HID: { prototype: { requestDevice(options: unknown): Promise<unknown[]>; getDevices(): Promise<unknown[]> } };
     Serial: { prototype: { requestPort(options?: unknown): Promise<unknown> } };
     fakeScanner: EventTarget;
+    ordersRequests: number; releaseOrders: () => void;
   }
 }
 
@@ -431,6 +432,41 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   await expect(page.getByTestId('orders-scope-till')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('orders-empty')).toBeVisible();
   await expect(page.getByTestId('orders-search')).toHaveCount(0);
+});
+
+test("the Orders refresh beside the count reads the list again, and waits while it loads, as v2's 07b", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('orders-open').click();
+  const rows = await storeRows(page);
+  await expect(rows).toHaveCount(3);
+  await expect(page.getByTestId('orders-count')).toHaveText('Showing 3 of 3 orders');
+  await expect(page.getByTestId('orders-refresh')).toBeEnabled();
+  await expect(page.getByTestId('orders-refresh')).toHaveAttribute('aria-label', 'Refresh orders');
+  // Count the store's order-list reads from here on, and hold each one until the test lets it go.
+  await page.evaluate(() => {
+    const pass = window.fetch;
+    window.ordersRequests = 0;
+    window.releaseOrders = () => {};
+    window.fetch = async (input, init) => {
+      if (typeof init?.body === 'string' && init.body.includes('query Orders(')) {
+        window.ordersRequests++;
+        await new Promise<void>((resolve) => { window.releaseOrders = resolve; });
+      }
+      return pass(input, init);
+    };
+  });
+  await page.getByTestId('orders-refresh').click();
+  await expect.poll(() => page.evaluate(() => window.ordersRequests)).toBe(1);
+  await expect(page.getByTestId('orders-refresh')).toBeDisabled();
+  await page.getByTestId('orders-refresh').click({ force: true });
+  await page.evaluate(() => window.releaseOrders());
+  await expect(page.getByTestId('orders-refresh')).toBeEnabled();
+  await expect(page.getByTestId('orders-count')).toHaveText('Showing 3 of 3 orders');
+  await expect(rows).toHaveCount(3);
+  expect(await page.evaluate(() => window.ordersRequests)).toBe(1);
 });
 
 test("the Customers panel lists the store's customers by surname, searches them, and a scan closes it and adds", async ({ page }) => {
