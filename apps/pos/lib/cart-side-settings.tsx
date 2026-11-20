@@ -4,7 +4,7 @@ import { loadCartSide, saveCartSide } from './cart-side-setting';
 import { cartColumnShown, loadCartColumns, saveCartColumns } from './cart-columns-setting';
 import { loadCartSort, saveCartSort } from './cart-sort-setting';
 
-/** Settings › General: v2's Cart settings Panel position (CHECKLIST 9.10). */
+/** Settings › General: v2's Cart settings Panel position, Sort items and Columns (CHECKLIST 9.10). */
 export function CartSideSettings(): JSX.Element {
   const [side, setSide] = useState(() => loadCartSide());
   const [columns, setColumns] = useState(() => loadCartColumns());
