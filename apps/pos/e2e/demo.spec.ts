@@ -932,6 +932,36 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await expect(detail).toContainText(mug.name);
 });
 
+test("a till sale is stamped with the till's drawer, and the Orders register filter finds it", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const ids = await page.evaluate(() => ({ device: localStorage.getItem('vendurepos.register_id'), drawer: localStorage.getItem('vendurepos.bound_register_id') }));
+  expect(ids.device).toBeTruthy();
+  expect(ids.drawer).toBeTruthy();
+  expect(ids.drawer).not.toBe(ids.device);
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+
+  const rows = await storeRows(page);
+  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
+  await expect(rows.and(page.getByTestId('orders-row-1'))).toBeVisible();
+  await page.getByTestId('order-filter-register').click();
+  await page.getByTestId(`order-filter-register-${ids.drawer}`).click();
+  await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
+  await expect(rows.and(page.getByTestId('orders-row-1'))).toHaveCount(0);
+});
+
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
 test('a scan over an open order closes the Orders panel, and Orders reopens on the list', async ({ page }) => {
   await page.goto('/demo');

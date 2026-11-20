@@ -377,7 +377,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           <View className="flex-1" style={openOrder ? { display: 'none' } : undefined}>
             <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
               till={{ orders: outbox.recent, onRetry: outbox.requeue, stuck: outbox.state.stuck }}
-              registerId={registerId} cashier={identity} onOpen={setOpenOrder} />
+              registerId={boundRegisterId} cashier={identity} onOpen={setOpenOrder} />
           </View>
         </VStack>
       ) : null}
@@ -413,7 +413,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           {saleSettings.status === 'ready' ? (
             <CurrencyProvider currencyCode={saleSettings.settings.currency}>
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
-                <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue} registerId={registerId}
+                <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue}
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onHolds={setSaleHolds}
@@ -486,10 +486,10 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 }
 
 function Sale({
-  session, capabilities, catalogue, registerId, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
+  session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
 }: {
-  session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>; registerId: string;
+  session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
   drafts: RxCollection | null;
   taxClasses: { id: string; label: string }[];
@@ -512,9 +512,12 @@ function Sale({
   const catalogueFilters = useCatalogueFilters(settingsOpen);
   const approvalSheet = useApprovalSheet({ session, register, capabilities });
   const identity = tillIdentity(session);
+  const [tenderDrawer, setTenderDrawer] = useState<string | null>(null);
+  // The sale's register: the drawer its tender pinned (pay-gate), else the bound one (Front desk, 2026-11-20).
+  const saleRegisterId = tenderDrawer ?? boundRegisterId;
   // The session's orders go to its own store's outbox, each stamped with the register session it was taken in.
   const sale = useSale(session.settings, {
-    registerId, cashierRef: identity, capabilities, session: register.saleSession,
+    registerId: saleRegisterId, cashierRef: identity, capabilities, session: register.saleSession,
     onSaleCompleted: session.url === DEMO_STORE_ORIGIN ? withDemoSaleEvent(outbox.record) : outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
@@ -539,6 +542,7 @@ function Sale({
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
+  useEffect(() => { if (stage.kind === 'cart') setTenderDrawer(null); }, [stage.kind]);
   const tender = useTillTender(sale);
   const currency = session.settings.currency;
   const configuredFloatMinor = loadOpeningFloatMinor(boundRegisterId);
@@ -550,7 +554,7 @@ function Sale({
   const [payError, setPayError] = useState<string>();
   async function checkout() {
     setPayError(undefined);
-    setPayError(await startTenderInSession(register, sale, 'cash'));
+    setPayError(await startTenderInSession(register, sale, 'cash', (id) => setTenderDrawer((current) => current ?? id)));
   }
   const format = useCurrencyFormatter();
   // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes a
@@ -732,7 +736,7 @@ function Sale({
             highlightSku={highlightSku} />
         ) : tenderPane) : stage.kind === 'receipt' ? (
           <ScrollView>
-            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={registerId} />
+            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId} />
           </ScrollView>
         ) : register.session?.status === 'conflict' ? cart(
           <RegisterConflictCard register={register} registerContract={capabilities?.register} onChoseAnother={onRebindRegister} className="mt-2 border border-border" />
