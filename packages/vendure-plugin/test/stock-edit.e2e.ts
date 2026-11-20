@@ -138,6 +138,14 @@ describe('10.2: POST /tally/v1/variants/:id/stock', () => {
     expect({ onHand: (await level()).stockOnHand, added: (await adjustments()).length - before }).toEqual({ onHand: 7, added: 1 });
   });
 
+  it('5b: oversold, an unchanged 0 writes nothing', async () => { // afterEach puts allocated back to 0
+    await setOnHand(3);
+    await setAllocated(5);
+    const before = (await adjustments()).length;
+    expect(await stock({ expectedSaleable: 0, saleable: 0 })).toEqual({ status: 200, body: { saleable: 0, stockOnHand: 3 } });
+    expect({ onHand: (await level()).stockOnHand, added: (await adjustments()).length - before }).toEqual({ onHand: 3, added: 0 });
+  });
+
   it('6: a resend after a lost answer is refused stock_changed and writes nothing more', async () => {
     await setOnHand(10);
     const s = await saleableNow(), before = (await adjustments()).length;

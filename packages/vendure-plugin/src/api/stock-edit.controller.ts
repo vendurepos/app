@@ -66,6 +66,8 @@ export class TallyStockEditController {
         if (current !== expectedSaleable) {
           return refusal(409, 'stock_changed', `The saleable stock is ${current}, not ${expectedSaleable}`, { saleable: current });
         }
+        // An unchanged figure writes nothing: oversold, current clamps to 0, and 0 + allocated + threshold is not the stored on-hand.
+        if (saleable === current) return { status: 200, body: { saleable, stockOnHand } };
         const next = saleable + stockAllocated + threshold;
         if (next > MAX_INT4) return refusal(400, 'invalid_payload', `The on-hand figure ${next} would be over 2147483647`);
         if (next !== stockOnHand) await this.stockMovements.adjustProductVariantStock(tx, variantId, [{ stockLocationId, stockOnHand: next }]);
