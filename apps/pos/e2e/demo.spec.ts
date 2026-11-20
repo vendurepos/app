@@ -468,6 +468,94 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test('the Customers panel adds and edits customers on the store; a refused save leaves the row as the store has it', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  const save = page.getByTestId('customer-sheet-save');
+  const error = page.getByTestId('customer-sheet-error');
+  await page.getByTestId('customers-add').click();
+  await expect(sheet.getByText('New customer', { exact: true })).toBeVisible();
+  await sheet.getByPlaceholder('First name', { exact: true }).fill('Mary');
+  await sheet.getByPlaceholder('Last name', { exact: true }).fill('Anning');
+  await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('mary@demo.vendurepos.com');
+  await sheet.getByPlaceholder('Phone number', { exact: true }).fill('+44 1297 000000');
+  await save.click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 9 of 9 customers');
+  await expect(page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]').filter({ hasText: 'mary@demo.vendurepos.com' })).toHaveCount(1);
+
+  await page.evaluate(() => {
+    const target = window as typeof window & { __releaseCustomerSave: () => void; __restoreCustomerFetch: () => void };
+    const originalFetch = window.fetch;
+    const gate = new Promise<void>(resolve => { target.__releaseCustomerSave = resolve; });
+    target.__restoreCustomerFetch = () => { window.fetch = originalFetch; };
+    window.fetch = async (...args) => {
+      if (String(args[1]?.body).includes('createCustomer')) await gate;
+      return originalFetch(...args);
+    };
+  });
+  await page.getByTestId('customers-add').click();
+  await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('hold@demo.vendurepos.com');
+  await save.click();
+  await expect(page.getByTestId('customer-sheet-close')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeVisible();
+  await page.evaluate(() => (window as typeof window & { __releaseCustomerSave: () => void }).__releaseCustomerSave());
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 10 of 10 customers');
+  await expect(page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]').filter({ hasText: 'hold@demo.vendurepos.com' })).toHaveCount(1);
+  await page.evaluate(() => (window as typeof window & { __restoreCustomerFetch: () => void }).__restoreCustomerFetch());
+
+  await page.getByTestId('customers-add').click();
+  await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('ada@demo.vendurepos.com');
+  await save.click();
+  await expect(error).toHaveText('The email address is not available.');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByPlaceholder('email@example.com', { exact: true })).toHaveValue('ada@demo.vendurepos.com');
+  await page.getByTestId('customer-sheet-close').click();
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 10 of 10 customers');
+
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(sheet.getByText('Edit Ada Lovelace', { exact: true })).toBeVisible();
+  await expect(sheet.getByPlaceholder('First name', { exact: true })).toHaveValue('Ada');
+  await expect(save).toBeDisabled();
+  await sheet.getByPlaceholder('Last name', { exact: true }).fill('King');
+  await expect(save).toBeEnabled();
+  await page.screenshot({ path: test.info().outputPath('06d-customer-edit.png') });
+  await save.click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('customers-row-c1')).toContainText('King');
+  await page.getByTestId('customers-edit-c1').click();
+  await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('mary@demo.vendurepos.com');
+  await save.click();
+  await expect(error).toHaveText('The email address is not available.');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByPlaceholder('email@example.com', { exact: true })).toHaveValue('mary@demo.vendurepos.com');
+  await page.getByTestId('customer-sheet-close').click();
+  await expect(page.getByTestId('customers-row-c1')).toContainText('ada@demo.vendurepos.com');
+
+  await page.context().setOffline(true);
+  await page.getByTestId('customers-add').click();
+  await expect(page.getByTestId('customer-sheet-offline')).toBeVisible();
+  await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('offline@demo.vendurepos.com');
+  await expect(save).toBeDisabled();
+  await page.context().setOffline(false);
+  await expect(save).toBeEnabled();
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(sheet).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('customers-panel')).toHaveCount(0);
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
 test("the Products panel lists the catalogue's variants with SKU, price and stock, searches them, and a scan closes it and adds", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -625,6 +713,39 @@ test('Store health checks everything now, and Clear & re-download empties and re
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await wedgeScan(page, 'TALLY-MUG');
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test("Store health › Sync cadence keeps this till's choice, and Custom clamps to TallyUI's limits", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('sync-cadence-standard')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByTestId('sync-cadence-standard-summary')).toHaveText('Every 60 s, up to 100 records a check, 60 checks an hour');
+  await page.getByTestId('sync-cadence-eco').click();
+  await expect(page.getByTestId('sync-cadence-eco')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByTestId('sync-cadence-standard')).toHaveAttribute('aria-checked', 'false');
+  await page.reload();
+  await expectSignedIn(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('sync-cadence-eco')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('sync-cadence-custom').click();
+  await page.getByTestId('sync-cadence-custom-seconds').fill('2');
+  await page.getByTestId('sync-cadence-custom-records').fill('500');
+  await page.getByTestId('sync-cadence-custom-save').click();
+  await expect(page.getByTestId('sync-cadence-custom-summary')).toHaveText('Every 5 s, 100 records a check, 720 checks an hour');
+  await expect(page.getByTestId('sync-cadence-custom')).toHaveAttribute('aria-checked', 'true');
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.getByTestId('sync-cadence').scrollIntoViewIfNeeded();
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13j-store-health-sync-cadence-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.getByTestId('sync-cadence-standard').click();
+  await page.reload();
+  await expectSignedIn(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('sync-cadence-standard')).toHaveAttribute('aria-checked', 'true');
 });
 
 test('Notifications at the foot of the rail shows the empty state and closes', async ({ page }) => {
