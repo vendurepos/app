@@ -1723,8 +1723,11 @@ test('Settings › Theme sets the fonts from the bundled faces, and keeps the ch
   await expect(page.getByTestId('font-auto')).toHaveAttribute('aria-pressed', 'true');
   const expectedFaces = Object.entries(FONT_FACES).flatMap(([family, faces]) =>
     faces.map(({ weight, style }) => `${family}|${weight}|${style ?? 'normal'}`)).sort();
-  await expect.poll(() => page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded')
-    .map((f) => `${f.family.replace(/"/g, '')}|${f.weight}|${f.style}`).sort())).toEqual(expectedFaces);
+  await expect.poll(() => page.evaluate(() => {
+    const faces: string[] = [];
+    document.fonts.forEach((f) => { if (f.status === 'loaded') faces.push(`${f.family.replace(/"/g, '')}|${f.weight}|${f.style}`); });
+    return faces.sort();
+  })).toEqual(expectedFaces);
   const fontOf = () => page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="font-help"]')!).fontFamily);
   expect(await fontOf()).not.toContain('Manrope');
   await page.getByTestId('font-manrope').click();

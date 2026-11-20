@@ -4,6 +4,9 @@ import * as Font from 'expo-font';
 import { Platform } from 'react-native';
 import { createFontLoader, type FontFaceSource } from './font-loader';
 
+// Expo's tsconfig has the dom lib without dom.iterable, whose FontFaceSet lacks the set-like add.
+type AddableFontFaceSet = FontFaceSet & { add(font: FontFace): FontFaceSet };
+
 export const FONT_SOURCES: Record<ThemeFontFamily, readonly FontFaceSource[]> = {
   'DM Sans': [{ weight: 400, asset: require('@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf') },
     { weight: 500, asset: require('@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf') },
@@ -33,7 +36,7 @@ export const loadAppFonts = createFontLoader({
     const uri = Asset.fromModule(asset as number).uri;
     const face = new FontFace(family, `url("${uri}")`, { weight: String(weight), style: style ?? 'normal', display: 'swap' });
     await face.load();
-    document.fonts.add(face);
+    (document.fonts as AddableFontFaceSet).add(face);
   },
   loadNative: Font.loadAsync as (fonts: Record<string, unknown>) => Promise<void>,
 });

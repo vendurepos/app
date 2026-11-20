@@ -34,12 +34,14 @@ export default function RootLayout() {
   return (
     // The web uses TallyUI's root mirror.
     <ScaleProvider scale={scale} scope={Platform.OS === 'web' ? undefined : ScopedVariables}>
-      <FontProvider font={font} loadFonts={loadAppFonts}><SessionProvider>
-        <StatusBar style={statusBarStyle(theme)} />
-        <Stack screenOptions={stackColors} />
-        {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
-        <PortalHost />
-      </SessionProvider></FontProvider>
+      <FontProvider font={font} loadFonts={loadAppFonts}>
+        <SessionProvider>
+          <StatusBar style={statusBarStyle(theme)} />
+          <Stack screenOptions={stackColors} />
+          {/* The one root host, after navigation: the register's panel, sheets and dialogs draw above every screen. */}
+          <PortalHost />
+        </SessionProvider>
+      </FontProvider>
     </ScaleProvider>
   );
 }
