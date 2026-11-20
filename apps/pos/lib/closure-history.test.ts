@@ -1,6 +1,6 @@
 import { formatMoney } from '@tallyui/core';
 import type { Closure } from '@tallyui/pos';
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   closureCsvFileName, closureFromRead, closureHistoryCsv, closureHistoryRows, closureSummary, mergeClosures, openSessionRows, zCopyLines,
   type TallyClosureRead,
@@ -170,6 +170,33 @@ it("gives each register with a live session an open row, this device's as 'This 
     { registerId: 'drawer-1', register: 'This device', status: 'open', since: 'Sep 30, 2026, 08:15' },
     { registerId: 'drawer-2', register: 'Front counter', status: 'counting', since: 'Sep 30, 2026, 08:15' },
   ]);
+});
+
+describe("openSessionRows with this till's local session", () => {
+  const session = { openedAt: '2026-09-30T08:15:00.000Z', openedBy: null, deviceName: null };
+  const other = { id: 'drawer-2', receivedAt: '', lastDeviceName: 'Front counter', session: { ...session, status: 'counting' as const } };
+  const otherRow = { registerId: 'drawer-2', register: 'Front counter', status: 'counting', since: 'Sep 30, 2026, 08:15' };
+  const ids = { ownRegisterId: 'drawer-1', timezone: 'UTC' };
+
+  it('adds the local open when the server lists no session for this register yet', () => {
+    const own = { status: 'open', openedAt: '2026-09-30T09:45:00.000Z' };
+    expect(openSessionRows([{ id: 'drawer-1', receivedAt: '', lastDeviceName: 'Till 1', session: null }, other], { ...ids, own })).toEqual([
+      { registerId: 'drawer-1', register: 'This device', status: 'open', since: 'Sep 30, 2026, 09:45' }, otherRow,
+    ]);
+  });
+
+  it("drops the server's open for this register when the local session is gone (the local close is newer)", () => {
+    const listed = [{ id: 'drawer-1', receivedAt: '', lastDeviceName: 'Till 1', session: { ...session, status: 'open' as const } }, other];
+    expect(openSessionRows(listed, { ...ids, own: null })).toEqual([otherRow]);
+    expect(openSessionRows(listed, { ...ids, own: { status: 'closed', openedAt: session.openedAt } })).toEqual([otherRow]);
+  });
+
+  it("reads this register from the server as before when no local session is given", () => {
+    const listed = [{ id: 'drawer-1', receivedAt: '', lastDeviceName: 'Till 1', session: { ...session, status: 'open' as const } }, other];
+    expect(openSessionRows(listed, ids)).toEqual([
+      { registerId: 'drawer-1', register: 'This device', status: 'open', since: 'Sep 30, 2026, 08:15' }, otherRow,
+    ]);
+  });
 });
 
 it("sums the listed closures' cash variance and cash counted, and counts the open sessions with them", () => {
