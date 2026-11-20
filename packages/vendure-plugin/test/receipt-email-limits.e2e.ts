@@ -90,6 +90,7 @@ describe('#345: the receipt-email per-order and daily caps are kept in the datab
     const code = await sale(email());
     expect([(await receipt(code)).status, (await receipt(code, second.url)).status]).toEqual([202, 202]);
     const answers = [await receipt(code), await receipt(code, second.url)], key = await orderKey(code), { expiresAt } = await row(key);
+    expect(Math.abs(expiresAt.getTime() - (Date.now() + offset) - 30 * DAY)).toBeLessThan(60 * SECOND);
     expect(answers).toEqual(Array(2).fill(refusal('order_send_limit', 'This order already had 2 receipt emails', expiresAt)));
     // The restart proof: a fresh instance knows only what the table holds.
     expect((await connection.rawConnection.query('SELECT "sends" FROM "tally_receipt_email_window" WHERE "key" = $1', [key]))[0].sends).toBe(2);
@@ -108,7 +109,9 @@ describe('#345: the receipt-email per-order and daily caps are kept in the datab
     expect(await statuses(4, till.headers)).toEqual([202, 202, 202, 202]);
     const refused = await receipt(await sale(email()), a, till.headers), { expiresAt } = await row(`user:${till.id}`);
     expect(refused).toEqual(refusal('user_daily_limit', 'This user already sent 4 receipt emails today', expiresAt));
-    offset += DAY + SECOND;
+    offset += DAY - 60 * SECOND;
+    expect((await receipt(await sale(email()), a, till.headers)).body.code).toBe('user_daily_limit');
+    offset += 61 * SECOND;
     expect(await statuses(1, till.headers)).toEqual([202]);
   });
 

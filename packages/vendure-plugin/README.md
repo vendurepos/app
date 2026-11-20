@@ -84,7 +84,7 @@ auth, CORS, tax strategy and a first sale. Install it with
    `tallyRegisterId` and `tallySessionId`, recovery fields, the register tables, the customer-display tables and the receipt-email limit table.
    Run them with `runMigrations(config)` before starting Vendure.
    Upgrading to `TallyPosReceiptEmail1791400000000`: run the migration before starting the new version. During a rolling deploy, instances still on the old version count receipt emails in their own memory until they stop, so the caps hold exactly only once every instance runs the new version.
-   To roll back, revert the plugin version first and only then run this migration's `down`, which drops the counts; the new version without the table answers 500 to every receipt email.
+   To roll back, revert the plugin version and leave the `tally_receipt_email_window` table in place: the old version ignores it. To remove the table as well, stop every instance, run this migration's `down` with the new version's package (the old package does not contain the migration), then start the old version; never drop the table by hand, or its `migrations` row stays and a later upgrade skips the migration.
 
 2. POS orders send no order-confirmation email. If you use `@vendure/email-plugin` (an
    optional peer dependency), install `tallyOrderConfirmationHandler` from the

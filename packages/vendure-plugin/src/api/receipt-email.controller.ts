@@ -20,7 +20,7 @@ export const receiptEmailCaps = (option?: boolean | { perOrder?: number; perUser
 // One plain ASCII address (no list, quote, space or header character), and at most 254 characters, RFC 5321's longest path.
 // No `=` or `?`, so no RFC 2047 encoded word, and an alphabetic top-level label, so no IP-shaped domain.
 const EMAIL = /^[A-Za-z0-9.!#$%&'*+/^_`{|}~-]{1,64}@([A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$/;
-/** 12.1a: a cashier's explicit receipt email, not ADR 0002's automatic confirmation. It writes nothing; each request sends one. */
+/** 12.1a: a cashier's explicit receipt email, not ADR 0002's automatic confirmation. It changes no customer or order; each request sends one. */
 @Controller('tally/v1')
 export class TallyReceiptEmailController {
   private readonly recent = new Map<string, number[]>(); // in memory on this singleton, so only the per-minute cap is per server process
