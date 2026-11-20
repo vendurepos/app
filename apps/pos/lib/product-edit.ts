@@ -95,3 +95,19 @@ export async function saveVariantUpdate(context: SyncContext, input: VariantUpda
     return response.ok && !body.errors?.length ? null : PRODUCT_SAVE_FAILED_TEXT;
   } catch { return PRODUCT_SAVE_FAILED_TEXT; }
 }
+/** 10.2: the stock edit as one compare-and-set on the plugin's POST /tally/v1/variants/:id/stock (plugin README). null: saved; text: why not; false: a plugin without the route (a 404 with no `code`), so the caller takes checkStockEdit + saveVariantUpdate. */
+export async function saveStock(context: SyncContext, variantId: string, shown: string, text: string): Promise<string | null | false> {
+  try {
+    const saleable = Number(text.trim());
+    const response = await fetch(`${context.baseUrl}/tally/v1/variants/${encodeURIComponent(variantId)}/stock`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...context.headers }, body: JSON.stringify({ expectedSaleable: Number(shown), saleable }) });
+    if (response.status === 401 || response.status === 403) return PRODUCT_SAVE_FORBIDDEN_TEXT;
+    const body = await response.json().catch(() => null);
+    const code = typeof body?.code === 'string' ? body.code : undefined;
+    if (response.status === 404 && !code) return false;
+    if (response.ok) return null;
+    // The store already holds the figure sent (a resend after a lost answer): the edit is saved.
+    if (response.status === 409 && code === 'stock_changed') return body.saleable === saleable ? null : STOCK_CHANGED_TEXT;
+    return PRODUCT_SAVE_FAILED_TEXT;
+  } catch { return PRODUCT_SAVE_FAILED_TEXT; }
+}
