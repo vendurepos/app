@@ -1471,6 +1471,35 @@ test("Settings › General › Cart columns show an item's image and SKU, and Sp
   }
 });
 
+test('Settings › General › Cart sorts the items newest or oldest at top', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Canvas Apron').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const lineOrder = () => cart.locator('[data-testid="cart-line-APP-APRON"], [data-testid="cart-line-TALLY-MUG"]')
+    .evaluateAll(els => els.map(el => el.getAttribute('data-testid')));
+  await expect.poll(lineOrder).toEqual(['cart-line-APP-APRON', 'cart-line-TALLY-MUG']);
+  await openSettings(page, 'general');
+  await expect(page.getByTestId('cart-sort-oldest')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('cart-sort-newest').click();
+  await expect(page.getByTestId('cart-sort-newest')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByText('Sort items', { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('04h-cart-sort-vendurepos.png') });
+  await page.getByTestId('settings-back').click();
+  await expect.poll(lineOrder).toEqual(['cart-line-TALLY-MUG', 'cart-line-APP-APRON']);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expect(cart.getByTestId('cart-line-TALLY-MUG').getByTestId('quantity-popover-trigger')).toHaveText('2');
+  await expect.poll(lineOrder).toEqual(['cart-line-TALLY-MUG', 'cart-line-APP-APRON']);
+  await openSettings(page, 'general');
+  await page.getByTestId('cart-sort-oldest').click();
+  await page.getByTestId('settings-back').click();
+  await expect.poll(lineOrder).toEqual(['cart-line-APP-APRON', 'cart-line-TALLY-MUG']);
+});
+
 test('Settings › General picks the register this device is at, and the till follows it', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
