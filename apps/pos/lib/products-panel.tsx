@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { View } from 'react-native';
+import { Image, View } from 'react-native';
 import { Button, HStack, Input, InputField, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
-import { productRows, type ProductRow } from './product-rows';
+import { productRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
 import { refreshCatalogue } from './catalogue';
 import { sessionContext, type Session } from './session';
 import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveStock, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
@@ -47,11 +47,11 @@ export function ProductsPanel({ products, traits, currency, session }: { product
     refreshCatalogue(); return true;
   }, [currency, session]);
   const COLUMNS = useMemo<ProductTableColumn<ProductRow>[]>(() => [
+    { id: 'image', header: 'Image', hideHeader: true, flex: 0.6, render: row => row.imageUrl ?
+      <Image source={{ uri: row.imageUrl }} testID={`product-image-${row.id}`} accessibilityLabel={row.name}
+        resizeMode="cover" className="h-10 w-10 rounded" /> : <View testID={`product-image-${row.id}`} className="h-10 w-10 rounded bg-muted" /> },
     { id: 'name', header: 'Name', flex: 3, render: row => <Text>{row.name}</Text> },
     { id: 'sku', header: 'SKU', render: row => <Text>{row.sku}</Text> },
-    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable ?
-      <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
-        keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
     { id: 'stock', header: 'Stock', align: 'center', flex: 1, render: row => editable ? <VStack className="items-center gap-1">
       <EditField testID={`product-stock-${row.id}`} label={`Stock of ${row.name}`} value={row.stockText} keyboardType="number-pad"
         disabled={!row.managed || !row.stockTarget}
@@ -60,6 +60,14 @@ export function ProductsPanel({ products, traits, currency, session }: { product
         checked={row.managed} onCheckedChange={on => { void save(row, { field: 'manage', on }); }} />
         <Text className="text-xs text-muted-foreground">Manage</Text></HStack>
     </VStack> : <Text>{row.stock}</Text> },
+    { id: 'stockStatus', header: 'Stock status', flex: 1.2, render: row => <HStack className="items-center gap-2">
+      {row.stockStatus !== 'unknown' ? <View className={`h-2 w-2 rounded-full ${row.stockStatus === 'in_stock' ? 'bg-green-600' : row.stockStatus === 'out_of_stock' ? 'bg-destructive' : 'bg-amber-500'}`} /> : null}
+      <Text testID={`product-stock-status-${row.id}`}>{STOCK_STATUS_LABELS[row.stockStatus]}</Text>
+    </HStack> },
+    { id: 'categories', header: 'Categories', flex: 1.5, render: row => <Text numberOfLines={1} testID={`product-categories-${row.id}`}>{row.categories}</Text> },
+    { id: 'price', header: 'Price', align: 'right', render: row => priceEditable ?
+      <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
+        keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
   ], [editable, priceEditable, save, currency]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);

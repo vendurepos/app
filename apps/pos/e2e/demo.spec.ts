@@ -584,6 +584,25 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("the Products panel shows each variant's image, stock status and categories, as v2's products table", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  await expect(panel.getByTestId(`product-image-${MUG_VARIANT_ID}`)).toBeVisible();
+  await expect(panel.getByTestId(`product-stock-status-${MUG_VARIANT_ID}`)).toHaveText('In stock');
+  await expect(panel.getByTestId(`product-categories-${MUG_VARIANT_ID}`)).not.toHaveText('—');
+  await expect(panel.getByTestId(`product-categories-${MUG_VARIANT_ID}`)).toHaveText(/\w/);
+  await expect(panel.getByText('Stock status', { exact: true })).toBeVisible();
+  await expect(panel.getByText('Categories', { exact: true })).toBeVisible();
+  // The demo-pairs size, as 10e; the PNG is made docs/v2-parity/demo-pairs/08-products-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.screenshot({ path: test.info().outputPath('08-products-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+});
+
 test("the Products panel edits the mug's price and stock inline, and the sell screen sells it at the new price", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
