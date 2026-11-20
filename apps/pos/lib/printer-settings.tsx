@@ -6,6 +6,7 @@ import {
   removePrinterProfile, savePrinterProfile, type SavedPrinterConnection,
 } from './printer-profiles';
 
+/** Settings › Printing: the printers set up on this device (TallyUI's PrinterProfile, kept in the device store). Data only: receipts still print through the print dialog. */
 export function PrinterSettings(): JSX.Element {
   const [printers, setPrinters] = useState(() => loadPrinterProfiles());
   const [formOpen, setFormOpen] = useState(false);

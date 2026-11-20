@@ -250,12 +250,12 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
           <CardContent>
             <VStack space="lg">
               <PrinterSettings />
-            <SettingsRow label="Show receipt after each sale" description="When off, a finished sale goes straight to a new one."
-              action={<Switch testID="auto-show-receipt-toggle" accessibilityLabel="Show receipt after each sale" checked={autoShowReceipt}
-                onCheckedChange={(on) => { saveAutoShowReceipt(on); setAutoShowReceipt(on); }} />} />
-            <SettingsRow label="Print after each sale" description="Open the print dialog when a sale's receipt shows."
-              action={<Switch testID="auto-print-toggle" accessibilityLabel="Print after each sale" checked={autoPrint}
-                onCheckedChange={(on) => { saveAutoPrint(on); setAutoPrint(on); }} />} />
+              <SettingsRow label="Show receipt after each sale" description="When off, a finished sale goes straight to a new one."
+                action={<Switch testID="auto-show-receipt-toggle" accessibilityLabel="Show receipt after each sale" checked={autoShowReceipt}
+                  onCheckedChange={(on) => { saveAutoShowReceipt(on); setAutoShowReceipt(on); }} />} />
+              <SettingsRow label="Print after each sale" description="Open the print dialog when a sale's receipt shows."
+                action={<Switch testID="auto-print-toggle" accessibilityLabel="Print after each sale" checked={autoPrint}
+                  onCheckedChange={(on) => { saveAutoPrint(on); setAutoPrint(on); }} />} />
             </VStack>
           </CardContent>
         </Card>
