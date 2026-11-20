@@ -5,7 +5,7 @@ import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { productRows, type ProductRow } from './product-rows';
 import { refreshCatalogue } from './catalogue';
 import { sessionContext, type Session } from './session';
-import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
+import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveStock, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
 
 // Rows shown at a time, as the Customers panel's page.
 const PAGE_SIZE = 25;
@@ -35,6 +35,8 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   const save = useCallback(async (row: ProductRow, edit: ProductEdit): Promise<boolean> => {
     let input = variantUpdateInput(row.id, edit, currency);
     if (input && edit.field === 'stock') {
+      const routed = await saveStock(sessionContext(session), row.id, row.stockText, edit.text);
+      if (routed !== false) { setError(routed); if (routed === null || routed === STOCK_CHANGED_TEXT) refreshCatalogue(); return routed === null; }
       const checked = await checkStockEdit(sessionContext(session), row.id, edit, row.stockText);
       if (typeof checked === 'string') { setError(checked); if (checked === STOCK_CHANGED_TEXT) refreshCatalogue(); return false; }
       input = checked;

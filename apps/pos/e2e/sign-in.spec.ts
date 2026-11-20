@@ -2442,6 +2442,7 @@ async function openProductsRow(page: Page, sku: string, variantId: string) {
 }
 const productSave = (page: Page) => page.waitForResponse((response) => response.request().method() === 'POST'
   && response.url().endsWith('/admin-api') && (response.request().postData() ?? '').includes('UpdateProductVariants'));
+const stockSave = (page: Page, variantId: string) => page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/tally/v1/variants/${variantId}/stock`));
 
 test('the Products panel writes a one-cent price edit as the price the merchant means, in both channel tax modes', async ({ browser, page }) => {
   test.setTimeout(4 * 60_000);
@@ -2533,15 +2534,17 @@ test('the Products panel refuses a stock edit when another till changed the stoc
     // Another till sells two units behind this till's back.
     await setOnHand(level.stockOnHand - 2);
     await stock.fill(String(shown + 5));
+    const refused = stockSave(page, seeded.id);
     await stock.press('Enter');
     await expect(page.getByTestId('products-save-error')).toHaveText('Stock changed in the store. Check the new figure and try again.');
+    expect((await refused).status()).toBe(409);
     expect((await read()).stockLevels[0].stockOnHand).toBe(level.stockOnHand - 2);
     await expect(stock).toHaveValue(String(shown - 2), { timeout: 30_000 });
 
-    const saved = productSave(page);
+    const saved = stockSave(page, seeded.id);
     await stock.fill(String(shown + 5));
     await stock.press('Enter');
-    expect((await saved).ok()).toBe(true);
+    expect((await saved).status()).toBe(200);
     await expect(page.getByTestId('products-save-error')).toHaveCount(0);
     const { productVariants, globalSettings } = await readAll();
     const after: StoreVariant = productVariants.items[0];

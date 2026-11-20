@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
-import { PRODUCT_SAVE_FAILED_TEXT, PRODUCT_SAVE_FORBIDDEN_TEXT, STOCK_CHANGED_TEXT, canEditCatalogue, catalogueEditable, checkStockEdit, saveVariantUpdate,
+import { PRODUCT_SAVE_FAILED_TEXT, PRODUCT_SAVE_FORBIDDEN_TEXT, STOCK_CHANGED_TEXT, canEditCatalogue, catalogueEditable, checkStockEdit, saveStock, saveVariantUpdate,
   stockTarget, variantUpdateInput } from './product-edit';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -113,4 +113,41 @@ it('saves one variant update and names a refusal', async () => {
   expect(await saveVariantUpdate(context, { id: '7', price: 950 })).toBe(PRODUCT_SAVE_FORBIDDEN_TEXT);
   vi.stubGlobal('fetch', respond({ errors: [{ message: 'boom' }] }));
   expect(await saveVariantUpdate(context, { id: '7', price: 950 })).toBe(PRODUCT_SAVE_FAILED_TEXT);
+});
+
+it('saves stock as one compare-and-set POST on the plugin route', async () => {
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ saleable: 9, stockOnHand: 12 }), { status: 200 }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await saveStock({ ...context, headers: { Authorization: 'Bearer t', 'vendure-token': 'pos' } } as SyncContext, '7', '5', ' 9 ')).toBeNull();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe('https://store.test/tally/v1/variants/7/stock');
+  expect(init.method).toBe('POST');
+  expect(init.headers).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer t', 'vendure-token': 'pos' });
+  expect(JSON.parse(init.body as string)).toEqual({ expectedSaleable: 5, saleable: 9 });
+});
+
+it.each([
+  [200, { saleable: 9, stockOnHand: 9 }, null],
+  [200, '<html>ok</html>', PRODUCT_SAVE_FAILED_TEXT],
+  [200, { saleable: 8, stockOnHand: 8 }, PRODUCT_SAVE_FAILED_TEXT],
+  [409, { code: 'stock_changed', message: 'x', saleable: 3 }, STOCK_CHANGED_TEXT],
+  [409, { code: 'stock_changed', message: 'x', saleable: 9 }, null],
+  [404, { statusCode: 404, message: 'Cannot POST /tally/v1/variants/7/stock', error: 'Not Found' }, false],
+  [404, 'Cannot POST /tally/v1/variants/7/stock', false],
+  [404, { code: 'variant_not_found', message: 'x' }, PRODUCT_SAVE_FAILED_TEXT],
+  [503, { code: 'stock_busy', message: 'x' }, PRODUCT_SAVE_FAILED_TEXT],
+  [503, { statusCode: 503, message: 'Service Unavailable' }, PRODUCT_SAVE_FAILED_TEXT],
+  [409, { code: 'stock_level_not_single', message: 'x' }, PRODUCT_SAVE_FAILED_TEXT],
+  [400, { code: 'invalid_payload', message: 'x' }, PRODUCT_SAVE_FAILED_TEXT],
+  [403, { message: 'Forbidden' }, PRODUCT_SAVE_FORBIDDEN_TEXT],
+  [401, {}, PRODUCT_SAVE_FORBIDDEN_TEXT],
+])('answers a stock route %i %j with %j', async (status, body, expected) => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })));
+  expect(await saveStock(context, '7', '5', '9')).toBe(expected);
+});
+
+it('answers a failed stock route fetch with the save failure', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+  expect(await saveStock(context, '7', '5', '9')).toBe(PRODUCT_SAVE_FAILED_TEXT);
 });
