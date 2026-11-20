@@ -1609,6 +1609,34 @@ test('a counting register holds the till to it until it is closed', async ({ pag
   await expect.poll(() => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'))).not.toBe('demo-front-counter');
 });
 
+test('the count warns about a parked sale before the register closes', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel-close').click();
+  await expect(page.getByTestId('count-amount')).toBeVisible();
+  await expect(page.getByTestId('close-warnings')).toHaveCount(0);
+  await page.getByTestId('count-back').click();
+  await expect(page.getByTestId('count-amount')).toHaveCount(0);
+
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('parked-open').click();
+  await page.getByTestId('parked-sales-park').click();
+  await page.getByTestId('parked-sales-dismiss').click();
+  await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+
+  await page.getByTestId('register-open-panel').click();
+  await page.getByTestId('register-panel-close').click();
+  await expect(page.getByTestId('close-warnings')).toBeVisible();
+  await expect(page.getByTestId('close-warning-parkedSales')).toHaveText('1 parked sale');
+  await expect(page.getByTestId('close-warning-partlyPaidSale')).toHaveCount(0);
+  await expect(page.getByTestId('count-amount')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('09i-register-close-warnings-vendurepos.png') });
+});
+
 test('the register panel names the register the till is at', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
