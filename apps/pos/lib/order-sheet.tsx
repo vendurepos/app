@@ -1,8 +1,9 @@
-import { Fragment, useState, type JSX, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type JSX, type ReactNode } from 'react';
 import { Button, HStack, OrderDetail, Text, VStack, type OrderHistoryRow } from '@tallyui/components';
 import type { VendureOrder } from '@tallyui/connector-vendure';
 import type { PosOrder } from '@tallyui/pos';
 import { ORDER_LOADING_TEXT, orderCustomerName, orderHeaderMeta, orderDetailTarget, orderDetailView, useOrderDetail } from './order-detail';
+import { fetchRegisters, type ListedRegister } from './register-choice';
 import type { Session } from './session';
 import { attentionReason, canSendAgain } from './store-health';
 
@@ -22,6 +23,12 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
   const view = order ? orderDetailView(order) : null;
   const refused = 'syncStatus' in row && row.syncStatus === 'rejected' ? row : null;
   const [sending, setSending] = useState(false);
+  const [registers, setRegisters] = useState<ListedRegister[]>([]);
+  useEffect(() => {
+    let live = true;
+    void fetchRegisters(session).then(listed => { if (live) setRegisters(listed); }, () => {});
+    return () => { live = false; };
+  }, [session]);
   return (
     <VStack testID="order-sheet" className="flex-1">
       <HStack dataSet={{ print: 'hide' }} className="border-b border-border px-4 py-2">
@@ -66,7 +73,7 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
           customerSlot={(
             <VStack>
               <Text testID="order-sheet-customer" className="font-medium">{orderCustomerName(order)}</Text>
-              <Text testID="order-sheet-meta" className="text-sm text-muted-foreground">{orderHeaderMeta(order, { timezone, now: new Date() })}</Text>
+              <Text testID="order-sheet-meta" className="text-sm text-muted-foreground">{orderHeaderMeta(order, { timezone, now: new Date(), registers })}</Text>
             </VStack>
           )}
           paymentSlot={(

@@ -6,6 +6,7 @@ import type { PosOrder } from '@tallyui/pos';
 import { WALK_IN_EMAIL } from './customer-list';
 import { orderHistoryNotice, orderStateLabel, type OrderHistoryNotice } from './order-history';
 import { storeDayOf } from './order-list';
+import { registerLabel, type ListedRegister } from './register-choice';
 import { sessionContext, type Session } from './session';
 
 export const ORDER_NOT_SYNCED_TEXT = "This sale hasn't reached the store yet. You can open it here once it has synced.";
@@ -19,9 +20,9 @@ export function orderCustomerName(order: Pick<VendureOrder, 'customer'>): string
   return `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress;
 }
 
-/** The order sheet's second header line, v2's "Today · 14:31 · …": day · time · cashier. */
+/** The order sheet's second header line, v2's "Today · 14:31 · …": day · time · cashier, then the register only when the store lists more than one. */
 export function orderHeaderMeta(order: Pick<VendureOrder, 'orderPlacedAt' | 'updatedAt' | 'customFields'>,
-  { timezone, now, locale }: { timezone: string; now: Date; locale?: string }): string {
+  { timezone, now, registers, locale }: { timezone: string; now: Date; registers: readonly Pick<ListedRegister, 'id' | 'lastDeviceName'>[]; locale?: string }): string {
   const instant = order.customFields?.tallySaleAt ?? order.orderPlacedAt ?? order.updatedAt;
   const tz = timezone === 'device' ? undefined : timezone;
   const day = storeDayOf(instant, timezone), today = storeDayOf(now.toISOString(), timezone);
@@ -30,6 +31,8 @@ export function orderHeaderMeta(order: Pick<VendureOrder, 'orderPlacedAt' | 'upd
   const label = day === today ? 'Today' : day === yesterday.toISOString().slice(0, 10) ? 'Yesterday'
     : new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz }).format(new Date(instant));
   const parts = [label, new Date(instant).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: tz }), order.customFields?.tallyCashierRef?.trim()].filter(Boolean);
+  const id = order.customFields?.tallyRegisterId;
+  if (registers.length > 1 && id) parts.push(registerLabel(registers.find(register => register.id === id) ?? { id, lastDeviceName: null }));
   return parts.join(' · ');
 }
 
