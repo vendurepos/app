@@ -1194,6 +1194,10 @@ test("Settings › General › Cart columns show an item's image and SKU, and Sp
   await page.getByTestId('cart-column-price').click();
   await expect(page.getByTestId('cart-column-price')).toHaveAttribute('aria-checked', 'false');
   await page.getByTestId('settings-back').click();
+  await expect(page.getByTestId('till-cart').getByRole('columnheader').getByText('Total', { exact: true })).toBeVisible();
+  await expect(lines).toHaveCount(2);
+  await expect(lines.nth(0)).toBeVisible();
+  await expect(lines.nth(1)).toBeVisible();
   await expect(priceHead).toHaveCount(0);
   await page.reload();
   await expectSignedIn(page);
