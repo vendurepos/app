@@ -25,6 +25,8 @@ import { cameraScanShown, permissionHook } from '../lib/native-camera-core';
 import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { refreshCatalogue, removeCatalogueDatabaseWithin } from '../lib/catalogue';
+import { closeWarningLines } from '../lib/close-warnings';
+import { CloseWarningsCard } from '../lib/close-warnings-card';
 import { ClosureHistory, ClosureList } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
@@ -738,7 +740,10 @@ function Sale({
           // Counting (or finishing a close) swaps the cart for the count; one drawer per till, so no picker.
           <RegisterColumn register={register} registerId={boundRegisterId} registers={[]} onPick={() => undefined} currency={currency}
             configuredFloatMinor={configuredFloatMinor ?? null}
-            countSlot={<RegisterCount register={register} currency={currency} approve={approvalSheet.approve} />} cartEmpty={!sale.order.lineItems.length}>
+            countSlot={<>
+              {register.session?.status === 'counting' ? <CloseWarningsCard lines={closeWarningLines(parked.length, paidMinor)} /> : null}
+              <RegisterCount register={register} currency={currency} approve={approvalSheet.approve} />
+            </>} cartEmpty={!sale.order.lineItems.length}>
             {cart()}
           </RegisterColumn>
         ) : cart(registerReady
