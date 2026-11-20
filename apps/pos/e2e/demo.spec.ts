@@ -963,6 +963,38 @@ test("a till sale is stamped with the till's drawer, and the Orders register fil
   await expect(rows.and(page.getByTestId('orders-row-4'))).toBeVisible();
 });
 
+test('a register rebind mid-tender leaves the sale on the drawer its tender pinned, with its session', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const drawer = await page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'));
+  expect(drawer).toBeTruthy();
+  expect(drawer).not.toBe('demo-front-counter');
+
+  const mug = CATALOGUE.find(product => product.variants.some(variant => variant.sku === 'TALLY-MUG'))!;
+  await page.getByTestId(`product-tile-${mug.name}`).click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+
+  await page.evaluate(() => localStorage.setItem('vendurepos.bound_register_id', 'demo-front-counter'));
+  await openSettings(page, 'general');
+  await page.getByTestId('settings-back').click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('vendurepos.bound_register_id'))).toBe('demo-front-counter');
+
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  const state = await demoState(page);
+  const sale = state!.orders.at(-1)! as { registerId?: string; sessionId?: string };
+  // Front desk, 2026-11-20: the drawer taken at tender start stays, and the sale's register and its session name it.
+  expect(sale.registerId).toBe(drawer);
+  expect(state!.sessions[sale.sessionId!].registerId).toBe(drawer);
+});
+
 // Front desk, 2026-11-15: a scan that closes the Orders panel drops the open order too, so Orders reopens on the list.
 test('a scan over an open order closes the Orders panel, and Orders reopens on the list', async ({ page }) => {
   await page.goto('/demo');
