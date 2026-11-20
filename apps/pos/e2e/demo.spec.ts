@@ -1891,6 +1891,8 @@ test('the cashier sheet switches the register the till is at, and holds it while
   await expect(sheet).toHaveCount(0);
   await openRegister(page);
   await page.getByTestId('register-bar-cashier').click();
+  // The till opened the register it was switched to, not the one it was at.
+  await expect(sheet.getByTestId('cashier-shift-since')).toHaveText(/^Front counter · open since \d{2}:\d{2}$/);
   await expect(sheet.getByTestId('cashier-register-name')).toHaveText('Front counter');
   await expect(sheet.getByTestId('cashier-register-switch')).toBeDisabled();
   await expect(sheet.getByTestId('cashier-register-held')).toHaveText('Close the register first');
