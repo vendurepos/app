@@ -1713,6 +1713,82 @@ test('signing in again in place keeps the cart and sells with the new session', 
   expect(cspConsole).toEqual([]);
 });
 
+test('the Customers panel adds and edits a customer on the dev store, and a refused email changes nothing on the store', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const random = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const emails = [`till-edit-${random}@example.com`, `till-taken-${random}@example.com`];
+  try {
+    const created = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers, data: {
+        query: 'mutation ($input: CreateCustomerInput!) { createCustomer(input: $input) { __typename ... on Customer { id } ... on ErrorResult { message } } }',
+        variables: { input: { emailAddress: emails[1], firstName: 'Till', lastName: 'Taken' } },
+      },
+    });
+    expect(created.ok()).toBe(true);
+    const taken = await created.json();
+    expect(taken.errors).toBeUndefined();
+    expect(taken.data.createCustomer.__typename).toBe('Customer');
+    await page.getByTestId('customers-open').click();
+    await page.getByTestId('customers-add').click();
+    const sheet = page.getByTestId('customer-sheet');
+    await sheet.getByPlaceholder('First name', { exact: true }).fill('Till');
+    await sheet.getByPlaceholder('Last name', { exact: true }).fill('Edit');
+    await sheet.getByPlaceholder('email@example.com', { exact: true }).fill(emails[0]);
+    await page.getByTestId('customer-sheet-save').click();
+    await expect(sheet).toHaveCount(0);
+    await page.getByTestId('customers-search').fill(emails[0]);
+    const rows = page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]');
+    await expect(rows).toHaveCount(1);
+    await expect(rows).toContainText(emails[0]);
+    const id = (await rows.getAttribute('data-testid'))!.slice('customers-row-'.length);
+    for (const [placeholder, value] of [['Last name', 'Edited'], ['email@example.com', emails[1]]]) {
+      await page.getByTestId(`customers-edit-${id}`).click();
+      await sheet.getByPlaceholder(placeholder, { exact: true }).fill(value);
+      await page.getByTestId('customer-sheet-save').click();
+      if (placeholder === 'Last name') await expect(sheet).toHaveCount(0);
+      else {
+        await expect(page.getByTestId('customer-sheet-error')).toBeVisible();
+        await expect(page.getByTestId('customer-sheet-error')).not.toHaveText('');
+      }
+      const read = await page.request.post(`${STORE_URL}/admin-api`, {
+        headers, data: { query: 'query ($id: ID!) { customer(id: $id) { lastName emailAddress } }', variables: { id } },
+      });
+      expect(read.ok()).toBe(true);
+      const result = await read.json();
+      expect(result.errors).toBeUndefined();
+      expect(result.data.customer).toEqual({ lastName: 'Edited', emailAddress: emails[0] });
+    }
+  } finally {
+    const customers = await page.request.post(`${STORE_URL}/admin-api`, {
+      headers, data: {
+        query: 'query ($emails: [String!]!) { customers(options: { filter: { emailAddress: { in: $emails } } }) { items { id } } }',
+        variables: { emails },
+      },
+    });
+    expect(customers.ok()).toBe(true);
+    const result = await customers.json();
+    expect(result.errors).toBeUndefined();
+    for (const { id } of result.data.customers.items) {
+      const deleted = await page.request.post(`${STORE_URL}/admin-api`, {
+        headers, data: { query: 'mutation ($id: ID!) { deleteCustomer(id: $id) { result message } }', variables: { id } },
+      });
+      expect(deleted.ok()).toBe(true);
+      const deletion = await deleted.json();
+      expect(deletion.errors).toBeUndefined();
+      expect(deletion.data.deleteCustomer.result).toBe('DELETED');
+    }
+  }
+});
+
 test('a sale to a searched customer, and one to a new customer, land on those customers in Vendure', async ({ page }) => {
   test.setTimeout(4 * 60_000);
   await page.goto('/');

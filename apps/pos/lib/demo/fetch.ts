@@ -46,7 +46,7 @@ const ADMINISTRATOR_ID = '1';
 // The demo's one channel, as the catalogue permissions query names it.
 const DEMO_CHANNEL_ID = '1';
 // The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
-const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'ReadOrder'];
+const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder'];
 // Vendure's Admin GraphQL route.
 const ADMIN_PATH = '/admin-api';
 // The plugin's capability discovery route.
@@ -160,6 +160,8 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
             .filter(row => (row.customer as { id: string } | null)?.id === variables.customerId), variables.options) } }; break;
       case 'Order': case 'order': data = { order: store.order(String(variables.id)) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
+      case 'Addresses': data = { customer: store.customer(variables.id) }; break;
+      case 'Update': case 'updateCustomer': data = { updateCustomer: store.updateCustomer(variables.input) }; break;
       case 'One': case 'customer': data = { customer: store.customer(variables.id) }; break;
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
@@ -172,7 +174,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { products: page(store.products(), variables.options) }; break;
       case 'GetVariants': case 'VariantStock': case 'GetVariantPrices': case 'productVariants':
         data = { productVariants: page(store.products().flatMap(product => product.variants), variables.options) }; break;
-      case 'CataloguePermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: {
+      case 'CustomerPermissions': case 'CataloguePermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: {
         id: DEMO_CHANNEL_ID, defaultCurrencyCode: DEMO_CHANNEL.defaultCurrencyCode, pricesIncludeTax: DEMO_CHANNEL.pricesIncludeTax } }; break;
       case 'VariantStockLevel': data = { globalSettings: { outOfStockThreshold: 0 },
         productVariant: store.products().flatMap(product => product.variants).find(variant => variant.id === variables.id) ?? null }; break;

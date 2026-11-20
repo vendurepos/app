@@ -179,7 +179,7 @@ it('seeds three historic server orders without changing the till stock baseline'
     .toEqual([[800, 152, 952], [2198, 154, 2352], [1499, 285, 1784]]);
   expect(state.orders.map((order: OrderCreatePayload) => order.lines.map(line => line.variantId)))
     .toEqual([['1'], ['2', '4'], ['15']]);
-  expect(state.orders[2].customer).toEqual({ email: 'ada@demo.vendurepos.com' });
+  expect(state.orders[2].customer).toEqual({ customerId: 'c1', email: 'ada@demo.vendurepos.com' });
   for (const product of store.products()) for (const variant of product.variants) {
     const seeded = CATALOGUE.flatMap(product => product.variants).find(seeded => seeded.sku === variant.sku)!;
     expect(variant.stockLevels[0].stockOnHand).toBe(seeded.shopFloorStock);
@@ -541,6 +541,50 @@ it('creates a demo customer and refuses its email twice, as Vendure does', async
   expect((await send(session, { ...ORDER, payload }))[0].status).toBe('applied');
   // Three historic orders are seeded before this customer sale.
   expect(JSON.parse(values.get(DEMO_STORAGE_KEY)!).orders[3].customer).toEqual(payload.customer);
+});
+
+it('updates only the given customer fields and persists them', () => {
+  const store = new DemoStore(storage);
+  const before = structuredClone(store.customer('c1'));
+  expect(store.updateCustomer({ id: 'c1', lastName: 'King', phoneNumber: '' })).toEqual({ ...before, lastName: 'King', phoneNumber: '' });
+  expect(new DemoStore(storage).customer('c1')).toEqual({ ...before, lastName: 'King', phoneNumber: '' });
+  expect(store.updateCustomer({ id: 'unknown', lastName: 'Nobody' })).toBeNull();
+});
+
+it('refuses another customer email without changing either customer, but accepts its own', () => {
+  const store = new DemoStore(storage);
+  const ada = structuredClone(store.customer('c1'))!;
+  const other = structuredClone(store.customer('c2'))!;
+  expect(store.updateCustomer({ id: ada.id, emailAddress: other.emailAddress, lastName: 'Wrong' }))
+    .toEqual({ __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.' });
+  for (const customer of [ada, other]) {
+    expect(store.customer(customer.id)).toEqual(customer);
+    expect(new DemoStore(storage).customer(customer.id)).toEqual(customer);
+  }
+  expect(store.updateCustomer({ id: ada.id, emailAddress: ada.emailAddress })).toEqual(ada);
+});
+
+it('keeps Ada’s seeded order linked by id after her email changes', () => {
+  const store = new DemoStore(storage);
+  store.updateCustomer({ id: 'c1', emailAddress: 'new@x.test' });
+  expect(store.orderSummaries().find(order => order.id === '3')).toMatchObject({ customer: { id: 'c1' } });
+});
+
+it('keeps Ada’s seeded order when another customer takes her old email', () => {
+  const store = new DemoStore(storage);
+  store.updateCustomer({ id: 'c1', emailAddress: 'new@x.test' });
+  expect(store.createCustomer({ firstName: 'New', lastName: 'Customer', emailAddress: 'ada@demo.vendurepos.com' }))
+    .toMatchObject({ __typename: 'Customer', id: 'c9' });
+  // Put the email match first so an id-or-email lookup cannot pass by array order.
+  store.customerList().reverse();
+  expect(store.orderSummaries().find(order => order.id === '3')).toMatchObject({ customer: { id: 'c1' } });
+});
+
+it('refuses customer email conflicts regardless of case and surrounding spaces', () => {
+  const store = new DemoStore(storage);
+  const emailAddress = '  ADA@DEMO.VENDUREPOS.COM  ';
+  expect(store.createCustomer({ firstName: '', lastName: '', emailAddress })).toMatchObject({ __typename: 'EmailAddressConflictError' });
+  expect(store.updateCustomer({ id: 'c2', emailAddress })).toMatchObject({ __typename: 'EmailAddressConflictError' });
 });
 
 it('Reset demo removes created customers', async () => {
