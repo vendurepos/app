@@ -116,7 +116,7 @@ function seed(): State {
   const orders: OrderCreatePayload[] = [
     { skus: ['TALLY-MUG'], ratePpm: 190_000, createdAt: '2025-12-28T10:00:00.000Z' },
     { skus: ['ESP-250', 'FIL-500'], ratePpm: 70_000, createdAt: '2025-12-29T11:00:00.000Z' },
-    { skus: ['TOTE'], ratePpm: 190_000, createdAt: '2025-12-30T14:00:00.000Z', customer: { email: customers[0].emailAddress } },
+    { skus: ['TOTE'], ratePpm: 190_000, createdAt: '2025-12-30T14:00:00.000Z', customer: { customerId: customers[0].id, email: customers[0].emailAddress } },
   ].map(({ skus, ratePpm, createdAt, customer }, orderIndex) => {
     const clientOrderId = `seed-order-${orderIndex + 1}`;
     const lines = skus.map((sku, lineIndex) => {
@@ -166,6 +166,10 @@ function fingerprint({ type, version, payload }: Command): string {
 
 function demoOrderCode(id: string): string {
   return `DEMO-${id.padStart(6, '0')}`;
+}
+
+function sameEmail(a: string, b: string | undefined): boolean {
+  return a.trim().toLowerCase() === b?.trim().toLowerCase();
 }
 
 export function largestRemainder(total: number, weights: number[]): number[] {
@@ -244,7 +248,7 @@ export class DemoStore {
   }
 
   createCustomer(input: { firstName: string; lastName: string; emailAddress: string; phoneNumber?: string }) {
-    if (this.state.customers.some(customer => customer.emailAddress === input.emailAddress)) return {
+    if (this.state.customers.some(customer => sameEmail(customer.emailAddress, input.emailAddress))) return {
       __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
     };
     const customer: Customer = { ...input, __typename: 'Customer', id: `c${this.state.customers.length + 1}`, phoneNumber: input.phoneNumber ?? null,
@@ -257,7 +261,7 @@ export class DemoStore {
   updateCustomer(input: { id: string; firstName?: string; lastName?: string; emailAddress?: string; phoneNumber?: string }) {
     const customer = this.state.customers.find(customer => customer.id === input.id);
     if (!customer) return null;
-    if (input.emailAddress !== undefined && this.state.customers.some(other => other.id !== input.id && other.emailAddress === input.emailAddress)) return {
+    if (input.emailAddress !== undefined && this.state.customers.some(other => other.id !== input.id && sameEmail(other.emailAddress, input.emailAddress))) return {
       __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
     };
     for (const field of ['firstName', 'lastName', 'emailAddress', 'phoneNumber'] as const) {
@@ -319,7 +323,7 @@ export class DemoStore {
     return this.state.orders.map((order, index) => {
       const id = String(index + 1);
       const customer = this.state.customers.find(customer =>
-        customer.id === order.customer?.customerId || customer.emailAddress === order.customer?.email);
+        order.customer?.customerId ? customer.id === order.customer.customerId : sameEmail(customer.emailAddress, order.customer?.email));
       return {
         id, code: demoOrderCode(id), state: 'PaymentSettled', orderPlacedAt: order.createdAt, updatedAt: order.createdAt,
         currencyCode: order.currency, totalQuantity: order.lines.reduce((sum, line) => sum + line.quantity, 0),

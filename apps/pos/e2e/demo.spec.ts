@@ -373,6 +373,28 @@ test('the Customers panel adds and edits customers on the store; a refused save 
   await expect(page.getByTestId('customers-count')).toHaveText('Showing 9 of 9 customers');
   await expect(page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]').filter({ hasText: 'mary@demo.vendurepos.com' })).toHaveCount(1);
 
+  await page.evaluate(() => {
+    const target = window as typeof window & { __releaseCustomerSave: () => void; __restoreCustomerFetch: () => void };
+    const originalFetch = window.fetch;
+    const gate = new Promise<void>(resolve => { target.__releaseCustomerSave = resolve; });
+    target.__restoreCustomerFetch = () => { window.fetch = originalFetch; };
+    window.fetch = async (...args) => {
+      if (String(args[1]?.body).includes('createCustomer')) await gate;
+      return originalFetch(...args);
+    };
+  });
+  await page.getByTestId('customers-add').click();
+  await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('hold@demo.vendurepos.com');
+  await save.click();
+  await expect(page.getByTestId('customer-sheet-close')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeVisible();
+  await page.evaluate(() => (window as typeof window & { __releaseCustomerSave: () => void }).__releaseCustomerSave());
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 10 of 10 customers');
+  await expect(page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]').filter({ hasText: 'hold@demo.vendurepos.com' })).toHaveCount(1);
+  await page.evaluate(() => (window as typeof window & { __restoreCustomerFetch: () => void }).__restoreCustomerFetch());
+
   await page.getByTestId('customers-add').click();
   await sheet.getByPlaceholder('email@example.com', { exact: true }).fill('ada@demo.vendurepos.com');
   await save.click();
@@ -380,7 +402,7 @@ test('the Customers panel adds and edits customers on the store; a refused save 
   await expect(sheet).toBeVisible();
   await expect(sheet.getByPlaceholder('email@example.com', { exact: true })).toHaveValue('ada@demo.vendurepos.com');
   await page.getByTestId('customer-sheet-close').click();
-  await expect(page.getByTestId('customers-count')).toHaveText('Showing 9 of 9 customers');
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 10 of 10 customers');
 
   await page.getByTestId('customers-edit-c1').click();
   await expect(sheet.getByText('Edit Ada Lovelace', { exact: true })).toBeVisible();

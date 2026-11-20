@@ -28,7 +28,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
     if (open) { setValues(customerFormValues(row)); setError(null); setSaving(false); }
     return () => { counter.current += 1; };
   }, [open, row]);
-  const close = () => { counter.current += 1; onClose(); };
+  const close = () => { if (saving) return; counter.current += 1; onClose(); };
   const save = async () => {
     const request = ++counter.current;
     setSaving(true);
@@ -52,7 +52,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
         <Button testID="customer-sheet-save" disabled={saving || !online || (row !== null && Object.keys(customerPatch(row, values)).length === 0)} onPress={save}>
           <Text>Save</Text>
         </Button>
-        <Button testID="customer-sheet-close" variant="outline" onPress={close}><Text>Close</Text></Button>
+        <Button testID="customer-sheet-close" variant="outline" disabled={saving} onPress={close}><Text>Close</Text></Button>
       </HStack>
     </DialogContent>
   </Dialog>;
