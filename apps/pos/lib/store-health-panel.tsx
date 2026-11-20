@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Platform, ScrollView, View } from 'react-native';
 import {
-  Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, orderReference, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
+  Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, orderReference, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
-import { confirmRedownload, coveragePercent, readServerTotals, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
+import { confirmRedownload, coveragePercent, formatStorageUsed, readServerTotals, readStorageUsed, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
 export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
   session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
@@ -45,6 +45,13 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
     void readServerTotals(sessionContext(session)).then(result => { if (!cancelled) setTotals(result); });
     return () => { cancelled = true; };
   }, [session]);
+  const [storageUsed, setStorageUsed] = useState<number | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let cancelled = false;
+    void readStorageUsed(typeof navigator === 'undefined' ? undefined : navigator.storage).then(result => { if (!cancelled) setStorageUsed(result); });
+    return () => { cancelled = true; };
+  }, []);
   const blocked = redownloadBlocked(redownloading, totals.products);
   const rows = [
     { key: 'products', name: 'Products', note: 'the whole catalogue, kept in step with the store', count: productCount,
@@ -77,6 +84,10 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                 <Text testID="store-health-records" className="text-lg font-semibold">{recordsOnDevice([productCount, ...Object.values(counts)])}</Text>
                 <Text className="text-xs text-muted-foreground">records on this device</Text>
               </VStack>
+              {storageUsed !== null ? <VStack>
+                <Text testID="store-health-storage" className="text-lg font-semibold">{formatStorageUsed(storageUsed)}</Text>
+                <Text className="text-xs text-muted-foreground">storage used</Text>
+              </VStack> : null}
               <VStack>
                 <Text testID="store-health-waiting" className={`text-lg font-semibold ${waiting > 0 ? 'text-destructive' : ''}`}>{waiting}</Text>
                 <Text className="text-xs text-muted-foreground">changes waiting to send</Text>
@@ -109,7 +120,10 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
               </TableRow></TableHeader>
               <TableBody>{rows.map(row => <View key={row.key} testID={`store-health-row-${row.key}`}><TableRow>
                 <TableCell><VStack space="none">
-                  <Text className="font-medium">{row.name}</Text>
+                  <HStack space="sm" className="items-center">
+                    <Text className="font-medium">{row.name}</Text>
+                    {row.key === 'orders' && attention.length > 0 ? <Badge testID="store-health-stuck-orders" variant="destructive" label={`${attention.length} stuck`} /> : null}
+                  </HStack>
                   <Text className="text-xs text-muted-foreground">{row.note}</Text>
                   {row.key === 'products' ? <Button testID="store-health-redownload" variant="link" size="sm" className="self-start px-0"
                     disabled={blocked !== null} onPress={() => setConfirming(true)}>

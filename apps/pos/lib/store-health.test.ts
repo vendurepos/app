@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, readServerTotals, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, formatStorageUsed, readServerTotals, readStorageUsed, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
+
+it('words storage used in B, KB, MB and GB, in steps of 1024', () => {
+  expect(formatStorageUsed(512)).toBe('512 B');
+  expect(formatStorageUsed(699 * 1024)).toBe('699 KB');
+  expect(formatStorageUsed(33 * 1024 ** 2)).toBe('33 MB');
+  expect(formatStorageUsed(1.5 * 1024 ** 3)).toBe('1.5 GB');
+});
+
+it('reads storage used from the estimate, and null when it is missing or fails', async () => {
+  expect(await readStorageUsed(undefined)).toBeNull();
+  expect(await readStorageUsed({})).toBeNull();
+  expect(await readStorageUsed({ estimate: async () => ({ usage: 34603008 }) })).toBe(34603008);
+  expect(await readStorageUsed({ estimate: async () => ({}) })).toBeNull();
+  expect(await readStorageUsed({ estimate: () => Promise.reject(new Error('denied')) })).toBeNull();
+  expect(await readStorageUsed({ estimate: () => { throw new Error('denied'); } })).toBeNull();
+});
 
 it("words Clear & re-download's confirm for no product, one and several", () => {
   expect(redownloadSummary(0)).toBe('No products are on this device yet; they download again from your store.');

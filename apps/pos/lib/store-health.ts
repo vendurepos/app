@@ -24,6 +24,25 @@ export function recordsOnDevice(counts: readonly (number | null)[]): number {
   return counts.reduce<number>((total, count) => total + (count ?? 0), 0);
 }
 
+/** Storage used in bytes, scaled in steps of 1024. */
+export function formatStorageUsed(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 ** 3) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/** Browser storage used for this origin, or null when its estimate is unavailable. */
+export async function readStorageUsed(storage: { estimate?: () => Promise<{ usage?: number }> } | undefined): Promise<number | null> {
+  if (!storage?.estimate) return null;
+  try {
+    const { usage } = await storage.estimate();
+    return typeof usage === 'number' && Number.isFinite(usage) && usage >= 0 ? usage : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Coverage (CHECKLIST 10.3): on device ÷ on server as a whole percent, at most 100, and 100 when the store has none;
  * null when either figure is unknown. */
 export function coveragePercent(onDevice: number | null, onServer: number | null): number | null {
