@@ -24,7 +24,7 @@ it('names the customer, calls absent and walk-in customers Guest, and uses email
   const customer = { id: 'c1', firstName: 'Ada', lastName: 'Lovelace', emailAddress: 'ada@x' };
   expect(orderCustomerName({ customer })).toBe('Ada Lovelace');
   expect(orderCustomerName({ customer: null })).toBe('Guest');
-  expect(orderCustomerName({ customer: { ...customer, emailAddress: 'walk-in@vendurepos.local' } })).toBe('Guest');
+  expect(orderCustomerName({ customer: { ...customer, emailAddress: 'walk-in@vendurepos.invalid' } })).toBe('Guest');
   expect(orderCustomerName({ customer: { ...customer, firstName: '', lastName: '', emailAddress: 'x@y.z' } })).toBe('x@y.z');
 });
 

@@ -48,4 +48,12 @@ describe('the Dashboard extension is packaged where the Dashboard looks for it',
     expect(source).toContain('vendurepos-needs-admin-switch-channel');
     expect(source).toContain('setActiveChannel');
   });
+
+  it('adds the till custom items block after the stock order lines table', () => {
+    const source = readFileSync(sourceFile, 'utf8');
+    expect(source).toMatch(/pageId:\s*(['"])order-detail\1/);
+    expect(source).toMatch(/blockId:\s*(['"])order-table\1/);
+    expect(source).toContain('tallyCustomName');
+    expect(source).toContain('data-testid="vendurepos-custom-items"');
+  });
 });

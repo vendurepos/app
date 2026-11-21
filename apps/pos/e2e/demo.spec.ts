@@ -1062,6 +1062,17 @@ test('Notifications at the foot of the rail shows the empty state and closes', a
   await expect(page.getByTestId('notifications-sheet')).toHaveCount(0);
 });
 
+test("a store on an older plugin names refunds in the bell's plugin-update notice, as v2's notifications", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('vendurepos.demo.info_no_refund', '1'));
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('notifications-open').click();
+  await expect(page.getByTestId('notification-plugin-update')).toContainText('so refunds are held back.');
+  await page.screenshot({ path: test.info().outputPath('13j-notifications-plugin-update-vendurepos.png') });
+});
+
 test("the demo opens a seeded order and the till's own sale from the Orders panel", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
