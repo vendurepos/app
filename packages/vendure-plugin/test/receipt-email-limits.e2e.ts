@@ -149,4 +149,13 @@ describe('#345: the receipt-email per-order and daily caps are kept in the datab
     expect(rows.filter(found => found.expiresAt <= now)).toEqual([]);
     expect(rows.map(found => found.key).sort()).toEqual([`channel:${channel}`, await orderKey(code), `user:${admin}`].sort());
   });
+
+  it('#347: a request with no session is refused 403 and counts under no user', async () => {
+    const code = await sale(email()), anonymous = { Authorization: '' };
+    // The same headers on the admin API have no session user, so the request really goes out unauthenticated.
+    const me = await fetch(`${a}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...anonymous }, body: JSON.stringify({ query: '{ me { id } }' }) });
+    expect((await me.json()).data).toEqual({ me: null });
+    expect((await receipt(code, a, anonymous)).status).toBe(403);
+    expect(await connection.rawConnection.query(`SELECT "key" FROM "tally_receipt_email_window" WHERE "key" IN ('user:undefined', 'user:null')`)).toEqual([]);
+  });
 });

@@ -27,6 +27,7 @@ declare global {
     Serial: { prototype: { requestPort(options?: unknown): Promise<unknown> } };
     fakeScanner: EventTarget;
     ordersRequests: number; releaseOrders: () => void;
+    customersRequests: number; releaseCustomers: () => void;
     productsRequests: number;
   }
 }
@@ -505,6 +506,43 @@ test("the Customers panel lists the store's customers by surname, searches them,
   await wedgeScan(page, 'TALLY-MUG');
   await expect(page.getByTestId('customers-panel')).toHaveCount(0);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test("the Customers refresh beside the count reads the list again, and waits while it loads, as v2's 06c", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const rows = page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]');
+  await expect(rows).toHaveCount(8);
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 8 of 8 customers');
+  await expect(page.getByTestId('customers-refresh')).toBeEnabled();
+  await expect(page.getByTestId('customers-refresh')).toHaveAttribute('aria-label', 'Refresh customers');
+  await page.getByTestId('customers-refresh').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('06j-customers-refresh-vendurepos.png') });
+  // Count the store's customer-list reads from here on, and hold each one until the test lets it go.
+  await page.evaluate(() => {
+    const pass = window.fetch;
+    window.customersRequests = 0;
+    window.releaseCustomers = () => {};
+    window.fetch = async (input, init) => {
+      if (typeof init?.body === 'string' && init.body.includes('query CustomerList(')) {
+        window.customersRequests++;
+        await new Promise<void>((resolve) => { window.releaseCustomers = resolve; });
+      }
+      return pass(input, init);
+    };
+  });
+  await page.getByTestId('customers-refresh').click();
+  await expect.poll(() => page.evaluate(() => window.customersRequests)).toBe(1);
+  await expect(page.getByTestId('customers-refresh')).toBeDisabled();
+  await page.getByTestId('customers-refresh').click({ force: true });
+  await page.evaluate(() => window.releaseCustomers());
+  await expect(page.getByTestId('customers-refresh')).toBeEnabled();
+  await expect(page.getByTestId('customers-count')).toHaveText('Showing 8 of 8 customers');
+  await expect(rows).toHaveCount(8);
+  expect(await page.evaluate(() => window.customersRequests)).toBe(1);
 });
 
 test("the Customers panel sorts by its headers on the store, as v2's customers table", async ({ page }) => {

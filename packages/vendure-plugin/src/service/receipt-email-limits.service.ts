@@ -9,7 +9,8 @@ export const TALLY_RECEIPT_EMAIL = Symbol('TALLY_RECEIPT_EMAIL');
 const DAY = 24 * 60 * 60_000; // the daily caps' window, opened by its first counted send: a fixed window, so no store time zone
 const ORDER_WINDOW = 30 * DAY; // an order's window: a resend weeks later still passes, a mail cannon at one order does not
 type Query = (sql: string, params?: unknown[]) => Promise<Array<Record<string, any>>>;
-export type ReceiptEmailLimit = { code: 'order_send_limit' | 'user_daily_limit' | 'channel_daily_limit'; cap: number; retryAt: Date };
+/** A refusal; with no `retryAt` when the cap is 0, as no send can ever pass. */
+export type ReceiptEmailLimit = { code: 'order_send_limit' | 'user_daily_limit' | 'channel_daily_limit'; cap: number; retryAt?: Date };
 
 /** #345: the per-order and daily caps, kept in `tally_receipt_email_window`, so they hold across restarts and server instances. */
 @Injectable()
@@ -33,6 +34,9 @@ export class ReceiptEmailLimits {
       { key: `user:${ctx.activeUserId}`, code: 'user_daily_limit', cap: caps.perUserPerDay },
       { key: `channel:${ctx.channelId}`, code: 'channel_daily_limit', cap: caps.perChannelPerDay },
     ] as const;
+    // #347: a cap of 0 (or below) refuses every send, so no lock, no prune and no row; with no window there is no retryAt.
+    const zero = keys.find(k => k.cap <= 0);
+    if (zero) return { code: zero.code, cap: 0 };
     // READ COMMITTED on any database default: the lock holds only if the read takes its snapshot after the lock is granted.
     return this.connection.rawConnection.transaction('READ COMMITTED', async (manager: EntityManager) => {
       const query: Query = async (sql, params) => (await manager.queryRunner!.query(sql, params, true)).records;
