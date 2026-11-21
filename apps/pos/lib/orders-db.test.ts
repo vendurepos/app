@@ -202,7 +202,7 @@ it('migrates register sessions a till stored before register_sessions schema ver
 
   const store = await openOrderStore(name, PLATFORM);
   const sessions = registerCollections(store.orders)!.sessions;
-  expect(sessions.schema.version).toBe(1);
+  expect(sessions.schema.version).toBe(2);
   expect((await sessions.findOne('v0-session-1').exec())?.toJSON()).toMatchObject({
     status: 'open', register_id: 'drawer-1', server_session_id: null,
   });

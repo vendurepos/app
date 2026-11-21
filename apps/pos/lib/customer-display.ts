@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DisplayAdvertisement, DisplayRecord, DisplaySignalling, ServerCapabilities } from '@tallyui/core';
 import {
-  createLogger, createTillDisplayService, createTillPairing, type DisplayConfig, type TillDisplayService, type TillPairing,
+  createLogger, createTillDevice, createTillDisplayService, createTillPairing, type DisplayConfig, type TillDisplayService, type TillPairing,
 } from '@tallyui/pos';
 import { DEMO_STORE_ORIGIN } from './demo/fetch';
 import { createDisplaySignalling } from './display-signalling';
 import { defaultStore, sessionContext, sessionKey, type KeyValueStore, type Session } from './session';
 import { storeLabel } from './store-label';
-import { displayDeviceId } from './till-ids';
+import { displayDeviceId, displayDeviceKeys } from './till-ids';
 
 // How long a display holds a completed sale before it goes idle; TallyUI sets no default.
 export const AFTER_COMPLETE_MS = 10_000;
@@ -44,16 +44,21 @@ export interface TillCustomerDisplay { service: TillDisplayService; pairing: Til
 
 const logError = (error: unknown) => customerDisplayLogger.warn('A customer display call failed', { error });
 
-/** The till's display service and pairing over the plugin's routes, with the display device id (never the register id). */
+/**
+ * The till's display service and pairing over the plugin's routes, with the display device id (never the register id)
+ * and its key, both kept only in `storage`. The service and the pairing share one device handle, so they register once.
+ */
 export function createTillCustomerDisplay({ session, advertisement, signalling = createDisplaySignalling(), storage = defaultStore() }: {
   session: () => Session; advertisement: DisplayAdvertisement; signalling?: DisplaySignalling; storage?: KeyValueStore;
 }): TillCustomerDisplay {
-  const deviceId = displayDeviceId(storage);
+  const device = createTillDevice({
+    signalling, deviceId: displayDeviceId(storage), keys: displayDeviceKeys(storage), onError: logError,
+  });
   const context = () => sessionContext(session());
   const service = createTillDisplayService({
-    signalling, context, deviceId, advertisement, configFor: (display) => displayConfig(session(), display), onError: logError,
+    signalling, context, device, advertisement, configFor: (display) => displayConfig(session(), display), onError: logError,
   });
-  const pairing = createTillPairing({ signalling, context, deviceId, service, onError: logError });
+  const pairing = createTillPairing({ signalling, context, device, service, onError: logError });
   return { service, pairing, close() { pairing.close(); service.close(); } };
 }
 
