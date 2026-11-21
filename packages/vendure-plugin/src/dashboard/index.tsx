@@ -1,7 +1,7 @@
 import {
   api, Button, defineDashboardExtension, Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle, Input, Label, Link, Page, PageBlock, PageLayout, PageTitle,
-  PermissionGuard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, useChannel,
+  DialogFooter, DialogHeader, DialogTitle, Input, Label, Link, Page, PageBlock, PageContextValue, PageLayout, PageTitle,
+  PermissionGuard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, useChannel, useLocalFormat,
 } from '@vendure/dashboard';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -23,7 +23,50 @@ export default defineDashboardExtension({
     },
     component: () => <PermissionGuard requires="SuperAdmin"><NeedsAdminPage /></PermissionGuard>,
   }],
+  pageBlocks: [{
+    id: 'vendurepos-custom-items',
+    title: 'Till custom items',
+    location: { pageId: 'order-detail', column: 'main', position: { blockId: 'order-table', order: 'after' } },
+    requiresPermission: 'ReadOrder',
+    shouldRender: context => customLines(context.entity).length > 0,
+    component: TillCustomItems,
+  }],
 });
+
+type CustomLine = {
+  id: string; quantity: number; linePriceWithTax: number;
+  customFields?: { tallyCustomName?: string | null; tallyCustomSku?: string | null };
+};
+
+// A till custom line sits on the shared "POS custom item" variant, so the stock table titles it by
+// that variant; its own name is in tallyCustomName (ADR 0005 ruling (a)). The order page's query
+// already selects OrderLine custom fields, so the page entity carries it.
+const customLines = (order?: { lines?: CustomLine[] }) =>
+  (order?.lines ?? []).filter(line => line.customFields?.tallyCustomName);
+
+function TillCustomItems({ context }: { context: PageContextValue }) {
+  const { formatCurrency } = useLocalFormat();
+  return <div data-testid="vendurepos-custom-items">
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>SKU</TableHead>
+          <TableHead>Quantity</TableHead>
+          <TableHead className="text-right">Total</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {customLines(context.entity).map(line => <TableRow key={line.id} data-testid="vendurepos-custom-item">
+          <TableCell>{line.customFields?.tallyCustomName}</TableCell>
+          <TableCell>{line.customFields?.tallyCustomSku || '—'}</TableCell>
+          <TableCell>{line.quantity}</TableCell>
+          <TableCell className="text-right">{formatCurrency(line.linePriceWithTax, context.entity.currencyCode)}</TableCell>
+        </TableRow>)}
+      </TableBody>
+    </Table>
+  </div>;
+}
 
 type NeedsAdminRow = {
   id: string; clientOrderId: string | null; channelId: string; orderId: string | null; orderCode: string | null; createdAt: string;
