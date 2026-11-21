@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Receipt email: a cap of 0 (`perOrder`, `perUserPerDay` or `perChannelPerDay`) refuses every send with its usual 429 code and no `retryAt`; before, it let one send through per window (#347).
 - Dashboard: an order with till custom lines shows a **Till custom items** block after its order lines, listing each line's custom name, SKU, quantity and price with tax, as the stock table titles them all "POS custom item" (ADR 0005 ruling (a)). Needs ReadOrder. No migration.
 - The till role preset (`tallyEnsurePosTillRole`) gains `UpdateCustomer`, so a till can edit a customer; it still holds no `DeleteCustomer`. An existing `vendurepos-pos-till` role gains it the next time **New POS till key** runs (or `tallyEnsurePosTillRole` is called), keeping the merchant's own additions, or a merchant can add Update customer to the role under Settings → Roles. No migration.
 - Receipt email: the per-order cap and the new daily caps (perUserPerDay, perChannelPerDay) are kept in the database (migration TallyPosReceiptEmail1791400000000), so they hold across restarts and server instances (#345).
