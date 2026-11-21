@@ -1,7 +1,7 @@
 import type {
   CommandResult, OrderCreatePayload, OrderRefundPayload, OrderRefundResult, RegisterClosureSubmitPayload, RegisterCommandResult, RegisterSessionOpenPayload,
 } from '@tallyui/core';
-import { barcodeOf, CATALOGUE } from './catalogue';
+import { barcodeOf, CATALOGUE, type CatalogueProduct } from './catalogue';
 import { demoFacetValues } from './facets';
 import { demoProductImage } from './product-images';
 import type { TallyClosureRead } from '../closure-history';
@@ -41,6 +41,22 @@ function taxCategoryOf(taxClass: string) {
 /** A category's rate, in percent, in the channel's tax zone. */
 function zoneRate(categoryId: string): number {
   return DEMO_RATES.find(rate => rate.category.id === categoryId && rate.zoneId === DEMO_CHANNEL.defaultTaxZone.id)!.value;
+}
+/** An option's or group's code, as Vendure's: its name lower-cased, with spaces as dashes. */
+function optionCode(name: string) {
+  return name.toLowerCase().replace(/\s+/g, '-');
+}
+/**
+ * Vendure's optionGroups on product `index` (the connector's VendureOptionGroup): its CATALOGUE group names in order,
+ * each with its distinct option names across the variants. A variant's options are in group order.
+ */
+function demoOptionGroups(product: CatalogueProduct, index: number) {
+  return product.optionGroups.map((name, groupIndex) => {
+    const id = `${index + 1}-g${groupIndex}`;
+    const names = [...new Set(product.variants.map(variant => variant.options[groupIndex]))];
+    return { id, code: optionCode(name), name, options: names.map(option =>
+      ({ id: `${index + 1}-${groupIndex}-${option}`, name: option, code: optionCode(option), groupId: id })) };
+  });
 }
 // The unsupported_version refusal's data key for each contract, as the plugin's command services name it.
 const CONTRACT_DATA_KEY = { 'order.create': 'orderCreate', 'order.refund': 'orderRefund', register: 'register' } as const;
@@ -330,6 +346,7 @@ export class DemoStore {
       id: String(index + 1), createdAt: SEED_TIME, updatedAt: SEED_TIME,
       name: product.name, slug: product.slug, description: `${product.name} (VendurePOS dev seed)`, enabled: true,
       featuredAsset: assets[index], assets: [assets[index]], collections: DEMO_COLLECTIONS.filter(collection => collection.name === product.category), facetValues: demoFacetValues(product),
+      optionGroups: demoOptionGroups(product, index),
       variants: product.variants.map(variant => {
         const id = String(++variantIndex);
         const category = DEMO_CATEGORIES.find(category => category.name === product.taxCategory)!;
@@ -345,7 +362,7 @@ export class DemoStore {
           trackInventory: edit?.trackInventory ?? (product.trackInventory ? 'TRUE' : 'FALSE'), outOfStockThreshold: 0, useGlobalOutOfStockThreshold: true,
           stockLevels: [{ stockLocationId: STOCK_LOCATION_ID, stockOnHand: this.state.stock[id]?.quantity ?? variant.shopFloorStock, stockAllocated: 0 }],
           options: variant.options.map((name, optionIndex) => ({
-            id: `${index + 1}-${optionIndex}-${name}`, name, code: name.toLowerCase().replace(/\s+/g, '-'),
+            id: `${index + 1}-${optionIndex}-${name}`, name, code: optionCode(name), groupId: `${index + 1}-g${optionIndex}`,
           })),
           taxCategory: { id: category.id }, customFields: { barcode: barcodeOf(variantIndex - 1) },
         };

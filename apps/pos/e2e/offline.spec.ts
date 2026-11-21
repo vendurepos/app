@@ -10,13 +10,13 @@ const CHANNEL_TOKEN = 'vendurepos-dev-pos';
 const USERNAME = 'superadmin';
 const PASSWORD = 'superadmin';
 
-// dev/vendure-store/src/catalogue.ts: each SKU's tile, and its variant button when the product has several. Prices
-// are tax-exclusive, and one sale takes one group only, so every order is single-rate (no TALLY-ROUNDING).
-const PRODUCTS: Record<string, { tile: string; variant?: RegExp }> = {
+// dev/vendure-store/src/catalogue.ts: each SKU's tile, and its variant tile's option chip when the product has several.
+// Prices are tax-exclusive, and one sale takes one group only, so every order is single-rate (no TALLY-ROUNDING).
+const PRODUCTS: Record<string, { tile: string; variant?: string }> = {
   'TALLY-MUG': { tile: 'Tally Fixture Mug' }, TOTE: { tile: 'Tote Bag' }, 'POST-SET': { tile: 'Postcard Set' },
-  'NOTE-A5': { tile: 'Notebook', variant: /NOTE-A5/ }, 'NOTE-A6': { tile: 'Notebook', variant: /NOTE-A6/ },
-  'FIL-500': { tile: 'Filter Coffee' }, 'ESP-250': { tile: 'Espresso Beans', variant: /ESP-250/ },
-  'ESP-1000': { tile: 'Espresso Beans', variant: /ESP-1000/ },
+  'NOTE-A5': { tile: 'Notebook', variant: 'A5' }, 'NOTE-A6': { tile: 'Notebook', variant: 'A6' },
+  'FIL-500': { tile: 'Filter Coffee' }, 'ESP-250': { tile: 'Espresso Beans', variant: '250 g' },
+  'ESP-1000': { tile: 'Espresso Beans', variant: '1 kg' },
 };
 const STANDARD = ['TALLY-MUG', 'TOTE', 'POST-SET', 'NOTE-A5', 'NOTE-A6'];
 const REDUCED = ['FIL-500', 'ESP-250', 'ESP-1000'];
@@ -100,7 +100,12 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
     const { lines, method } = mix(i);
     for (const { sku, quantity } of lines) {
       await page.getByTestId(`product-tile-${PRODUCTS[sku].tile}`).click();
-      if (PRODUCTS[sku].variant) await page.getByRole('button', { name: PRODUCTS[sku].variant }).click();
+      const variant = PRODUCTS[sku].variant;
+      if (variant) {
+        // The drill's variant tile by its option chip, then the product as Back before the next tile.
+        await page.getByTestId(/^variation-tile-.+-chips$/).getByText(variant, { exact: true }).click();
+        await page.getByTestId('variations-parent-tile').click();
+      }
       const line = cart.getByTestId(`cart-line-${sku}`);
       await expect(line).toBeVisible();
       if (quantity === 2) {
