@@ -4,6 +4,7 @@ import { FONT_FACES } from '@tallyui/theme';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_FACETS, demoBrand } from '../lib/demo/facets';
+import { DEMO_PUBLIC_NOTE, DEMO_STAFF_NOTE } from '../lib/demo/order-notes';
 import { DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
@@ -1021,6 +1022,24 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
   await expect(detail).toContainText('Paid €9.52');
   await expect(detail).toContainText(mug.name);
+});
+
+test("the order sheet shows the order's notes, a private one as Staff note, never on its receipt or a print, as v2's order notes", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('orders-open').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000002' }).click();
+  const notes = page.getByTestId('order-sheet-notes');
+  await expect(notes.getByTestId(/^order-sheet-order-note-/)).toHaveText([`Note: ${DEMO_PUBLIC_NOTE}`, `Staff note: ${DEMO_STAFF_NOTE}`]);
+  await expect(notes).toHaveAttribute('data-print', 'hide');
+  await page.screenshot({ path: test.info().outputPath('07f-order-notes-vendurepos.png') });
+  await page.getByTestId('order-sheet-receipt').click();
+  await expect(page.getByTestId('order-receipt')).toBeVisible();
+  await expect(page.getByText(DEMO_STAFF_NOTE)).toHaveCount(0);
+  await expect(page.getByText(DEMO_PUBLIC_NOTE)).toHaveCount(0);
 });
 
 test("the Orders register filter lists the store's registers by name, as v2's orders", async ({ page }) => {
