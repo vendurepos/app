@@ -166,6 +166,12 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { order: store.order(id) ? { id, history: page(DEMO_ORDER_HISTORY[id] ?? [], variables.options) } : null };
         break;
       }
+      case 'CustomerNotes': {
+        const id = String(variables.id);
+        data = { customer: store.customer(id) ? { id, history: page(store.customerHistory(id), variables.options) } : null };
+        break;
+      }
+      case 'AddCustomerNote': case 'addNoteToCustomer': data = { addNoteToCustomer: store.addCustomerNote(variables.input) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
       case 'Addresses': data = { customer: store.customer(variables.id) }; break;
       case 'Update': case 'updateCustomer': data = { updateCustomer: store.updateCustomer(variables.input) }; break;

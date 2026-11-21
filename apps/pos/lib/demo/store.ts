@@ -54,6 +54,8 @@ const PERCENT = 100;
 const PPM_PER_PERCENT = 10_000;
 // The real plugin records POS payments under this method code.
 const DEMO_PAYMENT_METHOD = 'tally-pos';
+// Ada Lovelace's (c1) seeded staff note, shown on her customer sheet and never on a receipt.
+export const DEMO_CUSTOMER_NOTE = 'Prefers oat milk; ask before adding a pastry.';
 
 export type DemoStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Command = { id: string; type: string; version: number; payload: any };
@@ -78,8 +80,11 @@ type RefundableOrder = {
   lines: { id: string; quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string } }[];
   payments: { id: string; amount: number; metadata: { tender: { method: string } } }[];
 };
+// A Vendure customer history entry of type CUSTOMER_NOTE, as the Admin API's Customer.history lists it.
+type CustomerNoteEntry = { id: string; type: 'CUSTOMER_NOTE'; createdAt: string; isPublic: boolean; data: { note: string } };
 type State = {
   customers: Customer[];
+  customerNotes: Record<string, CustomerNoteEntry[]>;
   stock: Record<string, { quantity: number; updatedAt: string }>;
   ledger: Record<string, { fingerprint: string; result: CommandResult }>;
   orders: OrderCreatePayload[]; sessions: Record<string, Session>;
@@ -144,7 +149,10 @@ function seed(): State {
       taxByRate: [{ ratePpm, netMinor: subtotalMinor, taxMinor, grossMinor: totalMinor }],
     };
   });
-  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers, refunds: [], variants: {} };
+  const customerNotes: State['customerNotes'] = {
+    c1: [{ id: 'cn1', type: 'CUSTOMER_NOTE', createdAt: '2026-02-03T10:05:00.000Z', isPublic: false, data: { note: DEMO_CUSTOMER_NOTE } }],
+  };
+  return { stock, ledger: {}, orders, sessions: {}, movements: [], closures: [], customers, customerNotes, refunds: [], variants: {} };
 }
 
 // Front counter's closure yesterday in device time (the app's store zone), so the Closures list shows another register (CHECKLIST 8.2).
@@ -194,8 +202,9 @@ export class DemoStore {
   constructor(private storage?: DemoStorage) {
     const saved = storage?.getItem(DEMO_STORAGE_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones; before refunds, none; before variant edits, none.
+      const parsed = JSON.parse(saved); // State saved before customers existed gets the seeded ones; before refunds, none; before variant edits, none; before customer notes, the seeded ones.
       this.state = { ...parsed, customers: Array.isArray(parsed.customers) ? parsed.customers : seed().customers,
+        customerNotes: parsed.customerNotes && typeof parsed.customerNotes === 'object' ? parsed.customerNotes : seed().customerNotes,
         refunds: Array.isArray(parsed.refunds) ? parsed.refunds : [], variants: parsed.variants && typeof parsed.variants === 'object' ? parsed.variants : {} };
     } else this.state = seed();
   }
@@ -217,6 +226,20 @@ export class DemoStore {
   }
 
   customerList(): Customer[] { return this.state.customers; }
+
+  /** The customer's CUSTOMER_NOTE history entries, as Customer.history lists them; none for a customer without notes. */
+  customerHistory(id: string): CustomerNoteEntry[] { return this.state.customerNotes[id] ?? []; }
+
+  /** addNoteToCustomer: appends a note entry and returns the customer; null for an unknown customer. */
+  addCustomerNote(input: { id: string; note: string; isPublic: boolean }) {
+    const customer = this.customer(input.id);
+    if (!customer) return null;
+    const total = Object.values(this.state.customerNotes).reduce((sum, entries) => sum + entries.length, 0);
+    (this.state.customerNotes[input.id] ??= []).push({ id: `cn${total + 1}`, type: 'CUSTOMER_NOTE', createdAt: new Date().toISOString(),
+      isPublic: input.isPublic, data: { note: input.note } });
+    this.save();
+    return customer;
+  }
 
   /** GET /tally/v1/registers/:id: a listed register and a page of its closures, newest first; null for an unknown id. */
   register(id: string, skip: number, take: number) {

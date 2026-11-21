@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, CustomerForm, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text } from '@tallyui/components';
+import { TextInput } from 'react-native';
+import { Button, CustomerForm, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text, VStack } from '@tallyui/components';
 import type { Customer } from '@tallyui/core';
 import { CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer } from './customer-edit';
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
+import { addCustomerNote, useCustomerNotes } from './customer-notes';
+import { STAFF_NOTE_LABEL } from './order-notes';
 import { sessionContext, type Session } from './session';
 
 function useOnline(): boolean {
@@ -23,12 +26,27 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const counter = useRef(0);
+  const noteCounter = useRef(0); // Bumped when the sheet closes or reopens, so a late add answer lands nowhere.
   const online = useOnline();
   const groupsText = customerGroupsText(row);
+  const { notes, reload } = useCustomerNotes(session, open && row ? row.id : null);
+  const [note, setNote] = useState('');
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   useEffect(() => {
-    if (open) { setValues(customerFormValues(row)); setError(null); setSaving(false); }
-    return () => { counter.current += 1; };
+    if (open) { setValues(customerFormValues(row)); setError(null); setSaving(false); setNote(''); setNoteError(null); setAdding(false); }
+    return () => { counter.current += 1; noteCounter.current += 1; };
   }, [open, row]);
+  const addNote = async () => {
+    if (!row) return;
+    const request = ++noteCounter.current;
+    setAdding(true);
+    try {
+      const result = await addCustomerNote(sessionContext(session), row.id, note);
+      if (request !== noteCounter.current) return;
+      if ('ok' in result) { setNote(''); reload(); } else setNoteError(result.error);
+    } finally { if (request === noteCounter.current) setAdding(false); }
+  };
   const close = () => { if (saving) return; counter.current += 1; onClose(); };
   const save = async () => {
     const request = ++counter.current;
@@ -52,6 +70,17 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
         <Text testID="customer-sheet-groups-value" className="flex-1 px-3 text-sm">{groupsText}</Text>
         <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
       </HStack>}
+      {row !== null && <VStack testID="customer-sheet-notes" className="gap-1 px-4">
+        {notes.map(item => <Text key={item.id} testID={`customer-sheet-note-${item.id}`} className="text-sm">{`${STAFF_NOTE_LABEL}: ${item.text}`}</Text>)}
+        <HStack space="sm" className="items-center">
+          <TextInput testID="customer-sheet-note-input" accessibilityLabel="Staff note" placeholder="Add a staff note" value={note}
+            onChangeText={text => { setNote(text); setNoteError(null); }} className="flex-1 rounded-md border border-input px-3 py-2 text-sm" />
+          <Button testID="customer-sheet-note-add" variant="secondary" size="sm" disabled={adding || !online || !note.trim()} onPress={addNote}>
+            <Text>Add note</Text>
+          </Button>
+        </HStack>
+        {noteError && <Text testID="customer-sheet-note-error" accessibilityRole="alert" className="text-sm text-destructive">{noteError}</Text>}
+      </VStack>}
       {!online && <Text testID="customer-sheet-offline">{CUSTOMER_OFFLINE_TEXT}</Text>}
       {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       <HStack space="sm" className="mt-auto justify-between">

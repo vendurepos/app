@@ -5,7 +5,7 @@ import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_FACETS, demoBrand } from '../lib/demo/facets';
 import { DEMO_PUBLIC_NOTE, DEMO_STAFF_NOTE } from '../lib/demo/order-notes';
-import { DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
+import { DEMO_CUSTOMER_NOTE, DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 import { openRegister } from './register';
@@ -565,6 +565,56 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   await page.getByTestId('customers-add').click();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
+});
+
+test("the customer sheet lists a customer's staff notes and adds one; notes are never on a receipt or a print", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  const notes = sheet.getByTestId('customer-sheet-notes').getByTestId(/^customer-sheet-note-cn/);
+  const input = sheet.getByTestId('customer-sheet-note-input');
+  const added = 'Ask about the grinder service';
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(notes).toHaveText([`Staff note: ${DEMO_CUSTOMER_NOTE}`]);
+  await expect(sheet.getByTestId('customer-sheet-note-add')).toBeDisabled();
+  await input.fill(added);
+  await sheet.getByTestId('customer-sheet-note-add').click();
+  await expect(notes).toHaveText([`Staff note: ${DEMO_CUSTOMER_NOTE}`, `Staff note: ${added}`]);
+  await expect(input).toHaveValue('');
+  await page.screenshot({ path: test.info().outputPath('06g-customer-notes-vendurepos.png') });
+  await expect(sheet).toHaveAttribute('data-print', 'hide');
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(notes).toHaveText([`Staff note: ${DEMO_CUSTOMER_NOTE}`, `Staff note: ${added}`]);
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-open').click();
+  await expect(page.getByTestId('customers-panel')).toHaveCount(0);
+
+  await page.getByTestId('customer-chip').click();
+  await page.getByLabel('Search customers').fill('ada');
+  await page.getByTestId('customer-picker').getByText('Ada Lovelace', { exact: true }).click();
+  await expect(page.getByTestId('sale-customer')).toContainText('Ada Lovelace');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await expect(page.getByTestId('tender-pane').getByTestId('tender-balance')).toContainText('€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
+  await expect(page.getByText(DEMO_CUSTOMER_NOTE)).toHaveCount(0);
+  await expect(page.getByText(added)).toHaveCount(0);
+
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await page.getByTestId('order-sheet-receipt').click();
+  await expect(page.getByTestId('order-receipt')).toBeVisible();
+  await expect(page.getByText(DEMO_CUSTOMER_NOTE)).toHaveCount(0);
+  await expect(page.getByText(added)).toHaveCount(0);
 });
 
 test('the Customers panel adds and edits customers on the store; a refused save leaves the row as the store has it', async ({ page }) => {
