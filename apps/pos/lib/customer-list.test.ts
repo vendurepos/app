@@ -1,19 +1,34 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import { CUSTOMERS_FAILED_TEXT, CUSTOMERS_FORBIDDEN_TEXT, DEFAULT_CUSTOMER_SORT, nextCustomerSort, customerListNotice, customerListOptions,
-  customerGroupsText, customersReadable, listVendureCustomerPage, toCustomerRow, type VendureCustomerListItem } from './customer-list';
+  customerGroupsText, customersReadable, isWalkIn, listVendureCustomerPage, toCustomerRow, WALK_IN_EMAIL, type VendureCustomerListItem } from './customer-list';
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("the till's walk-in email is the plugin's", () => {
+  const constants = readFileSync(fileURLToPath(new URL('../../../packages/vendure-plugin/src/service/constants.ts', import.meta.url).href), 'utf8');
+  expect(constants).toContain(`WALK_IN_EMAIL = '${WALK_IN_EMAIL}'`);
+});
+
+it('knows the walk-in by either email field', () => {
+  expect(isWalkIn({ email: WALK_IN_EMAIL })).toBe(true);
+  expect(isWalkIn({ emailAddress: WALK_IN_EMAIL })).toBe(true);
+  expect(isWalkIn({ email: 'ada@example.com', emailAddress: 'ada@example.com' })).toBe(false);
+  expect(isWalkIn(null)).toBe(false);
+  expect(isWalkIn(undefined)).toBe(false);
+});
+
 it('lists the first page by last name and excludes the walk-in customer', () => {
   expect(customerListOptions('', 0)).toEqual({ skip: 0, take: 25, sort: { lastName: 'ASC' },
-    filter: { emailAddress: { notEq: 'walk-in@vendurepos.local' } } });
+    filter: { emailAddress: { notEq: 'walk-in@vendurepos.invalid' } } });
 });
 
 it('trims search across names, email and phone while excluding the walk-in customer', () => {
   expect(customerListOptions('  mead ', 25)).toEqual({ skip: 25, take: 25, sort: { lastName: 'ASC' }, filter: {
-    emailAddress: { notEq: 'walk-in@vendurepos.local' },
+    emailAddress: { notEq: 'walk-in@vendurepos.invalid' },
     _or: [{ firstName: { contains: 'mead' } }, { lastName: { contains: 'mead' } },
       { emailAddress: { contains: 'mead' } }, { phoneNumber: { contains: 'mead' } }],
   } });
@@ -21,7 +36,7 @@ it('trims search across names, email and phone while excluding the walk-in custo
 
 it('passes the selected sort to the store for the first page and a searched next page', () => {
   expect(customerListOptions('', 0, { field: 'createdAt', dir: 'DESC' })).toEqual({ skip: 0, take: 25, sort: { createdAt: 'DESC' },
-    filter: { emailAddress: { notEq: 'walk-in@vendurepos.local' } } });
+    filter: { emailAddress: { notEq: 'walk-in@vendurepos.invalid' } } });
   expect(customerListOptions('ada', 25, { field: 'emailAddress', dir: 'ASC' }).sort).toEqual({ emailAddress: 'ASC' });
 });
 
