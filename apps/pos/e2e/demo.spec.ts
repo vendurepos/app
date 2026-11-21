@@ -642,6 +642,47 @@ test("the customer sheet lists a customer's staff notes and adds one; notes are 
   await expect(page.getByText(added)).toHaveCount(0);
 });
 
+test("the customer sheet lists the customer's five newest orders, and a tap opens the order's sheet", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  // Ada Lovelace (c1) has seeded order DEMO-000003; a till sale to her adds DEMO-000004, her newest.
+  await page.getByTestId('customer-chip').click();
+  await page.getByLabel('Search customers').fill('ada');
+  await page.getByTestId('customer-picker').getByText('Ada Lovelace', { exact: true }).click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
+  await page.getByTestId('orders-scope-store').click();
+
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  const orders = sheet.getByTestId('customer-sheet-orders').getByTestId(/^customer-sheet-order-\d+$/);
+  await page.getByTestId('customers-edit-c2').click();
+  await expect(sheet.getByTestId('customer-sheet-orders-empty')).toHaveText('No orders yet');
+  await expect(orders).toHaveCount(0);
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(orders).toHaveText([/^DEMO-000004.*Payment settled€9\.52$/, /^DEMO-000003.*Payment settled€17\.84$/]);
+  await expect(sheet.getByTestId('customer-sheet-orders-empty')).toHaveCount(0);
+  await expect(sheet.getByLabel('Order DEMO-000004')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('06i-customer-orders-vendurepos.png') });
+
+  await orders.first().click();
+  await expect(page.getByTestId('customers-panel')).toHaveCount(0);
+  await expect(page.getByTestId('orders-panel')).toBeVisible();
+  await expect(page.getByTestId('order-sheet-detail')).toContainText('DEMO-000004');
+  await page.getByTestId('order-sheet-close').click();
+  await expect(page.getByTestId('order-sheet-detail')).toHaveCount(0);
+  await expect(page.getByTestId('orders-panel').locator('[data-testid^="orders-row-"]')).toHaveCount(4);
+});
+
 test('the Customers panel adds and edits customers on the store; a refused save leaves the row as the store has it', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
@@ -996,6 +1037,11 @@ test("Store health shows Ready to sell, nothing waiting, the products on this de
   await expect(page.getByTestId('store-health-server-products')).toHaveText(String(demoStore.products().length));
   await expect(page.getByTestId('store-health-server-orders')).toHaveText(String(demoStore.orderSummaries().length));
   await expect(page.getByTestId('store-health-coverage-products')).toHaveAttribute('aria-valuenow', '100');
+  await expect(page.getByTestId('store-health-count-variants')).toHaveText(String(CATALOGUE.flatMap(product => product.variants).length));
+  await expect(page.getByTestId('store-health-server-variants')).toHaveText(String(demoStore.products().flatMap(product => product.variants).length));
+  await expect(page.getByTestId('store-health-coverage-variants')).toHaveAttribute('aria-valuenow', '100');
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13l-store-health-variants-vendurepos.png') });
   await expect(page.getByTestId('store-health-server-refunds')).toHaveText('—');
   await page.getByTestId('store-health-open').click();
   await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
