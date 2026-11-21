@@ -15,13 +15,20 @@ describe('productRows', () => {
     const rows = productRows(products, '', vendureProductTraits, 'EUR', 0);
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
     expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
-      imageUrl: null, stockStatus: 'in_stock', categories: '—', categoryIds: [],
+      imageUrl: null, stockStatus: 'in_stock', categories: '—', categoryIds: [], facetValueIds: [],
       priceText: '8.00', stockText: '50', managed: true, stockTarget: null });
     expect([rows[3].managed, rows[3].stockText]).toEqual([false, '']);
     expect(rows[1].name).toBe('Espresso Beans · 250 g');
     expect(rows[1].stock).toBe('20');
     expect(rows[2].stock).toBe('0');
     expect(rows[3].stock).toBe('—');
+  });
+
+  it("carries each product's own facet value ids on every variant row", () => {
+    const rows = productRows([{ ...products[1], facetValues: [
+      { id: '6', name: 'Tally', code: 'tally', facet: { id: '2', name: 'Brand' } },
+    ] }], '', vendureProductTraits, 'EUR', 0);
+    expect(rows.map(row => row.facetValueIds)).toEqual([['6'], ['6']]);
   });
 
   it('includes the product image and categories and each variant\'s stock status', () => {
@@ -107,12 +114,19 @@ describe('filterProductRows', () => {
   it('keeps every row in order when neither filter is set', () => {
     expect(filterProductRows(rows, { inStock: false, categoryId: null })).toEqual(rows);
   });
+
+  it('keeps only the rows carrying every chosen facet value', () => {
+    const facetRows = rows.map((row, index) => ({ ...row, facetValueIds: [['6'], ['6', '9'], ['7'], []][index] }));
+    expect(filterProductRows(facetRows, { inStock: false, categoryId: null, facets: { '2': '6' } })).toEqual(facetRows.slice(0, 2));
+    expect(filterProductRows(facetRows, { inStock: false, categoryId: null, facets: { '2': '6', '4': '9' } })).toEqual([facetRows[1]]);
+    expect(filterProductRows(facetRows, { inStock: false, categoryId: null, facets: {} })).toEqual(facetRows);
+  });
 });
 
 describe('Products panel header sorting', () => {
   const row = (values: Partial<ProductRow> = {}): ProductRow => ({
     id: '1', name: 'Mug', sku: '—', price: '—', stock: '—', imageUrl: null,
-    stockStatus: 'unknown', categories: '—', categoryIds: [], priceText: '', stockText: '',
+    stockStatus: 'unknown', categories: '—', categoryIds: [], facetValueIds: [], priceText: '', stockText: '',
     managed: false, stockTarget: null, ...values,
   });
 

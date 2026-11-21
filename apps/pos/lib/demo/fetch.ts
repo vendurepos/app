@@ -29,6 +29,7 @@
  * POST /tally/v1/commands (order.refund) — apps/pos/lib/refund-sheet.tsx via till-refund.ts and order-transport.ts.
  */
 import { COMMANDS_PATH } from '@tallyui/core';
+import { DEMO_FACETS } from './facets';
 import { DEMO_ORDER_HISTORY } from './order-notes';
 import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, type DemoStorage } from './store';
 
@@ -170,6 +171,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'Update': case 'updateCustomer': data = { updateCustomer: store.updateCustomer(variables.input) }; break;
       case 'One': case 'customer': data = { customer: store.customer(variables.id) }; break;
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
+      case 'PublicFacets': case 'facets': data = { facets: page(DEMO_FACETS, variables.options) }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
       case 'GlobalStockSettings': case 'globalSettings': data = { globalSettings: {
         trackInventory: true, outOfStockThreshold: 0,
