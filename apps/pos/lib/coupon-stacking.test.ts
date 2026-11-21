@@ -5,13 +5,17 @@ import {
 import { describe, expect, it } from 'vitest';
 
 const COUPON_MINOR = 600;
+// Observed TallyUI 3.20.0 figures; compared with Vendure in coupon-spike.e2e.ts B4.
+export const F1_TILL_TOTAL_MINOR = 6000;
+export const F2_TILL_TOTAL_MINOR = 5996;
+export const COUPON_TAX_MINOR = 150;
 const fixtures = [
-  { name: 'F1', unit: 2000, quantity: 3 },
-  { name: 'F2', unit: 1999, quantity: 3 },
+  { name: 'F1', unit: 2000, quantity: 3, total: F1_TILL_TOTAL_MINOR, tax: 1200 },
+  { name: 'F2', unit: 1999, quantity: 3, total: F2_TILL_TOTAL_MINOR, tax: 1199 },
 ];
 
 describe('CPN-S Q1: percent till discount and store-priced coupon stacking', () => {
-  for (const { name, unit, quantity } of fixtures) {
+  for (const { name, unit, quantity, total, tax } of fixtures) {
     it(`${name}: both application orders retain the pre-coupon till discount`, () => {
       const orders = (['X', 'Y'] as const).map((sequence) => {
         const builder = createOrderBuilder({
@@ -49,13 +53,13 @@ describe('CPN-S Q1: percent till discount and store-priced coupon stacking', () 
         couponDiscountMinor: order.coupons![0].discountMinor,
         couponTaxMinor: order.coupons![0].discountTaxMinor,
       });
-      // First-run observations supply the literals for B4 only if Q1 passes.
-      process.stdout.write(`${name} ${JSON.stringify(orders.map(order => ({
-        ...figures(order), tillDiscountMinor: order.lineItems[0].discounts[0].amountMinor,
-      })))}\n`);
       expect(x.lineItems[0].discounts[0].amountMinor).toBe(Math.round(0.10 * unit * quantity));
       expect(y.lineItems[0].discounts[0].amountMinor).toBe(Math.round(0.10 * unit * quantity));
       expect(figures(x)).toEqual(figures(y));
+      expect(x.totalMinor).toBe(total);
+      expect(x.taxMinor).toBe(tax);
+      expect(x.coupons![0].discountMinor).toBe(600);
+      expect(x.coupons![0].discountTaxMinor).toBe(COUPON_TAX_MINOR);
     });
   }
 });
