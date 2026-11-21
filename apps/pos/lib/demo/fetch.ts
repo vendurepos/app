@@ -48,7 +48,7 @@ const ADMINISTRATOR_ID = '1';
 // The demo's one channel, as the catalogue permissions query names it.
 const DEMO_CHANNEL_ID = '1';
 // The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
-// The demo signs in as the store's manager, so every register figure shows (ApproveTallyPosVariance unblinds the count).
+// The demo's till role also approves register variances, so its count shows every figure (ApproveTallyPosVariance unblinds it, lib/register-blind.ts).
 const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
 // e2e only: a till without the approve permission, which counts blind.
 export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
