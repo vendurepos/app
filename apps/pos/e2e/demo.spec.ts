@@ -1167,6 +1167,14 @@ test("the Products panel groups a multi-variant product under one 'N variations'
   }
   // The demo-pairs size, as 10e; the PNG is made docs/v2-parity/demo-pairs/08j-products-variations-vendurepos.webp (cwebp -q 80).
   await page.setViewportSize({ width: 960, height: 600 });
+  // CHECKLIST 10.2k: at this size the range once wrapped to "€8.99 –" over "€29.99"; v2's 08 keeps it on one line.
+  // One line is a box under 1.5 line heights (two would be 2); RN-web may leave line-height `normal`, then 1.5 × the font size stands in.
+  const range = panel.getByTestId(`product-price-range-${productId}`);
+  const lineHeight = await range.evaluate(el => {
+    const style = getComputedStyle(el);
+    return style.lineHeight === 'normal' ? 1.5 * parseFloat(style.fontSize) : parseFloat(style.lineHeight);
+  });
+  expect((await range.boundingBox())!.height).toBeLessThan(1.5 * lineHeight);
   await page.screenshot({ path: test.info().outputPath('08j-products-variations-vendurepos.png') });
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
 
