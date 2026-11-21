@@ -40,12 +40,14 @@ export function storeDayOf(iso: string, timezone: string): StoreDay {
   return new Intl.DateTimeFormat('en-CA', { timeZone: timezone === 'device' ? undefined : timezone,
     year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 }
+/** A payment's tender in words: the till's metadata.tender.method when set, else Vendure's payment method. */
+export function paymentTenderName(payment: { method: string; metadata?: unknown }): string {
+  const method = (payment.metadata as { tender?: { method?: unknown } } | null)?.tender?.method;
+  return tenderName(typeof method === 'string' && method.length > 0 ? method : payment.method);
+}
 export function toOrderTableRow(order: VendureOrder, timezone: string): OrderTableRow {
   const placedAt = order.orderPlacedAt ?? order.updatedAt;
-  const payments = (order.payments ?? []).filter(payment => !['Declined', 'Error', 'Cancelled'].includes(payment.state)).map(payment => {
-    const method = (payment.metadata as { tender?: { method?: unknown } } | null)?.tender?.method;
-    return tenderName(typeof method === 'string' && method.length > 0 ? method : payment.method);
-  });
+  const payments = (order.payments ?? []).filter(payment => !['Declined', 'Error', 'Cancelled'].includes(payment.state)).map(paymentTenderName);
   return { id: order.id, code: order.code, stateLabel: orderStateLabel(order.state), status: toOrderStatus(order.state),
     placedAt, day: storeDayOf(placedAt, timezone),
     customer: order.customer ? `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress : null,

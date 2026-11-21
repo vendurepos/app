@@ -554,7 +554,7 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   const sheet = page.getByTestId('customer-sheet');
   await page.getByTestId('customers-edit-c3').click();
   await expect(sheet.getByTestId('customer-sheet-groups-value')).toHaveText('Coffee club, Trade');
-  await expect(sheet.getByText('Set in Vendure', { exact: true })).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-groups').getByText('Set in Vendure', { exact: true })).toBeVisible();
   await expect(sheet.getByTestId('customer-sheet-groups').getByRole('textbox')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('06f-customer-groups.png') });
   await page.getByTestId('customer-sheet-close').click();
@@ -565,6 +565,30 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   await page.getByTestId('customers-add').click();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
+});
+
+test("the customer sheet shows the customer's account read-only, as v2's username row: registered and verified, not verified, or a guest", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-account-value')).toHaveText('Registered · email verified');
+  await expect(sheet.getByTestId('customer-sheet-account').getByRole('textbox')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('06h-customer-account.png') });
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c8').click();
+  await expect(sheet.getByTestId('customer-sheet-account-value')).toHaveText('Registered · not verified');
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c7').click();
+  await expect(sheet.getByTestId('customer-sheet-account-value')).toHaveText('Guest');
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-add').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-account')).toHaveCount(0);
 });
 
 test("the customer sheet lists a customer's staff notes and adds one; notes are never on a receipt or a print", async ({ page }) => {
@@ -1094,7 +1118,7 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
     const product = CATALOGUE.find(product => product.variants.some(variant => variant.sku === sku))!;
     await expect(detail).toContainText(product.name);
   }
-  await expect(detail).toContainText('Paid €23.52');
+  await expect(detail).toContainText('€23.52 · Settled');
   await expect(page.getByTestId('refund-start')).toBeVisible();
   await page.getByTestId('order-sheet-close').click();
   for (const id of ['3', '2', '1']) await expect(page.getByTestId(`orders-row-${id}`)).toBeVisible();
@@ -1111,8 +1135,11 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await page.getByTestId('receipt').getByTestId('new-sale').click();
   await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
   await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
-  await expect(detail).toContainText('Paid €9.52');
+  await expect(detail).toContainText('Cash €9.52 · Settled');
+  await expect(page.getByTestId('order-sheet-payment-paid')).toContainText('€9.52');
+  await expect(page.getByTestId('order-sheet-payment-remaining')).toContainText('€0.00');
   await expect(detail).toContainText(mug.name);
+  await page.screenshot({ path: test.info().outputPath('07j-order-payment-vendurepos.png') });
 });
 
 test("the order sheet shows Vendure's state, and a storefront order's fulfilment; a till order lists none", async ({ page }) => {

@@ -5,6 +5,7 @@ import type { OrderHistoryRow } from '@tallyui/components';
 import { formatMoney, type Customer } from '@tallyui/core';
 import { CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer } from './customer-edit';
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
+import { CUSTOMER_ACCOUNT_LABEL, useCustomerAccount } from './customer-account';
 import { addCustomerNote, useCustomerNotes } from './customer-notes';
 import { useCustomerOrders } from './customer-orders';
 import { STAFF_NOTE_LABEL } from './order-notes';
@@ -33,6 +34,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   const online = useOnline();
   const groupsText = customerGroupsText(row);
   const { notes, reload } = useCustomerNotes(session, open && row ? row.id : null);
+  const account = useCustomerAccount(session, open && row ? row.id : null);
   const orders = useCustomerOrders(session, open && row ? row.id : null);
   const [note, setNote] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -70,8 +72,13 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
       </DialogHeader>
       <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false} />
       {groupsText !== null && <HStack testID="customer-sheet-groups" className="items-center justify-between px-4">
-        <Text className="text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
+        <Text className="w-20 text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
         <Text testID="customer-sheet-groups-value" className="flex-1 px-3 text-sm">{groupsText}</Text>
+        <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
+      </HStack>}
+      {row !== null && account !== null && <HStack testID="customer-sheet-account" className="items-center justify-between px-4">
+        <Text className="w-20 text-sm text-muted-foreground">{CUSTOMER_ACCOUNT_LABEL}</Text>
+        <Text testID="customer-sheet-account-value" className="flex-1 px-3 text-sm">{account}</Text>
         <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
       </HStack>}
       {row !== null && <VStack testID="customer-sheet-notes" className="gap-1 px-4">
