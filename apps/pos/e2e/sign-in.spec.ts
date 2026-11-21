@@ -953,6 +953,20 @@ test('Settings › Customer display mints a pairing code on the dev store', asyn
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   await page.getByTestId('settings-open').click();
   await page.getByTestId('settings-section-customer-display').click();
+  // Web only: the display page's URL for this store (session.url is the sign-in field, as the header shows above).
+  const displayUrl = `${new URL(page.url()).origin}/display?store=${encodeURIComponent(STORE_URL)}`;
+  await expect(page.getByTestId('display-url')).toHaveText(displayUrl);
+  await expect(page.getByTestId('pairing-code')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('11-settings-customer-display-vendurepos.png') });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByTestId('display-url-copy').click();
+  await expect(page.getByTestId('display-url-copied')).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(displayUrl);
+  const popupOpened = page.waitForEvent('popup');
+  await page.getByTestId('display-url-open').click();
+  const popup = await popupOpened;
+  expect(popup.url()).toContain('/display?store=');
+  await popup.close();
   const mint = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/tally/v1/displays/codes'));
   await page.getByTestId('pairing-start').click();
   expect((await mint).ok()).toBe(true);
