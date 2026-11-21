@@ -59,7 +59,7 @@ type Command = { id: string; type: string; version: number; payload: any };
 type Session = RegisterSessionOpenPayload & { status: 'open' | 'counting' | 'closed' };
 type Movement = { movementId: string; sessionId: string; type: string; amountMinor: number; voids?: string };
 type Customer = { __typename: 'Customer'; id: string; firstName: string; lastName: string; emailAddress: string; phoneNumber: string | null;
-  createdAt: string; addresses: DemoAddress[] };
+  createdAt: string; addresses: DemoAddress[]; groups: Array<{ id: string; name: string }> };
 type DemoAddress = {
   id: string; fullName: string; company: string | null; streetLine1: string; streetLine2: string | null;
   city: string; province: string | null; postalCode: string; country: { code: string };
@@ -94,6 +94,10 @@ function seed(): State {
     index++;
     if (product.trackInventory) stock[String(index)] = { quantity: variant.shopFloorStock, updatedAt: SEED_TIME };
   }
+  const groupsByEmail: Record<string, Customer['groups']> = {
+    'ada@demo.vendurepos.com': [{ id: 'g1', name: 'Coffee club' }],
+    'alan@demo.vendurepos.com': [{ id: 'g2', name: 'Trade' }, { id: 'g1', name: 'Coffee club' }],
+  };
   const customers: Customer[] = [
     ['Ada', 'Lovelace', 'ada@demo.vendurepos.com', '2026-02-03T10:00:00.000Z', '12 Engine Row', 'London', null, 'N1 9GU', 'GB', null],
     ['Grace', 'Hopper', 'grace@demo.vendurepos.com', '2026-03-14T10:00:00.000Z', '40 Compiler Court', 'Arlington', 'VA', '22202', 'US', null],
@@ -105,6 +109,7 @@ function seed(): State {
     ['Dorothy', 'Vaughan', 'dorothy@demo.vendurepos.com', '2026-10-18T10:00:00.000Z'],
   ].map(([firstName, lastName, emailAddress, createdAt, streetLine1, city, province, postalCode, code, company], index) => ({
     __typename: 'Customer', id: `c${index + 1}`, firstName: firstName!, lastName: lastName!, emailAddress: emailAddress!, phoneNumber: null,
+    groups: groupsByEmail[emailAddress!] ?? [],
     createdAt: createdAt!, addresses: streetLine1 ? [{ id: `a${index + 1}`, fullName: `${firstName} ${lastName}`, company,
       streetLine1, streetLine2: null, city: city!, province, postalCode: postalCode!, country: { code: code! },
       defaultBillingAddress: true, defaultShippingAddress: true }] : [],
@@ -252,7 +257,7 @@ export class DemoStore {
       __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.',
     };
     const customer: Customer = { ...input, __typename: 'Customer', id: `c${this.state.customers.length + 1}`, phoneNumber: input.phoneNumber ?? null,
-      createdAt: new Date().toISOString(), addresses: [] };
+      createdAt: new Date().toISOString(), addresses: [], groups: [] };
     this.state.customers.push(customer);
     this.save();
     return customer;

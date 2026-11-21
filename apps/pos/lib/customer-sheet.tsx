@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, CustomerForm, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text } from '@tallyui/components';
 import type { Customer } from '@tallyui/core';
 import { CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer } from './customer-edit';
-import type { CustomerRow } from './customer-list';
+import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
 import { sessionContext, type Session } from './session';
 
 function useOnline(): boolean {
@@ -24,6 +24,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const counter = useRef(0);
   const online = useOnline();
+  const groupsText = customerGroupsText(row);
   useEffect(() => {
     if (open) { setValues(customerFormValues(row)); setError(null); setSaving(false); }
     return () => { counter.current += 1; };
@@ -46,6 +47,11 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
         <DialogTitle>{row ? `Edit ${`${row.firstName} ${row.lastName}`.trim() || row.email}` : 'New customer'}</DialogTitle>
       </DialogHeader>
       <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false} />
+      {groupsText !== null && <HStack testID="customer-sheet-groups" className="items-center justify-between">
+        <Text className="text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
+        <Text testID="customer-sheet-groups-value" className="flex-1 px-3 text-sm">{groupsText}</Text>
+        <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
+      </HStack>}
       {!online && <Text testID="customer-sheet-offline">{CUSTOMER_OFFLINE_TEXT}</Text>}
       {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       <HStack space="sm" className="mt-auto justify-between">

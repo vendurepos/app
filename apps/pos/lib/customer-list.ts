@@ -14,6 +14,9 @@ export const WALK_IN_EMAIL = 'walk-in@vendurepos.local';
 export const CUSTOMERS_FORBIDDEN_TEXT = "This till can't read the store's customers: its role lacks the Read customer permission. Ask the store's admin to add it.";
 // Other failures can be retried from the list.
 export const CUSTOMERS_FAILED_TEXT = "Can't load the store's customers.";
+export const CUSTOMER_GROUPS_LABEL = 'Groups';
+// v2's "Set in WordPress" for a field the till does not edit.
+export const CUSTOMER_GROUPS_HINT = 'Set in Vendure';
 
 export type VendureCustomerAddress = {
   fullName?: string | null; company?: string | null; streetLine1?: string | null; streetLine2?: string | null;
@@ -23,13 +26,20 @@ export type VendureCustomerAddress = {
 export type VendureCustomerListItem = {
   id: string; firstName?: string | null; lastName?: string | null; emailAddress?: string | null;
   phoneNumber?: string | null; createdAt: string; addresses?: VendureCustomerAddress[] | null;
+  groups?: Array<{ id: string; name: string }> | null;
 };
 export type CustomerRow = {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;
   /** The default billing address as display lines; [] when the customer has none. */
   billingAddress: string[];
+  /** The customer's Vendure customer group names, sorted by name; [] when it has none. */
+  groups: string[];
   createdAt: string;
 };
+
+export function customerGroupsText(row: CustomerRow | null): string | null {
+  return row?.groups.length ? row.groups.join(', ') : null;
+}
 
 export type CustomerSortField = 'firstName' | 'lastName' | 'emailAddress' | 'createdAt';
 export type CustomerSort = { field: CustomerSortField; dir: 'ASC' | 'DESC' };
@@ -55,7 +65,8 @@ export function toCustomerRow(item: VendureCustomerListItem): CustomerRow {
     [[address.city, address.province, address.postalCode].filter(Boolean).join(' '), address.country?.code].filter(Boolean).join(', '),
   ].filter((line): line is string => !!line) : [];
   return { id: item.id, firstName: item.firstName ?? '', lastName: item.lastName ?? '', email: item.emailAddress ?? '',
-    phone: item.phoneNumber ?? null, billingAddress, createdAt: item.createdAt };
+    phone: item.phoneNumber ?? null, billingAddress, createdAt: item.createdAt,
+    groups: (item.groups ?? []).map(group => group.name).sort((a, b) => a.localeCompare(b)) };
 }
 export async function listVendureCustomerPage(context: SyncContext, options: ReturnType<typeof customerListOptions>): Promise<{ items: VendureCustomerListItem[]; totalItems: number }> {
   const query = `query CustomerList($options: CustomerListOptions) {
@@ -63,6 +74,7 @@ export async function listVendureCustomerPage(context: SyncContext, options: Ret
       totalItems
       items {
         id firstName lastName emailAddress phoneNumber createdAt
+        groups { id name }
         addresses { fullName company streetLine1 streetLine2 city province postalCode country { code } defaultBillingAddress }
       }
     }
