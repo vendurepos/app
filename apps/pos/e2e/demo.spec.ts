@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { devices, expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Locator, type Page } from '@playwright/test';
 import { FONT_FACES } from '@tallyui/theme';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
@@ -7,8 +7,8 @@ import { DEMO_FACETS, demoBrand } from '../lib/demo/facets';
 import { DEMO_PUBLIC_NOTE, DEMO_STAFF_NOTE } from '../lib/demo/order-notes';
 import { DEMO_CUSTOMER_NOTE, DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
-import { checkout, takePayment, typeAmount } from './checkout';
-import { openRegister } from './register';
+import { checkout, expectBalanceAsEntry, takePayment, typeAmount } from './checkout';
+import { expectClosureCash, openRegister } from './register';
 import { wedgeScan } from './wedge';
 
 /** Settings from the rail, on one of its sections (v2's tabs, parity 9.1). */
@@ -71,6 +71,16 @@ async function expectSignedIn(page: Page) {
   await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 }
 
+/**
+ * A product tile's in-cart badge shows `count`. TallyUI 4.0.0's InCartBadge keeps the count it changed from beside the
+ * new one (aria-hidden, faded out, testID `<badge>-was`), so the badge's own text reads "12" at 2; the shown count is
+ * its other child, and the badge's label names it.
+ */
+async function expectInCart(badge: Locator, count: number) {
+  await expect(badge).toHaveAttribute('aria-label', `${count} in cart`);
+  await expect(badge.locator(':scope > :not([data-testid])')).toHaveText(String(count));
+}
+
 test('the camera scan button adds what the camera sees once, follows the scan rules and lets the camera go while the catalogue is hidden', async ({ page }) => {
   await page.addInitScript(() => {
     window.cameraStreams = [];
@@ -109,16 +119,16 @@ test('the camera scan button adds what the camera sees once, follows the scan ru
   const line = page.getByTestId('cart-line-TALLY-MUG');
   const inCart = page.getByTestId(`in-cart-${MUG_PRODUCT_ID}`);
   await expect(line).toBeVisible();
-  await expect(inCart).toHaveText('1');
+  await expectInCart(inCart, 1);
   await page.waitForTimeout(2000);
-  await expect(inCart).toHaveText('1');
+  await expectInCart(inCart, 1);
   await page.evaluate(() => { window.cameraSees = null; });
   await page.waitForTimeout(1500);
   await page.evaluate((seen) => { window.cameraSees = seen; }, mug);
-  await expect(inCart).toHaveText('2');
+  await expectInCart(inCart, 2);
   await page.evaluate(() => { window.cameraSees = { code: 'NO-SUCH-CODE', format: 'qr_code' }; });
   await expect(page.getByTestId('scan-not-found')).toHaveText('No products match "NO-SUCH-CODE".');
-  await expect(inCart).toHaveText('2');
+  await expectInCart(inCart, 2);
   await page.evaluate(() => { window.cameraSees = null; });
   const streamsBeforeHide = await page.evaluate(() => window.cameraStreams.length);
   expect(streamsBeforeHide).toBeGreaterThan(0);
@@ -129,7 +139,7 @@ test('the camera scan button adds what the camera sees once, follows the scan ru
   await page.evaluate((seen) => { window.cameraSees = seen; }, mug);
   await page.waitForTimeout(1000);
   await expect(line).toBeVisible();
-  if (await inCart.count()) await expect(inCart).toHaveText('2');
+  if (await inCart.count()) await expectInCart(inCart, 2);
   else await expect(line.getByTestId('quantity-popover-trigger')).toHaveText('2');
   await page.evaluate(() => { window.cameraSees = null; });
   await page.getByTestId('tab-products').click();
@@ -681,7 +691,7 @@ test("the customer sheet lists a customer's staff notes and adds one; notes are 
   await expect(page.getByTestId('sale-customer')).toContainText('Ada Lovelace');
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
-  await expect(page.getByTestId('tender-pane').getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
@@ -1227,7 +1237,7 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await page.getByTestId(`product-tile-${mug.name}`).click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1293,7 +1303,7 @@ test("the order sheet lists the sale's fee and shipping under Items, the fee ins
     await form.getByLabel('Name', { exact: true }).fill(name);
     await form.getByLabel('Amount', { exact: true }).fill(amount);
     if (taxClass) await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: taxClass, exact: true }).click();
-    await form.getByRole('button', { name: 'Apply', exact: true }).click();
+    await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
     await expect(form).toHaveCount(0);
   }
   await checkout(page);
@@ -1332,7 +1342,7 @@ test("the Orders register filter lists the store's registers by name, as v2's or
   await page.getByTestId(`product-tile-${mug.name}`).click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1374,7 +1384,7 @@ test("a till sale is stamped with the till's drawer, and the Orders register fil
   await page.getByTestId(`product-tile-${mug.name}`).click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1404,7 +1414,7 @@ test('a register rebind mid-tender leaves the sale on the drawer its tender pinn
   await page.getByTestId(`product-tile-${mug.name}`).click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
 
   await page.evaluate(() => localStorage.setItem('vendurepos.bound_register_id', 'demo-front-counter'));
   await openSettings(page, 'general');
@@ -1446,7 +1456,7 @@ test("the order sheet names the customer, and the sale's day, time and cashier, 
   await page.getByTestId(`product-tile-${mug.name}`).click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1491,7 +1501,7 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '10.00');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1545,7 +1555,7 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1610,7 +1620,7 @@ test('Reports opens on the drawer card: since, float + cash sales = expected, Pr
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1642,7 +1652,7 @@ test('a demo cashier refunds a mug from the order sheet; stock comes back and ex
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await expectBalanceAsEntry(page, '€19.04');
   await typeAmount(page, '19.04');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1722,13 +1732,13 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   const line = cart.getByTestId('cart-line-TALLY-MUG');
   await expect(line).toBeVisible();
   const inCart = page.getByTestId(`in-cart-${MUG_PRODUCT_ID}`);
-  await expect(inCart).toHaveText('1');
+  await expectInCart(inCart, 1);
   await line.getByTestId('quantity-popover-trigger').click();
   await page.getByTestId('quantity-popover-keypad-key-2').click();
   await page.getByTestId('quantity-popover-apply').click();
-  await expect(inCart).toHaveText('2');
+  await expectInCart(inCart, 2);
   await checkout(page);
-  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await expectBalanceAsEntry(page, '€19.04');
   await typeAmount(page, '19.04');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -1758,8 +1768,8 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await count.getByTestId('count-amount').fill('119.04');
   await count.getByTestId('count-close').click();
   const sheet = page.getByTestId('closure-sheet');
-  await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €119.04');
-  await expect(sheet.getByTestId('closure-counted-cash')).toHaveText('Counted €119.04');
+  await expectClosureCash(page, 'Expected', '€119.04');
+  await expectClosureCash(page, 'Counted', '€119.04');
   await expect(page.getByTestId('closure-blind-counted')).toHaveCount(0);
   await sheet.getByTestId('closure-print').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
@@ -2488,7 +2498,7 @@ test('the cashier sheet shows the register and since in its header, your sales t
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -2881,7 +2891,7 @@ test('Order details keeps a customer note on the sale and sends it to the store 
   await page.getByTestId('order-details-close').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€9.52');
+  await expectBalanceAsEntry(page, '€9.52');
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -3327,7 +3337,8 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.52');
   await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
   await page.getByTestId('tender-split-open').click();
-  await expect(page.getByTestId('tender-split-ways')).toBeVisible();
+  // The app's own split (lib/tender-split.tsx); TallyUI 4.0.0's TenderPane draws its own even ways too, under the same testID.
+  await expect(page.getByTestId('tender-split').getByTestId('tender-split-ways')).toBeVisible();
   await page.getByTestId('tender-split-ways-2').click();
   await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
   await expect(tender.getByTestId('tender-plan')).toHaveText('1 of 2');
@@ -3335,7 +3346,7 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   await takePayment(page);
   await expect(cart.getByTestId('cart-paid')).toHaveText('€4.76');
   await expect(cart.getByTestId('cart-remaining')).toHaveText('€4.76');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€4.76');
+  await expectBalanceAsEntry(page, '€4.76');
   await expect(tender.getByTestId('tender-plan')).toHaveText('2 of 2');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€4.76');
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
@@ -3508,7 +3519,7 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await form.getByRole('button', { name: 'Fee', exact: true }).click();
   await form.getByLabel('Name', { exact: true }).fill('Bag');
   await form.getByLabel('Amount', { exact: true }).fill('0.10');
-  await form.getByRole('button', { name: 'Apply', exact: true }).click();
+  await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   await expect(cart.getByTestId('cart-fee-0')).toContainText('Bag');
   await cart.getByRole('button', { name: 'Remove Bag', exact: true }).click();
   await expect(cart.getByTestId('cart-fee-0')).toHaveCount(0);
@@ -3517,7 +3528,7 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await form.getByLabel('Name', { exact: true }).fill('Gift wrap');
   await form.getByLabel('Amount', { exact: true }).fill('2.00');
   await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Reduced DE', exact: true }).click();
-  await form.getByRole('button', { name: 'Apply', exact: true }).click();
+  await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   await expect(cart.getByTestId('cart-fee-0-amount')).toHaveText('€2.00');
   await expect(cart.getByTestId('cart-tax-Reduced DE 7%')).toHaveText('€0.14');
   await expect(cart.getByTestId('cart-total')).toHaveText('€11.66');
@@ -3564,13 +3575,16 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await allProducts.click();
   await expect(mugTile).toBeVisible();
 
+  // TallyUI 4.0.0's catalogue toggle is one icon button offering the other view: on the table it offers the grid.
   const tableToggle = page.getByTestId('view-toggle-table');
+  const gridToggle = page.getByTestId('view-toggle-grid');
   await tableToggle.click();
-  await expect(tableToggle).toHaveAttribute('aria-checked', 'true');
+  await expect(gridToggle).toHaveAccessibleName('Switch to grid view');
+  await expect(tableToggle).toHaveCount(0);
   await expect(tiles).toHaveCount(0);
   // The table renders its rows lazily, so check the first row by name rather than one further down.
   await expect(page.locator('[data-testid^="product-row-"]').filter({ hasText: 'Canvas Apron' })).toBeVisible();
-  await page.getByTestId('view-toggle-grid').click();
+  await gridToggle.click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
