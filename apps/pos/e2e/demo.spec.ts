@@ -3624,7 +3624,7 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await expect(receipt.getByTestId('receipt-total')).toHaveText('€11.66');
 });
 
-test('A demo cashier adds a 10% fee and a fee whose amount includes tax, and the receipt matches the cart', async ({ page }) => {
+test('A demo cashier adds a 10% fee, and a tax-exclusive store offers no Amount Includes Tax switch', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
@@ -3639,13 +3639,17 @@ test('A demo cashier adds a 10% fee and a fee whose amount includes tax, and the
   await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Standard DE', exact: true }).click();
   await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   await cart.getByTestId('add-charge').click();
+  // lib/sale-cart.tsx: no switch in a tax-exclusive store, on a fee or on shipping.
+  await expect(form.getByRole('switch', { name: 'Amount Includes Tax' })).toHaveCount(0);
+  await form.getByRole('button', { name: 'Shipping', exact: true }).click();
+  await expect(form.getByRole('switch', { name: 'Amount Includes Tax' })).toHaveCount(0);
+  await form.getByRole('button', { name: 'Fee', exact: true }).click();
   await form.getByLabel('Name', { exact: true }).fill('Gift wrap');
-  await form.getByLabel('Amount', { exact: true }).fill('2.14');
-  await form.getByRole('switch', { name: 'Amount Includes Tax' }).click();
+  await form.getByLabel('Amount', { exact: true }).fill('2.00');
   await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Reduced DE', exact: true }).click();
   await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
-  // The demo store excludes tax. Mug 8.00 at Standard 19%. Service: 10% of the lines in the store's mode, 8.00 → 0.80 net,
-  // at 19%. Gift wrap: 2.14 including Reduced 7% is 2.14 / 1.07 = 2.00 net, tax 0.14 exactly.
+  // The demo store excludes tax (per_rate_group_items / half_up). Mug 8.00 at Standard 19%. Service: 10% of the lines in the
+  // store's mode, 8.00 → 0.80 net, at 19%. Gift wrap: 2.00 net at Reduced 7%, tax 0.14 exactly.
   // Standard tax (8.00 + 0.80) × 19% = 1.672 → 1.67; Reduced 0.14; tax 1.81. Total 8.00 + 0.80 + 2.00 + 1.81 = 12.61.
   const figures = { 'tax-Standard DE 19%': '€1.67', 'tax-Reduced DE 7%': '€0.14', tax: '€1.81', total: '€12.61' };
   for (const [id, text] of Object.entries({ ...figures, 'fee-0-amount': '€0.80', 'fee-1-amount': '€2.00' })) {

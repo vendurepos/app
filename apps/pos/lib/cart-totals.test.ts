@@ -29,10 +29,10 @@ const traits = createVendureConnector({ pricesIncludeTax: false }).traits.produc
 const entry = (sku: string) => catalogueEntries(products, traits).find((item) => item.variant.sku === sku)!;
 
 /** The context the app's `<TaxProvider {...taxProviderProps(settings)}>` gives the sale. */
-function saleTaxContext(): TaxContext {
+function saleTaxContext(store = settings): TaxContext {
   let context: TaxContext | undefined;
   const Probe = () => { context = useTax(); return null; };
-  renderToString(createElement(TaxProvider, taxProviderProps(settings) as TaxProviderProps, createElement(Probe)));
+  renderToString(createElement(TaxProvider, taxProviderProps(store) as TaxProviderProps, createElement(Probe)));
   return context!;
 }
 
@@ -59,13 +59,17 @@ describe('the cart under the store tax settings', () => {
     );
   });
 
-  it("splits a fee whose amount includes tax in the fee's own mode, so the rows sum to the order's tax", () => {
-    const builder = createOrderBuilder({ currency: settings.currency, taxContext: saleTaxContext() });
-    addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
-    builder.addFee({ name: 'Gift wrap', amountMinor: 214, taxClass: '2', amountIncludesTax: true });
+  it("splits a fee entered without tax in a tax-inclusive store in the fee's own mode, so the rows sum to the order's tax", () => {
+    const inclusive = { ...settings, pricesIncludeTax: true, taxRounding: { granularity: 'per_line_items', mode: 'half_up' } as const };
+    const inclusiveTraits = createVendureConnector({ pricesIncludeTax: true }).traits.product;
+    const builder = createOrderBuilder({ currency: settings.currency, taxContext: saleTaxContext(inclusive) });
+    const mug = { id: 'mug', name: 'Tally Fixture Mug', variants: [{ ...variant('11', 'TALLY-MUG', 672, '1'), priceWithTax: 800 }] };
+    addEntryToCart(builder, catalogueEntries([mug], inclusiveTraits)[0], inclusiveTraits, 'EUR');
+    builder.addFee({ name: 'Service', amountMinor: 99, taxClass: '2', amountIncludesTax: false });
     const totals = cartTotals(builder.getSnapshot());
-    // The demo's rounding (lib/demo/store.ts). Mug 800 x 19 % = 152; Gift wrap 214 incl. 7 % = 200 net + 14 (not 214 x 7 % = 15).
-    expect(totals.taxRows.map(({ name, amountMinor }) => [name, amountMinor])).toEqual([['Standard DE 19%', 152], ['Reduced DE 7%', 14]]);
+    // Vendure's default per_line_items (per_rate_group_items splits any order with an inclusive line per_order, by exact tax,
+    // TallyUI #310). Mug 800 incl. 19 %: net 672, tax 128; Service 99 excl. 7 % = 6.93 -> 7 (as gross: 99 - 93 net = 6).
+    expect(totals.taxRows.map(({ name, amountMinor }) => [name, amountMinor])).toEqual([['Standard DE 19%', 128], ['Reduced DE 7%', 7]]);
     expect(totals.taxRows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(totals.taxMinor);
   });
 

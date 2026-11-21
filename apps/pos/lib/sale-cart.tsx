@@ -119,9 +119,11 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
             ))}
           </>}
           {!locked && chargesOffered && (form?.kind === 'charge' ? (
-            // v2's Add Fee "%" and "Amount Includes Tax" switch (docs/v2-parity/demo-pairs/04-cart-3-items-wcpos.webp).
+            // v2's Add Fee "%" and "Amount Includes Tax" switch (docs/v2-parity/demo-pairs/04-cart-3-items-wcpos.webp). The switch shows only in
+            // a tax-inclusive store: in an exclusive one Vendure re-taxes the converted net and drifts a cent (PR #422 review), so it
+            // waits for an order.create contract that carries each charge's own mode.
             <ChargeForm currency={order.currency} lineTax={sale.capabilities?.lineTax} taxClasses={taxClasses} shippingTaxFromStore={false}
-              allowPercent pricesIncludeTax={order.pricesIncludeTax}
+              allowPercent pricesIncludeTax={order.pricesIncludeTax || undefined}
               onClose={() => setForm(null)} onApply={({ kind, name, amountMinor, taxStatus, taxClass, percent, amountIncludesTax }) => {
                 if (kind === 'shipping' && (order.shipping?.length ?? 0) >= MAX_SHIPPING_LINES) return SHIPPING_SINGLE_REFUSAL;
                 const result = kind === 'custom' ? sale.addCustomLine({ name, priceMinor: amountMinor, taxStatus, taxClass })
