@@ -46,17 +46,18 @@ describe('register approval (contract 3)', () => {
     { input: { firstName, lastName, emailAddress: email, password: 'secret-password', roleIds: [createRole.id] } });
     return { email, userId: decode(createAdministrator.user.id) };
   }
-  // A till cashier of its own, so each test's failures count only against its own limit.
-  async function cashier() {
-    const { email } = await admin(['TallyPosSell']);
+  // A till cashier of its own, so each test's failures count only against its own limit (test 30 passes a role without the till).
+  async function cashier(permissions = ['TallyPosSell']) {
+    const { email } = await admin(permissions);
     const response = await fetch(`${base}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: `mutation { login(username: "${email}", password: "secret-password") { ... on CurrentUser { id } } }` }) });
     return `Bearer ${response.headers.get('vendure-auth-token')}`;
   }
   const superAdmin = () => `Bearer ${adminClient.getAuthToken()}`;
-  async function approve(body: Record<string, unknown>, auth = superAdmin()) {
-    const response = await fetch(`${base}/tally/v1/register-approvals`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: auth }, body: JSON.stringify(body) });
+  // A null auth sends no Authorization header at all (test 30's anonymous caller).
+  async function approve(body: unknown, auth: string | null = superAdmin()) {
+    const response = await fetch(`${base}/tally/v1/register-approvals`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(auth === null ? {} : { Authorization: auth }) }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json(), headers: response.headers };
   }
   const request = (sessionId: string, extra: Record<string, unknown> = {}) =>
@@ -433,5 +434,42 @@ describe('register approval (contract 3)', () => {
       register: { session: { id: s }, resumed: { fromSessionId: alias } } });
     expect(await connection.rawConnection.getRepository(TallyRegisterSessionAlias).findOneBy({ id: alias })).toMatchObject({ sessionId: s });
     expect(await sessions().countBy({ registerId: r })).toBe(1);
+  });
+
+  it('29. malformed bodies are refused 400 invalid_payload and count no attempt', async () => {
+    const { s } = await session();
+    const valid = request(s);
+    const without = (field: string) => Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field));
+    // One case per approvalBody branch, each a valid body (open session, variance, a manager's credentials) with one fault.
+    const cases: Record<string, unknown> = {
+      'not an object': [valid], 'unknown field': { ...valid, extra: 1 },
+      'no sessionId': without('sessionId'), 'numeric sessionId': { ...valid, sessionId: 1 },
+      'unknown tender': { ...valid, variance: { card: 600 } }, 'non-integer': { ...valid, variance: { cash: 1.5 } },
+      'unsafe integer': { ...valid, variance: { cash: 2 ** 53 } }, 'no username': without('username'), 'no password': without('password'),
+    };
+    for (const [label, body] of Object.entries(cases)) {
+      const answer = await approve(body);
+      expect.soft({ status: answer.status, body: answer.body }, label)
+        .toEqual({ status: 400, body: { code: 'invalid_payload', message: expect.any(String) } });
+      expect.soft(JSON.stringify(answer.body), label).not.toContain('secret-password');
+    }
+    expect(await approvals().countBy({ sessionId: s })).toBe(0);
+  });
+
+  it('30. a caller without the till permission is refused 403 and counts no attempt', async () => {
+    const { s } = await session();
+    const sent = vi.spyOn(globalThis, 'fetch');
+    try {
+      const anonymous = await approve(request(s), null);
+      // The request really went out bare: no Authorization header and no cookie (Node's fetch keeps no cookie jar).
+      const headers = new Headers(sent.mock.calls[0][1]?.headers);
+      expect([headers.has('authorization'), headers.has('cookie')]).toEqual([false, false]);
+      expect.soft(anonymous.status, 'anonymous').toBe(403);
+    } finally {
+      sent.mockRestore();
+    }
+    const clerk = await cashier(['ReadOrder']);
+    expect.soft((await approve(request(s), clerk)).status, 'ReadOrder only').toBe(403);
+    expect(await approvals().countBy({ sessionId: s })).toBe(0);
   });
 });
