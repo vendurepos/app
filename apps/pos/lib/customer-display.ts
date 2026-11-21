@@ -15,6 +15,11 @@ export const AFTER_COMPLETE_MS = 10_000;
 /** The till's customer display: the service's and the pairing's refused or failed calls. */
 export const customerDisplayLogger = createLogger('customer-display');
 
+/** The store's identity for its displays: the session URL and channel token, or the URL alone. */
+export function displayStoreId(session: Session): string {
+  return session.channelToken ? `${session.url}#${session.channelToken}` : session.url;
+}
+
 /** One display's config: this store and channel, the device's locale and time zone, and the display's own record. */
 export function displayConfig(session: Session, display: DisplayRecord): DisplayConfig {
   const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
@@ -22,7 +27,7 @@ export function displayConfig(session: Session, display: DisplayRecord): Display
     contract: '1.0',
     display: { id: display.displayId, name: display.name },
     store: {
-      id: session.channelToken ? `${session.url}#${session.channelToken}` : session.url,
+      id: displayStoreId(session),
       name: storeLabel(session),
       currency: session.settings.currency,
       locale,
@@ -52,7 +57,7 @@ export function createTillCustomerDisplay({ session, advertisement, signalling =
   session: () => Session; advertisement: DisplayAdvertisement; signalling?: DisplaySignalling; storage?: KeyValueStore;
 }): TillCustomerDisplay {
   const device = createTillDevice({
-    signalling, deviceId: displayDeviceId(storage), keys: displayDeviceKeys(storage), onError: logError,
+    signalling, deviceId: displayDeviceId(storage), keys: displayDeviceKeys(storage, displayStoreId(session())), onError: logError,
   });
   const context = () => sessionContext(session());
   const service = createTillDisplayService({

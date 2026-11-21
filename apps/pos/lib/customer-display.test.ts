@@ -100,7 +100,7 @@ it('(c2) keeps the issued key under vendurepos.display_device_key, and a later d
   const first = start(undefined, storage);
   await first.handles.pairing.start();
   expect(first.signalling.registerDevice).toHaveBeenCalledTimes(1);
-  expect(storage.getItem('vendurepos.display_device_key')).toBe(ISSUED_KEY);
+  expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-a')).toBe(ISSUED_KEY);
   first.handles.close();
 
   const second = start(undefined, storage);
@@ -108,6 +108,29 @@ it('(c2) keeps the issued key under vendurepos.display_device_key, and a later d
   expect(second.signalling.registerDevice).not.toHaveBeenCalled();
   const [, sent] = second.signalling.mint.mock.calls[0] as unknown as Parameters<DisplaySignalling['mint']>;
   expect(sent).toEqual({ deviceId: displayDeviceId(storage), deviceKey: ISSUED_KEY });
+});
+
+it("(c3) keeps a key per store: X, then Y, then X again reuses X's key and does not register again", async () => {
+  const storage = memoryStorage();
+  const sessionY: Session = { ...session, channelToken: 'channel-b' };
+  const x = start(() => session, storage);
+  x.signalling.registerDevice.mockResolvedValueOnce({ deviceKey: 'key-x' });
+  await x.handles.pairing.start();
+  x.handles.close();
+
+  const y = start(() => sessionY, storage);
+  y.signalling.registerDevice.mockResolvedValueOnce({ deviceKey: 'key-y' });
+  await y.handles.pairing.start();
+  expect(y.signalling.registerDevice).toHaveBeenCalledTimes(1);
+  y.handles.close();
+
+  const again = start(() => session, storage);
+  await again.handles.pairing.start();
+  expect(again.signalling.registerDevice).not.toHaveBeenCalled();
+  const [, sent] = again.signalling.mint.mock.calls[0] as unknown as Parameters<DisplaySignalling['mint']>;
+  expect(sent).toEqual({ deviceId: displayDeviceId(storage), deviceKey: 'key-x' });
+  expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-a')).toBe('key-x');
+  expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-b')).toBe('key-y');
 });
 
 it("(d) configFor reads the session getter's current session", () => {

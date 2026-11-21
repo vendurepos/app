@@ -14,7 +14,7 @@ export class TallyPosDisplayDevice1791500000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX "public"."IDX_1cfc018cafb2a3033d784b3ac5"`);
+    await queryRunner.query(`DROP INDEX "IDX_1cfc018cafb2a3033d784b3ac5"`);
     await queryRunner.query(`DROP TABLE "tally_display_device"`);
   }
 }
