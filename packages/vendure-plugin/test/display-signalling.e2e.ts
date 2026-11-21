@@ -144,6 +144,11 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     if (result.status !== 'paired') throw new Error('not paired');
     return result;
   }
+  /** The raw status and body of one request to the routes, bypassing the client's own headers and shapes. */
+  const answer = async (path: string, init: RequestInit) => {
+    const response = await fetch(`${base}/tally/v1/${path}`, init);
+    return [response.status, await response.json()];
+  };
   const fresh = () => connection.rawConnection.query(`TRUNCATE ${TABLES.map(table => `"${table}"`).join(', ')}`);
 
   const make = async (): Promise<DisplaySignallingHarness> => {
@@ -289,10 +294,6 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
   });
 
   it('(i) the public routes refuse bad input in the seam\'s shape', async () => {
-    const answer = async (path: string, init: RequestInit) => {
-      const response = await fetch(`${base}/tally/v1/${path}`, init);
-      return [response.status, await response.json()];
-    };
     const json = { 'Content-Type': 'application/json' };
     const headers = { ...(await pairTill('bad-input')).headers, 'X-Tally-Device-Id': 'till-i' };
     expect(await answer('displays/%00', { method: 'DELETE', headers })).toEqual([404, { code: 'not_found', message: expect.any(String) }]);
@@ -301,6 +302,35 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     const big = JSON.stringify({ type: 'offer', payload: 'x'.repeat(450_000 - 29) }); // over the parser's 409 600 bytes
     expect(await answer('display/signals', { method: 'POST', headers: json, body: big }))
       .toEqual([413, { code: 'too_large', message: expect.any(String) }]);
+  });
+
+  it('(i2) the controller\'s own checks refuse a bad device header, bad fields and a missing display token, storing nothing', async () => {
+    await fresh();
+    const ctx = await pairTill('own-checks');
+    const { displayId } = await paired(ctx, 'till-i2', display('192.0.2.110'));
+    const stored = () => Promise.all(TABLES.map(table => count(table)));
+    const before = await stored();
+    const refusal = (status: number, code: string) => [status, { code, message: expect.any(String) }];
+    const json = { 'Content-Type': 'application/json' };
+    const send = (headers: Record<string, string>, body: unknown) =>
+      answer(`displays/${displayId}/signals`, { method: 'POST', headers: { ...json, ...headers }, body: JSON.stringify(body) });
+    const offer = { type: 'offer', payload: 'o1' };
+    // The device header: missing, then one character over 64.
+    expect(await send(ctx.headers, offer)).toEqual(refusal(400, 'invalid_request'));
+    expect(await send({ ...ctx.headers, 'X-Tally-Device-Id': 'd'.repeat(65) }, offer)).toEqual(refusal(400, 'invalid_request'));
+    // A valid header, with a field the route does not know, then a type outside offer, answer and ice.
+    const till = { ...ctx.headers, 'X-Tally-Device-Id': 'till-i2' };
+    expect(await send(till, { ...offer, extra: 1 })).toEqual(refusal(400, 'invalid_request'));
+    expect(await send(till, { type: 'bye', payload: 'o1' })).toEqual(refusal(400, 'invalid_request'));
+    // The claim's own bounds: an empty name, a name of 101 characters, a code of 33.
+    const claim = (body: unknown) => answer('display/claim', { method: 'POST', headers: json, body: JSON.stringify(body) });
+    expect(await claim({ code: '123456', displayName: '' })).toEqual(refusal(400, 'invalid_request'));
+    expect(await claim({ code: '123456', displayName: 'n'.repeat(101) })).toEqual(refusal(400, 'invalid_request'));
+    expect(await claim({ code: '1'.repeat(33), displayName: 'Counter' })).toEqual(refusal(400, 'invalid_request'));
+    // No display token on the display's own routes.
+    expect(await answer('display/signals', { method: 'GET' })).toEqual(refusal(401, 'token_refused'));
+    expect(await answer('display/snapshot', { method: 'GET' })).toEqual(refusal(401, 'token_refused'));
+    expect(await stored()).toEqual(before);
   });
 
   it('(j) another channel\'s till holding every check code never uses up a till\'s check codes', async () => {
