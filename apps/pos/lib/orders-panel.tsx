@@ -145,7 +145,7 @@ function OrderTableRowView({ row, wide, timezone, onOpen }: {
     hour: '2-digit', minute: '2-digit', timeZone: timezone === 'device' ? undefined : timezone,
   });
   const total = formatMoney({ amount: row.totalMinor, currency: row.currency });
-  const via = <Text testID={`orders-row-via-${row.id}`} accessibilityLabel={ORDER_VIA_A11Y[row.via]}
+  const via = <Text testID={`orders-via-${row.id}`} accessibilityLabel={ORDER_VIA_A11Y[row.via]}
     className="text-xs text-muted-foreground">{ORDER_VIA_LABEL[row.via]}</Text>;
   return (
     <Pressable testID={`orders-row-${row.id}`} accessibilityRole="button" accessibilityLabel={`Order ${row.code}`} onPress={() => onOpen(row.history)}>
