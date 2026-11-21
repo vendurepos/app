@@ -846,3 +846,15 @@ it("keeps a customer's staff notes as CUSTOMER_NOTE history, adds one as given a
   expect(reopened.addCustomerNote({ id: 'nobody', note: 'Lost', isPublic: false })).toBeNull();
   expect(new DemoStore(storage).customerHistory('nobody')).toEqual([]);
 });
+
+it("answers CustomerAccount with each customer's Vendure User: verified, a guest's none, unverified, a till-made one unverified, and an unknown id null", async () => {
+  const account = async (id: string) => (await (await fetch(`${DEMO_STORE_ORIGIN}/admin-api`, {
+    method: 'POST', body: JSON.stringify({ query: 'query CustomerAccount($id: ID!) { customer(id: $id) { id user { id verified } } }', variables: { id } }),
+  })).json()).data.customer;
+  expect((await account('c3')).user.verified).toBe(true);
+  expect(await account('c7')).toEqual({ id: 'c7', user: null });
+  expect((await account('c8')).user.verified).toBe(false);
+  const created = await createVendureConnector().createCustomer!(sessionContext(await signedIn()), { email: 'till@example.com', firstName: 'Till', lastName: 'Made' });
+  expect((await account(created.id)).user).toEqual({ id: expect.any(String), verified: false });
+  expect(await account('unknown')).toBeNull();
+});

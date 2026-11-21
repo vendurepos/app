@@ -56,6 +56,13 @@ const PPM_PER_PERCENT = 10_000;
 const DEMO_PAYMENT_METHOD = 'tally-pos';
 // Ada Lovelace's (c1) seeded staff note, shown on her customer sheet and never on a receipt.
 export const DEMO_CUSTOMER_NOTE = 'Prefers oat milk; ask before adding a pastry.';
+// Read-time, no stored field: Margaret Mead (c7) bought as a storefront guest (no User); Dorothy Vaughan (c8) and till-made customers are unverified, as Admin createCustomer gives.
+const DEMO_GUEST_EMAIL = 'margaret@demo.vendurepos.com';
+const DEMO_VERIFIED_EMAILS = ['ada', 'grace', 'alan', 'katherine', 'barbara', 'donald'].map(name => `${name}@demo.vendurepos.com`);
+export function demoCustomerUser(customer: { emailAddress: string }): { id: string; verified: boolean } | null {
+  const email = customer.emailAddress.trim().toLowerCase();
+  return email === DEMO_GUEST_EMAIL ? null : { id: `u-${email}`, verified: DEMO_VERIFIED_EMAILS.includes(email) };
+}
 
 export type DemoStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Command = { id: string; type: string; version: number; payload: any };

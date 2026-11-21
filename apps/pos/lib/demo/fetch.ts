@@ -31,7 +31,7 @@
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
 import { DEMO_ORDER_HISTORY } from './order-notes';
-import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, type DemoStorage } from './store';
+import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, demoCustomerUser, type DemoStorage } from './store';
 
 // Reserved, non-resolving origin: a request missed by the wrapper cannot reach a live store.
 export const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
@@ -171,6 +171,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { customer: store.customer(id) ? { id, history: page(store.customerHistory(id), variables.options) } : null };
         break;
       }
+      case 'CustomerAccount': { const c = store.customer(String(variables.id)); data = { customer: c ? { id: c.id, user: demoCustomerUser(c) } : null }; break; }
       case 'AddCustomerNote': case 'addNoteToCustomer': data = { addNoteToCustomer: store.addCustomerNote(variables.input) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
       case 'Addresses': data = { customer: store.customer(variables.id) }; break;

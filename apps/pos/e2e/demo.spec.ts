@@ -554,7 +554,7 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   const sheet = page.getByTestId('customer-sheet');
   await page.getByTestId('customers-edit-c3').click();
   await expect(sheet.getByTestId('customer-sheet-groups-value')).toHaveText('Coffee club, Trade');
-  await expect(sheet.getByText('Set in Vendure', { exact: true })).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-groups').getByText('Set in Vendure', { exact: true })).toBeVisible();
   await expect(sheet.getByTestId('customer-sheet-groups').getByRole('textbox')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('06f-customer-groups.png') });
   await page.getByTestId('customer-sheet-close').click();
@@ -565,6 +565,30 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   await page.getByTestId('customers-add').click();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
+});
+
+test("the customer sheet shows the customer's account read-only, as v2's username row: registered and verified, not verified, or a guest", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-account-value')).toHaveText('Registered · email verified');
+  await expect(sheet.getByTestId('customer-sheet-account').getByRole('textbox')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('06h-customer-account.png') });
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c8').click();
+  await expect(sheet.getByTestId('customer-sheet-account-value')).toHaveText('Registered · not verified');
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c7').click();
+  await expect(sheet.getByTestId('customer-sheet-account-value')).toHaveText('Guest');
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-add').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-account')).toHaveCount(0);
 });
 
 test("the customer sheet lists a customer's staff notes and adds one; notes are never on a receipt or a print", async ({ page }) => {
