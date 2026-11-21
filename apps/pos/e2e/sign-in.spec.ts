@@ -206,10 +206,12 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
     .toHaveText("This store's VendurePOS plugin is missing or out of date. Install or update it, then this till continues.");
   await expect(cart).toHaveCount(0);
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toHaveCount(0);
+  await expect(page.getByTestId('category-browse')).toHaveCount(0);
   await page.unroute('**/tally/v1/info', infoNotFound);
   await expect(page.getByTestId('sale-settings-retrying')).toHaveText("Can't reach the store's settings yet. Retrying…");
   await expect(cart).toHaveCount(0);
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toHaveCount(0);
+  await expect(page.getByTestId('category-browse')).toHaveCount(0);
   // At least one of the sale's reads has failed (sign-in's own read was the 404 above).
   expect(infoAborts).toBeGreaterThanOrEqual(1);
   await page.unroute('**/tally/v1/info');

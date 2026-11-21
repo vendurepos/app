@@ -3655,9 +3655,14 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await expect(search).toHaveValue('');
   // A search typed inside a category leaves it (v2 use-browse-path.ts), so the cleared search is back on the tiles.
   await expect(categories).toBeVisible();
-  await expect(mugTile).toHaveCount(0);
 
   await coffee.click();
+  await expect(crumb).toContainText('Coffee');
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('cart-line-TALLY-MUG').getByTestId('quantity-popover-trigger')).toHaveText('2');
+  await expect(crumb).toContainText('Coffee');
+  await expect(tiles).toHaveCount(CATALOGUE.filter(p => p.category === 'Coffee').length);
+  await expect(mugTile).toHaveCount(0);
   await expect(crumb).toContainText('Coffee');
   await page.getByTestId('category-crumb-root').click();
   await expect(crumb).toHaveCount(0);
