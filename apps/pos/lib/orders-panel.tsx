@@ -8,6 +8,7 @@ import {
 import { searchVendureCustomers } from '@tallyui/connector-vendure';
 import { formatMoney } from '@tallyui/core';
 import { needsAttention, type OrderFilterValue, type OutboxState, type PosOrder } from '@tallyui/pos';
+import { isWalkIn } from './customer-list';
 import { RefreshIcon } from './nav-icons';
 import {
   groupOrdersByDay, ORDER_SEARCH_DEBOUNCE_MS, ORDER_STATUS_OPTIONS, storeDayOf,
@@ -61,7 +62,7 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
     if (!text.trim()) return;
     customerTimer.current = setTimeout(() => {
       void searchVendureCustomers(sessionContext(session), text, { limit: 10 }).then(results => {
-        if (request === customerRequest.current) setCustomers(results.map(({ id, name }) => ({ value: id, label: name })));
+        if (request === customerRequest.current) setCustomers(results.filter(c => !isWalkIn(c)).map(({ id, name }) => ({ value: id, label: name })));
       }).catch(() => { /* Keep the last options when the search fails. */ });
     }, ORDER_SEARCH_DEBOUNCE_MS);
   };

@@ -4,6 +4,7 @@ import type { OrderFilterField } from '@tallyui/core';
 import { listVendureOrderDetails, type VendureOrder, type VendureOrderListOptions } from '@tallyui/connector-vendure';
 import { orderFiltersQuery, type OrderFilterValue, type StoreDay } from '@tallyui/pos';
 import { orderHistoryNotice, orderStateLabel, toOrderHistoryRow, type OrderHistoryNotice } from './order-history';
+import { isWalkIn } from './customer-list';
 import { toOrderStatus } from './order-detail';
 import { sessionContext, type Session } from './session';
 import { tenderName } from './z-report';
@@ -48,7 +49,7 @@ export function toOrderTableRow(order: VendureOrder, timezone: string): OrderTab
   });
   return { id: order.id, code: order.code, stateLabel: orderStateLabel(order.state), status: toOrderStatus(order.state),
     placedAt, day: storeDayOf(placedAt, timezone),
-    customer: order.customer ? `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress : null,
+    customer: !order.customer || isWalkIn(order.customer) ? null : `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress,
     cashierRef: order.customFields?.tallyCashierRef ?? null, paymentMethods: [...new Set(payments)].join(', '),
     totalMinor: order.totalWithTax, currency: order.currencyCode, history: toOrderHistoryRow(order),
   };
