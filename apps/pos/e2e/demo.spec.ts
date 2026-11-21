@@ -1593,6 +1593,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   const sheet = page.getByTestId('closure-sheet');
   await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €119.04');
   await expect(sheet.getByTestId('closure-counted-cash')).toHaveText('Counted €119.04');
+  await expect(page.getByTestId('closure-blind-counted')).toHaveCount(0);
   await sheet.getByTestId('closure-print').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(printed).toEqual(expect.arrayContaining([
@@ -1621,6 +1622,33 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   expect(requests.filter((url) => new URL(url).origin !== origin && url !== DEMO_CAPTURE_URL)).toEqual([]);
   expect(cspConsole).toEqual([]);
   expect(consoleErrors).toEqual([]);
+});
+
+test('a till without the approve permission counts blind; after closing it sees what it counted, sent for review, and no expected figure', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('vendurepos.demo.till_role', '1'));
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('register-open-panel').click();
+  const panel = page.getByTestId('register-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId('register-panel-expected')).toHaveCount(0);
+  await panel.getByTestId('register-panel-close').click();
+  const count = page.getByTestId('register-count');
+  await count.getByTestId('count-amount').fill('100.00');
+  await expect(count.getByTestId('count-variance')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('09j-register-count-blind-vendurepos.png') });
+  await count.getByTestId('count-close').click();
+
+  const sheet = page.getByTestId('closure-sheet');
+  await expect(page.getByTestId('closure-blind-counted')).toHaveText('Cash counted €100.00 · sent for review');
+  await expect(sheet.getByTestId('closure-figures')).toHaveCount(0);
+  await expect(sheet.getByTestId('closure-expected-cash')).toHaveCount(0);
+  await expect(sheet.getByTestId('closure-print')).toHaveCount(0);
+  await expect(sheet).not.toContainText(/Expected|variance/i);
+  await page.screenshot({ path: test.info().outputPath('09k-register-closed-blind-vendurepos.png') });
 });
 
 test('one click from a fresh visit at phone width', async ({ page }) => {
