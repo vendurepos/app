@@ -220,7 +220,7 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     ));
     expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied' });
     const order = await connection.getRepository(ctx, Order).findOneOrFail({
-      where: { id: decode(result.serverRefs!.orderId) }, relations: ['promotions', 'lines'],
+      where: { id: decode(result.serverRefs!.orderId) }, relations: ['promotions', 'lines', 'lines.productVariant', 'lines.taxCategory', 'shippingLines', 'shippingLines.shippingMethod', 'surcharges', 'customer'],
     });
     if (customerId) expect(String(order.customerId)).toBe(decode(customerId));
     // Test setup only: the later order.create job saves the order's coupon promotions for real.
