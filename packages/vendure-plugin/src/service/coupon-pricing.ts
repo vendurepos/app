@@ -47,6 +47,7 @@ const refusalTexts = {
 };
 
 // Postgres order for productVariantId: numeric for integer ids, plain string comparison otherwise.
+// It also orders promotion ids, for equal priorityScore.
 function compareVariantIds(a: string | number, b: string | number): number {
   const integer = (id: string | number) => typeof id === 'number' || /^\d+$/.test(id);
   if (integer(a) && integer(b)) return Number(a) - Number(b);
@@ -217,8 +218,8 @@ export class CouponPricingService {
         taxLines: byBody[index].taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
       }));
     }
-    // Vendure applies promotions in priorityScore order (getActivePromotionsInChannel), whatever order the codes came in.
-    await this.calculator.applyPriceAdjustments(ctx, order, [...promotions].sort((a, b) => a.priorityScore - b.priorityScore));
+    // Vendure applies promotions in priorityScore order (getActivePromotionsInChannel), whatever order the codes came in. Equal scores go by promotion id, so the answer never depends on the order sent; CPN-2's final pass must apply this same order.
+    await this.calculator.applyPriceAdjustments(ctx, order, [...promotions].sort((a, b) => a.priorityScore - b.priorityScore || compareVariantIds(a.id, b.id)));
     const amounts = promotions.map(promotion => byBody.map(line => {
       const discounts = line.discounts.filter(discount => discount.adjustmentSource === promotion.getSourceId());
       const amount = discounts.reduce((sum, discount) => sum - (line.listPriceIncludesTax ? discount.amountWithTax : discount.amount), 0);

@@ -157,6 +157,10 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
       const savedPromotion = (await server.app.get(PromotionService).findOne(ctx, decode(id)))!;
       // Promotion.test skips a coupon promotion the order's couponCodes don't name.
       order.couponCodes = ['ORDERPCT'];
+      // Vendure's final pass loads the lines ORDER BY createdAt, productVariantId (order.service.js:218-219), and these lines share createdAt.
+      const integer = (id: string | number) => typeof id === 'number' || /^\d+$/.test(id);
+      order.lines.sort(({ productVariant: { id: a } }, { productVariant: { id: b } }) => integer(a) && integer(b)
+        ? Number(a) - Number(b) : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
       await server.app.get(OrderCalculator).applyPriceAdjustments(ctx, order, [savedPromotion]);
       const amounts = [variantIds.mug[0], variantIds.beans[0]].map(variantId => {
         const line = order.lines.find(item => String(item.productVariant.id) === decode(variantId))!;
@@ -241,6 +245,34 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
       }
     } finally {
       for (const id of [pct10, fixed500]) {
+        const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+          updatePromotion(input: $input) { ... on Promotion { id enabled } }
+        }`), { input: { id, enabled: false } });
+        expect(updatePromotion).toEqual({ id, enabled: false });
+      }
+    }
+  });
+
+  it('breaks equal priority by promotion id, whatever order the codes are sent in', async () => {
+    const tie10 = await promotion('TIE10', {
+      conditions: minimum('0'),
+      actions: [{ code: 'order_percentage_discount', arguments: [{ name: 'discount', value: '10' }] }],
+    });
+    const tie20 = await promotion('TIE20', {
+      conditions: minimum('0'),
+      actions: [{ code: 'order_percentage_discount', arguments: [{ name: 'discount', value: '20' }] }],
+    });
+    try {
+      for (const codes of [['tie10', 'tie20'], ['tie20', 'tie10']]) {
+        const answer = await price(sale(codes));
+        expect(answer.status).toBe(200);
+        expect(Object.keys(answer.body.priced)).toEqual(codes);
+        for (const [code, amount] of [['tie10', 700], ['tie20', 1260]] as const) {
+          expect(answer.body.priced[code].lines.reduce((sum: number, line: { amountMinor: number }) => sum + line.amountMinor, 0)).toBe(amount);
+        }
+      }
+    } finally {
+      for (const id of [tie10, tie20]) {
         const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
           updatePromotion(input: $input) { ... on Promotion { id enabled } }
         }`), { input: { id, enabled: false } });
