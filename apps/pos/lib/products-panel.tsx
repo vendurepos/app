@@ -3,7 +3,7 @@ import { Image, Pressable, ScrollView, View } from 'react-native';
 import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, IconButton, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { type ProductSort } from '@tallyui/pos';
-import { filterProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow, type ProductRowFilters } from './product-rows';
+import { filterProductRows, groupProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type PanelRow, type ProductRow, type ProductRowFilters } from './product-rows';
 import { productFacets, usePublicFacetIds } from './product-facets';
 import { refreshCatalogue } from './catalogue';
 import { RefreshIcon } from './nav-icons';
@@ -51,13 +51,26 @@ export function ProductsPanel({ products, traits, currency, session }: { product
     if (failure) return false;
     refreshCatalogue(); return true;
   }, [currency, session]);
-  const COLUMNS = useMemo<ProductTableColumn<ProductRow>[]>(() => [
+  // The products whose "N variations" group is open (10.2j): kept across search, filters and sort, empty when the panel opens.
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggle = useCallback((productId: string) => setOpen(prev => {
+    const next = new Set(prev);
+    if (!next.delete(productId)) next.add(productId);
+    return next;
+  }), []);
+  const COLUMNS = useMemo<ProductTableColumn<PanelRow>[]>(() => [
     { id: 'image', header: 'Image', hideHeader: true, flex: 0.6, render: row => row.imageUrl ?
       <Image source={{ uri: row.imageUrl }} testID={`product-image-${row.id}`} accessibilityLabel={row.name}
         resizeMode="cover" className="h-10 w-10 rounded" /> : <View testID={`product-image-${row.id}`} className="h-10 w-10 rounded bg-muted" /> },
-    { id: 'name', header: 'Name', flex: 3, sortValue: row => productRowSortValue(row, 'name'), render: row => <Text>{row.name}</Text> },
+    { id: 'name', header: 'Name', flex: 3, sortValue: row => productRowSortValue(row, 'name'), render: row => row.group ? <VStack className="items-start gap-0.5">
+      <Text>{row.name}</Text>
+      <Pressable testID={`product-variations-${row.group.productId}`} accessibilityRole="button" aria-expanded={row.group.open}
+        accessibilityLabel={`Show variations of ${row.name}`} onPress={() => toggle(row.group!.productId)}>
+        <Text className="text-sm text-primary">{`${row.group.count} variations ${row.group.open ? '⌄' : '›'}`}</Text>
+      </Pressable>
+    </VStack> : <Text className={row.childOf ? 'pl-6' : undefined}>{row.name}</Text> },
     { id: 'sku', header: 'SKU', sortValue: row => productRowSortValue(row, 'sku'), render: row => <Text>{row.sku}</Text> },
-    { id: 'stock', header: 'Stock', align: 'center', flex: 1, sortValue: row => productRowSortValue(row, 'stock'), render: row => editable ? <VStack className="items-center gap-1">
+    { id: 'stock', header: 'Stock', align: 'center', flex: 1, sortValue: row => productRowSortValue(row, 'stock'), render: row => editable && !row.group ? <VStack className="items-center gap-1">
       <EditField testID={`product-stock-${row.id}`} label={`Stock of ${row.name}`} value={row.stockText} keyboardType="number-pad"
         disabled={!row.managed || !row.stockTarget}
         onSave={text => row.stockTarget ? save(row, { field: 'stock', text, target: row.stockTarget }) : Promise.resolve(false)} />
@@ -70,10 +83,10 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       <Text testID={`product-stock-status-${row.id}`}>{STOCK_STATUS_LABELS[row.stockStatus]}</Text>
     </HStack> },
     { id: 'categories', header: 'Categories', flex: 1.5, render: row => <Text numberOfLines={1} testID={`product-categories-${row.id}`}>{row.categories}</Text> },
-    { id: 'price', header: 'Price', align: 'right', sortValue: row => productRowSortValue(row, 'price'), render: row => priceEditable ?
+    { id: 'price', header: 'Price', align: 'right', sortValue: row => productRowSortValue(row, 'price'), render: row => priceEditable && !row.group ?
       <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
         keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
-  ], [editable, priceEditable, save, currency]);
+  ], [editable, priceEditable, save, currency, toggle]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [sort, setSort] = useState<ProductSort | null>(null);
@@ -89,7 +102,7 @@ export function ProductsPanel({ products, traits, currency, session }: { product
   const openFacet = facets.find(facet => facet.id === facetOpen);
   const filtered = useMemo(() => filterProductRows(rows, filters), [rows, filters]);
   const sorted = useMemo(() => sortProductRows(filtered, sort), [filtered, sort]);
-  const shown = sorted.slice(0, limit);
+  const { shown, shownTop, totalTop } = useMemo(() => groupProductRows(sorted, open, limit), [sorted, open, limit]);
   return (
     <VStack testID="products-panel" className="flex-1">
       <HStack dataSet={{ print: 'hide' }} className="items-center border-b border-border px-4 py-2">
@@ -143,12 +156,12 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       {error ? <Text testID="products-save-error" className="border-t border-border px-4 py-2 text-sm text-destructive">{error}</Text> : null}
       {filtered.length > 0 ? <HStack className="items-center justify-between border-t border-border px-4 py-3">
         <HStack className="items-center gap-1">
-          <Text testID="products-count">{`Showing ${shown.length} of ${filtered.length} products`}</Text>
+          <Text testID="products-count">{`Showing ${shownTop} of ${totalTop} products`}</Text>
           <IconButton testID="products-refresh" variant="ghost" size="sm" accessibilityLabel="Refresh products" onPress={() => { refreshCatalogue(); }}>
             <RefreshIcon size={16} />
           </IconButton>
         </HStack>
-        {shown.length < filtered.length ? <Button testID="products-more" variant="secondary" size="sm" onPress={() => setLimit((n) => n + PAGE_SIZE)}>
+        {shownTop < totalTop ? <Button testID="products-more" variant="secondary" size="sm" onPress={() => setLimit((n) => n + PAGE_SIZE)}>
           <Text>Show more</Text>
         </Button> : null}
       </HStack> : null}
