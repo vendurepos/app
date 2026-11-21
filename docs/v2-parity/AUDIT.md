@@ -127,7 +127,7 @@ v2 paths below are under `monorepo/`; "core" means `packages/core/src`.
 | Closure history and Z reprint | Missing | **app**: this till's closures are in the local closure collection (`selectClosureRows` ships). **plugin**: a read route (`GET /tally/v1/registers/:id/closures`) for closures from other tills |
 | Manager approval checked by the server | Partial | Typed name only (`apps/pos/lib/typed-approval.tsx`). **plugin**: an approval route checking `ApproveTallyPosVariance` against a Vendure admin's credentials (medusapos ADR 0023's shape). **shared**: an approval field in `@tallyui/core`'s register close contract |
 | Blind counting, overdue-close prompt, take the drawer, hand-over slip | Missing | **shared** (`@tallyui/pos` session rules, `@tallyui/components` `RegisterCount`), then **plugin** (blind-count setting per register) |
-| Blind close: the server withholds expected and movement amounts from non-holders of ApproveTallyPosVariance | Missing | **plugin**: GET /tally/v1/registers/:id sends the live session's expected and (4.2x) its movements to every TallyPosSell or CreateOrder holder; the app does not wire blind close (useRegisterSession gets no blind option), and a blind till would only leave them off the display |
+| Blind close: the server withholds expected and movement amounts from non-holders of ApproveTallyPosVariance | Missing | **plugin**: GET /tally/v1/registers/:id sends the live session's expected and (4.2x) its movements to every TallyPosSell or CreateOrder holder; since 4.3b the app counts blind for a till without that permission, but that only leaves the figures off the display |
 
 ### 5. Offline cash sales and outbox
 - **v2:**

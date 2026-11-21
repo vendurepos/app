@@ -17,7 +17,8 @@ import { logout } from '../logout';
 import { readServerTotals } from '../store-health';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
-import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
+import { registerBlind } from '../register-blind';
+import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, DEMO_TILL_ROLE_KEY, installDemoStore } from './fetch';
 import { demoCategoryImage, demoProductImage } from './product-images';
 import { DEMO_CUSTOMER_NOTE, DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
 
@@ -111,6 +112,17 @@ it('signs in through the app, checks the barcode field and reads the seeded tax 
     .toEqual({ ok: false, error: 'Email or password is incorrect.' });
   expect(await logout(session)).toBe('ok');
   expect(original).not.toHaveBeenCalled();
+});
+
+it('answers RegisterPermissions with the approve permission, and without it for the e2e till role', async () => {
+  const context = sessionContext(await signedIn());
+  const permissions = async () => (await (await fetch(`${context.baseUrl}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
+    body: JSON.stringify({ query: 'query RegisterPermissions { me { channels { id permissions } } activeChannel { id } }' }) })).json()).data.me.channels[0].permissions;
+  expect(await permissions()).toContain('ApproveTallyPosVariance');
+  expect(await registerBlind(context)).toBe(false);
+  storage.setItem(DEMO_TILL_ROLE_KEY, '1');
+  expect(await permissions()).not.toContain('ApproveTallyPosVariance');
+  expect(await registerBlind(context)).toBe(true);
 });
 
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
@@ -856,6 +868,18 @@ it("keeps a customer's staff notes as CUSTOMER_NOTE history, adds one as given a
   expect(reopened.customerHistory('c2').map(({ id, isPublic, type }) => ({ id, isPublic, type }))).toEqual([{ id: 'cn3', isPublic: true, type: 'CUSTOMER_NOTE' }]);
   expect(reopened.addCustomerNote({ id: 'nobody', note: 'Lost', isPublic: false })).toBeNull();
   expect(new DemoStore(storage).customerHistory('nobody')).toEqual([]);
+});
+
+it("answers CustomerAccount with each customer's Vendure User: verified, a guest's none, unverified, a till-made one unverified, and an unknown id null", async () => {
+  const account = async (id: string) => (await (await fetch(`${DEMO_STORE_ORIGIN}/admin-api`, {
+    method: 'POST', body: JSON.stringify({ query: 'query CustomerAccount($id: ID!) { customer(id: $id) { id user { id verified } } }', variables: { id } }),
+  })).json()).data.customer;
+  expect((await account('c3')).user.verified).toBe(true);
+  expect(await account('c7')).toEqual({ id: 'c7', user: null });
+  expect((await account('c8')).user.verified).toBe(false);
+  const created = await createVendureConnector().createCustomer!(sessionContext(await signedIn()), { email: 'till@example.com', firstName: 'Till', lastName: 'Made' });
+  expect((await account(created.id)).user).toEqual({ id: expect.any(String), verified: false });
+  expect(await account('unknown')).toBeNull();
 });
 
 it("the customer notes read returns the newest 100 of more than 100 notes, oldest first", async () => {

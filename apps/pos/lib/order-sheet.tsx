@@ -100,6 +100,8 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
           )}
           paymentSlot={(
             <VStack>
+              <Text className="font-semibold">Payment</Text>
+              {view.payments.length === 0 ? <Text testID="order-sheet-no-payments">No payments yet</Text> : null}
               {view.payments.map(payment => (
                 <Fragment key={payment.id}>
                   <Text testID={`order-sheet-payment-${payment.id}`}>{payment.text}</Text>
@@ -108,6 +110,14 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
                   ))}
                 </Fragment>
               ))}
+              {([['total', 'Total', view.paymentTotals.total], ['paid', 'Paid', view.paymentTotals.paid],
+                ['refunded', 'Refunded', view.paymentTotals.refunded], ['remaining', 'Remaining', view.paymentTotals.remaining]] as const)
+                .map(([key, label, amount]) => amount === null ? null : (
+                  <HStack key={key} testID={`order-sheet-payment-${key}`} className="justify-between">
+                    <Text className={key === 'remaining' ? 'font-semibold' : undefined}>{label}</Text>
+                    <Text className={key === 'remaining' ? 'font-semibold' : undefined}>{amount}</Text>
+                  </HStack>
+                ))}
             </VStack>
           )}
           footerSlot={footer?.(order, reload)} />

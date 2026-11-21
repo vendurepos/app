@@ -55,6 +55,7 @@ import { printLines } from '../lib/print-lines';
 import { printXReport } from '../lib/print-x-report';
 import { RefundSheet } from '../lib/refund-sheet';
 import { loadVarianceLimitMinor } from '../lib/register-approval';
+import { blindClosureText, useRegisterBlind } from '../lib/register-blind';
 import { loadCloseBy } from '../lib/register-close-by';
 import { loadOpeningFloatMinor } from '../lib/register-float';
 import { fetchRegisters, headerPlace, holdsRegister, registerTitle, setTillHoldsSession, type ListedRegister } from '../lib/register-choice';
@@ -199,6 +200,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const identity = tillIdentity(session);
   const actor = useMemo(() => ({ id: identity, name: identity }), [identity]);
   const readSettingsCapabilities = saleSettings.status === 'ready' ? saleSettings.capabilities : undefined;
+  const blind = useRegisterBlind(session);
   // The one register session hook for this store: the sale, the panel and the count share it.
   const register = useRegisterSession({
     sessions: registerStore?.sessions ?? null, movements: registerStore?.movements ?? null, closures: registerStore?.closures ?? null,
@@ -208,7 +210,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     deviceName: session.kind === 'api-key' ? session.device ?? null : null,
     enabled: (readSettingsCapabilities?.register ?? 0) >= MIN_REGISTER, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
     varianceThreshold: loadVarianceLimitMinor(),
-    expectedCloseTime: loadCloseBy(boundRegisterId),
+    expectedCloseTime: loadCloseBy(boundRegisterId), blind,
   });
   // #332: the "approval needed again" card's button, only where the store has the approval route.
   const approvalSheet = useApprovalSheet({ session, register, capabilities: readSettingsCapabilities });
@@ -465,10 +467,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         <>
           <ClosureSheet register={register} currency={currency} onPrint={printZ} onDone={() => setClosingSessionId(null)} />
           {/* Drawn after the sheet, so above it: the store's figures may lag this Z until these orders are sent. */}
-          {register.lastClosure.unsynced_count > 0 ? (
+          {register.lastClosure.unsynced_count > 0 || register.blind ? (
             <Portal name="closure-unsynced">
               <View className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-md border border-border bg-background px-4 py-2">
-                <Text testID="closure-unsynced">{unsyncedNote(register.lastClosure.unsynced_count)}</Text>
+                <VStack>
+                  {register.lastClosure.unsynced_count > 0 ? <Text testID="closure-unsynced">{unsyncedNote(register.lastClosure.unsynced_count)}</Text> : null}
+                  {/* A blind cashier sees what they counted, never the expected figure or the variance (Front desk ruling, 2026-11-21). */}
+                  {register.blind ? <Text testID="closure-blind-counted">{blindClosureText(register.lastClosure.counted.cash ?? 0, currency)}</Text> : null}
+                </VStack>
               </View>
             </Portal>
           ) : null}
