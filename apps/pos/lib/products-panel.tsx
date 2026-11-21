@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Image, Pressable, ScrollView, View } from 'react-native';
-import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
+import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, IconButton, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { type ProductSort } from '@tallyui/pos';
 import { filterProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow, type ProductRowFilters } from './product-rows';
 import { productFacets, usePublicFacetIds } from './product-facets';
 import { refreshCatalogue } from './catalogue';
+import { RefreshIcon } from './nav-icons';
 import { sessionContext, type Session } from './session';
 import { PRICE_INVALID_TEXT, STOCK_CHANGED_TEXT, STOCK_INVALID_TEXT, checkStockEdit, saveStock, saveVariantUpdate, useCatalogueEditable, variantUpdateInput, type ProductEdit } from './product-edit';
 
@@ -141,7 +142,12 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       } />
       {error ? <Text testID="products-save-error" className="border-t border-border px-4 py-2 text-sm text-destructive">{error}</Text> : null}
       {filtered.length > 0 ? <HStack className="items-center justify-between border-t border-border px-4 py-3">
-        <Text testID="products-count">{`Showing ${shown.length} of ${filtered.length} products`}</Text>
+        <HStack className="items-center gap-1">
+          <Text testID="products-count">{`Showing ${shown.length} of ${filtered.length} products`}</Text>
+          <IconButton testID="products-refresh" variant="ghost" size="sm" accessibilityLabel="Refresh products" onPress={() => { refreshCatalogue(); }}>
+            <RefreshIcon size={16} />
+          </IconButton>
+        </HStack>
         {shown.length < filtered.length ? <Button testID="products-more" variant="secondary" size="sm" onPress={() => setLimit((n) => n + PAGE_SIZE)}>
           <Text>Show more</Text>
         </Button> : null}
