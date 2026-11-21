@@ -59,6 +59,16 @@ describe('the cart under the store tax settings', () => {
     );
   });
 
+  it("splits a fee whose amount includes tax in the fee's own mode, so the rows sum to the order's tax", () => {
+    const builder = createOrderBuilder({ currency: settings.currency, taxContext: saleTaxContext() });
+    addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
+    builder.addFee({ name: 'Gift wrap', amountMinor: 214, taxClass: '2', amountIncludesTax: true });
+    const totals = cartTotals(builder.getSnapshot());
+    // The demo's rounding (lib/demo/store.ts). Mug 800 x 19 % = 152; Gift wrap 214 incl. 7 % = 200 net + 14 (not 214 x 7 % = 15).
+    expect(totals.taxRows.map(({ name, amountMinor }) => [name, amountMinor])).toEqual([['Standard DE 19%', 152], ['Reduced DE 7%', 14]]);
+    expect(totals.taxRows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(totals.taxMinor);
+  });
+
   it('offers category ids as tax classes in key order, excluding the default', () => {
     expect(chargeTaxClasses({ default: 'Standard DE', '1': 'Standard DE', '2': 'Reduced DE' })).toEqual([
       { id: '1', label: 'Standard DE' }, { id: '2', label: 'Reduced DE' },

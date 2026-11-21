@@ -119,11 +119,14 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
             ))}
           </>}
           {!locked && chargesOffered && (form?.kind === 'charge' ? (
+            // v2's Add Fee "%" and "Amount Includes Tax" switch (docs/v2-parity/demo-pairs/04-cart-3-items-wcpos.webp).
             <ChargeForm currency={order.currency} lineTax={sale.capabilities?.lineTax} taxClasses={taxClasses} shippingTaxFromStore={false}
-              onClose={() => setForm(null)} onApply={({ kind, name, amountMinor, taxStatus, taxClass }) => {
+              allowPercent pricesIncludeTax={order.pricesIncludeTax}
+              onClose={() => setForm(null)} onApply={({ kind, name, amountMinor, taxStatus, taxClass, percent, amountIncludesTax }) => {
                 if (kind === 'shipping' && (order.shipping?.length ?? 0) >= MAX_SHIPPING_LINES) return SHIPPING_SINGLE_REFUSAL;
                 const result = kind === 'custom' ? sale.addCustomLine({ name, priceMinor: amountMinor, taxStatus, taxClass })
-                  : kind === 'fee' ? sale.addFee({ name, amountMinor, taxStatus, taxClass }) : sale.addShipping({ name, amountMinor, taxStatus, taxClass });
+                  : kind === 'fee' ? sale.addFee({ name, amountMinor, taxStatus, taxClass, percent, amountIncludesTax })
+                  : sale.addShipping({ name, amountMinor, taxStatus, taxClass, amountIncludesTax });
                 return typeof result === 'string' ? result : null;
               }} />
           ) : (

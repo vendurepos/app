@@ -11,7 +11,8 @@ export function taxRowLabel(taxInclusive: boolean, code: string | undefined, rat
  */
 export function cartTotals(order: Order) {
   const { subtotalMinor, taxMinor, totalMinor, taxInclusive } = order.display;
-  const taxedLines = [...order.lineItems, ...[...(order.fees ?? []), ...(order.shipping ?? [])].map((charge) => ({ ...charge, taxInclusive: order.pricesIncludeTax }))];
+  // A charge is in its own mode, else the order's: the rule TallyUI's taxedLinesFor and order-builder.ts:342 apply (no woocommerce rounding here).
+  const taxedLines = [...order.lineItems, ...[...(order.fees ?? []), ...(order.shipping ?? [])].map((charge) => ({ ...charge, taxInclusive: charge.amountIncludesTax ?? order.pricesIncludeTax }))];
   const taxRows = taxLinesByRate(taxedLines, order.taxMinor, undefined, order.taxRounding).map(({ code, ratePpm, amountMinor }) => ({
     label: taxRowLabel(taxInclusive, code, ratePpm), name: taxRowLabel(false, code, ratePpm), amountMinor,
   }));

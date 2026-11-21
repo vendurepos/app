@@ -3624,6 +3624,43 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await expect(receipt.getByTestId('receipt-total')).toHaveText('€11.66');
 });
 
+test('A demo cashier adds a 10% fee and a fee whose amount includes tax, and the receipt matches the cart', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const form = cart.getByRole('group', { name: 'Add charge' });
+  await cart.getByTestId('add-charge').click();
+  await form.getByLabel('Name', { exact: true }).fill('Service');
+  await form.getByTestId('charge-form-unit-percent').click();
+  await form.getByLabel('Amount', { exact: true }).fill('10');
+  await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Standard DE', exact: true }).click();
+  await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
+  await cart.getByTestId('add-charge').click();
+  await form.getByLabel('Name', { exact: true }).fill('Gift wrap');
+  await form.getByLabel('Amount', { exact: true }).fill('2.14');
+  await form.getByRole('switch', { name: 'Amount Includes Tax' }).click();
+  await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Reduced DE', exact: true }).click();
+  await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
+  // The demo store excludes tax. Mug 8.00 at Standard 19%. Service: 10% of the lines in the store's mode, 8.00 → 0.80 net,
+  // at 19%. Gift wrap: 2.14 including Reduced 7% is 2.14 / 1.07 = 2.00 net, tax 0.14 exactly.
+  // Standard tax (8.00 + 0.80) × 19% = 1.672 → 1.67; Reduced 0.14; tax 1.81. Total 8.00 + 0.80 + 2.00 + 1.81 = 12.61.
+  const figures = { 'tax-Standard DE 19%': '€1.67', 'tax-Reduced DE 7%': '€0.14', tax: '€1.81', total: '€12.61' };
+  for (const [id, text] of Object.entries({ ...figures, 'fee-0-amount': '€0.80', 'fee-1-amount': '€2.00' })) {
+    await expect(cart.getByTestId(`cart-${id}`)).toHaveText(text);
+  }
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  for (const [id, text] of Object.entries({ ...figures, 'fee-0': '€0.80', 'fee-1': '€2.00' })) {
+    await expect(receipt.getByTestId(`receipt-${id}`)).toHaveText(text);
+  }
+});
+
 test('a demo cashier picks a category, still scans a product from another, and switches the products to a table', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });

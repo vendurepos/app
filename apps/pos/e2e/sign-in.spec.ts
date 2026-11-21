@@ -2120,6 +2120,60 @@ test('fees, a shipping charge and a custom item, one with a tax class, are appli
   await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: 2951, shippingWithTax: 595 }]);
 });
 
+test('a percent fee and a fee whose amount includes tax reach the store in its own mode, and the order is accepted', async ({ page }) => {
+  const sent: { payload: { clientOrderId: string; fees: Record<string, unknown>[] } }[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() === 'POST') {
+      sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
+    }
+    return route.continue();
+  });
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const form = cart.getByRole('group', { name: 'Add charge' });
+  for (const [name, amount, taxClass] of [['Service', '10', 'Standard DE'], ['Gift wrap', '2.14', 'Reduced DE']]) {
+    await cart.getByTestId('add-charge').click();
+    await form.getByLabel('Name', { exact: true }).fill(name);
+    if (name === 'Service') await form.getByTestId('charge-form-unit-percent').click();
+    await form.getByLabel('Amount', { exact: true }).fill(amount);
+    if (name === 'Gift wrap') await form.getByRole('switch', { name: 'Amount Includes Tax' }).click();
+    await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: taxClass, exact: true }).click();
+    await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
+    await expect(form).toHaveCount(0);
+  }
+  // Seed: excluding tax. Mug 800; Service 10% × 800 = 80; Gift wrap 214 / 1.07 = 200 net (tax 14).
+  // Standard (800 + 80) × 19 % = 167.2 → 167; Reduced 14; total 800 + 80 + 200 + 181 = 1261.
+  await expect(cart.getByTestId('cart-fee-0-amount')).toHaveText('€0.80');
+  await expect(cart.getByTestId('cart-fee-1-amount')).toHaveText('€2.00');
+  await expect(cart.getByTestId('cart-total')).toHaveText('€12.61');
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toHaveText('€12.61');
+  await expect.poll(() => sent.length).toBeGreaterThan(0);
+  for (const command of sent) {
+    expect(command.payload.fees.map((fee) => fee.amountMinor)).toEqual([80, 200]);
+    for (const fee of command.payload.fees) for (const key of ['percent', 'amountIncludesTax']) expect(fee).not.toHaveProperty(key);
+  }
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const onStore = async () => (await (await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax } } }',
+      variables: { id: sent[0].payload.clientOrderId },
+    },
+  })).json()).data.orders.items;
+  await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: 1261 }]);
+});
+
 test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
   type RegisterResult = {
     id: string; status: string;
