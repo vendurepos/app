@@ -256,6 +256,17 @@ describe('order.create v5 contract plumbing', () => {
     expect(result.error!.message).toContain('shipping[1].clientShippingId: expected no duplicate clientShippingId');
   });
 
+  it('a duplicate clientFeeId is refused invalid_payload and creates no order', async () => {
+    const command = sale();
+    command.payload.fees = [fee, { ...fee, name: 'Second' }];
+    const result = await run(command);
+    expect(result).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload' } });
+    expect(result.error!.message).toContain('fees[1].clientFeeId: expected no duplicate clientFeeId');
+    expect(await connection.rawConnection.getRepository(Order).countBy({
+      customFields: { tallyClientOrderId: command.payload.clientOrderId },
+    })).toBe(0);
+  });
+
   for (const mode of ['taxable', 'none', 'with-fee'] as const) {
     it(`applies one ${mode} shipping charge as the order's ShippingLine`, async () => {
       const command = { ...orderCommand([{
