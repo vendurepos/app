@@ -23,8 +23,11 @@ export type OrderListQuery = { search: string; filters: OrderFilterValue };
 export type OrderTableRow = {
   id: string; code: string; stateLabel: string; status: OrderStatus; placedAt: string; day: StoreDay;
   customer: string | null; cashierRef: string | null; paymentMethods: string;
-  totalMinor: number; currency: string; history: OrderHistoryRow;
+  totalMinor: number; currency: string; history: OrderHistoryRow; via: 'pos' | 'online';
 };
+// Front desk ruling 2026-11-21: v2's made-at marker, in words (POS / Online), not v2's icon.
+export const ORDER_VIA_LABEL: Record<'pos' | 'online', string> = { pos: 'POS', online: 'Online' };
+export const ORDER_VIA_A11Y: Record<'pos' | 'online', string> = { pos: 'Made at the till', online: 'Made online' };
 
 export function orderListOptions(query: OrderListQuery, timezone: string, skip: number): VendureOrderListOptions {
   const { filters, search } = query;
@@ -54,6 +57,7 @@ export function toOrderTableRow(order: VendureOrder, timezone: string): OrderTab
     customer: !order.customer || isWalkIn(order.customer) ? null : `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress,
     cashierRef: order.customFields?.tallyCashierRef ?? null, paymentMethods: [...new Set(payments)].join(', '),
     totalMinor: order.totalWithTax, currency: order.currencyCode, history: toOrderHistoryRow(order),
+    via: order.customFields?.tallyClientOrderId ? 'pos' : 'online',
   };
 }
 export function groupOrdersByDay(rows: readonly OrderTableRow[], today: StoreDay): { day: StoreDay; label: string; rows: OrderTableRow[] }[] {

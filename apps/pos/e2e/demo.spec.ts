@@ -438,6 +438,24 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   await expect(page.getByTestId('orders-search')).toHaveCount(0);
 });
 
+test('the Orders table marks each order POS or Online, as v2\'s orders', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-store').click();
+  await expect(page.getByTestId('orders-via-1')).toHaveText('Online');
+  await expect(page.getByTestId('orders-via-1')).toHaveAttribute('aria-label', 'Made online');
+  for (const id of ['2', '3']) {
+    await expect(page.getByTestId(`orders-via-${id}`)).toHaveText('POS');
+    await expect(page.getByTestId(`orders-via-${id}`)).toHaveAttribute('aria-label', 'Made at the till');
+  }
+  await page.screenshot({ path: test.info().outputPath('07l-orders-via-vendurepos.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId('orders-via-1')).toBeVisible();
+});
+
 test("the Orders refresh beside the count reads the list again, and waits while it loads, as v2's 07b", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
