@@ -13,14 +13,14 @@ afterEach(() => vi.unstubAllGlobals());
 
 it('listCustomerNotes POSTs the notes query and options, trims notes, drops blank ones and returns none for an absent customer', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: { customer: { id: 'c1', history: { items: [
-    { id: 'h1', isPublic: false, data: { note: ' Prefers oat milk \n' } },
+    { id: 'h2', isPublic: true, data: { note: 'Second' } },
     { id: 'blank', isPublic: false, data: { note: '   ' } },
     { id: 'missing', isPublic: false, data: {} },
-    { id: 'h2', isPublic: true, data: { note: 'Second' } },
+    { id: 'h1', isPublic: false, data: { note: ' Prefers oat milk \n' } },
   ] } } } })).mockResolvedValueOnce(Response.json({ data: { customer: null } }));
   vi.stubGlobal('fetch', fetch);
   expect(await listCustomerNotes(context, 'c1')).toEqual([{ id: 'h1', text: 'Prefers oat milk' }, { id: 'h2', text: 'Second' }]);
-  expect(CUSTOMER_NOTE_OPTIONS).toEqual({ take: 100, sort: { createdAt: 'ASC' }, filter: { type: { eq: 'CUSTOMER_NOTE' } } });
+  expect(CUSTOMER_NOTE_OPTIONS).toEqual({ take: 100, sort: { createdAt: 'DESC' }, filter: { type: { eq: 'CUSTOMER_NOTE' } } });
   expect(fetch).toHaveBeenCalledExactlyOnceWith(`${context.baseUrl}/admin-api`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers }, signal: context.signal,
     body: JSON.stringify({ query: CUSTOMER_NOTES_QUERY, variables: { id: 'c1', options: CUSTOMER_NOTE_OPTIONS } }),

@@ -8,6 +8,7 @@ import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
 import { loadOrderPage } from '../order-list';
 import { loadCustomerPage } from '../customer-list';
+import { listCustomerNotes } from '../customer-notes';
 import { orderDetailView } from '../order-detail';
 import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
@@ -845,4 +846,20 @@ it("keeps a customer's staff notes as CUSTOMER_NOTE history, adds one as given a
   expect(reopened.customerHistory('c2').map(({ id, isPublic, type }) => ({ id, isPublic, type }))).toEqual([{ id: 'cn3', isPublic: true, type: 'CUSTOMER_NOTE' }]);
   expect(reopened.addCustomerNote({ id: 'nobody', note: 'Lost', isPublic: false })).toBeNull();
   expect(new DemoStore(storage).customerHistory('nobody')).toEqual([]);
+});
+
+it("the customer notes read returns the newest 100 of more than 100 notes, oldest first", async () => {
+  const session = await signedIn();
+  new DemoStore(storage).addCustomerNote({ id: 'c1', note: 'seed', isPublic: false });
+  const saved = JSON.parse(values.get(DEMO_STORAGE_KEY)!);
+  saved.customerNotes.c1 = Array.from({ length: 105 }, (_, index) => ({
+    id: `n${index + 1}`, type: 'CUSTOMER_NOTE', createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(), isPublic: false, data: { note: `note ${index + 1}` },
+  }));
+  values.set(DEMO_STORAGE_KEY, JSON.stringify(saved));
+  installed.uninstall();
+  installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
+  const notes = await listCustomerNotes(sessionContext(session), 'c1');
+  expect(notes).toHaveLength(100);
+  expect(notes[0].text).toBe('note 6');
+  expect(notes[99].text).toBe('note 105');
 });

@@ -6,8 +6,8 @@ import { sessionContext, type Session } from './session';
 export const CUSTOMER_NOTES_QUERY = `query CustomerNotes($id: ID!, $options: HistoryEntryListOptions) {
   customer(id: $id) { id history(options: $options) { items { id isPublic data } } }
 }`;
-// Vendure keeps a customer's notes as CUSTOMER_NOTE history entries among its other events; the sheet reads only the notes, oldest first.
-export const CUSTOMER_NOTE_OPTIONS = { take: 100, sort: { createdAt: 'ASC' }, filter: { type: { eq: 'CUSTOMER_NOTE' } } };
+// Vendure keeps a customer's notes as CUSTOMER_NOTE history entries among its other events; the sheet reads only the newest 100 notes and shows them oldest first.
+export const CUSTOMER_NOTE_OPTIONS = { take: 100, sort: { createdAt: 'DESC' }, filter: { type: { eq: 'CUSTOMER_NOTE' } } };
 export const ADD_CUSTOMER_NOTE_MUTATION = `mutation AddCustomerNote($input: AddNoteToCustomerInput!) {
   addNoteToCustomer(input: $input) { id }
 }`;
@@ -27,7 +27,7 @@ export async function listCustomerNotes(context: SyncContext, customerId: string
   const body = await response.json();
   if (body.errors?.length) throw new Error(body.errors[0].message);
   if (body.data.customer === null) return [];
-  return toOrderNotes(body.data.customer.history.items).map(({ id, text }) => ({ id, text }));
+  return toOrderNotes([...body.data.customer.history.items].reverse()).map(({ id, text }) => ({ id, text }));
 }
 
 /** Adds one note to the customer; never throws. A blank note is refused without a request. */
