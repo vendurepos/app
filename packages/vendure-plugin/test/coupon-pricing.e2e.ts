@@ -496,6 +496,27 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
       .toEqual({ status: 400, body: { code: 'invalid_payload', message: 'lines[0].custom.taxClass: unknown tax class' } });
   });
 
+  it('out-of-bounds lines and codes are refused 400 invalid_payload', async () => {
+    // Each row starts from a valid sale and changes one thing. 10 is MAX_COUPON_CODES, 2147483647 is MAX_INT4.
+    const input = sale(), [l1, l2] = input.lines;
+    const custom = { clientLineId: 'l1', custom: { name: 'Custom item', taxStatus: 'exempt' }, quantity: 1, unitPriceMinor: 1000 };
+    const rows: Array<[unknown, string]> = [
+      [{ ...input, currency: 978 }, 'currency: expected a string'],
+      [{ ...input, pricesIncludeTax: 'false' }, 'pricesIncludeTax: expected a boolean'],
+      [{ ...input, codes: [] }, 'codes: expected 1 to 10 codes'],
+      [{ ...input, codes: Array.from({ length: 11 }, (_, i) => `code${i}`) }, 'codes: expected 1 to 10 codes'],
+      [{ ...input, lines: [] }, 'lines: expected 1 to 100 lines'],
+      [{ ...input, lines: Array.from({ length: 101 }, (_, i) => ({ ...l1, clientLineId: `l${i}` })) }, 'lines: expected 1 to 100 lines'],
+      [{ ...input, lines: [l1, { ...l2, clientLineId: 'l1' }] }, 'lines[1].clientLineId: duplicate line id'],
+      [{ ...input, lines: [custom, l2] }, 'lines[0].custom.taxStatus: expected taxable or none'],
+      [{ ...input, lines: [{ ...l1, quantity: 0 }, l2] }, 'lines[0].quantity: expected a whole number from 1 to 2147483647'],
+      [{ ...input, lines: [{ ...l1, discountMinor: -1 }, l2] }, 'lines[0].discountMinor: expected a whole number from 0 to 2147483647'],
+    ];
+    for (const [body, message] of rows) {
+      expect(await price(body), message).toEqual({ status: 400, body: { code: 'invalid_payload', message } });
+    }
+  });
+
   it('rejects eleven codes', async () => {
     expect(await price(sale(Array.from({ length: 11 }, (_, i) => `code${i}`))))
       .toMatchObject({ status: 400, body: { code: 'invalid_payload' } });
