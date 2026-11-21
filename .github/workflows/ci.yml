@@ -58,7 +58,8 @@ jobs:
   plugin:
     name: Vendure plugin (typecheck and Postgres e2e)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The e2e suite took 850 s of a 15-minute cap on 2026-11-21 (60 files, 579 tests) and was killed at cleanup.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16

@@ -72,8 +72,26 @@ it('reads no server totals while offline', async () => {
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
   try {
     expect(await readServerTotals({ connectorId: 'vendure', baseUrl: 'https://store.invalid', headers: {} } as SyncContext))
-      .toEqual({ products: null, orders: null });
+      .toEqual({ products: null, variants: null, orders: null });
   } finally { vi.unstubAllGlobals(); }
+});
+
+describe('readServerTotals variants', () => {
+  const context = { connectorId: 'vendure', baseUrl: 'https://store.invalid', headers: {} } as SyncContext;
+  const store = (variants: () => Response) => vi.fn(async (_url: string, init: RequestInit) => {
+    const { query } = JSON.parse(String(init.body));
+    if (query.includes('productVariants(')) return variants();
+    if (query.includes('products(')) return Response.json({ data: { products: { totalItems: 30 } } });
+    return Response.json({ data: { orders: { items: [], totalItems: 4 } } });
+  });
+  it("reads the store's variant total", async () => {
+    vi.stubGlobal('fetch', store(() => Response.json({ data: { productVariants: { totalItems: 42 } } })));
+    try { expect(await readServerTotals(context)).toEqual({ products: 30, variants: 42, orders: 4 }); } finally { vi.unstubAllGlobals(); }
+  });
+  it('a failed variants read is null and leaves products and orders', async () => {
+    vi.stubGlobal('fetch', store(() => new Response('refused', { status: 403 })));
+    try { expect(await readServerTotals(context)).toEqual({ products: 30, variants: null, orders: 4 }); } finally { vi.unstubAllGlobals(); }
+  });
 });
 
 describe('attentionRows', () => {
@@ -132,7 +150,7 @@ describe('attentionReason and canSendAgain', () => {
 });
 
 it('refuses to clear on Yes when the store no longer answers', async () => {
-  const totals = { products: null, orders: null };
+  const totals = { products: null, variants: null, orders: null };
   const onTotals = vi.fn();
   const onRedownload = vi.fn(async () => {});
   expect(await confirmRedownload(async () => totals, onTotals, onRedownload, () => true)).toBe('refused');
@@ -142,12 +160,12 @@ it('refuses to clear on Yes when the store no longer answers', async () => {
 
 it('clears on Yes when the store answers', async () => {
   const onRedownload = vi.fn(async () => {});
-  expect(await confirmRedownload(async () => ({ products: 5, orders: 2 }), vi.fn(), onRedownload, () => true)).toBe('cleared');
+  expect(await confirmRedownload(async () => ({ products: 5, variants: 7, orders: 2 }), vi.fn(), onRedownload, () => true)).toBe('cleared');
   expect(onRedownload).toHaveBeenCalledTimes(1);
 });
 
 it('keeps the catalogue when Yes is cancelled while the store is checked', async () => {
   const onRedownload = vi.fn(async () => {});
-  expect(await confirmRedownload(async () => ({ products: 5, orders: 2 }), vi.fn(), onRedownload, () => false)).toBe('refused');
+  expect(await confirmRedownload(async () => ({ products: 5, variants: 7, orders: 2 }), vi.fn(), onRedownload, () => false)).toBe('refused');
   expect(onRedownload).not.toHaveBeenCalled();
 });

@@ -404,7 +404,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
-      {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
+      {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} onOpenOrder={row => { setCustomersOpen(false); setOrdersOpen(true); setOpenOrder(row); }} /> : null}
       {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} session={session} /> : null}
       {healthOpen ? <StoreHealthPanel
         session={session}
@@ -413,7 +413,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
         onViewLog={() => { setHealthOpen(false); setSettingsSection('sync-log'); setSettingsOpen(true); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
-        waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
+        waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length}
+        variantCount={catalogue.products.reduce((total, product) => total + (Array.isArray(product.variants) ? product.variants.length : 0), 0)} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }}
         onCheckNow={() => syncNow([outbox, registerOutbox], refreshCatalogue)}
         redownloading={catalogue.redownloading}

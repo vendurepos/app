@@ -1617,6 +1617,19 @@ test('Sync now pulls a price change made in Vendure at once, and the header says
   expect(cspConsole).toEqual([]);
 });
 
+test("Store health's Variants and Products cover the whole dev store once the catalogue has synced", async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  await expect(page.getByTestId('last-synced')).toHaveText(/^Last synced \d/);
+  await openRegister(page);
+  await page.getByTestId('store-health-open').click();
+  await expect(page.getByTestId('store-health-coverage-products')).toHaveAttribute('aria-valuenow', '100');
+  await expect(page.getByTestId('store-health-coverage-variants')).toHaveAttribute('aria-valuenow', '100');
+  const onDevice = await page.getByTestId('store-health-count-variants').textContent();
+  expect(onDevice).toMatch(/^\d+$/);
+  await expect(page.getByTestId('store-health-server-variants')).toHaveText(onDevice!);
+});
+
 test('a stock change made in Vendure shows on the open till when it comes back to the foreground or online', async ({ page }) => {
   test.setTimeout(3 * 60_000);
   await page.goto('/');
