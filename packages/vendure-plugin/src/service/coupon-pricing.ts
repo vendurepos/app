@@ -194,6 +194,7 @@ export class CouponPricingService {
       if (amounts[index].every(line => line.amount === 0)) return { status: 200, body: this.refuse(ctx, code, "doesn't-apply") };
     }
     for (const [index, line] of order.lines.entries()) {
+      if (amounts.every(code => code[index].amount === 0)) continue;
       const net = amounts.reduce((sum, code) => sum + code[index].net, 0);
       if (net + (input.lines[index].discountMinor ?? 0) > line.linePrice) {
         const last = input.codes.filter((_, codeIndex) => amounts[codeIndex][index].amount > 0).at(-1)!;
