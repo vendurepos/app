@@ -179,6 +179,32 @@ describe('POST /tally/v1/commands', () => {
     expect(accepted.body.results).toHaveLength(50);
   });
 
+  it('each bad envelope field answers 400 with its path and nothing runs', async () => {
+    const rows: Array<[string, (envelope: Record<string, unknown>) => void, string]> = [
+      ['empty id', e => { e.id = ''; }, 'id'],
+      ['65-char id', e => { e.id = 'x'.repeat(65); }, 'id'],
+      ['type 5', e => { e.type = 5; }, 'type'],
+      ['version 0', e => { e.version = 0; }, 'version'],
+      ['version 1.5', e => { e.version = 1.5; }, 'version'],
+      ['payload []', e => { e.payload = []; }, 'payload'],
+      ['payload "x"', e => { e.payload = 'x'; }, 'payload'],
+      ['createdAt 5', e => { e.createdAt = 5; }, 'createdAt'],
+      ['deviceId 5', e => { e.deviceId = 5; }, 'deviceId'],
+    ];
+    for (const [label, mutate, field] of rows) {
+      const valid = mug();
+      const bad: Record<string, unknown> = { ...mug() };
+      mutate(bad);
+      expect(await post({ commands: [valid, bad] }), label).toEqual({
+        status: 400, body: { code: 'invalid_payload', message: `Invalid commands[1].${field}` },
+      });
+      expect(await ledgerFor(valid), label).toBeNull();
+    }
+    expect(await post({ commands: [] })).toEqual({
+      status: 400, body: { code: 'invalid_payload', message: 'Expected 1 to 50 commands' },
+    });
+  });
+
   it('answers 413 batch_too_large with maxCommands for more than 50 commands, and nothing runs (ruling 18)', async () => {
     const before = await ledgerCount();
     const commands = Array.from({ length: 51 }, () => mug());
