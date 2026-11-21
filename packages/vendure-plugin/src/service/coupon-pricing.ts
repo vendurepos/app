@@ -101,6 +101,7 @@ function shapeError(body: unknown): string | undefined {
         return `${path}.${field}: expected a whole number from ${minimum} to ${MAX_INT4}`;
       }
     }
+    if (!Number.isSafeInteger(line.quantity * line.unitPriceMinor)) return `${path}.unitPriceMinor: line total is too large`;
     if (line.taxInclusive !== undefined && typeof line.taxInclusive !== 'boolean') return `${path}.taxInclusive: expected a boolean`;
   }
 }
@@ -118,9 +119,9 @@ export class CouponPricingService {
     return { refusal: refusalTexts[kind](code) };
   }
 
-  async resolveCodes(ctx: RequestContext, codes: string[], customer: Customer | undefined): Promise<{ promotions: Promotion[] } | { refusal: string }> {
+  async resolveCodes(ctx: RequestContext, codes: string[], customer: Customer | undefined): Promise<{ promotions: Promotion[] } | { refusal: string } | Answer> {
     const promotions: Promotion[] = [];
-    for (const code of codes) {
+    for (const [index, code] of codes.entries()) {
       const matches = await this.connection.getRepository(ctx, Promotion).createQueryBuilder('promotion')
         .select('promotion.id').innerJoin('promotion.channels', 'channel')
         .where('channel.id = :channelId', { channelId: ctx.channelId })
@@ -137,6 +138,10 @@ export class CouponPricingService {
           return this.refuse(ctx, code, withoutCustomer instanceof Promotion ? 'customer-used' : 'used-up', promotion.errorCode);
         }
         return this.refuse(ctx, code, 'invalid', promotion.errorCode);
+      }
+      // Database LOWER can fold codes that JS toLowerCase keeps apart; one promotion is priced once.
+      if (promotions.some(resolved => resolved.id === promotion.id)) {
+        return refusal(400, 'invalid_payload', `codes[${index}]: duplicate code`);
       }
       if (promotion.startsAt && promotion.startsAt.getTime() > Date.now()) return this.refuse(ctx, code, 'invalid');
       const actions = promotion.actions.map(action => this.config.promotionOptions.promotionActions.find(definition => definition.code === action.code));
@@ -176,6 +181,8 @@ export class CouponPricingService {
         })).taxCategory;
       }
       order.lines.push(new OrderLine({
+        // Unsaved lines need distinct ids: buy_x_get_y_free keys its free quantity by line id.
+        id: index + 1,
         order, productVariant: variant, productVariantId: variant.id, quantity: line.quantity,
         // A saved line gets orderPlacedQuantity 0 from its column default; unset, OrderLine.discounts divides by NaN.
         orderPlacedQuantity: 0,
@@ -184,7 +191,8 @@ export class CouponPricingService {
         taxCategory, taxCategoryId: taxCategory.id, adjustments: [], taxLines: [],
       }));
     }
-    await this.calculator.applyPriceAdjustments(ctx, order, promotions);
+    // Vendure applies promotions in priorityScore order (getActivePromotionsInChannel), whatever order the codes came in.
+    await this.calculator.applyPriceAdjustments(ctx, order, [...promotions].sort((a, b) => a.priorityScore - b.priorityScore));
     const amounts = promotions.map(promotion => order.lines.map(line => {
       const discounts = line.discounts.filter(discount => discount.adjustmentSource === promotion.getSourceId());
       const amount = discounts.reduce((sum, discount) => sum - (line.listPriceIncludesTax ? discount.amountWithTax : discount.amount), 0);
@@ -216,6 +224,7 @@ export class CouponPricingService {
     const customerId = input.customer ? this.recipe.decodeId(input.customer.customerId) : undefined;
     const customer = customerId === undefined ? undefined : await this.customers.findOne(ctx, customerId);
     const resolved = await this.resolveCodes(ctx, input.codes, customer);
+    if ('status' in resolved) return resolved;
     if ('refusal' in resolved) return { status: 200, body: resolved };
     return this.pricePromotions(ctx, input, customer, resolved.promotions);
   }

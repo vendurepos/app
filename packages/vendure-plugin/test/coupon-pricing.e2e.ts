@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
-  defaultPromotionActions, LanguageCode, Order, OrderLine, Promotion, PromotionItemAction,
+  defaultPromotionActions, LanguageCode, Order, OrderLine, Promotion, PromotionItemAction, PromotionService,
   RequestContext, RequestContextService, Surcharge, TransactionalConnection,
 } from '@vendure/core';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { POS_TILL_PERMISSIONS } from '../src';
 import type { CouponPricingInput } from '../src/service/coupon-pricing';
 import { createPluginTestEnvironment } from './env';
@@ -104,6 +104,24 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     for (const line of answer.body.priced.both10.lines) expect(Number.isSafeInteger(line.amountMinor)).toBe(true);
   });
 
+  it('prices buy_x_get_y_free on the free line only', async () => {
+    const id = await promotion('FREEBEANS', {
+      conditions: [{ code: 'buy_x_get_y_free', arguments: [
+        { name: 'amountX', value: '2' }, { name: 'variantIdsX', value: JSON.stringify([variantIds.mug[0]]) },
+        { name: 'amountY', value: '1' }, { name: 'variantIdsY', value: JSON.stringify([variantIds.beans[0]]) },
+      ] }],
+      actions: [{ code: 'buy_x_get_y_free', arguments: [] }],
+    });
+    try {
+      expect(await price(sale(['freebeans']))).toEqual(priced('freebeans', id, 'FREEBEANS', [{ lineId: 'l2', amountMinor: 500 }]));
+    } finally {
+      const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id, enabled: false } });
+      expect(updatePromotion).toEqual({ id, enabled: false });
+    }
+  });
+
   it('distributes an order discount across a product and a tax-free custom line', async () => {
     const id = await promotion('CUSTOM10', {
       conditions: minimum('0'),
@@ -130,6 +148,33 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
       const amount = answer.body.priced[code].lines[0].amountMinor;
       expect(Number.isSafeInteger(amount)).toBe(true);
       expect(amount).toBeGreaterThan(0);
+    }
+  });
+
+  it('prices several codes in Vendure\'s priority order, whatever order they are sent in', async () => {
+    const pct10 = await promotion('PCT10', {
+      conditions: minimum('0'),
+      actions: [{ code: 'order_percentage_discount', arguments: [{ name: 'discount', value: '10' }] }],
+    });
+    const fixed500 = await promotion('FIXED500', {
+      conditions: [], actions: [{ code: 'order_fixed_discount', arguments: [{ name: 'discount', value: '500' }] }],
+    });
+    try {
+      for (const codes of [['pct10', 'fixed500'], ['fixed500', 'pct10']]) {
+        const answer = await price(sale(codes));
+        expect(answer.status).toBe(200);
+        expect(Object.keys(answer.body.priced)).toEqual(codes);
+        for (const [code, amount] of [['pct10', 650], ['fixed500', 500]] as const) {
+          expect(answer.body.priced[code].lines.reduce((sum: number, line: { amountMinor: number }) => sum + line.amountMinor, 0)).toBe(amount);
+        }
+      }
+    } finally {
+      for (const id of [pct10, fixed500]) {
+        const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+          updatePromotion(input: $input) { ... on Promotion { id enabled } }
+        }`), { input: { id, enabled: false } });
+        expect(updatePromotion).toEqual({ id, enabled: false });
+      }
     }
   });
 
@@ -293,6 +338,13 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
       .toEqual({ status: 400, body: { code: 'invalid_payload', message: 'lines[0].extra: unknown field' } });
   });
 
+  it('rejects a line total beyond safe integers', async () => {
+    const input = sale();
+    input.lines[0] = { ...input.lines[0], quantity: 2 ** 30, unitPriceMinor: 2 ** 30 };
+    expect(await price(input))
+      .toEqual({ status: 400, body: { code: 'invalid_payload', message: 'lines[0].unitPriceMinor: line total is too large' } });
+  });
+
   it('rejects an unknown tax class on a taxable custom line', async () => {
     const input = sale();
     input.lines[0] = { clientLineId: 'l1', custom: { name: 'Custom item', taxStatus: 'taxable', taxClass: 'no-such-class' }, quantity: 1, unitPriceMinor: 1000 };
@@ -308,6 +360,18 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
   it('rejects duplicate codes, including different case', async () => {
     for (const codes of [['cpn10', 'cpn10'], ['CPN10', 'cpn10']]) {
       expect(await price(sale(codes))).toEqual({ status: 400, body: { code: 'invalid_payload', message: 'codes[1]: duplicate code' } });
+    }
+  });
+
+  it('answers 400 when two codes resolve to the same promotion', async () => {
+    const service = server.app.get(PromotionService);
+    const validate = service.validateCouponCode.bind(service);
+    const spy = vi.spyOn(service, 'validateCouponCode').mockImplementation((context, _code, ...args) => validate(context, 'CPN10', ...args));
+    try {
+      expect(await price(sale(['cpn10', 'zzz'])))
+        .toEqual({ status: 400, body: { code: 'invalid_payload', message: 'codes[1]: duplicate code' } });
+    } finally {
+      spy.mockRestore();
     }
   });
 
