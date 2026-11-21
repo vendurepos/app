@@ -148,6 +148,34 @@ export class TallyDisplayClaimWindow {
   expiresAt: Date;
 }
 
+/**
+ * A till device and the hash of the key `registerDevice` issued it (TallyUI#754), per channel. A row with no key hash
+ * and no adopter is a pre-migration device, which adopts once. Pruned when idle for 30 days and owning nothing.
+ */
+@Entity()
+export class TallyDisplayDevice {
+  @PrimaryColumn('varchar')
+  channelId: string;
+
+  @PrimaryColumn('varchar')
+  deviceId: string;
+
+  @Column('varchar', { nullable: true })
+  keyHash: string | null;
+
+  /** The adopting session's cashier id, as `confirm` records it. */
+  @Column('varchar', { nullable: true })
+  adoptedBy: string | null;
+
+  @Column('timestamptz', { nullable: true })
+  adoptedAt: Date | null;
+
+  /** Set at register and on each till call whose key is accepted. */
+  @Index()
+  @Column('timestamptz')
+  lastCallAt: Date;
+}
+
 export const DISPLAY_ENTITIES = [
-  TallyDisplayCode, TallyDisplayPending, TallyDisplay, TallyDisplaySnapshot, TallyDisplaySignal, TallyDisplayClaimWindow,
+  TallyDisplayCode, TallyDisplayPending, TallyDisplay, TallyDisplaySnapshot, TallyDisplaySignal, TallyDisplayClaimWindow, TallyDisplayDevice,
 ];
