@@ -404,7 +404,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
           onPrintXReport={() => printXReport(register, { store, currency, timezone: TIMEZONE, actor })}
           onOpenRegister={() => setRegisterOpen(true)} />} /> : null}
-      {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} /> : null}
+      {customersOpen ? <CustomersPanel session={session} timezone={TIMEZONE} onOpenOrder={row => { setCustomersOpen(false); setOrdersOpen(true); setOpenOrder(row); }} /> : null}
       {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} session={session} /> : null}
       {healthOpen ? <StoreHealthPanel
         session={session}

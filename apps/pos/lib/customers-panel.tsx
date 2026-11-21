@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
 import {
-  Avatar, avatarInitials, Button, HStack, SearchInput, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
+  Avatar, type OrderHistoryRow, avatarInitials, Button, HStack, SearchInput, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
 } from '@tallyui/components';
 import { DEFAULT_CUSTOMER_SORT, nextCustomerSort, useCustomerList, type CustomerRow, type CustomerSort, type CustomerSortField } from './customer-list';
 import { useCustomerAccess } from './customer-edit';
@@ -12,7 +12,7 @@ import type { Session } from './session';
 // twice as wide so an address does not wrap mid-word at 1280 (v2's table).
 const COLUMN_CLASS = ['w-16 flex-none', undefined, undefined, 'flex-[2]', undefined, undefined, 'w-20 flex-none'];
 
-export function CustomersPanel({ session, timezone }: { session: Session; timezone: string }): JSX.Element {
+export function CustomersPanel({ session, timezone, onOpenOrder }: { session: Session; timezone: string; onOpenOrder?: (row: OrderHistoryRow) => void }): JSX.Element {
   const wide = useWindowDimensions().width >= 640;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<CustomerSort>(DEFAULT_CUSTOMER_SORT);
@@ -90,7 +90,7 @@ export function CustomersPanel({ session, timezone }: { session: Session; timezo
           </Button> : null}
         </HStack> : null}
       </ScrollView>
-      <CustomerSheet session={session} row={sheet?.row ?? null} open={sheet !== null} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} />
+      <CustomerSheet session={session} row={sheet?.row ?? null} open={sheet !== null} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} onOpenOrder={onOpenOrder} />
     </VStack>
   );
 }

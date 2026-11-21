@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { TextInput } from 'react-native';
-import { Button, CustomerForm, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text, VStack } from '@tallyui/components';
-import type { Customer } from '@tallyui/core';
+import { Pressable, TextInput } from 'react-native';
+import { Button, CustomerForm, CustomerOrderHistory, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text, VStack } from '@tallyui/components';
+import type { OrderHistoryRow } from '@tallyui/components';
+import { formatMoney, type Customer } from '@tallyui/core';
 import { CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer } from './customer-edit';
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
 import { addCustomerNote, useCustomerNotes } from './customer-notes';
+import { useCustomerOrders } from './customer-orders';
 import { STAFF_NOTE_LABEL } from './order-notes';
 import { sessionContext, type Session } from './session';
 
@@ -19,8 +21,9 @@ function useOnline(): boolean {
   }, []);
   return online;
 }
-export function CustomerSheet({ session, row, open, onClose, onSaved }: {
+export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrder }: {
   session: Session; row: CustomerRow | null; open: boolean; onClose(): void; onSaved(customer: Customer): void;
+  onOpenOrder?: (row: OrderHistoryRow) => void;
 }): JSX.Element {
   const [values, setValues] = useState(() => customerFormValues(row));
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +33,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
   const online = useOnline();
   const groupsText = customerGroupsText(row);
   const { notes, reload } = useCustomerNotes(session, open && row ? row.id : null);
+  const orders = useCustomerOrders(session, open && row ? row.id : null);
   const [note, setNote] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -81,6 +85,14 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
         </HStack>
         {noteError && <Text testID="customer-sheet-note-error" accessibilityRole="alert" className="text-sm text-destructive">{noteError}</Text>}
       </VStack>}
+      {row !== null && <CustomerOrderHistory testID="customer-sheet-orders" className="flex-none" orders={orders.orders ?? []}
+        emptyState={orders.notice ? <Text testID="customer-sheet-orders-notice" className="px-3 text-sm text-muted-foreground">{orders.notice.text}</Text>
+          : orders.orders && <Text testID="customer-sheet-orders-empty" className="px-3 text-sm text-muted-foreground">No orders yet</Text>}
+        renderItem={(order: OrderHistoryRow) => <Pressable testID={`customer-sheet-order-${order.id}`} accessibilityRole="button"
+          accessibilityLabel={`Order ${order.reference}`} onPress={() => onOpenOrder?.(order)}><HStack space="sm" className="items-center justify-between">
+          {[order.reference, new Date(order.placedAt).toLocaleDateString(undefined, { dateStyle: 'medium' }), order.stateLabel,
+            formatMoney({ amount: order.totalMinor, currency: order.currency })].map((text, index) => <Text key={index} className="text-sm">{text}</Text>)}
+        </HStack></Pressable>} />}
       {!online && <Text testID="customer-sheet-offline">{CUSTOMER_OFFLINE_TEXT}</Text>}
       {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       <HStack space="sm" className="mt-auto justify-between">
