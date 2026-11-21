@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Blind close (4.3c): a caller without `ApproveTallyPosVariance` on the active channel (SuperAdmin holds it) no longer receives `GET /tally/v1/registers/:id`'s `session.expected`, `session.paidInMinor` and `session.paidOutMinor`, nor each closure item's `expected`, `variance`, `tillExpected`, `paidInMinor` and `paidOutMinor`, nor a register command reply's `session.expected` or `closure.expected` and `closure.variance` (fresh or replayed). The keys are omitted; movement amounts, floats and `register_approval_required`'s `data.variance` are still sent, and the command ledger still stores every figure. No migration.
 - Receipt email: a cap of 0 (`perOrder`, `perUserPerDay` or `perChannelPerDay`) refuses every send with its usual 429 code and no `retryAt`; before, it let one send through per window (#347).
 - Dashboard: an order with till custom lines shows a **Till custom items** block after its order lines, listing each line's custom name, SKU, quantity and price with tax, as the stock table titles them all "POS custom item" (ADR 0005 ruling (a)). Needs ReadOrder. No migration.
 - The till role preset (`tallyEnsurePosTillRole`) gains `UpdateCustomer`, so a till can edit a customer; it still holds no `DeleteCustomer`. An existing `vendurepos-pos-till` role gains it the next time **New POS till key** runs (or `tallyEnsurePosTillRole` is called), keeping the merchant's own additions, or a merchant can add Update customer to the role under Settings → Roles. No migration.

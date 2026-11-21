@@ -10,9 +10,9 @@ export const STORE_UNREACHABLE_TEXT = "Couldn't reach the store.";
 export type MovementRead = {
   id: string; type: CashMovement['type']; amountMinor: number; reason: string | null; voids: string | null; createdAt: string; createdBy: string | null;
 };
-/** The plugin's live session on GET /tally/v1/registers/:id; an older plugin sends no movements. */
+/** The plugin's live session on GET /tally/v1/registers/:id; an older plugin sends no movements, and 4.3c omits `expected` for a blind caller. */
 type LiveSessionRead = { id: string; status: 'open' | 'counting'; openedAt: string; openedBy: string | null; countedFloatMinor: number;
-  expected: Record<string, number>; salesCount: number; movements?: MovementRead[] };
+  expected?: Record<string, number>; salesCount: number; movements?: MovementRead[] };
 export type RemoteXReport = { lines: string[]; sessionId: string } | { notice: string | null; retry: boolean; refresh: boolean };
 
 /**
@@ -54,7 +54,7 @@ export async function remoteXReport(session: Session, registerId: string, { stor
   if (live.status !== 'open' || !Array.isArray(live.movements)) return { notice: null, retry: false, refresh: true };
   const lines = xReportLines({
     session: { id: live.id, register_id: registerId, status: 'open', opened_at_gmt: live.openedAt, opened_by: live.openedBy, counted_float_minor: live.countedFloatMinor },
-    expected: live.expected, salesCount: live.salesCount, blind, movements: cashMovementsFromRead(live.id, live.movements),
+    expected: live.expected ?? {}, salesCount: live.salesCount, blind, movements: cashMovementsFromRead(live.id, live.movements),
   }, { store, currency, timezone, printedAt });
   return { lines, sessionId: live.id };
 }

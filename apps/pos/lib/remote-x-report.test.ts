@@ -80,3 +80,12 @@ it("offers the X report only for another register's open, printable session", ()
   expect(xReportOffered('drawer-2', { ...options, status: 'counting' })).toBe(false);
   expect(xReportOffered('drawer-3', options)).toBe(false);
 });
+
+it('4.3c: prints a blind read without expected or paid in/out', async () => {
+  const { expected: _expected, paidInMinor: _in, paidOutMinor: _out, ...blindLive } = live;
+  vi.stubGlobal('fetch', answer(200, { session: blindLive, closures: { items: [] } }));
+  const result = await remoteXReport(session, 'drawer-2', { ...context, blind: true });
+  const lines = 'lines' in result ? result.lines : ['missing'];
+  expect(lines).toEqual(expect.arrayContaining(['Opening float €100.00', 'Paid in €5.00 float']));
+  expect(lines.filter((line) => line.includes('expected') || line.includes('undefined'))).toEqual([]);
+});

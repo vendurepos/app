@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { RequestContextService, StockMovementService, TransactionalConnection } from '@vendure/core';
+import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, RegisterService, TallyCommand } from '../src';
 import type { RegisterEnvelope, RegisterResult } from '../src';
@@ -314,5 +315,37 @@ describe('register commands', () => {
     expect(results.map((result: RegisterResult) => [result.id, result.status])).toEqual([[opening.id, 'applied'], [sale.id, 'applied']]);
     expect(results[0].register).toEqual({ session: { id: s, status: 'open', expected: { cash: 10000 }, salesCount: 0 } });
     expect(results[1].serverRefs).toMatchObject({ totalMinor: 1000 });
+  });
+
+  it('4.3c: a till without ApproveTallyPosVariance gets no expected or variance, fresh or replayed; a holder\'s resend of the id still does', async () => {
+    const base = await server.app.getUrl();
+    const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
+    const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
+      createRole(input: $input) { id } }`), { input: { code: `blind-${uuid()}`, description: 'test', permissions: ['TallyPosSell'], channelIds: [activeChannel.id] } });
+    const email = `${uuid()}@till.example`;
+    await adminClient.query(parse('mutation Admin($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }'),
+      { input: { firstName: 'Blind', lastName: 'Till', emailAddress: email, password: 'till-password', roleIds: [createRole.id] } });
+    const login = await fetch(`${base}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: `mutation { login(username: "${email}", password: "till-password") { ... on CurrentUser { id } } }` }) });
+    const till = `Bearer ${login.headers.get('vendure-auth-token')}`;
+    const post = async (auth: string, command: RegisterEnvelope): Promise<RegisterResult> => {
+      const response = await fetch(`${base}/tally/v1/commands`, { method: 'POST', body: JSON.stringify({ commands: [command] }),
+        headers: { 'Content-Type': 'application/json', Authorization: auth, 'X-Tally-Protocol': '1' } });
+      expect(response.status).toBe(200);
+      return (await response.json()).results[0];
+    };
+    const [s, r] = [uuid(), uuid()];
+    const opened = await post(till, open(s, r));
+    expect(opened).toMatchObject({ status: 'applied', register: { session: { id: s, status: 'open', salesCount: 0 } } });
+    expect(opened.register!.session).not.toHaveProperty('expected');
+    expect((await post(till, transition(s, 'closed', { counted: { cash: 10000 } }))).register!.session).not.toHaveProperty('expected');
+    const close = closure(s, r, 1);
+    for (const [answer, status] of [[await post(till, close), 'applied'], [await post(till, close), 'duplicate']] as const) {
+      expect(answer).toMatchObject({ status, register: { closure: { serverClosureId: close.payload.closureId, number: 1 } } });
+      expect(answer.register!.closure).not.toHaveProperty('expected');
+      expect(answer.register!.closure).not.toHaveProperty('variance');
+    }
+    expect((await post(`Bearer ${adminClient.getAuthToken()}`, close)).register!.closure)
+      .toMatchObject({ expected: { cash: 10000 }, variance: { cash: 0 } });
   });
 });

@@ -5,6 +5,7 @@ import { markTallyRoute } from '../config/strategies';
 import { TransientCommandError, loggerCtx } from '../service/errors';
 import { OrderCreateService } from '../service/order-create.service';
 import type { OrderCreateResult } from '../service/order-create.service';
+import { blindCommandResult } from '../service/register-blind';
 import { REGISTER_TYPES, RegisterService } from '../service/register.service';
 import type { RegisterEnvelope, RegisterResult } from '../service/register.service';
 import { RefundService } from '../service/refund.service';
@@ -81,7 +82,8 @@ export class TallyCommandsController {
       try {
         // ADR 0003: order.create and register.* commands mix in one batch, applied in array order.
         results.push(REGISTER_TYPES.includes(command.type as never)
-          ? await this.registers.apply(ctx, command as unknown as RegisterEnvelope, { requestTimeMs })
+          // 4.3c: withheld when sent, so the ledger row keeps the figures and a holder's resend still sees them.
+          ? blindCommandResult(ctx, await this.registers.apply(ctx, command as unknown as RegisterEnvelope, { requestTimeMs }))
           : (command.type as string) === 'order.refund'
           ? await this.refunds.apply(ctx, command as unknown as OrderRefundEnvelope<Record<string, unknown>>, { requestTimeMs })
           : await this.orders.create(ctx, command, { requestTimeMs }));
