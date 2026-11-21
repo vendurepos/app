@@ -97,8 +97,8 @@ export function ProductsPanel({ products, traits, currency, session }: { product
         </View>
       </HStack>
       <HStack dataSet={{ print: 'hide' }} className="items-center gap-2 border-b border-border px-4 py-2" testID="products-filters">
-        {/* grow-0: TallyUI's bar is a growing ScrollView; without it the facet pills start mid-row. */}
-        <ProductFilterBar className="grow-0" value={{ ...DEFAULT_PRODUCT_FILTERS, inStock: filters.inStock }} chips={FILTER_CHIPS}
+        {/* !grow-0: TallyUI's bar is a growing ScrollView, and RN-web's own flexGrow class outranks a plain grow-0; without it the facet pills start mid-row. */}
+        <ProductFilterBar className="!grow-0" value={{ ...DEFAULT_PRODUCT_FILTERS, inStock: filters.inStock }} chips={FILTER_CHIPS}
           onChange={next => { setFilters(f => ({ ...f, inStock: next.inStock })); setLimit(PAGE_SIZE); }}
           onTermPress={() => { setFacetOpen(null); setCategoryOpen(open => !open); }} />
         {filters.categoryId ? <View testID="products-category-chip">
