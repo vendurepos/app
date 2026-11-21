@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openAllProducts } from './register';
 
 // A measurement, not a test (PLAN §1): only scripts/measure-sync.sh runs it, which provides E2E_STORE_URL.
 const STORE_URL = process.env.E2E_STORE_URL ?? 'http://127.0.0.1:3400';
@@ -44,8 +45,11 @@ test('initial sync of the large seed', async ({ page }, testInfo) => {
   await page.getByTestId('sign-in-barcode_field').fill('barcode');
   const t0 = Date.now();
   await page.getByTestId('sign-in-submit').click();
-  await page.locator('[data-testid^="product-tile-"]').first().waitFor({ state: 'visible', timeout: COMPLETE_WITHIN_MS });
+  // The till opens on the category tiles (1.5a), drawn with the first products as the grid would be.
+  await page.getByTestId('category-tile-all').or(page.locator('[data-testid^="product-tile-"]').first()).first()
+    .waitFor({ state: 'visible', timeout: COMPLETE_WITHIN_MS });
   const firstRenderMs = Date.now() - t0;
+  await openAllProducts(page);
   await expect.poll(async () => (await catalogueState(page)).synced, { timeout: COMPLETE_WITHIN_MS - firstRenderMs, intervals: [100] })
     .toBe(true);
   let counts = { products: 0, variants: 0 };

@@ -1,7 +1,7 @@
 import { devices, expect, test, type Page, type Route } from '@playwright/test';
 import { lineAction } from './cart-line';
 import { checkout, expectBalanceAsEntry, takePayment, typeAmount } from './checkout';
-import { expectClosureCash, openRegister } from './register';
+import { expectClosureCash, openAllProducts, openRegister } from './register';
 import { wedgeScan } from './wedge';
 
 declare global {
@@ -116,6 +116,7 @@ test('signs in to the dev store', async ({ page }) => {
     expect(response.ok()).toBe(true);
     expect((await response.json()).errors).toBeUndefined();
   }
+  await openAllProducts(page);
   for (const name of [
     'Tally Fixture Mug', 'Espresso Beans', 'Filter Coffee', 'Tally T-Shirt', 'Tally Hoodie',
     'Tote Bag', 'Notebook', 'Postcard Set', 'Limited Print', 'Gift Card',
@@ -174,6 +175,7 @@ test('signs in to the dev store', async ({ page }) => {
   await page.unroute('**/admin-api');
   violations.push(...await cspViolations(page));
   await page.reload();
+  await openAllProducts(page);
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
   await expectCspMeta(page);
   violations.push(...await cspViolations(page));
@@ -311,6 +313,7 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
+  await openAllProducts(page);
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
   const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
   // Ends the session on the store behind the app's back, as an expiry or an admin would.
@@ -338,6 +341,7 @@ test('a session revoked on the store stops the catalogue with a notice', async (
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
+  await openAllProducts(page);
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Your session has ended. Sign in again to keep selling.', { exact: true })).toHaveCount(0);
   violations.push(...await cspViolations(page));
@@ -373,6 +377,7 @@ test('a 403 on the orders asks to sign in again with the sign-in words; signing 
 
 test('a 403 on a product pull asks to sign in again with the sign-in words, and signing in again resumes the catalogue', async ({ page }) => {
   await signIn(page);
+  await openAllProducts(page);
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
   await page.route('**/admin-api', (route) => {
     const body = route.request().postData() ?? '';
@@ -386,6 +391,7 @@ test('a 403 on a product pull asks to sign in again with the sign-in words, and 
   await page.getByTestId('sign-in-again-password').fill(PASSWORD);
   await page.getByTestId('sign-in-again-submit').click();
   await expect(page.getByTestId('sign-in-again')).toHaveCount(0);
+  await openAllProducts(page);
   await expect(page.getByText('Tally Fixture Mug', { exact: true }).first()).toBeVisible();
   violations.push(...await cspViolations(page));
   expect(violations).toEqual([]);
@@ -665,6 +671,7 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   const cart = page.getByTestId('cart');
   const tender = page.getByTestId('tender-pane');
   // No session: the cart builds, and the open card stands where Pay would be.
+  await openAllProducts(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await expect(cart.getByTestId('cart-line-TALLY-MUG')).toBeVisible();
   await expect(cart.getByTestId('open-register-card')).toBeVisible();
@@ -1023,6 +1030,7 @@ test("a customer display pairs on a second page, shows the till's cart, and a fo
     await expect(display.getByTestId('display-paired')).toHaveCount(0);
 
     await page.getByTestId('settings-back').click();
+    await openAllProducts(page);
     await page.getByTestId('product-tile-Tally Fixture Mug').click();
     const cart = display.getByTestId('customer-display-cart');
     await expect(cart).toContainText('Tally Fixture Mug', { timeout: 30_000 });
@@ -1108,8 +1116,9 @@ test.describe('on a narrow screen', () => {
     await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
     await page.getByTestId('sign-in-barcode_field').fill('barcode');
     await page.getByTestId('sign-in-submit').click();
-    // The narrow grid renders only what's in view, so wait for the first tile by name rather than the mug.
-    await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
+    // The till opens on the category tiles (1.5a); the narrow grid renders only what's in view, so a grid is waited for
+    // by its first tile by name rather than the mug.
+    await expect(page.getByTestId('category-tile-all').or(page.getByTestId('product-tile-Canvas Apron')).first()).toBeVisible();
   }
 
   /** A scan typed key by key, for a text field whose own handling of the keys is under test: the listener leaves it be. */
@@ -1510,6 +1519,7 @@ test('a price change made in Vendure reaches the open till without a reload', as
   await page.getByTestId('sign-in-password').fill(PASSWORD);
   await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
   await page.getByTestId('sign-in-submit').click();
+  await openAllProducts(page);
   const tile = page.getByTestId('product-tile-Tally Fixture Mug');
   await expect(tile).toBeVisible();
   const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
@@ -1569,6 +1579,7 @@ test('Sync now pulls a price change made in Vendure at once, and the header says
   await page.getByTestId('sign-in-submit').click();
   // The 60 s re-pull and the price reconcile's 60 s first pass start with the sync: everything below must land before them.
   const started = Date.now();
+  await openAllProducts(page);
   const tile = page.getByTestId('product-tile-Tally Fixture Mug');
   await expect(tile).toBeVisible();
   await expect(page.getByTestId('last-synced')).toHaveText(/^Last synced \d/);
@@ -1621,6 +1632,7 @@ test('Sync now pulls a price change made in Vendure at once, and the header says
 
 test("Store health's Variants and Products cover the whole dev store once the catalogue has synced", async ({ page }) => {
   await signIn(page);
+  await openAllProducts(page);
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
   await expect(page.getByTestId('last-synced')).toHaveText(/^Last synced \d/);
   await openRegister(page);
@@ -1642,6 +1654,7 @@ test('a stock change made in Vendure shows on the open till when it comes back t
   const stockResponse = page.waitForResponse((response) => response.request().method() === 'POST'
     && response.url().endsWith('/admin-api') && (response.request().postData() ?? '').includes('VariantStock'));
   await page.getByTestId('sign-in-submit').click();
+  await openAllProducts(page);
   const tile = page.getByTestId('product-tile-Travel Tumbler');
   // The In Stock pill is on by default and would hide the tile once it sells out; this test watches the tile itself.
   await page.getByTestId('filter-chip-inStock').click();
@@ -2129,6 +2142,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
     try {
       const aCapture = captureCommands(a);
       await signIn(a);
+      await openAllProducts(a);
       await a.getByTestId('product-tile-Tally Fixture Mug').click();
       await openRegister(a, '100.00');
       await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
@@ -2144,6 +2158,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
       const c = await contextC.newPage();
       const cCapture = captureCommands(c);
       await signIn(c);
+      await openAllProducts(c);
       await c.getByTestId('product-tile-Tally Fixture Mug').click();
       await expect(c.getByTestId('open-register-card')).toBeVisible();
       await openRegister(c, '50.00');
@@ -2175,6 +2190,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
     try {
       const aCapture = captureCommands(a);
       await signIn(a);
+      await openAllProducts(a);
       await a.getByTestId('product-tile-Tally Fixture Mug').click();
       await openRegister(a, '100.00');
       await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
@@ -2186,6 +2202,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
       const b = await contextB.newPage();
       const bCapture = captureCommands(b);
       await signIn(b);
+      await openAllProducts(b);
       await b.getByTestId('product-tile-Tally Fixture Mug').click();
       await b.getByTestId('open-register-amount').fill('20.00');
       await b.getByTestId('open-register-button').click();
@@ -2223,6 +2240,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
         const d = await contextD.newPage();
         const dCapture = captureCommands(d);
         await signIn(d);
+        await openAllProducts(d);
         await d.getByTestId('product-tile-Tally Fixture Mug').click();
         await d.getByTestId('open-register-amount').fill('30.00');
         await d.getByTestId('open-register-button').click();
@@ -2253,6 +2271,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
     try {
       const aCapture = captureCommands(a);
       await signIn(a);
+      await openAllProducts(a);
       await a.getByTestId('product-tile-Tally Fixture Mug').click();
       await openRegister(a, '100.00');
       await expect.poll(() => aCapture.results.get(aCapture.commands.find(({ type }) => type === 'register.session.open')?.id ?? '')?.status, { timeout: 30_000 }).toBe('applied');
@@ -2266,6 +2285,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
       await b.getByTestId(`register-choice-${boundId}`).click();
       await expect(b.getByTestId(`register-choice-${boundId}`)).toHaveAttribute('aria-checked', 'true');
       await b.getByTestId('settings-back').click();
+      await openAllProducts(b);
       await b.getByTestId('product-tile-Tally Fixture Mug').click();
       await b.getByTestId('open-register-amount').fill('20.00');
       await b.getByTestId('open-register-button').click();
@@ -2282,6 +2302,7 @@ test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {
 
   test('Settings opened before the register open reaches the store shows Open since once it lands', async ({ page }) => {
     await signIn(page);
+    await openAllProducts(page);
     await page.getByTestId('product-tile-Tally Fixture Mug').click();
     let release!: () => void;
     const released = new Promise<void>((resolve) => { release = resolve; });
