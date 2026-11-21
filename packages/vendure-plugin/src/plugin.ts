@@ -6,6 +6,7 @@ import {
 import type { Middleware } from '@vendure/core';
 import { adminApiSchema, TallyAdminResolver } from './api/admin-api';
 import { TallyCommandsController } from './api/commands.controller';
+import { TallyCouponsController } from './api/coupons.controller';
 import { TallyDisplaysController } from './api/displays.controller';
 import { TallyInfoController } from './api/info.controller';
 import { TALLY_RECEIPT_EMAIL, TallyReceiptEmailController, receiptEmailCaps } from './api/receipt-email.controller';
@@ -22,6 +23,7 @@ import { DISPLAY_ENTITIES } from './entities/display.entities';
 import { TallyReceiptEmailWindow } from './entities/receipt-email.entities';
 import { REGISTER_ENTITIES } from './entities/register.entities';
 import { TallyCommand } from './entities/tally-command.entity';
+import { CouponPricingService } from './service/coupon-pricing';
 import {
   DisplayRefusal, DisplaySignallingService, SNAPSHOT_MAX_BYTES, TALLY_DISPLAY_OPTIONS,
 } from './service/display-signalling.service';
@@ -106,8 +108,9 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
   imports: [PluginCommonModule],
   entities: [TallyCommand, ...REGISTER_ENTITIES, ...DISPLAY_ENTITIES, TallyReceiptEmailWindow],
   controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController,
-    TallyStockEditController],
+    TallyStockEditController, TallyCouponsController],
   providers: [OrderCreateService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService, ReceiptEmailLimits,
+    CouponPricingService,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
     { provide: TALLY_PLUGIN_OPTIONS, useFactory: () => TallyPosPlugin.options },
     { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],

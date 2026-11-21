@@ -434,7 +434,7 @@ export class OrderCreateService {
     return undefined;
   }
 
-  private async findVariant(ctx: RequestContext, variantId: string) {
+  async findVariant(ctx: RequestContext, variantId: string) {
     const id = this.decodeId(variantId);
     // B1: a disabled or deleted product makes addItemToOrder throw EntityNotFoundError, so it is refused here.
     const variant = id === undefined ? null : await this.connection.getRepository(ctx, ProductVariant).findOne({
