@@ -775,7 +775,9 @@ it('seeds every till order with the demo cashier; the storefront order has none'
 
 it("the demo store answers Store health's server totals", async () => {
   const session = await signedIn();
-  expect(await readServerTotals(sessionContext(session))).toEqual({ products: CATALOGUE.length, orders: new DemoStore().orderSummaries().length });
+  expect(await readServerTotals(sessionContext(session))).toEqual({
+    products: CATALOGUE.length, variants: CATALOGUE.flatMap(product => product.variants).length, orders: new DemoStore().orderSummaries().length,
+  });
 });
 
 it('lists, searches and pages the store\'s customers through the demo', async () => {

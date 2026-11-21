@@ -10,8 +10,8 @@ import { sessionContext, type Session } from './session';
 import { SyncCadenceCard } from './sync-cadence-card';
 import { confirmRedownload, coveragePercent, formatStorageUsed, readServerTotals, readStorageUsed, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
-export function StoreHealthPanel({ session, ready, waiting, productCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
-  session: Session; ready: ReadyToSell; waiting: number; productCount: number; catalogueSynced: boolean;
+export function StoreHealthPanel({ session, ready, waiting, productCount, variantCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
+  session: Session; ready: ReadyToSell; waiting: number; productCount: number; variantCount: number; catalogueSynced: boolean;
   collections: { orders: RxCollection | null; refunds: RxCollection | null; parked: RxCollection | null; closures: RxCollection | null };
   attention: AttentionRow[]; onRetry: (orderIds: string[]) => Promise<number>; onOpen: (order: PosOrder) => void;
   onViewLog: () => void; onCheckNow: () => Promise<void>; onRedownload: () => Promise<void>; redownloading: boolean;
@@ -40,7 +40,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
       sources[key]?.count().$.subscribe(count => setCounts(current => ({ ...current, [key]: count }))));
     return () => subscriptions.forEach(subscription => subscription?.unsubscribe());
   }, [orders, refunds, parked, closures]);
-  const [totals, setTotals] = useState<ServerTotals>({ products: null, orders: null });
+  const [totals, setTotals] = useState<ServerTotals>({ products: null, variants: null, orders: null });
   useEffect(() => {
     let cancelled = false;
     void readServerTotals(sessionContext(session)).then(result => { if (!cancelled) setTotals(result); });
@@ -57,6 +57,8 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
   const rows = [
     { key: 'products', name: 'Products', note: 'the whole catalogue, kept in step with the store', count: productCount,
       server: totals.products, coverage: coveragePercent(productCount, totals.products) ?? (catalogueSynced ? 100 : 0) },
+    // v2 13d's "↳ Variations": every variant on both sides, as Products counts every product.
+    { key: 'variants', name: '↳ Variants', note: null, count: variantCount, server: totals.variants, coverage: coveragePercent(variantCount, totals.variants) },
     { key: 'orders', name: 'Orders', note: "this till's sales on the device · the store's orders on the server", count: counts.orders,
       server: totals.orders, coverage: coveragePercent(counts.orders, totals.orders) },
     { key: 'refunds', name: 'Refunds', note: 'refunds taken on this till', count: counts.refunds, server: null, coverage: null },
@@ -125,7 +127,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, catalo
                     <Text className="font-medium">{row.name}</Text>
                     {row.key === 'orders' && attention.length > 0 ? <Badge testID="store-health-stuck-orders" variant="destructive" label={`${attention.length} stuck`} /> : null}
                   </HStack>
-                  <Text className="text-xs text-muted-foreground">{row.note}</Text>
+                  {row.note ? <Text className="text-xs text-muted-foreground">{row.note}</Text> : null}
                   {row.key === 'products' ? <Button testID="store-health-redownload" variant="link" size="sm" className="self-start px-0"
                     disabled={blocked !== null} onPress={() => setConfirming(true)}>
                     <Text>{redownloading ? 'Re-downloading…' : 'Clear & re-download'}</Text>

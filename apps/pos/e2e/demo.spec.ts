@@ -969,6 +969,11 @@ test("Store health shows Ready to sell, nothing waiting, the products on this de
   await expect(page.getByTestId('store-health-server-products')).toHaveText(String(demoStore.products().length));
   await expect(page.getByTestId('store-health-server-orders')).toHaveText(String(demoStore.orderSummaries().length));
   await expect(page.getByTestId('store-health-coverage-products')).toHaveAttribute('aria-valuenow', '100');
+  await expect(page.getByTestId('store-health-count-variants')).toHaveText(String(CATALOGUE.flatMap(product => product.variants).length));
+  await expect(page.getByTestId('store-health-server-variants')).toHaveText(String(demoStore.products().flatMap(product => product.variants).length));
+  await expect(page.getByTestId('store-health-coverage-variants')).toHaveAttribute('aria-valuenow', '100');
+  await page.mouse.move(480, 0);
+  await page.screenshot({ path: test.info().outputPath('13l-store-health-variants-vendurepos.png') });
   await expect(page.getByTestId('store-health-server-refunds')).toHaveText('—');
   await page.getByTestId('store-health-open').click();
   await expect(page.getByTestId('store-health-panel')).toHaveCount(0);

@@ -413,7 +413,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
         onViewLog={() => { setHealthOpen(false); setSettingsSection('sync-log'); setSettingsOpen(true); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
-        waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length} catalogueSynced={!!catalogue.lastSyncedAt}
+        waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length}
+        variantCount={catalogue.products.reduce((total, product) => total + (Array.isArray(product.variants) ? product.variants.length : 0), 0)} catalogueSynced={!!catalogue.lastSyncedAt}
         collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }}
         onCheckNow={() => syncNow([outbox, registerOutbox], refreshCatalogue)}
         redownloading={catalogue.redownloading}
