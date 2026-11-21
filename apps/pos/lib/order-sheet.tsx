@@ -76,6 +76,16 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
             <VStack>
               <Text testID="order-sheet-customer" className="font-medium">{orderCustomerName(order)}</Text>
               <Text testID="order-sheet-meta" className="text-sm text-muted-foreground">{orderHeaderMeta(order, { timezone, now: new Date(), registers })}</Text>
+              <Text testID="order-sheet-state" className="text-sm text-muted-foreground">{view.state}</Text>
+              {view.fulfilments.length > 0 ? (
+                <VStack testID="order-sheet-fulfilments" className="mt-2">
+                  {view.fulfilments.map(f => (
+                    <Text key={f.id} testID={`order-sheet-fulfilment-${f.id}`} className="text-sm">
+                      <Text className="font-semibold">Fulfilment: </Text>{f.text}
+                    </Text>
+                  ))}
+                </VStack>
+              ) : null}
               {/* Never printed or on a receipt: notes stay on this sheet (Front desk ruling, 2026-11-21). */}
               {notes.length > 0 ? (
                 <VStack testID="order-sheet-notes" dataSet={{ print: 'hide' }} className="mt-2">

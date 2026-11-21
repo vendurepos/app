@@ -76,7 +76,7 @@ type DemoRefund = {
 };
 // The fields of order()'s detail the refund rules read.
 type RefundableOrder = {
-  id: string; shippingWithTax: number; customFields: { tallyClientOrderId: string };
+  id: string; shippingWithTax: number; customFields: { tallyClientOrderId: string | null };
   lines: { id: string; quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string } }[];
   payments: { id: string; amount: number; metadata: { tender: { method: string } } }[];
 };
@@ -91,6 +91,12 @@ type State = {
   movements: Movement[]; closures: RegisterClosureSubmitPayload[];
   refunds: DemoRefund[];
   variants: Record<string, { price?: number; trackInventory?: 'TRUE' | 'FALSE'; updatedAt: string }>;
+};
+
+// Seeded order 1 stands for an order placed in the Vendure storefront, not at the till: it has no till id or cashier, and it has shipped.
+const DEMO_WEB_ORDER = {
+  clientOrderId: 'seed-order-1', state: 'Shipped',
+  fulfillments: [{ id: 'f1', state: 'Shipped', method: 'Courier', trackingCode: 'DEMO-TRACK-0001' }],
 };
 
 function seed(): State {
@@ -353,14 +359,16 @@ export class DemoStore {
       const id = String(index + 1);
       const customer = this.state.customers.find(customer =>
         order.customer?.customerId ? customer.id === order.customer.customerId : sameEmail(customer.emailAddress, order.customer?.email));
+      const web = order.clientOrderId === DEMO_WEB_ORDER.clientOrderId;
       return {
-        id, code: demoOrderCode(id), state: 'PaymentSettled', orderPlacedAt: order.createdAt, updatedAt: order.createdAt,
+        id, code: demoOrderCode(id), state: web ? DEMO_WEB_ORDER.state : 'PaymentSettled', orderPlacedAt: order.createdAt, updatedAt: order.createdAt,
         currencyCode: order.currency, totalQuantity: order.lines.reduce((sum, line) => sum + line.quantity, 0),
         total: order.totalMinor - order.taxMinor, totalWithTax: order.totalMinor,
         customer: customer ? { id: customer.id, firstName: customer.firstName, lastName: customer.lastName, emailAddress: customer.emailAddress } : null,
         customFields: {
-          tallyClientOrderId: order.clientOrderId, tallySaleAt: order.createdAt,
-          tallyRegisterId: order.registerId ?? null, tallySessionId: order.sessionId ?? null, tallyCashierRef: order.cashierRef ?? null,
+          tallyClientOrderId: web ? null : order.clientOrderId, tallySaleAt: order.createdAt,
+          tallyRegisterId: order.registerId ?? null, tallySessionId: order.sessionId ?? null,
+          tallyCashierRef: web ? null : order.cashierRef ?? null,
           tallyRejected: false, tallyRejectedClientOrderId: null,
         },
       };
@@ -414,7 +422,8 @@ export class DemoStore {
       };
     });
     return {
-      ...summary, active: false, couponCodes: [], discounts: [], fulfillments: [],
+      ...summary, active: false, couponCodes: [], discounts: [],
+      fulfillments: payload.clientOrderId === DEMO_WEB_ORDER.clientOrderId ? DEMO_WEB_ORDER.fulfillments : [],
       customFields: { ...summary.customFields as Record<string, unknown>, tallyPayments: JSON.stringify(payload.payments), tallyShipping: null,
         tallySnapshot: JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate }) },
       lines, surcharges, shippingLines,

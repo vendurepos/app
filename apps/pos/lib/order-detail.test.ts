@@ -121,8 +121,35 @@ it("shows a Vendure order's lines, totals, payments and refunds as text", () => 
       id: 'pay-1', text: `Paid ${money(2856)} · Settled`,
       refunds: [{ id: 'refund-1', text: `Refunded ${money(952)} · Settled` }],
     }],
+    state: '● Payment settled',
+    fulfilments: [],
   });
   expect(orderDetailView({ ...order, payments: undefined }).payments).toEqual([]);
+});
+
+// The smallest order orderDetailView reads; each test below adds only the fields it is about.
+const bareOrder = (fields: Partial<VendureOrder>) => ({
+  id: 'store-9', code: 'GHI789', state: 'PaymentSettled', currencyCode: 'EUR', total: 0, totalWithTax: 0, subTotalWithTax: 0,
+  lines: [], surcharges: [], shippingLines: [], ...fields,
+}) as unknown as VendureOrder;
+
+it("shows Vendure's order state in words", () => {
+  expect(orderDetailView(bareOrder({ state: 'PaymentSettled' })).state).toBe('● Payment settled');
+  expect(orderDetailView(bareOrder({ state: 'PartiallyShipped' })).state).toBe('● Partially shipped');
+});
+
+it('lists fulfilments only on an order the till did not create', () => {
+  const fulfillments = [
+    { id: 'f1', state: 'Shipped', method: 'Courier', trackingCode: 'ABC123' },
+    { id: 'f2', state: 'Pending', method: 'Pickup', trackingCode: '' },
+  ];
+  const web = bareOrder({ fulfillments, customFields: { tallyClientOrderId: null } as VendureOrder['customFields'] });
+  expect(orderDetailView(web).fulfilments).toEqual([
+    { id: 'f1', text: 'Courier · Shipped · Tracking ABC123' },
+    { id: 'f2', text: 'Pickup · Pending' },
+  ]);
+  const till = { ...web, customFields: { ...web.customFields, tallyClientOrderId: 'client-1' } } as VendureOrder;
+  expect(orderDetailView(till).fulfilments).toEqual([]);
 });
 
 it("lists the order's discount, fee, rounding and shipping under Items, and they add up to Subtotal and Total", () => {

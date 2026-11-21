@@ -397,7 +397,7 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   const rows = await storeRows(page);
   await expect.poll(() => rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-testid'))))
     .toEqual(['orders-row-3', 'orders-row-2', 'orders-row-1']);
-  await expect(page.getByTestId('orders-row-1')).toContainText('cashier@demo.vendurepos.com');
+  await expect(page.getByTestId('orders-row-2')).toContainText('cashier@demo.vendurepos.com');
   await expect(page.locator('[data-testid^="orders-day-"]')).toHaveCount(3);
   await expect(page.getByTestId('orders-count')).toHaveText('Showing 3 of 3 orders');
   await expect(page.getByTestId('orders-more')).toHaveCount(0);
@@ -1072,6 +1072,25 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
   await expect(detail).toContainText('Paid €9.52');
   await expect(detail).toContainText(mug.name);
+});
+
+test("the order sheet shows Vendure's state, and a storefront order's fulfilment; a till order lists none", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('orders-open').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000001' }).click();
+  await expect(page.getByTestId('order-sheet-state')).toHaveText('● Shipped');
+  await expect(page.getByTestId('order-sheet-fulfilment-f1')).toHaveText('Fulfilment: Courier · Shipped · Tracking DEMO-TRACK-0001');
+  await expect(page.getByTestId('refund-start')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('07i-order-fulfilment-vendurepos.png') });
+  await page.getByTestId('order-sheet-close').click();
+
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000002' }).click();
+  await expect(page.getByTestId('order-sheet-state')).toHaveText('● Payment settled');
+  await expect(page.getByTestId('order-sheet-fulfilments')).toHaveCount(0);
 });
 
 test("the order sheet shows the order's notes, a private one as Staff note, never on its receipt or a print, as v2's order notes", async ({ page }) => {
