@@ -55,11 +55,15 @@ jobs:
       - run: bash scripts/check-web-bundle.test.sh
 
   # The Vendure plugin is standalone npm with its own lockfile; it needs no secrets.
-  plugin:
-    name: Vendure plugin (typecheck and Postgres e2e)
+  plugin-e2e:
+    name: Vendure plugin e2e (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    # The e2e suite took 850 s of a 15-minute cap on 2026-11-21 (60 files, 579 tests) and was killed at cleanup.
-    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    # 850 s across 61 files on 2026-11-21 is about 300 s per shard, so 15 minutes is 3x headroom.
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -87,10 +91,42 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - run: npm ci
+      # Some e2e files read the build output (test/dashboard-packaging.e2e.ts reads dist/).
+      - run: npm run build
+      - run: npx vitest run --maxWorkers=1 --shard=${{ matrix.shard }}/3
+
+  # A gate: it keeps the required check's name, and always() means a failed or cancelled shard can never leave it skipped.
+  plugin:
+    name: Vendure plugin (typecheck and Postgres e2e)
+    needs: plugin-e2e
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/vendure-plugin
+    steps:
+      # Runs before checkout, when packages/vendure-plugin does not exist yet.
+      - name: Require every e2e shard to pass
+        working-directory: .
+        env:
+          E2E_RESULT: ${{ needs.plugin-e2e.result }}
+        run: |
+          if [ "$E2E_RESULT" != "success" ]; then
+            echo "plugin e2e shards result: $E2E_RESULT (expected success)" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
       - run: npm run typecheck
       - run: npm run build
       - run: bash scripts/test-stack.test.sh
-      - run: npm test
 
   # No artifacts are uploaded: dist, public, apps/pos/test-results and
   # Playwright traces contain or can capture licensed rxdb-premium code.
