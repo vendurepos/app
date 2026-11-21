@@ -83,7 +83,7 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       <Text testID={`product-stock-status-${row.id}`}>{STOCK_STATUS_LABELS[row.stockStatus]}</Text>
     </HStack> },
     { id: 'categories', header: 'Categories', flex: 1.5, render: row => <Text numberOfLines={1} testID={`product-categories-${row.id}`}>{row.categories}</Text> },
-    // Price 1.5, taken from Name: at 960 px a group's range ("€8.99 – €29.99") stays on one line, as v2's 08 (CHECKLIST 10.2k).
+    // Price 1.5, taken from Name: at 960 px a group's range ("€8.99 – €29.99") stays on one line (CHECKLIST 10.2l; v2's 08 wraps it, one line is our call).
     { id: 'price', header: 'Price', align: 'right', flex: 1.5, sortValue: row => productRowSortValue(row, 'price'), render: row => priceEditable && !row.group ?
       <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
         keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text testID={row.group ? `product-price-range-${row.group.productId}` : undefined}>{row.price}</Text> },
