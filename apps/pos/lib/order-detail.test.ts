@@ -103,7 +103,7 @@ it("shows a Vendure order's lines, totals, payments and refunds as text", () => 
     lines: [line('line-1', 'Mug', 1904, null), line('line-2', 'Open item', 952, 'Gift wrap')],
     surcharges: [], shippingLines: [],
     payments: [{
-      id: 'pay-1', amount: 2856, state: 'Settled',
+      id: 'pay-1', amount: 2856, state: 'Settled', method: 'tally-pos', metadata: { tender: { method: 'cash' } },
       refunds: [{ id: 'refund-1', total: 952, state: 'Settled' }],
     }],
   } as unknown as VendureOrder;
@@ -118,9 +118,11 @@ it("shows a Vendure order's lines, totals, payments and refunds as text", () => 
     tax: money(456),
     total: money(2856),
     payments: [{
-      id: 'pay-1', text: `Paid ${money(2856)} · Settled`,
+      id: 'pay-1', text: `Cash ${money(2856)} · Settled`,
       refunds: [{ id: 'refund-1', text: `Refunded ${money(952)} · Settled` }],
     }],
+    // A refund never makes money due again: Vendure keeps totalWithTax, so Remaining stays 0.
+    paymentTotals: { total: money(2856), paid: money(2856), refunded: money(952), remaining: money(0) },
     state: '● Payment settled',
     fulfilments: [],
   });
@@ -132,6 +134,25 @@ const bareOrder = (fields: Partial<VendureOrder>) => ({
   id: 'store-9', code: 'GHI789', state: 'PaymentSettled', currencyCode: 'EUR', total: 0, totalWithTax: 0, subTotalWithTax: 0,
   lines: [], surcharges: [], shippingLines: [], ...fields,
 }) as unknown as VendureOrder;
+
+it('Payment totals count only settled and authorized payments, and Remaining never goes below zero', () => {
+  const payment = (id: string, amount: number, state: string, refunds: { id: string; total: number; state: string }[] = []) =>
+    ({ id, amount, state, method: 'external', refunds });
+  const on = (payments: unknown) => orderDetailView(bareOrder({ totalWithTax: 2856, payments } as Partial<VendureOrder>));
+  // (a) The Declined payment is listed but not counted; a payment without tender metadata reads its method.
+  const split = on([payment('p-1', 1000, 'Authorized'), payment('p-2', 1856, 'Declined')]);
+  expect(split.paymentTotals).toEqual({ total: money(2856), paid: money(1000), refunded: null, remaining: money(1856) });
+  expect(split.payments.map(p => p.text)).toEqual([`Card ${money(1000)} · Authorized`, `Card ${money(1856)} · Declined`]);
+  // (b) No payments, whether empty or absent.
+  for (const none of [[], undefined]) {
+    expect(on(none).payments).toEqual([]);
+    expect(on(none).paymentTotals).toEqual({ total: money(2856), paid: money(0), refunded: null, remaining: money(2856) });
+  }
+  // (c) An overpayment leaves nothing to pay, never a negative Remaining.
+  expect(on([payment('p-3', 3000, 'Settled')]).paymentTotals.remaining).toBe(money(0));
+  // (d) A Pending refund is not counted.
+  expect(on([payment('p-4', 2856, 'Settled', [{ id: 'r-1', total: 500, state: 'Pending' }])]).paymentTotals.refunded).toBeNull();
+});
 
 it("shows Vendure's order state in words", () => {
   expect(orderDetailView(bareOrder({ state: 'PaymentSettled' })).state).toBe('● Payment settled');

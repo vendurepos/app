@@ -1077,7 +1077,7 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
     const product = CATALOGUE.find(product => product.variants.some(variant => variant.sku === sku))!;
     await expect(detail).toContainText(product.name);
   }
-  await expect(detail).toContainText('Paid €23.52');
+  await expect(detail).toContainText('€23.52 · Settled');
   await expect(page.getByTestId('refund-start')).toBeVisible();
   await page.getByTestId('order-sheet-close').click();
   for (const id of ['3', '2', '1']) await expect(page.getByTestId(`orders-row-${id}`)).toBeVisible();
@@ -1094,8 +1094,11 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await page.getByTestId('receipt').getByTestId('new-sale').click();
   await expect(await orderEntries(page)).toHaveText([/€9\.52 · Synced$/]);
   await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
-  await expect(detail).toContainText('Paid €9.52');
+  await expect(detail).toContainText('Cash €9.52 · Settled');
+  await expect(page.getByTestId('order-sheet-payment-paid')).toContainText('€9.52');
+  await expect(page.getByTestId('order-sheet-payment-remaining')).toContainText('€0.00');
   await expect(detail).toContainText(mug.name);
+  await page.screenshot({ path: test.info().outputPath('07j-order-payment-vendurepos.png') });
 });
 
 test("the order sheet shows Vendure's state, and a storefront order's fulfilment; a till order lists none", async ({ page }) => {
