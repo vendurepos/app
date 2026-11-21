@@ -155,8 +155,8 @@ export class CouponPricingService {
       couponCodes: promotions.map(promotion => promotion.couponCode!),
       ...(customer ? { customer, customerId: customer.id } : {}),
     });
-    for (const line of input.lines) {
-      let variant: ProductVariant, taxCategory: TaxCategory;
+    for (const [index, line] of input.lines.entries()) {
+      let variant: ProductVariant, taxCategory: TaxCategory | null;
       if (line.custom) {
         const customVariant = await this.connection.getRepository(ctx, ProductVariant).findOne({
           where: { sku: TALLY_CUSTOM_ITEM_SKU, deletedAt: IsNull(), channels: { id: ctx.channelId } },
@@ -165,7 +165,8 @@ export class CouponPricingService {
         variant = customVariant;
         taxCategory = line.custom.taxStatus === 'none'
           ? await this.connection.getRepository(ctx, TaxCategory).findOneByOrFail({ name: TALLY_NO_TAX_CATEGORY })
-          : (await resolveTaxCategory(ctx, this.connection, line.custom.taxClass))!;
+          : await resolveTaxCategory(ctx, this.connection, line.custom.taxClass);
+        if (!taxCategory) return refusal(400, 'invalid_payload', `lines[${index}].custom.taxClass: unknown tax class`);
       } else {
         const found = await this.recipe.findVariant(ctx, line.variantId!);
         if (!found) return { status: 200, body: this.refuse(ctx, input.codes[0], 'no-longer-sold') };

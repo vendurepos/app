@@ -87,7 +87,10 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
   });
 
   it('prices inclusive lines in their own tax mode', async () => {
-    expect(await price({ ...sale(), pricesIncludeTax: true })).toEqual(priced('cpn10', cpn10, 'CPN10'));
+    // Vendure's products_percentage_discount reads ctx.channel.pricesIncludeTax (product-percentage-discount-action.js:28):
+    // on this tax-exclusive channel a gross-priced 2000 line is discounted 10% of its net 1600, x3 = 480, which the
+    // line, in gross mode, reads as gross. The saved order gets the same figure (spike CPN-S B1, mixed mode).
+    expect(await price({ ...sale(), pricesIncludeTax: true })).toEqual(priced('cpn10', cpn10, 'CPN10', [{ lineId: 'l1', amountMinor: 480 }]));
   });
 
   it('keeps both lines and safe integers with a minimum-order condition (orderPlacedQuantity NaN pin)', async () => {
@@ -108,9 +111,13 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     });
     const input = sale(['custom10']);
     input.lines[1] = { clientLineId: 'l2', custom: { name: 'Custom item', taxStatus: 'none' }, quantity: 1, unitPriceMinor: 1000 };
-    expect(await price(input)).toEqual(priced('custom10', id, 'CUSTOM10', [
-      { lineId: 'l1', amountMinor: 600 }, { lineId: 'l2', amountMinor: 100 },
+    // Vendure's order_percentage_discount takes 10% of subTotal (net 6000 + 1000 = 7000, so 700) and spreads it by
+    // gross line weight (7500 : 1000): 617.6 -> 618 and 82.4 -> 82.
+    const answer = await price(input);
+    expect(answer).toEqual(priced('custom10', id, 'CUSTOM10', [
+      { lineId: 'l1', amountMinor: 618 }, { lineId: 'l2', amountMinor: 82 },
     ]));
+    expect(answer.body.priced.custom10.lines[0].amountMinor + answer.body.priced.custom10.lines[1].amountMinor).toBe(700);
   });
 
   it('prices two codes together and keeps their sent order', async () => {
@@ -213,7 +220,7 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     ));
     expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied' });
     const order = await connection.getRepository(ctx, Order).findOneOrFail({
-      where: { id: decode(result.serverRefs!.orderId) }, relations: ['promotions'],
+      where: { id: decode(result.serverRefs!.orderId) }, relations: ['promotions', 'lines'],
     });
     if (customerId) expect(String(order.customerId)).toBe(decode(customerId));
     // Test setup only: the later order.create job saves the order's coupon promotions for real.
@@ -271,6 +278,13 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     const input = sale();
     expect(await price({ ...input, lines: [{ ...input.lines[0], extra: true }] }))
       .toEqual({ status: 400, body: { code: 'invalid_payload', message: 'lines[0].extra: unknown field' } });
+  });
+
+  it('rejects an unknown tax class on a taxable custom line', async () => {
+    const input = sale();
+    input.lines[0] = { clientLineId: 'l1', custom: { name: 'Custom item', taxStatus: 'taxable', taxClass: 'no-such-class' }, quantity: 1, unitPriceMinor: 1000 };
+    expect(await price(input))
+      .toEqual({ status: 400, body: { code: 'invalid_payload', message: 'lines[0].custom.taxClass: unknown tax class' } });
   });
 
   it('rejects eleven codes', async () => {
