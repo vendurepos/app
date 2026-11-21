@@ -765,6 +765,28 @@ test("the customer sheet lists the customer's five newest orders, and a tap open
   await expect(page.getByTestId('orders-panel').locator('[data-testid^="orders-row-"]')).toHaveCount(4);
 });
 
+test('The sale\'s customer picker shows v2\'s avatars and a Guest row, and Guest takes the customer off', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customer-chip').click();
+  await page.getByLabel('Search customers').fill('ada');
+  const picker = page.getByTestId('customer-picker');
+  await expect(picker.getByTestId('customer-picker-option-guest')).toBeVisible();
+  // avatarInitials('Ada Lovelace') in TallyUI 4.1.0 is 'AL'.
+  await expect(picker.getByText('AL', { exact: true })).toBeVisible();
+  await picker.getByText('Ada Lovelace', { exact: true }).click();
+  await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
+
+  await page.getByTestId('customer-chip').click();
+  await picker.getByTestId('customer-picker-option-guest').click();
+  await expect(page.getByTestId('sale-customer')).toHaveCount(0);
+  await expect(page.getByTestId('customer-chip')).toContainText('Guest');
+  await expect(picker).toHaveCount(0);
+});
+
 test('the Customers panel adds and edits customers on the store; a refused save leaves the row as the store has it', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');

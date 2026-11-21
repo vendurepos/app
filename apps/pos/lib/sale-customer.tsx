@@ -41,6 +41,8 @@ export function SaleCustomer({ sale, connector, session, onSettings }: {
       {open ? (
         <View testID="customer-picker" className="rounded-md border border-border p-3">
           <CustomerPicker
+            showAvatar
+            withGuest
             search={(q) => connector.searchCustomers!(sessionContext(session), q, { limit: 20 }).then(results => results.filter(c => !isWalkIn(c)))}
             create={connector.createCustomer ? (input) => connector.createCustomer!(sessionContext(session), input) : undefined}
             selected={customer ? { id: customer.id, name: customer.name, email: customer.email } : null}
