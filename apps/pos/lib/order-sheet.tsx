@@ -3,6 +3,7 @@ import { Button, HStack, OrderDetail, Text, VStack, type OrderHistoryRow } from 
 import type { VendureOrder } from '@tallyui/connector-vendure';
 import type { PosOrder } from '@tallyui/pos';
 import { ORDER_LOADING_TEXT, orderCustomerName, orderHeaderMeta, orderDetailTarget, orderDetailView, useOrderDetail } from './order-detail';
+import { NOTE_LABEL, STAFF_NOTE_LABEL, useOrderNotes } from './order-notes';
 import { fetchRegisters, type ListedRegister } from './register-choice';
 import type { Session } from './session';
 import { attentionReason, canSendAgain } from './store-health';
@@ -19,6 +20,7 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
 }): JSX.Element {
   const target = orderDetailTarget(row);
   const { order, notice, loading, reload } = useOrderDetail(session, 'orderId' in target ? target.orderId : null);
+  const notes = useOrderNotes(session, 'orderId' in target ? target.orderId : null);
   const [showReceipt, setShowReceipt] = useState(false);
   const view = order ? orderDetailView(order) : null;
   const refused = 'syncStatus' in row && row.syncStatus === 'rejected' ? row : null;
@@ -74,6 +76,16 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
             <VStack>
               <Text testID="order-sheet-customer" className="font-medium">{orderCustomerName(order)}</Text>
               <Text testID="order-sheet-meta" className="text-sm text-muted-foreground">{orderHeaderMeta(order, { timezone, now: new Date(), registers })}</Text>
+              {/* Never printed or on a receipt: notes stay on this sheet (Front desk ruling, 2026-11-21). */}
+              {notes.length > 0 ? (
+                <VStack testID="order-sheet-notes" dataSet={{ print: 'hide' }} className="mt-2">
+                  {notes.map(note => (
+                    <Text key={note.id} testID={`order-sheet-order-note-${note.id}`} className="text-sm">
+                      <Text className="font-semibold">{note.staff ? STAFF_NOTE_LABEL : NOTE_LABEL}: </Text>{note.text}
+                    </Text>
+                  ))}
+                </VStack>
+              ) : null}
             </VStack>
           )}
           paymentSlot={(

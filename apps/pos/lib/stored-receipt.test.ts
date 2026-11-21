@@ -30,6 +30,15 @@ function order({ line, total, totalWithTax, discounts = [], tallyPayments = null
 const EXCLUSIVE: Line = { quantity: 2, linePrice: 1600, linePriceWithTax: 1904, proratedLinePrice: 1600, proratedLinePriceWithTax: 1904 };
 
 describe('storedReceiptData', () => {
+  it("never carries the order's notes, even when the order object holds its history (Front desk ruling, 2026-11-21)", () => {
+    const withHistory = {
+      ...order({ line: EXCLUSIVE, total: 1600, totalWithTax: 1904 }),
+      history: { items: [{ id: 'h3', type: 'ORDER_NOTE', isPublic: false, data: { note: 'STAFF-ONLY-TEXT' } }] },
+    } as VendureOrder;
+    const receipt = storedReceiptData(withHistory, { storeName: 'Store', pricesIncludeTax: false });
+    expect(JSON.stringify(receipt)).not.toContain('STAFF-ONLY-TEXT');
+  });
+
   it('a tax-inclusive order shows gross lines, the line discount and the order total', () => {
     // 2 × EUR 11.90 gross (EUR 10.00 net) less 10 %: EUR 21.42 gross, EUR 18.00 net.
     const inclusive = order({

@@ -30,6 +30,7 @@
  */
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
+import { DEMO_ORDER_HISTORY } from './order-notes';
 import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, type DemoStorage } from './store';
 
 // Reserved, non-resolving origin: a request missed by the wrapper cannot reach a live store.
@@ -160,6 +161,11 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
           store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) }))
             .filter(row => (row.customer as { id: string } | null)?.id === variables.customerId), variables.options) } }; break;
       case 'Order': case 'order': data = { order: store.order(String(variables.id)) }; break;
+      case 'OrderNotes': {
+        const id = String(variables.id);
+        data = { order: store.order(id) ? { id, history: page(DEMO_ORDER_HISTORY[id] ?? [], variables.options) } : null };
+        break;
+      }
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
       case 'Addresses': data = { customer: store.customer(variables.id) }; break;
       case 'Update': case 'updateCustomer': data = { updateCustomer: store.updateCustomer(variables.input) }; break;
