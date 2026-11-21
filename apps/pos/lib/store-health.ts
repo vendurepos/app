@@ -50,24 +50,25 @@ export function coveragePercent(onDevice: number | null, onServer: number | null
   return onServer === 0 ? 100 : Math.min(100, Math.round(onDevice / onServer * 100));
 }
 
-export type ServerTotals = { products: number | null; orders: number | null };
+export type ServerTotals = { products: number | null; variants: number | null; orders: number | null };
 
-// Unnamed, so the demo store (lib/demo/fetch.ts) answers it as `products`.
+// Unnamed, so the demo store (lib/demo/fetch.ts) answers them as `products` and `productVariants`.
 const PRODUCT_TOTAL_QUERY = 'query ($options: ProductListOptions) { products(options: $options) { totalItems } }';
+const VARIANT_TOTAL_QUERY = 'query ($options: ProductVariantListOptions) { productVariants(options: $options) { totalItems } }';
 
-/** Store health's On server column: one read of the store's product total and order total (the Orders panel's
+/** Store health's On server column: one read each of the store's product, variant and order totals (the Orders panel's
  * `orders` list total). Each is null when its read fails: offline, refused or an unexpected answer. */
 export async function readServerTotals(context: SyncContext): Promise<ServerTotals> {
-  const products = fetch(`${context.baseUrl}/admin-api`, {
+  const total = (query: string, field: 'products' | 'productVariants') => fetch(`${context.baseUrl}/admin-api`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers }, signal: context.signal,
-    body: JSON.stringify({ query: PRODUCT_TOTAL_QUERY, variables: { options: { take: 1 } } }),
+    body: JSON.stringify({ query, variables: { options: { take: 1 } } }),
   }).then(async response => {
-    const total = response.ok ? (await response.json())?.data?.products?.totalItems : undefined;
+    const total = response.ok ? (await response.json())?.data?.[field]?.totalItems : undefined;
     return typeof total === 'number' ? total : null;
   }).catch(() => null);
   const orders = listVendureOrders(context, { take: 1 }).then(list => list.totalItems).catch(() => null);
-  const [productTotal, orderTotal] = await Promise.all([products, orders]);
-  return { products: productTotal, orders: orderTotal };
+  const [productTotal, variantTotal, orderTotal] = await Promise.all([total(PRODUCT_TOTAL_QUERY, 'products'), total(VARIANT_TOTAL_QUERY, 'productVariants'), orders]);
+  return { products: productTotal, variants: variantTotal, orders: orderTotal };
 }
 
 export type AttentionRow = { order: PosOrder; reason: string; retry: boolean };
