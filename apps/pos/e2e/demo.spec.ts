@@ -647,7 +647,7 @@ test("the customer sheet lists the customer's five newest orders, and a tap open
   await expect(orders).toHaveText([/^DEMO-000004.*Payment settled€9\.52$/, /^DEMO-000003.*Payment settled€17\.84$/]);
   await expect(sheet.getByTestId('customer-sheet-orders-empty')).toHaveCount(0);
   await expect(sheet.getByLabel('Order DEMO-000004')).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath('06h-customer-orders-vendurepos.png') });
+  await page.screenshot({ path: test.info().outputPath('06i-customer-orders-vendurepos.png') });
 
   await orders.first().click();
   await expect(page.getByTestId('customers-panel')).toHaveCount(0);
