@@ -60,12 +60,14 @@ export type OrderDetailView = {
   orderNumber: string; status: OrderStatus; lineItems: { name: string; quantity: number; total: string }[];
   subtotal: string; tax: string; total: string;
   payments: { id: string; text: string; refunds: { id: string; text: string }[] }[];
+  state: string; fulfilments: { id: string; text: string }[];
 };
 
 /**
  * The order's own figures as text; the only arithmetic is tax = totalWithTax - total.
  * Items lists the lines, then each surcharge (the till's discount, fees, rounding), then each shipping line.
  * Subtotal is Vendure's subTotalWithTax: the lines and surcharges, not shipping.
+ * State is Vendure's order state in words ("● Shipped"); fulfilments are listed only for an order the till did not create.
  */
 export function orderDetailView(order: VendureOrder): OrderDetailView {
   const money = (amount: number) => formatMoney({ amount, currency: order.currencyCode }) ?? '';
@@ -90,6 +92,12 @@ export function orderDetailView(order: VendureOrder): OrderDetailView {
       id: payment.id,
       text: `Paid ${money(payment.amount)} · ${orderStateLabel(payment.state)}`,
       refunds: payment.refunds.map(refund => ({ id: refund.id, text: `Refunded ${money(refund.total)} · ${orderStateLabel(refund.state)}` })),
+    })),
+    state: `● ${orderStateLabel(order.state)}`,
+    // The till fulfils its own sales at create (order.create), so only an order from elsewhere, e.g. the storefront, lists its fulfilments (Front desk ruling, 2026-11-21).
+    fulfilments: order.customFields?.tallyClientOrderId ? [] : (order.fulfillments ?? []).map(f => ({
+      id: f.id,
+      text: `${f.method} · ${orderStateLabel(f.state)}${f.trackingCode.trim() ? ` · Tracking ${f.trackingCode}` : ''}`,
     })),
   };
 }

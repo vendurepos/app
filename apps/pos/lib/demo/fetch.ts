@@ -48,7 +48,10 @@ const ADMINISTRATOR_ID = '1';
 // The demo's one channel, as the catalogue permissions query names it.
 const DEMO_CHANNEL_ID = '1';
 // The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
-const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder'];
+// The demo's till role also approves register variances, so its count shows every figure (ApproveTallyPosVariance unblinds it, lib/register-blind.ts).
+const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
+// e2e only: a till without the approve permission, which counts blind.
+export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
 // Vendure's Admin GraphQL route.
 const ADMIN_PATH = '/admin-api';
 // The plugin's capability discovery route.
@@ -117,7 +120,8 @@ function page(items: Record<string, any>[], options: any = {}) {
 
 export function installDemoStore(origin: string, options: { storage?: DemoStorage } = {}): { uninstall(): void; reset(): void } {
   const original = globalThis.fetch;
-  const store = new DemoStore(options.storage ?? globalThis.localStorage ?? memoryStorage);
+  const storage = options.storage ?? globalThis.localStorage ?? memoryStorage;
+  const store = new DemoStore(storage);
   globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (!url.startsWith(origin)) return original(input, init);
@@ -189,7 +193,8 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { products: page(store.products(), variables.options) }; break;
       case 'GetVariants': case 'VariantStock': case 'GetVariantPrices': case 'productVariants':
         data = { productVariants: page(store.products().flatMap(product => product.variants), variables.options) }; break;
-      case 'CustomerPermissions': case 'CataloguePermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: {
+      case 'CustomerPermissions': case 'CataloguePermissions': case 'RegisterPermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID,
+        permissions: storage.getItem(DEMO_TILL_ROLE_KEY) === '1' ? DEMO_PERMISSIONS.filter(p => p !== 'ApproveTallyPosVariance') : DEMO_PERMISSIONS }] }, activeChannel: {
         id: DEMO_CHANNEL_ID, defaultCurrencyCode: DEMO_CHANNEL.defaultCurrencyCode, pricesIncludeTax: DEMO_CHANNEL.pricesIncludeTax } }; break;
       case 'VariantStockLevel': data = { globalSettings: { outOfStockThreshold: 0 },
         productVariant: store.products().flatMap(product => product.variants).find(variant => variant.id === variables.id) ?? null }; break;

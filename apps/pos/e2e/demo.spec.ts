@@ -397,7 +397,7 @@ test("the Orders panel lists the store's orders by day, and searches and filters
   const rows = await storeRows(page);
   await expect.poll(() => rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-testid'))))
     .toEqual(['orders-row-3', 'orders-row-2', 'orders-row-1']);
-  await expect(page.getByTestId('orders-row-1')).toContainText('cashier@demo.vendurepos.com');
+  await expect(page.getByTestId('orders-row-2')).toContainText('cashier@demo.vendurepos.com');
   await expect(page.locator('[data-testid^="orders-day-"]')).toHaveCount(3);
   await expect(page.getByTestId('orders-count')).toHaveText('Showing 3 of 3 orders');
   await expect(page.getByTestId('orders-more')).toHaveCount(0);
@@ -1098,6 +1098,25 @@ test("the demo opens a seeded order and the till's own sale from the Orders pane
   await expect(detail).toContainText(mug.name);
 });
 
+test("the order sheet shows Vendure's state, and a storefront order's fulfilment; a till order lists none", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('orders-open').click();
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000001' }).click();
+  await expect(page.getByTestId('order-sheet-state')).toHaveText('● Shipped');
+  await expect(page.getByTestId('order-sheet-fulfilment-f1')).toHaveText('Fulfilment: Courier · Shipped · Tracking DEMO-TRACK-0001');
+  await expect(page.getByTestId('refund-start')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('07i-order-fulfilment-vendurepos.png') });
+  await page.getByTestId('order-sheet-close').click();
+
+  await (await storeRows(page)).filter({ hasText: 'DEMO-000002' }).click();
+  await expect(page.getByTestId('order-sheet-state')).toHaveText('● Payment settled');
+  await expect(page.getByTestId('order-sheet-fulfilments')).toHaveCount(0);
+});
+
 test("the order sheet shows the order's notes, a private one as Staff note, never on its receipt or a print, as v2's order notes", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
@@ -1598,6 +1617,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   const sheet = page.getByTestId('closure-sheet');
   await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €119.04');
   await expect(sheet.getByTestId('closure-counted-cash')).toHaveText('Counted €119.04');
+  await expect(page.getByTestId('closure-blind-counted')).toHaveCount(0);
   await sheet.getByTestId('closure-print').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(printed).toEqual(expect.arrayContaining([
@@ -1626,6 +1646,33 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   expect(requests.filter((url) => new URL(url).origin !== origin && url !== DEMO_CAPTURE_URL)).toEqual([]);
   expect(cspConsole).toEqual([]);
   expect(consoleErrors).toEqual([]);
+});
+
+test('a till without the approve permission counts blind; after closing it sees what it counted, sent for review, and no expected figure', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('vendurepos.demo.till_role', '1'));
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  await page.getByTestId('register-open-panel').click();
+  const panel = page.getByTestId('register-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId('register-panel-expected')).toHaveCount(0);
+  await panel.getByTestId('register-panel-close').click();
+  const count = page.getByTestId('register-count');
+  await count.getByTestId('count-amount').fill('100.00');
+  await expect(count.getByTestId('count-variance')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('09j-register-count-blind-vendurepos.png') });
+  await count.getByTestId('count-close').click();
+
+  const sheet = page.getByTestId('closure-sheet');
+  await expect(page.getByTestId('closure-blind-counted')).toHaveText('Cash counted €100.00 · sent for review');
+  await expect(sheet.getByTestId('closure-figures')).toHaveCount(0);
+  await expect(sheet.getByTestId('closure-expected-cash')).toHaveCount(0);
+  await expect(sheet.getByTestId('closure-print')).toHaveCount(0);
+  await expect(sheet).not.toContainText(/Expected|variance/i);
+  await page.screenshot({ path: test.info().outputPath('09k-register-closed-blind-vendurepos.png') });
 });
 
 test('one click from a fresh visit at phone width', async ({ page }) => {

@@ -8,6 +8,7 @@ import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
 import { loadOrderPage } from '../order-list';
 import { loadCustomerPage } from '../customer-list';
+import { listCustomerNotes } from '../customer-notes';
 import { orderDetailView } from '../order-detail';
 import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
@@ -16,7 +17,8 @@ import { logout } from '../logout';
 import { readServerTotals } from '../store-health';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
-import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
+import { registerBlind } from '../register-blind';
+import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, DEMO_TILL_ROLE_KEY, installDemoStore } from './fetch';
 import { demoCategoryImage, demoProductImage } from './product-images';
 import { DEMO_CUSTOMER_NOTE, DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
 
@@ -110,6 +112,17 @@ it('signs in through the app, checks the barcode field and reads the seeded tax 
     .toEqual({ ok: false, error: 'Email or password is incorrect.' });
   expect(await logout(session)).toBe('ok');
   expect(original).not.toHaveBeenCalled();
+});
+
+it('answers RegisterPermissions with the approve permission, and without it for the e2e till role', async () => {
+  const context = sessionContext(await signedIn());
+  const permissions = async () => (await (await fetch(`${context.baseUrl}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
+    body: JSON.stringify({ query: 'query RegisterPermissions { me { channels { id permissions } } activeChannel { id } }' }) })).json()).data.me.channels[0].permissions;
+  expect(await permissions()).toContain('ApproveTallyPosVariance');
+  expect(await registerBlind(context)).toBe(false);
+  storage.setItem(DEMO_TILL_ROLE_KEY, '1');
+  expect(await permissions()).not.toContain('ApproveTallyPosVariance');
+  expect(await registerBlind(context)).toBe(true);
 });
 
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
@@ -231,8 +244,8 @@ it('splits integer totals by largest remainder, with earlier lines winning ties'
 it('reads a seeded order detail through sign-in and the real connector', async () => {
   const session = await signedIn();
   const order = await getVendureOrder(sessionContext(session), '1');
-  expect(order).toMatchObject({ code: 'DEMO-000001', state: 'PaymentSettled', totalWithTax: 952,
-    customFields: { tallyClientOrderId: 'seed-order-1' } });
+  expect(order).toMatchObject({ code: 'DEMO-000001', state: 'Shipped', totalWithTax: 952,
+    customFields: { tallyClientOrderId: null } });
   expect(order!.lines).toHaveLength(1);
   expect(order!.lines[0]).toMatchObject({ productVariant: { sku: 'TALLY-MUG' }, quantity: 1,
     proratedLinePriceWithTax: 952, taxRate: 19 });
@@ -240,6 +253,14 @@ it('reads a seeded order detail through sign-in and the real connector', async (
   const view = orderDetailView(order!);
   expect(view.total).toBe('€9.52');
   expect(view.lineItems[0].total).toBe('€9.52');
+});
+
+it('seeds order 1 as a shipped storefront order with its fulfilment, and the till orders with none', () => {
+  const store = new DemoStore();
+  expect(store.order('1')).toMatchObject({ state: 'Shipped', customFields: { tallyClientOrderId: null },
+    fulfillments: [{ id: 'f1', state: 'Shipped', method: 'Courier', trackingCode: 'DEMO-TRACK-0001' }] });
+  expect(store.order('2')).toMatchObject({ state: 'PaymentSettled', customFields: { tallyClientOrderId: 'seed-order-2' },
+    fulfillments: [] });
 });
 
 it('a demo sale paid with change reprints with the charged total, the tendered cash and the change', async () => {
@@ -698,16 +719,16 @@ it('a saved demo state from before refunds loads, reads the seeded orders and ta
   values.set(DEMO_STORAGE_KEY, JSON.stringify(saved));
   installed.uninstall();
   installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
-  expect((await detail(session, '1')).customFields?.tallyClientOrderId).toBe('seed-order-1');
+  expect((await detail(session, '2')).customFields?.tallyClientOrderId).toBe('seed-order-2');
   expect((await send(session, refundEnvelope(await detail(session, '4'), 1, 'old')))[0].status).toBe('applied');
 });
 
 it('counts a refund of a seeded order in the session that made it', async () => {
   const session = await signedIn();
   await send(session, OPEN);
-  const [applied] = await send(session, refundEnvelope(await detail(session, '1'), 1, 'seeded'));
-  expect(applied).toMatchObject({ status: 'applied', refund: { totalMinor: 952, byMethod: { cash: 952 } } });
-  expect(await expectedCash(session, 'cash-seeded')).toBe(1000 - 952);
+  const [applied] = await send(session, refundEnvelope(await detail(session, '3'), 1, 'seeded'));
+  expect(applied).toMatchObject({ status: 'applied', refund: { totalMinor: 1784, byMethod: { cash: 1784 } } });
+  expect(await expectedCash(session, 'cash-seeded')).toBe(1000 - 1784);
 });
 
 // 3 mugs less EUR 1.00 is 2300 net, 2737 with tax: 2737 does not divide by 3.
@@ -742,12 +763,14 @@ it('lists full order details newest first through the real connector', async () 
   expect(result.orders.find(order => order.id === '2')).toEqual(await getVendureOrder(sessionContext(session), '2'));
 });
 
-it('seeds every order with the demo cashier', async () => {
+it('seeds every till order with the demo cashier; the storefront order has none', async () => {
   const session = await signedIn();
   const result = await loadOrderPage(session, { search: '', filters: {} }, 'UTC', 0);
   expect('orders' in result).toBe(true);
   if (!('orders' in result)) throw new Error(result.notice.text);
-  for (const order of result.orders) expect(order.customFields?.tallyCashierRef).toBe(DEMO_CREDENTIALS.email);
+  for (const order of result.orders) {
+    expect(order.customFields?.tallyCashierRef).toBe(order.id === '1' ? null : DEMO_CREDENTIALS.email);
+  }
 });
 
 it("the demo store answers Store health's server totals", async () => {
@@ -785,7 +808,7 @@ it.each([['demo-000002', ['2']], ['LOVELACE', ['3']], ['zzz', []]] as const)('se
   expect(result.totalItems).toBe(ids.length);
 });
 
-it.each([['PaymentSettled', 3], ['Cancelled', 0]] as const)('filters orders by status: %s', async (status, count) => {
+it.each([['PaymentSettled', 2], ['Shipped', 1], ['Cancelled', 0]] as const)('filters orders by status: %s', async (status, count) => {
   const result = await loadOrderPage(await signedIn(), { search: '', filters: { status } }, 'UTC', 0);
   expect(result).toMatchObject({ orders: expect.any(Array), totalItems: count });
   if (!('orders' in result)) throw new Error(result.notice.text);
@@ -857,4 +880,20 @@ it("answers CustomerAccount with each customer's Vendure User: verified, a guest
   const created = await createVendureConnector().createCustomer!(sessionContext(await signedIn()), { email: 'till@example.com', firstName: 'Till', lastName: 'Made' });
   expect((await account(created.id)).user).toEqual({ id: expect.any(String), verified: false });
   expect(await account('unknown')).toBeNull();
+});
+
+it("the customer notes read returns the newest 100 of more than 100 notes, oldest first", async () => {
+  const session = await signedIn();
+  new DemoStore(storage).addCustomerNote({ id: 'c1', note: 'seed', isPublic: false });
+  const saved = JSON.parse(values.get(DEMO_STORAGE_KEY)!);
+  saved.customerNotes.c1 = Array.from({ length: 105 }, (_, index) => ({
+    id: `n${index + 1}`, type: 'CUSTOMER_NOTE', createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(), isPublic: false, data: { note: `note ${index + 1}` },
+  }));
+  values.set(DEMO_STORAGE_KEY, JSON.stringify(saved));
+  installed.uninstall();
+  installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
+  const notes = await listCustomerNotes(sessionContext(session), 'c1');
+  expect(notes).toHaveLength(100);
+  expect(notes[0].text).toBe('note 6');
+  expect(notes[99].text).toBe('note 105');
 });
