@@ -883,8 +883,8 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   await openRegister(page);
   await page.getByTestId('products-open').click();
   const panel = page.getByTestId('products-panel');
-  const variants = CATALOGUE.flatMap(product => product.variants).length;
-  await expect(page.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants} products`);
+  // The count is top-level rows: a multi-variant product is one "N variations" row (10.2j), so it counts products.
+  await expect(page.getByTestId('products-count')).toHaveText(`Showing 25 of ${CATALOGUE.length} products`);
   const mug = panel.getByTestId(`product-row-${MUG_VARIANT_ID}`);
 
   await page.getByTestId('products-search').fill('TALLY-MUG');
@@ -910,8 +910,7 @@ test("the Products refresh beside the count pulls the catalogue again, as v2's 0
   await expectSignedIn(page);
   await openRegister(page);
   await page.getByTestId('products-open').click();
-  const variants = CATALOGUE.flatMap(product => product.variants).length;
-  const count = `Showing 25 of ${variants} products`;
+  const count = `Showing 25 of ${CATALOGUE.length} products`;
   await expect(page.getByTestId('products-count')).toHaveText(count);
   await page.mouse.move(480, 0); // off the rail, so its tooltip does not cover the search
   await page.screenshot({ path: test.info().outputPath('08i-products-refresh-vendurepos.png') });
@@ -978,7 +977,8 @@ test("the Products panel filters by In Stock and by category, as v2's filter pil
   await panel.getByTestId('products-category-picker').getByText('Drinkware', { exact: true }).click();
   await expect(panel.getByTestId('products-category-picker')).toHaveCount(0);
   await expect(panel.getByTestId('products-category-chip')).toContainText('Drinkware');
-  const n = CATALOGUE.filter(product => product.category === 'Drinkware').flatMap(product => product.variants).length;
+  // One top-level row per Drinkware product: Enamel Cup's two variants are one group row (10.2j).
+  const n = CATALOGUE.filter(product => product.category === 'Drinkware').length;
   await expect(panel.locator('[data-testid^="product-categories-"]')).toHaveText(Array(n).fill('Drinkware'));
   await expect(panel.getByTestId('products-count')).toHaveText(`Showing ${n} of ${n} products`);
   // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/08f-products-filters-vendurepos.webp (cwebp -q 80).
@@ -1010,7 +1010,7 @@ test("the Products panel filters by each public facet, one pill per facet, as v2
   await picker.getByText('Tally', { exact: true }).click();
   await expect(picker).toHaveCount(0);
   await expect(brand).toContainText('Brand: Tally');
-  const n = CATALOGUE.filter(p => demoBrand(p) === 'Tally').flatMap(p => p.variants).length;
+  const n = CATALOGUE.filter(p => demoBrand(p) === 'Tally').length; // top-level rows: products (10.2j)
   await expect(panel.getByTestId('products-count')).toHaveText(`Showing ${Math.min(n, 25)} of ${n} products`);
   // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/08h-products-facets-vendurepos.webp (cwebp -q 80).
   await page.setViewportSize({ width: 960, height: 600 });
@@ -1032,14 +1032,19 @@ test("the Products panel sorts by its headers, across every page, as v2's produc
   const variants = CATALOGUE.flatMap(p => p.variants).sort((a, b) => a.priceMinor - b.priceMinor);
   const cheapestSku = variants[0].sku;
   const dearestSku = variants[variants.length - 1].sku;
-  await expect(panel.getByTestId('products-count')).toHaveText(`Showing 25 of ${variants.length} products`);
+  await expect(panel.getByTestId('products-count')).toHaveText(`Showing 25 of ${CATALOGUE.length} products`);
   const unsortedFirst = await rows.first().getAttribute('data-testid');
   await panel.getByTestId('product-table-sort-price').click();
   await expect(rows.first()).toContainText(cheapestSku);
   await expect(panel.getByTestId('product-table-sort-price')).toContainText('▲');
   await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
   await panel.getByTestId('product-table-sort-price').click();
-  await expect(rows.first()).toContainText(dearestSku);
+  // The dearest variant's product has two variants, so its group row leads (10.2j); opened, the dearest variant is its first row.
+  const dearestProductId = String(CATALOGUE.findIndex(p => p.variants.some(v => v.sku === dearestSku)) + 1);
+  await expect(rows.first()).toHaveAttribute('data-testid', `product-row-group-${dearestProductId}`);
+  await panel.getByTestId(`product-variations-${dearestProductId}`).click();
+  await expect(rows.nth(1)).toContainText(dearestSku);
+  await panel.getByTestId(`product-variations-${dearestProductId}`).click();
   await expect(panel.getByTestId('product-table-sort-price')).toContainText('▼');
   await page.setViewportSize({ width: 960, height: 600 });
   await page.screenshot({ path: test.info().outputPath('08g-products-header-sort-vendurepos.png') });
@@ -1094,7 +1099,10 @@ test('the Products panel edits one variant of a multi-variant product, and its s
   await page.getByTestId('products-open').click();
   const panel = page.getByTestId('products-panel');
   await page.getByTestId('products-search').fill('Espresso Beans');
-  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(2);
+  // One "2 variations" group row (10.2j); opened, its two variant rows follow it.
+  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
+  await panel.getByTestId(`product-variations-${CATALOGUE.findIndex(p => p.name === 'Espresso Beans') + 1}`).click();
+  await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(3);
   // lib/demo/store.ts assigns variant ids sequentially across the catalogue, starting at 1.
   const variants = CATALOGUE.flatMap(product => product.variants);
   const [smallId, largeId] = ['ESP-250', 'ESP-1000'].map(sku => String(variants.findIndex(variant => variant.sku === sku) + 1));
@@ -1122,6 +1130,52 @@ test('the Products panel edits one variant of a multi-variant product, and its s
   await page.getByTestId('products-open').click();
   await expect(panel).toHaveCount(0);
   await expect(page.getByTestId('cart')).toBeVisible();
+});
+
+test("the Products panel groups a multi-variant product under one 'N variations' row that opens to its variants, as v2's products table", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  const rows = panel.locator('[data-testid^="product-row-"]');
+  await page.getByTestId('products-search').fill('Espresso Beans');
+  // lib/demo/store.ts: a product's id is its CATALOGUE index + 1, and variant ids run sequentially across the catalogue from 1.
+  const beans = CATALOGUE.find(p => p.name === 'Espresso Beans')!;
+  const productId = String(CATALOGUE.indexOf(beans) + 1);
+  const variantIds = beans.variants.map(v => String(CATALOGUE.flatMap(p => p.variants).indexOf(v) + 1));
+  // The range runs from the cheapest variant's price to the dearest's: ESP-250 at 899 and ESP-1000 at 2999 minor units, €8.99 – €29.99.
+  const minor = beans.variants.map(v => v.priceMinor);
+  const euro = (n: number) => `€${(n / 100).toFixed(2)}`;
+  const group = panel.getByTestId(`product-row-group-${productId}`);
+  await expect(rows).toHaveCount(1);
+  await expect(group).toContainText('Espresso Beans');
+  await expect(group).toContainText(`${euro(Math.min(...minor))} – ${euro(Math.max(...minor))}`);
+  const toggle = panel.getByTestId(`product-variations-${productId}`);
+  await expect(toggle).toHaveText(`${beans.variants.length} variations ›`);
+  await expect(toggle).toHaveAccessibleName('Show variations of Espresso Beans');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  for (const id of variantIds) await expect(panel.getByTestId(`product-row-${id}`)).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggle).toHaveText(`${beans.variants.length} variations ⌄`);
+  await expect(rows).toHaveCount(1 + variantIds.length);
+  for (const [i, id] of variantIds.entries()) {
+    await expect(panel.getByTestId(`product-row-${id}`).getByTestId(`product-price-${id}`)).toHaveValue((minor[i] / 100).toFixed(2));
+  }
+  // The demo-pairs size, as 10e; the PNG is made docs/v2-parity/demo-pairs/08j-products-variations-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.screenshot({ path: test.info().outputPath('08j-products-variations-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  for (const id of variantIds) await expect(panel.getByTestId(`product-row-${id}`)).toHaveCount(0);
+  // Cleared, the count is top-level rows: one per CATALOGUE product (30), the page is 25.
+  await page.getByTestId('products-search').fill('');
+  await expect(panel.getByTestId('products-count')).toHaveText(`Showing ${Math.min(25, CATALOGUE.length)} of ${CATALOGUE.length} products`);
 });
 
 test("Store health shows Ready to sell, nothing waiting, the products on this device and the store's totals, and a scan closes it and adds", async ({ page }) => {

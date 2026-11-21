@@ -3,7 +3,7 @@ import { catalogueEntries, searchProducts, sortProducts, variantPriceLabel, type
 import { stockTarget, type StockTarget, type VendureVariantStock } from './product-edit';
 
 /** One variant's row in the Products panel (CHECKLIST 10.2), with display and edit fields. */
-export interface ProductRow { id: string; name: string; sku: string; price: string; stock: string;
+export interface ProductRow { id: string; productId: string; productName: string; name: string; sku: string; price: string; stock: string;
   imageUrl: string | null; stockStatus: StockStatus; categories: string; categoryIds: string[]; facetValueIds: string[];
   priceText: string; stockText: string; managed: boolean; stockTarget: StockTarget | null }
 /** The Products panel's header sort value for a row (v2's sortable headers): Name, SKU, Stock and Price; a missing value sorts last. */
@@ -32,7 +32,7 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
     const option = variant.title?.startsWith(name) ? variant.title.slice(name.length).trim() : variant.title ?? '';
     const current = resolvePrice(variant.prices, currency)?.current;
     return {
-      id: variant.id, name: option ? `${name} · ${option}` : name,
+      id: variant.id, productId: String(traits.getId(product)), productName: name, name: option ? `${name} · ${option}` : name,
       sku: variant.sku ?? '—', price: variantPriceLabel(variant, currency) ?? '—',
       stock: variant.stock.quantity == null ? '—' : String(variant.stock.quantity),
       imageUrl: traits.getImageUrl(product) ?? null, stockStatus: variant.stock.status,
@@ -44,6 +44,32 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
       stockTarget: stockTarget((product as { variants?: ({ id: string | number } & VendureVariantStock)[] }).variants?.find(v => String(v.id) === variant.id), outOfStockThreshold),
     };
   });
+}
+
+/** A Products panel row: a variant, a product's "N variations" group row, or a variant drawn inside its open group (CHECKLIST 10.2j). */
+export type PanelRow = ProductRow & { group?: { productId: string; count: number; open: boolean }; childOf?: string };
+// A group's stock status is the first of these any of its rows has, else unknown.
+const GROUP_STATUS_ORDER: StockStatus[] = ['in_stock', 'backorder', 'out_of_stock'];
+
+/** v2's products table (08): a product with two or more rows left after search, filters and sort is one group row at its first row's place;
+ * an open group's variants follow it in list order. The page limit and the counts are top-level rows (groups and plain rows), never an open group's children. */
+export function groupProductRows(rows: ProductRow[], open: ReadonlySet<string>, limit: number): { shown: PanelRow[]; shownTop: number; totalTop: number } {
+  const byProduct = new Map<string, ProductRow[]>();
+  for (const row of rows) byProduct.set(row.productId, [...(byProduct.get(row.productId) ?? []), row]);
+  const top = [...byProduct.values()];
+  const shown = top.slice(0, limit).flatMap((members): PanelRow[] => {
+    const [first] = members;
+    if (members.length < 2) return [first];
+    const priced = members.filter(row => row.priceText !== '').sort((a, b) => Number(a.priceText) - Number(b.priceText));
+    const [low, high] = [priced[0], priced.at(-1)];
+    const isOpen = open.has(first.productId);
+    const group: PanelRow = { ...first, id: `group-${first.productId}`, name: first.productName, sku: '—', stock: '—', stockText: '', managed: false, stockTarget: null,
+      stockStatus: GROUP_STATUS_ORDER.find(status => members.some(row => row.stockStatus === status)) ?? 'unknown',
+      price: !low || !high ? '—' : low.priceText === high.priceText ? low.price : `${low.price} – ${high.price}`,
+      group: { productId: first.productId, count: members.length, open: isOpen } };
+    return [group, ...(isOpen ? members.map(row => ({ ...row, childOf: first.productId })) : [])];
+  });
+  return { shown, shownTop: Math.min(limit, top.length), totalTop: top.length };
 }
 
 /** The panel's own filters (v2's In Stock, Category, Tags and Brands pills); null category means all; facets maps a facet id to its chosen value id. */

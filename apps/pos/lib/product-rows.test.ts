@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createVendureConnector, vendureProductTraits } from '@tallyui/connector-vendure';
-import { filterProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
+import { filterProductRows, groupProductRows, productCategories, productRows, productRowSortValue, sortProductRows, STOCK_STATUS_LABELS, type ProductRow } from './product-rows';
 
 const variant = (id: string, sku: string, price: number, name: string, stockOnHand?: number) =>
   ({ id, name, sku, price, currencyCode: 'EUR', enabled: true, trackInventory: stockOnHand === undefined ? 'FALSE' : 'TRUE', stockOnHand });
@@ -14,7 +14,7 @@ describe('productRows', () => {
   it('lists each variant in catalogue order with its name, SKU, price and tracked stock', () => {
     const rows = productRows(products, '', vendureProductTraits, 'EUR', 0);
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
-    expect(rows[0]).toEqual({ id: '11', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
+    expect(rows[0]).toEqual({ id: '11', productId: '1', productName: 'Tally Fixture Mug', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
       imageUrl: null, stockStatus: 'in_stock', categories: '—', categoryIds: [], facetValueIds: [],
       priceText: '8.00', stockText: '50', managed: true, stockTarget: null });
     expect([rows[3].managed, rows[3].stockText]).toEqual([false, '']);
@@ -125,7 +125,7 @@ describe('filterProductRows', () => {
 
 describe('Products panel header sorting', () => {
   const row = (values: Partial<ProductRow> = {}): ProductRow => ({
-    id: '1', name: 'Mug', sku: '—', price: '—', stock: '—', imageUrl: null,
+    id: '1', productId: '1', productName: 'Mug', name: 'Mug', sku: '—', price: '—', stock: '—', imageUrl: null,
     stockStatus: 'unknown', categories: '—', categoryIds: [], facetValueIds: [], priceText: '', stockText: '',
     managed: false, stockTarget: null, ...values,
   });
@@ -159,6 +159,62 @@ describe('Products panel header sorting', () => {
   it('brings the cheapest row from beyond the first page to the front', () => {
     const rows = Array.from({ length: 30 }, (_, i) => row({ id: String(i), priceText: i === 29 ? '1.00' : '10.00' }));
     expect(sortProductRows(rows, { field: 'price', dir: 'asc' })[0]).toBe(rows[29]);
+  });
+});
+
+describe('groupProductRows', () => {
+  const row = (id: string, productId: string, values: Partial<ProductRow> = {}): ProductRow => ({
+    id, productId, productName: `Product ${productId}`, name: `Product ${productId} · ${id}`, sku: `SKU-${id}`, price: '—', stock: '5', imageUrl: null,
+    stockStatus: 'in_stock', categories: 'Coffee', categoryIds: ['c'], facetValueIds: [], priceText: '', stockText: '5',
+    managed: true, stockTarget: null, ...values,
+  });
+  const ids = (rows: { id: string }[]) => rows.map(r => r.id);
+
+  it("draws two rows of one product as one group row at the first row's place", () => {
+    const { shown } = groupProductRows([row('a', '1'), row('b1', '2'), row('c', '3'), row('b2', '2')], new Set(), 25);
+    expect(ids(shown)).toEqual(['a', 'group-2', 'c']);
+    expect(shown[1]).toMatchObject({ name: 'Product 2', sku: '—', stock: '—', stockText: '', managed: false, stockTarget: null,
+      categories: 'Coffee', group: { productId: '2', count: 2, open: false } });
+  });
+
+  it('keeps a product with one row left a plain variant row', () => {
+    const plain = row('b2', '2');
+    const { shown } = groupProductRows([row('a', '1'), plain], new Set(['2']), 25);
+    expect(shown).toEqual([row('a', '1'), plain]);
+    expect(shown.some(r => 'group' in r || 'childOf' in r)).toBe(false);
+  });
+
+  it('prices a group as the range of its rows, one price when all match, leaving out a row with no price', () => {
+    const price = (priceText: string) => ({ priceText, price: priceText ? `€${priceText}` : '—' });
+    const range = (...texts: string[]) => groupProductRows(texts.map((t, i) => row(String(i), '1', price(t))), new Set(), 25).shown[0].price;
+    expect(range('29.99', '8.99', '10.00')).toBe('€8.99 – €29.99');
+    expect(range('19.99', '19.99')).toBe('€19.99');
+    expect(range('', '12.00', '4.50')).toBe('€4.50 – €12.00');
+    expect(range('', '')).toBe('—');
+  });
+
+  it('takes the group stock status as in stock, then on backorder, then out of stock, then unknown', () => {
+    const status = (...statuses: ProductRow['stockStatus'][]) =>
+      groupProductRows(statuses.map((s, i) => row(String(i), '1', { stockStatus: s })), new Set(), 25).shown[0].stockStatus;
+    expect(status('out_of_stock', 'backorder', 'in_stock')).toBe('in_stock');
+    expect(status('unknown', 'out_of_stock', 'backorder')).toBe('backorder');
+    expect(status('unknown', 'out_of_stock')).toBe('out_of_stock');
+    expect(status('unknown', 'unknown')).toBe('unknown');
+  });
+
+  it("pages and counts top-level rows only; an open group's children follow it and never use up the page", () => {
+    const rows = [row('a1', '1'), row('a2', '1'), row('a3', '1'), row('b', '2'), row('c', '3'), row('d', '4')];
+    const result = groupProductRows(rows, new Set(['1']), 2);
+    expect(ids(result.shown)).toEqual(['group-1', 'a1', 'a2', 'a3', 'b']);
+    expect(result.shown.slice(1, 4).map(r => r.childOf)).toEqual(['1', '1', '1']);
+    expect(result.shown[0].group?.open).toBe(true);
+    expect([result.shownTop, result.totalTop]).toEqual([2, 4]);
+    expect(groupProductRows(rows, new Set(['1']), 25)).toMatchObject({ shownTop: 4, totalTop: 4 });
+  });
+
+  it('shows no children for a closed group', () => {
+    const { shown } = groupProductRows([row('a1', '1'), row('a2', '1'), row('b', '2')], new Set(['2']), 25);
+    expect(ids(shown)).toEqual(['group-1', 'b']);
   });
 });
 
