@@ -245,6 +245,61 @@ describe('order.refund v1', () => {
       'order.refund version 2 is not supported; this server supports 1', { orderRefund: 1 });
   });
 
+  it('a till sale an administrator cancelled is refused order_state, and a replay is refused the same', async () => {
+    const session = await openSession();
+    const { order, clientOrderId } = await sell(1);
+    const { cancelOrder } = await adminClient.query<{ cancelOrder: { id: string; state: string } }>(parse(`mutation Cancel($input: CancelOrderInput!) {
+      cancelOrder(input: $input) { ... on Order { id state } ... on ErrorResult { errorCode message } }
+    }`), { input: { orderId: order.id, lines: [{ orderLineId: order.lines[0].id, quantity: 1 }], reason: 'Back office' } });
+    expect(cancelOrder).toEqual({ id: order.id, state: 'Cancelled' });
+    const stored = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: environment.decode(order.id) });
+    expect([stored.state, stored.customFields.tallyClientOrderId]).toEqual(['Cancelled', clientOrderId]);
+    const stock = (await readOrder(order.id)).lines[0].productVariant.stockOnHand;
+    const command = refundFor(order, session);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await refused(command, order.id, 'order_state', `Order ${order.id} is Cancelled and cannot be refunded`, { state: 'Cancelled' });
+    }
+    expect((await readOrder(order.id)).lines[0].productVariant.stockOnHand).toBe(stock);
+  });
+
+  it('a line from another order is refused invalid_payload', async () => {
+    const session = await openSession();
+    const { order } = await sell(1);
+    const { order: other } = await sell(1);
+    const foreign = other.lines[0].id;
+    await refused(refundFor(order, session, { lines: [{ orderLineId: foreign, quantity: 1, restock: true }], totalMinor: order.lines[0].proratedUnitPriceWithTax }),
+      order.id, 'invalid_payload', `lines[0].orderLineId: no line ${foreign} on order ${order.id}`);
+  });
+
+  it('shipping beyond what is refundable is refused amount_mismatch', async () => {
+    const session = await openSession();
+    const { order } = await sell(2);
+    expect(order.shippingWithTax).toBe(0);
+    const command = refundFor(order, session, { lines: [{ orderLineId: order.lines[0].id, quantity: 1, restock: true }], shippingMinor: 100 });
+    const t = Math.round(order.lines[0].proratedLinePriceWithTax / 2) + 100;
+    expect(command.payload.totalMinor).toBe(t);
+    expect(t).toBeLessThan(order.payments.reduce((sum, payment) => sum + payment.amount, 0));
+    await refused(command, order.id, 'amount_mismatch', `Refund total ${t} does not match the server's ${t}`, { expectedMinor: t, serverMinor: t });
+  });
+
+  it('a refund above the paid remainder is refused amount_mismatch at the remainder', async () => {
+    const session = await openSession();
+    const { order } = await sell(1);
+    const paid = order.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    const command = refundFor(order, session, { adjustmentMinor: 1 });
+    expect(command.payload.totalMinor).toBe(paid + 1);
+    await refused(command, order.id, 'amount_mismatch', `Refund total ${paid + 1} does not match the server's ${paid}`,
+      { expectedMinor: paid + 1, serverMinor: paid });
+  });
+
+  it('a refund whose lines net to zero is refused nothing_to_refund', async () => {
+    const session = await openSession();
+    const { order } = await sell(1);
+    const line = order.lines[0];
+    await refused(refundFor(order, session, { shippingMinor: 0, adjustmentMinor: -line.proratedLinePriceWithTax, totalMinor: 0 }),
+      order.id, 'nothing_to_refund', 'Nothing to refund');
+  });
+
   it('a till refund cannot take money already refunded outside the till', async () => {
     const session = await openSession();
     const { order } = await sell(2);
