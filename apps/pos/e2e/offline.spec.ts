@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { checkout, takePayment } from './checkout';
+import { openAllProducts } from './register';
 
 // The MVP acceptance (plan §1, VA7), run by pnpm e2e (scripts/e2e.sh) against its own fresh store on :3100: 25 sales,
 // 20 of them offline, land as exactly 25 orders at the POS totals, settled, fulfilled and stamped with the sale time.
@@ -89,6 +90,7 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
   await card.getByTestId('open-register-amount').fill('100.00');
   await card.getByTestId('open-register-button').click();
   await expect(card).toHaveCount(0);
+  await openAllProducts(page);
 
   const cart = page.getByTestId('cart');
   const tender = page.getByTestId('tender-pane');

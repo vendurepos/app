@@ -8,7 +8,7 @@ import { DEMO_PUBLIC_NOTE, DEMO_STAFF_NOTE } from '../lib/demo/order-notes';
 import { DEMO_CUSTOMER_NOTE, DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, expectBalanceAsEntry, takePayment, typeAmount } from './checkout';
-import { expectClosureCash, openRegister } from './register';
+import { expectClosureCash, openAllProducts, openRegister } from './register';
 import { wedgeScan } from './wedge';
 
 /** Settings from the rail, on one of its sections (v2's tabs, parity 9.1). */
@@ -67,8 +67,9 @@ async function mugStock(page: Page) {
 
 async function expectSignedIn(page: Page) {
   await expect(page.getByTestId('register-bar-cashier')).toBeVisible();
-  // The grid renders its tiles lazily (at phone width the mug is past the first screenful), so wait for the first by name.
-  await expect(page.getByTestId('product-tile-Canvas Apron')).toBeVisible();
+  // The till opens on the category tiles (1.5a), or on a stored category's grid. The grid renders its tiles lazily (at
+  // phone width the mug is past the first screenful), so wait for the first by name.
+  await expect(page.getByTestId('category-tile-all').or(page.getByTestId('product-tile-Canvas Apron')).first()).toBeVisible();
 }
 
 /**
@@ -1757,6 +1758,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   expect(await page.getByTestId('sign-in-email').count()).toBe(0);
+  await openAllProducts(page);
   // The whole seed is on the till: the In Stock pill (on by default) is tapped off to show the shelf's sold-out products too.
   await page.getByTestId('filter-chip-inStock').click();
   for (const { name } of CATALOGUE) await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
@@ -2024,12 +2026,14 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
   await expect(page.getByTestId('tile-size-3')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('settings-back').click();
 
-  const tiles = page.locator('[data-testid^="product-tile-"]');
+  // All products is a level, whose back poster takes the grid's first slot.
+  const tiles = page.locator('[data-testid="category-level-parent"], [data-testid^="product-tile-"]');
   for (const reload of [false, true]) {
     if (reload) {
       await page.reload();
       await expectSignedIn(page);
     }
+    await openAllProducts(page);
     await expect(tiles.nth(3)).toBeVisible();
     await expect(async () => {
       const first = await tiles.nth(0).boundingBox();
@@ -2059,6 +2063,7 @@ test('Settings keeps the product sort for this till, and the grid takes it on re
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
+  await openAllProducts(page);
   const firstTile = page.locator('[data-testid^="product-tile-"]').first();
   await expect(firstTile).toHaveAttribute('data-testid', 'product-tile-Canvas Apron');
   await openSettings(page, 'general');
@@ -3170,6 +3175,7 @@ test('a second tab is told the till is open in another tab, and opens after the 
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
+  await openAllProducts(page);
   const second = await context.newPage();
   await second.goto('/');
   await expect(second.getByTestId('storage-failure')).toHaveText('VendurePOS is open in another tab. Close it, then reload this page.', { timeout: 30_000 });
@@ -3625,15 +3631,17 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
 
-  const categories = page.getByRole('radiogroup', { name: 'Categories' });
-  const allProducts = categories.getByRole('radio', { name: 'All products', exact: true });
-  const coffee = categories.getByRole('radio', { name: 'Coffee', exact: true });
-  await expect(allProducts).toHaveAttribute('aria-checked', 'true');
-  await expect(categories.getByRole('radio')).toHaveCount(new Set(CATALOGUE.map(p => p.category)).size + 1);
+  // The till opens on the category tiles (1.5a): All products, then one per category.
+  const categories = page.getByTestId('category-browse');
+  const allProducts = page.getByTestId('category-tile-all');
+  const coffee = categories.getByRole('button', { name: 'Coffee', exact: true });
+  const crumb = page.getByTestId('category-crumb');
+  await expect(categories.getByRole('button').first()).toHaveAttribute('data-testid', 'category-tile-all');
+  await expect(categories.getByRole('button')).toHaveCount(new Set(CATALOGUE.map(p => p.category)).size + 1);
 
   await coffee.click();
-  await expect(coffee).toHaveAttribute('aria-checked', 'true');
-  await expect(allProducts).toHaveAttribute('aria-checked', 'false');
+  await expect(crumb).toContainText('Coffee');
+  await expect(categories).toHaveCount(0);
   const tiles = page.locator('[data-testid^="product-tile-"]');
   const mugTile = page.getByTestId('product-tile-Tally Fixture Mug');
   await expect(tiles).toHaveCount(CATALOGUE.filter(p => p.category === 'Coffee').length);
@@ -3645,10 +3653,21 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await search.press('Enter');
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
   await expect(search).toHaveValue('');
-  await expect(coffee).toHaveAttribute('aria-checked', 'true');
-  await expect(mugTile).toHaveCount(0);
+  // A search typed inside a category leaves it (v2 use-browse-path.ts), so the cleared search is back on the tiles.
+  await expect(categories).toBeVisible();
 
+  await coffee.click();
+  await expect(crumb).toContainText('Coffee');
+  await wedgeScan(page, 'TALLY-MUG');
+  await expect(page.getByTestId('cart-line-TALLY-MUG').getByTestId('quantity-popover-trigger')).toHaveText('2');
+  await expect(crumb).toContainText('Coffee');
+  await expect(tiles).toHaveCount(CATALOGUE.filter(p => p.category === 'Coffee').length);
+  await expect(mugTile).toHaveCount(0);
+  await expect(crumb).toContainText('Coffee');
+  await page.getByTestId('category-crumb-root').click();
+  await expect(crumb).toHaveCount(0);
   await allProducts.click();
+  await expect(crumb).toContainText('All products');
   await expect(mugTile).toBeVisible();
 
   // TallyUI 4.0.0's catalogue toggle is one icon button offering the other view: on the table it offers the grid.
@@ -3663,6 +3682,27 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await gridToggle.click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
+});
+
+test('The till opens on v2\'s category tiles, with All products first and a search from the root', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  // openRegister leaves the tiles for All products, which is the catalogue's own state: a reload opens on the tiles.
+  await page.reload();
+  await expect(page.getByTestId('register-open-panel')).toBeVisible();
+  const browse = page.getByTestId('category-browse');
+  await expect(browse).toBeVisible();
+  await expect(browse.getByRole('button').first()).toHaveAttribute('data-testid', 'category-tile-all');
+
+  const search = page.getByPlaceholder('Search or scan barcode / SKU');
+  await search.fill('mug');
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  await expect(browse).toHaveCount(0);
+  await search.fill('');
+  await expect(browse).toBeVisible();
+  await expect(page.locator('[data-testid^="product-tile-"]')).toHaveCount(0);
 });
 
 test('a demo cashier keeps two sales open as tabs under the cart and switches between them', async ({ page }) => {
@@ -3721,6 +3761,7 @@ test("the In Stock pill is on by default, hides the shelf's sold-out products an
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
+  await openAllProducts(page);
   const pill = page.getByTestId('filter-chip-inStock');
   const carafe = page.getByTestId('product-tile-Glass Carafe');
   await expect(pill).toHaveAttribute('aria-pressed', 'true');
@@ -3741,6 +3782,7 @@ test('Settings › Products shows out-of-stock products: the In Stock pill start
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
+  await openAllProducts(page);
   const toggle = page.getByTestId('show-out-of-stock-toggle');
   const pill = page.getByTestId('filter-chip-inStock');
   const carafe = page.getByTestId('product-tile-Glass Carafe');
