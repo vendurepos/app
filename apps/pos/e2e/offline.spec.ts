@@ -102,6 +102,8 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
       const line = cart.getByTestId(`cart-line-${sku}`);
       await expect(line).toBeVisible();
       if (quantity === 2) {
+        // A closing line popover stays mounted through its fade-out (as in cart-line.ts): let it go before this one opens.
+        await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
         await line.getByTestId('quantity-popover-trigger').click();
         await page.getByTestId('quantity-popover-keypad-key-2').click();
         await page.getByTestId('quantity-popover-apply').click();
