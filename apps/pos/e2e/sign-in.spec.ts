@@ -235,7 +235,7 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   const beans = cart.getByTestId('cart-line-ESP-250');
   await beans.getByTestId('quantity-popover-trigger').click();
   await page.getByTestId('quantity-popover-keypad-key-3').click();
-  await page.getByTestId('quantity-popover-apply').click();
+  await page.getByTestId('quantity-popover-done').click();
   await expect(beans).toContainText('Espresso Beans');
   await expect(beans).toContainText('€26.97');
   // 152 + 188.79 -> 189 = 341 (per_order gives 341 too).

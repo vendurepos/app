@@ -106,7 +106,7 @@ test('25 sales, 20 offline: 25 orders, none duplicated, at the POS totals, settl
         await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
         await line.getByTestId('quantity-popover-trigger').click();
         await page.getByTestId('quantity-popover-keypad-key-2').click();
-        await page.getByTestId('quantity-popover-apply').click();
+        await page.getByTestId('quantity-popover-done').click();
       }
     }
     await expect(cart.getByTestId(/^cart-line-/)).toHaveCount(lines.length);
