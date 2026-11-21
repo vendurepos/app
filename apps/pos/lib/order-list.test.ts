@@ -50,6 +50,11 @@ it('maps customer, store day, tenders, status and history to a table row', () =>
   expect(fallback).toMatchObject({ placedAt: order.updatedAt, day: '2026-11-18', cashierRef: null, paymentMethods: '' });
 });
 
+it("shows the plugin's walk-in as no customer, so its row reads Guest, and keeps a named customer's name", () => {
+  expect(toOrderTableRow({ ...order, customer: { ...order.customer!, firstName: '', lastName: '', emailAddress: 'walk-in@vendurepos.invalid' } }, 'UTC').customer).toBeNull();
+  expect(toOrderTableRow(order, 'UTC').customer).toBe('Ada Lovelace');
+});
+
 it('skips every unpaid state and falls back to the payment method for missing or empty tender methods', () => {
   const payment = order.payments![0];
   expect(toOrderTableRow({ ...order, payments: ['Declined', 'Error', 'Cancelled'].map(state => ({ ...payment, state })) }, 'UTC').paymentMethods).toBe('');

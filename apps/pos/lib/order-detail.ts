@@ -3,7 +3,7 @@ import type { OrderHistoryRow, OrderStatus } from '@tallyui/components';
 import { getVendureOrder, type VendureOrder } from '@tallyui/connector-vendure';
 import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { WALK_IN_EMAIL } from './customer-list';
+import { isWalkIn } from './customer-list';
 import { orderHistoryNotice, orderStateLabel, type OrderHistoryNotice } from './order-history';
 import { paymentTenderName, storeDayOf } from './order-list';
 import { registerLabel, type ListedRegister } from './register-choice';
@@ -16,7 +16,7 @@ export const ORDER_LOADING_TEXT = 'Loading the order…';
 
 /** The order sheet's customer line: the customer's name, or "Guest" without one or for the plugin's walk-in. */
 export function orderCustomerName(order: Pick<VendureOrder, 'customer'>): string {
-  if (!order.customer || order.customer.emailAddress === WALK_IN_EMAIL) return 'Guest';
+  if (!order.customer || isWalkIn(order.customer)) return 'Guest';
   return `${order.customer.firstName} ${order.customer.lastName}`.trim() || order.customer.emailAddress;
 }
 

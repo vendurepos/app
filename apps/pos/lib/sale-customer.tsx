@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Avatar, avatarInitials, Button, CustomerPicker, HStack, IconButton, Text, XIcon } from '@tallyui/components';
 import type { TallyConnector } from '@tallyui/core';
 import type { useSale } from '@tallyui/pos';
+import { isWalkIn } from './customer-list';
 import { sessionContext, type Session } from './session';
 import { SlidersIcon } from './nav-icons';
 
@@ -40,7 +41,7 @@ export function SaleCustomer({ sale, connector, session, onSettings }: {
       {open ? (
         <View testID="customer-picker" className="rounded-md border border-border p-3">
           <CustomerPicker
-            search={(q) => connector.searchCustomers!(sessionContext(session), q, { limit: 20 })}
+            search={(q) => connector.searchCustomers!(sessionContext(session), q, { limit: 20 }).then(results => results.filter(c => !isWalkIn(c)))}
             create={connector.createCustomer ? (input) => connector.createCustomer!(sessionContext(session), input) : undefined}
             selected={customer ? { id: customer.id, name: customer.name, email: customer.email } : null}
             onSelect={(c) => {
