@@ -4,7 +4,7 @@ import { FONT_FACES } from '@tallyui/theme';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_FACETS, demoBrand } from '../lib/demo/facets';
-import { DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
+import { DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
 import { openRegister } from './register';
@@ -2321,23 +2321,28 @@ test("Reports › Closures lists every register's closures and opens one to its 
   const panel = page.getByTestId('reports-panel');
   await panel.getByTestId('reports-tab-closures').click();
   await expect(panel.getByTestId('closure-history-row-1')).toContainText('This device · Closure #1');
-  await expect(panel.getByTestId('closure-history-row-demo-front-counter-1')).toContainText('Front counter · Closure #1');
-  // v2's tiles: this device's open session and closure #1 (€100.00 counted), and Front counter's closure yesterday (€150.00).
-  await expect(panel.getByTestId('closures-tile-sessions')).toContainText('3');
-  await expect(panel.getByTestId('closures-tile-sessions')).toContainText('1 open · 2 closed');
-  await expect(panel.getByTestId('closures-tile-cash-at-close')).toContainText('€250.00');
+  // The period starts at Today (v2 10b): Front counter's closure of yesterday is not listed.
+  await expect(panel.getByTestId('closure-history-row-demo-front-counter-1')).toHaveCount(0);
+  // v2's tiles over today: this device's open session and closure #1 (€100.00 counted).
+  await expect(panel.getByTestId('closures-tile-sessions')).toContainText('2');
+  await expect(panel.getByTestId('closures-tile-sessions')).toContainText('1 open · 1 closed');
+  await expect(panel.getByTestId('closures-tile-cash-at-close')).toContainText('€100.00');
   await expect(panel.getByTestId('closures-tile-discrepancy')).toContainText('€0.00');
-  // Floats: the open session's €50, closure #1's €100 and Front counter's €120; activity (100 − 100) + (150 − 120).
-  await expect(panel.getByTestId('closures-tile-cash-at-open')).toContainText('€270.00');
-  await expect(panel.getByTestId('closures-tile-cash-activity')).toContainText('+€30.00');
+  // Floats: the open session's €50 and closure #1's €100; activity 100 − 100.
+  await expect(panel.getByTestId('closures-tile-cash-at-open')).toContainText('€150.00');
+  await expect(panel.getByTestId('closures-tile-cash-activity')).toContainText('+€0.00');
+  // Export CSV, at the top as v2's, exports what the filters show: today's closure of this device, not Front counter's of yesterday.
+  const [download] = await Promise.all([page.waitForEvent('download'), panel.getByTestId('closure-history-export').click()]);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  expect(csv).toContain('"This device"');
+  expect(csv).not.toContain('"Front counter"');
   const openRow = panel.locator('[data-testid^="closures-open-"]').first();
   await expect(openRow).toContainText('This device · Open since');
   await expect(panel.locator('[data-testid^="closures-open-print-x-"]')).toHaveCount(0);
   const days = panel.locator('[data-testid^="closures-day-"]');
   await expect(days.first()).toContainText('Today');
   await expect(days.first().getByTestId('closure-history-row-1')).toBeVisible();
-  await expect(days.nth(1)).toContainText('Yesterday');
-  await expect(days.nth(1).getByTestId('closure-history-row-demo-front-counter-1')).toBeVisible();
+  await expect(days).toHaveCount(1);
   await panel.getByTestId('closures-filter-open').click();
   await expect(openRow).toBeVisible();
   await expect(panel.getByTestId('closure-history-row-1')).toHaveCount(0);
@@ -2351,12 +2356,26 @@ test("Reports › Closures lists every register's closures and opens one to its 
   await page.mouse.move(480, 0);
   await page.screenshot({ path: test.info().outputPath('10d-reports-closures-vendurepos.png') });
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  // Yesterday: Front counter's closure is listed and this device's of today is not; the open session is listed whatever the period.
+  await panel.getByTestId('closures-filter-period').click();
+  await page.getByTestId('closures-filter-period-yesterday').click();
+  await expect(days.first()).toContainText('Yesterday');
+  await expect(panel.getByTestId('closure-history-row-1')).toHaveCount(0);
+  await expect(openRow).toBeVisible();
+  await expect(panel.getByTestId('closures-tile-cash-at-close')).toContainText('€150.00');
+  // The register filter: Front counter keeps its closure and drops this device's open session.
+  await panel.getByTestId('closures-filter-register').click();
+  await panel.getByTestId(`closures-filter-register-option-${DEMO_FRONT_COUNTER.id}`).click();
+  await expect(panel.getByTestId('closure-history-row-demo-front-counter-1')).toBeVisible();
+  await expect(panel.locator('[data-testid^="closures-open-"]')).toHaveCount(0);
+  await panel.getByTestId('closures-filter-register').click();
+  await panel.getByTestId('closures-filter-register-option-all').click();
   await panel.getByTestId('closure-history-open-demo-front-counter-1').click();
   await expect(panel.getByTestId('closure-detail-title')).toHaveText('Front counter · Closure #1');
   await expect(panel.getByTestId('closure-detail')).toContainText('Sales total €245.50');
   await expect(panel.getByTestId('closure-detail')).toContainText('Cash counted €150.00');
   await panel.getByTestId('closure-detail-back').click();
-  await expect(panel.getByTestId('closure-history-row-1')).toBeVisible();
+  await expect(panel.getByTestId('closure-history-row-demo-front-counter-1')).toBeVisible();
   await panel.getByTestId('reports-tab-sales').click();
   await expect(panel.getByTestId('sales-room')).toBeVisible();
 });
