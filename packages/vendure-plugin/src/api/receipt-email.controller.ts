@@ -54,6 +54,8 @@ export class TallyReceiptEmailController {
     // #345: counted before the send, so a failed publish errs towards fewer emails, never more.
     const limited = await this.limits.reserve(ctx, order.id);
     if (limited) {
+      const option = { order_send_limit: 'perOrder', user_daily_limit: 'perUserPerDay', channel_daily_limit: 'perChannelPerDay' }[limited.code];
+      if (!limited.retryAt) return refuse(429, limited.code, `The \`${option}\` cap is 0, so no receipt email can be sent`);
       const retryAt = limited.retryAt.toISOString(), who = { order_send_limit: 'This order already had', user_daily_limit: 'This user already sent',
         channel_daily_limit: 'This store already sent' }[limited.code], today = limited.code === 'order_send_limit' ? '' : ' today';
       return refuse(429, limited.code, `${who} ${limited.cap} receipt emails${today}; another can be sent after ${retryAt}`, { retryAt });

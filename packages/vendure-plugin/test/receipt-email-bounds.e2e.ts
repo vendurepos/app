@@ -1,6 +1,7 @@
 import type { RequestContext } from '@vendure/core';
 import { describe, expect, it } from 'vitest';
 import { TallyReceiptEmailController } from '../src/api/receipt-email.controller';
+import { ReceiptEmailLimits } from '../src/service/receipt-email-limits.service';
 
 // No database: the controller on its own, with stubs that fail if the route reaches an order or the event bus.
 const boom = () => new Proxy({}, { get: () => () => { throw new Error('must not be called'); } });
@@ -30,5 +31,12 @@ describe('#318: the receipt-email rate limit map is bounded', () => {
     expect(recent().has('u1')).toBe(false);
     expect(recent().has('a')).toBe(true);
     expect((await send('a')).code).toBe('rate_limited');
+  });
+});
+
+describe('#347: a cap of 0 refuses before the database', () => {
+  it('checks every cap, not only perOrder, and touches no connection', async () => {
+    const limits = new ReceiptEmailLimits(boom() as never, { perOrder: 3, perUserPerMinute: 20, perUserPerDay: 500, perChannelPerDay: 0 });
+    expect(await limits.reserve({ activeUserId: 1, channelId: 1 } as never, 7)).toStrictEqual({ code: 'channel_daily_limit', cap: 0 });
   });
 });
