@@ -741,6 +741,8 @@ function Sale({
             viewfinder: nativeCamera?.Viewfinder, permission: cameraPermission }}
           showCategoryNav
           categoryBrowse="tiles"
+          // v2's "Open in place" (03-variations-wcpos): variant tiles with option chips, and the product as Back.
+          variationsStyle="drill"
           showViewToggle
           // v2's filter row with its In Stock pill alone, on by default (TallyUI's default filters); the other pills need TallyUI or a ruling (CHECKLIST 1.6).
           showFilterBar

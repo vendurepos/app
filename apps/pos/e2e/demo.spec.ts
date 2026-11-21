@@ -2027,7 +2027,7 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
   await page.getByTestId('settings-back').click();
 
   // All products is a level, whose back poster takes the grid's first slot.
-  const tiles = page.locator('[data-testid="category-level-parent"], [data-testid^="product-tile-"]');
+  const tiles = page.locator('[data-testid="category-level-parent"], [data-testid^="product-tile-"]:not([data-testid*="-stack"])');
   for (const reload of [false, true]) {
     if (reload) {
       await page.reload();
@@ -2064,7 +2064,7 @@ test('Settings keeps the product sort for this till, and the grid takes it on re
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openAllProducts(page);
-  const firstTile = page.locator('[data-testid^="product-tile-"]').first();
+  const firstTile = page.locator('[data-testid^="product-tile-"]:not([data-testid*="-stack"])').first();
   await expect(firstTile).toHaveAttribute('data-testid', 'product-tile-Canvas Apron');
   await openSettings(page, 'general');
   await expect(page.getByTestId('product-sort-name-asc')).toHaveAttribute('aria-pressed', 'true');
@@ -3642,7 +3642,8 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await coffee.click();
   await expect(crumb).toContainText('Coffee');
   await expect(categories).toHaveCount(0);
-  const tiles = page.locator('[data-testid^="product-tile-"]');
+  // The drill's TileStack on a product with variants adds product-tile-<name>-stack ids; a tile count leaves them out.
+  const tiles = page.locator('[data-testid^="product-tile-"]:not([data-testid*="-stack"])');
   const mugTile = page.getByTestId('product-tile-Tally Fixture Mug');
   await expect(tiles).toHaveCount(CATALOGUE.filter(p => p.category === 'Coffee').length);
   await expect(page.getByTestId('product-tile-Espresso Beans')).toBeVisible();
@@ -3702,7 +3703,47 @@ test('The till opens on v2\'s category tiles, with All products first and a sear
   await expect(browse).toHaveCount(0);
   await search.fill('');
   await expect(browse).toBeVisible();
-  await expect(page.locator('[data-testid^="product-tile-"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="product-tile-"]:not([data-testid*="-stack"])')).toHaveCount(0);
+});
+
+test('A product with variants opens its variant tiles in place, with option chips and the product as Back', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+
+  // At 960x600 All products doesn't mount the T-shirt's tile, so the search finds it; its stack is v2's variants cue.
+  const search = page.getByPlaceholder('Search or scan barcode / SKU');
+  const tee = page.getByTestId('product-tile-Tally T-Shirt');
+  await search.fill('T-Shirt');
+  await expect(page.getByTestId('product-tile-Tally T-Shirt-stack')).toBeVisible();
+  await tee.click();
+  const crumb = page.getByTestId('products-breadcrumb');
+  await expect(crumb).toContainText('Tally T-Shirt');
+  await expect(page.getByTestId('variations-parent-tile')).toBeVisible();
+  const chips = page.locator('[data-testid^="variation-tile-"][data-testid$="-chips"]');
+  await expect(chips).toHaveCount(6);
+  // The M White tile, found by its chips.
+  const mWhiteChips = chips.filter({ has: page.getByText('M', { exact: true }) })
+    .filter({ has: page.getByText('White', { exact: true }) });
+  await expect(mWhiteChips).toHaveCount(1);
+  const mWhite = page.getByTestId((await mWhiteChips.getAttribute('data-testid'))!.replace(/-chips$/, ''));
+  await expect(mWhite).toBeVisible();
+  await mWhite.click();
+  const line = page.getByTestId('cart').getByTestId('cart-line-TEE-M-WHT');
+  await expect(line).toBeVisible();
+  // Picking a variant leaves the drill open, so the same tile adds again.
+  await expect(crumb).toBeVisible();
+  await mWhite.click();
+  await expect(line.getByTestId('quantity-popover-trigger')).toHaveText('2');
+
+  await page.getByTestId('variations-parent-tile').click();
+  await expect(crumb).toHaveCount(0);
+  await expect(tee).toBeVisible();
+  await search.fill('');
+  await search.fill('T-Shirt');
+  await expect(tee).toBeVisible();
 });
 
 test('a demo cashier keeps two sales open as tabs under the cart and switches between them', async ({ page }) => {

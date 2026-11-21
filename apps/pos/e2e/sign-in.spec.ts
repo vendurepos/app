@@ -235,7 +235,9 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   };
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await page.getByTestId('product-tile-Espresso Beans').click();
-  await page.getByRole('button', { name: /ESP-250/ }).click();
+  // The drill's variant tiles: the 250 g bag by its option chip, then the product as Back.
+  await page.getByTestId(/^variation-tile-.+-chips$/).getByText('250 g', { exact: true }).click();
+  await page.getByTestId('variations-parent-tile').click();
   const beans = cart.getByTestId('cart-line-ESP-250');
   await beans.getByTestId('quantity-popover-trigger').click();
   await page.getByTestId('quantity-popover-keypad-key-3').click();
