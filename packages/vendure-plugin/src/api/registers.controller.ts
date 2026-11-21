@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestj
 import { Allow, Ctx, Permission, RequestContext } from '@vendure/core';
 import { tallyPosSell } from '../config/permissions';
 import { RegisterApprovalService, approvalBody } from '../service/register-approval.service';
+import { blindRegisterRead } from '../service/register-blind';
 import { RegisterService } from '../service/register.service';
 
 export type TallyRegisterRead = {
@@ -11,11 +12,12 @@ export type TallyRegisterRead = {
   session: null | {
     id: string; status: 'open' | 'counting'; openedAt: string; openedBy: string | null;
     deviceId: string | null; deviceName: string | null; countedFloatMinor: number;
-    expected: Record<string, number>; salesCount: number;
+    /** 4.3c: `expected`, `paidInMinor` and `paidOutMinor` are omitted for a caller without ApproveTallyPosVariance. */
+    expected?: Record<string, number>; salesCount: number;
     /** Every movement row of the session, oldest first by `createdAt` then `id`. `paidInMinor` and `paidOutMinor` follow the
      * closure item's rule over all of them, so `expected.cash` equals `countedFloatMinor` + the session's cash payments
      * + `paidInMinor` − `paidOutMinor` − its cash refunds. The three fields are additive at version 1. */
-    paidInMinor: number; paidOutMinor: number;
+    paidInMinor?: number; paidOutMinor?: number;
     movements: { id: string; type: 'paid_in' | 'paid_out' | 'no_sale' | 'void'; amountMinor: number; reason: string | null;
       voids: string | null; createdAt: string; createdBy: string | null }[];
   };
@@ -27,17 +29,18 @@ export type TallyRegisterRead = {
  * movements that the submit counted, under `deriveSessionFigures`' rule: of the movements in `movementIds`, skip each `void` row and
  * each row voided by a `void` row in that same list. So `expected.cash` equals `countedFloatMinor` + the cash payments of `orderIds`
  * + `paidInMinor` − `paidOutMinor` − the session's cash refunds. Those three fields are additive at version 1.
+ * 4.3c: `tillExpected`, `expected`, `variance`, `paidInMinor` and `paidOutMinor` are omitted for a caller without ApproveTallyPosVariance.
  */
 export type TallyClosureRead = {
   closureId: string; sessionId: string; registerId: string; number: number; businessDay: string | null;
   openedAt: string; closedAt: string; closedBy: string | null; approvedBy: string | null;
-  tillExpected: Record<string, number>; counted: Record<string, number>;
-  expected: Record<string, number>; variance: Record<string, number>;
+  tillExpected?: Record<string, number>; counted: Record<string, number>;
+  expected?: Record<string, number>; variance?: Record<string, number>;
   periodSalesTotalMinor: number; periodRefundsTotalMinor: number;
   perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number;
   unsyncedCount: number; unsyncedTotalMinor: number; softwareVersion: string;
   orderIds: string[]; movementIds: string[];
-  countedFloatMinor: number; paidInMinor: number; paidOutMinor: number; receivedAt: string;
+  countedFloatMinor: number; paidInMinor?: number; paidOutMinor?: number; receivedAt: string;
   /** #332: the closure used a manager's approval proof, so `approvedBy` is that manager's user id; false for every other closure. */
   approvalVerified: boolean;
 };
@@ -108,7 +111,7 @@ export class TallyRegistersController {
       res.status(404);
       return { code: 'register_not_found', message: `Unknown register ${id}` };
     }
-    const body: TallyRegisterRead = { version: 1, ...read };
+    const body: TallyRegisterRead = blindRegisterRead(ctx, { version: 1 as const, ...read });
     return body;
   }
 }

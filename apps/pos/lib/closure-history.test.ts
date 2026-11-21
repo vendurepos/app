@@ -249,3 +249,13 @@ it("v2's Cash at open sums open and closed floats, and Cash activity the closed 
   expect(closureSummary(listed, { ...options, open: 1, openFloats: [5000], blind: true })).toMatchObject({ cashAtOpen: '—', cashActivity: '—' });
   expect(closureSummary([remote], { ...options, open: 1, openFloats: [undefined] })).toMatchObject({ cashAtOpen: '—', cashActivity: '—' });
 });
+
+it('4.3c: maps a blind read without tillExpected, expected, variance or paid in/out, and lists it without throwing', () => {
+  const { tillExpected: _till, expected: _expected, variance: _variance, ...blindRead } = read;
+  const mapped = closureFromRead({ ...blindRead, countedFloatMinor: 10000 }, options.storeKey);
+  expect(mapped).toMatchObject({ till_expected: {}, expected: {}, variance: {}, counted: { cash: 15000 } });
+  const blind = { ...options, names, blind: true };
+  expect(closureHistoryRows([mapped], blind)[0]).toMatchObject({ expected: '', variance: '', cashAtClose: '' });
+  expect(closureSummary([mapped], { ...blind, open: 0 })).toMatchObject({ discrepancy: '—', cashActivity: '—' });
+  expect(() => zCopyLines(mapped, { store: 'Shop', currency: 'EUR', timezone: 'UTC', printedAt: '2026-09-30T18:15:00.000Z' })).not.toThrow();
+});

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatMoney, type SyncContext } from '@tallyui/core';
 import { sessionContext, type Session } from './session';
 
-// Front desk ruling, 2026-11-21: the variance approver counts with the figures; everyone else counts blind. A display rule: GET /registers/:id still returns them until AUDIT.md:130 lands.
+// Front desk ruling, 2026-11-21: the variance approver counts with the figures; everyone else counts blind. The plugin now withholds them from GET /registers/:id and the register command replies for the same callers (4.3c).
 export const UNBLIND_PERMISSION = 'ApproveTallyPosVariance';
 /** Blind unless the active channel's permissions hold the approve permission; errors and missing data count blind. */
 export function blindFromPermissions(body: unknown): boolean {

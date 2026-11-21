@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Blind close (4.3c): a caller without `ApproveTallyPosVariance` on the active channel (SuperAdmin holds it) no longer receives `GET /tally/v1/registers/:id`'s `session.expected`, `session.paidInMinor` and `session.paidOutMinor`, nor each closure item's `expected`, `variance`, `tillExpected`, `paidInMinor` and `paidOutMinor`, nor a register command reply's `session.expected` or `closure.expected` and `closure.variance` (fresh or replayed). The keys are omitted; movement amounts, floats and `register_approval_required`'s `data.variance` are still sent, and the command ledger still stores every figure. No migration.
 - The till role preset (`tallyEnsurePosTillRole`) gains `UpdateCustomer`, so a till can edit a customer; it still holds no `DeleteCustomer`. An existing `vendurepos-pos-till` role gains it the next time **New POS till key** runs (or `tallyEnsurePosTillRole` is called), keeping the merchant's own additions, or a merchant can add Update customer to the role under Settings → Roles. No migration.
 - Receipt email: the per-order cap and the new daily caps (perUserPerDay, perChannelPerDay) are kept in the database (migration TallyPosReceiptEmail1791400000000), so they hold across restarts and server instances (#345).
 - `POST /tally/v1/variants/:id/stock` sets a variant's saleable stock only while it still equals the figure the till showed, under the same stock lock as a sale (10.2).

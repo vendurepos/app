@@ -37,7 +37,7 @@ describe('GET /tally/v1/registers/:id', () => {
     const response = await fetch(`${base}/tally/v1/registers/${path}`, { headers });
     return { status: response.status, body: await response.json() };
   }
-  async function tokenWith(permissions: Array<'TallyPosSell'>) {
+  async function tokenWith(permissions: Array<'TallyPosSell' | 'ApproveTallyPosVariance'>) {
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
     const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
       createRole(input: $input) { id }
@@ -250,6 +250,25 @@ describe('GET /tally/v1/registers/:id', () => {
     await applied(open(uuid(), r));
     expect((await get(r, {})).status).toBe(403);
     expect((await get(r, await tokenWith(['TallyPosSell']))).status).toBe(200);
+  });
+
+  it('4.3c: withholds the derived figures from a caller without ApproveTallyPosVariance, keeping the movement amounts and the float', async () => {
+    const [s1, s2, r] = [uuid(), uuid(), uuid()];
+    const paidIn = (sessionId: string) => envelope('register.movement.record',
+      { movementId: uuid(), sessionId, type: 'paid_in', amountMinor: 500, reason: 'float', createdAt: now() });
+    const m1 = paidIn(s1);
+    for (const command of [open(s1, r), m1, transition(s1, 'closed', { counted: { cash: 10500 } }),
+      closure(s1, r, 1, { counted: { cash: 10500 }, movementIds: [m1.payload.movementId] }), open(s2, r), paidIn(s2)]) await applied(command);
+    const blind = (await get(r, await tokenWith(['TallyPosSell']))).body;
+    for (const key of ['expected', 'paidInMinor', 'paidOutMinor']) expect(blind.session).not.toHaveProperty(key);
+    expect(blind.session).toMatchObject({ countedFloatMinor: 10000, salesCount: 0, movements: [{ type: 'paid_in', amountMinor: 500 }] });
+    expect(blind.closures.items).toHaveLength(1);
+    for (const key of ['expected', 'variance', 'tillExpected', 'paidInMinor', 'paidOutMinor']) expect(blind.closures.items[0]).not.toHaveProperty(key);
+    expect(blind.closures.items[0]).toMatchObject({ counted: { cash: 10500 }, countedFloatMinor: 10000, number: 1 });
+    const holder = (await get(r, await tokenWith(['TallyPosSell', 'ApproveTallyPosVariance']))).body;
+    expect(holder.session).toMatchObject({ expected: { cash: 10500 }, paidInMinor: 500, paidOutMinor: 0, movements: [{ amountMinor: 500 }] });
+    expect(holder.closures.items[0]).toMatchObject({ expected: { cash: 10500 }, variance: { cash: 0 }, tillExpected: { cash: 10000 },
+      paidInMinor: 500, paidOutMinor: 0, countedFloatMinor: 10000 });
   });
 
   describe('GET /tally/v1/registers', () => {

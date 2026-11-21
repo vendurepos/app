@@ -18,8 +18,9 @@ export type ClosureFilters = { from: string; to: string; registerId: string | nu
 /** One closure of the plugin's GET /tally/v1/registers/:id (packages/vendure-plugin/src/api/registers.controller.ts). */
 export type TallyClosureRead = {
   closureId: string; sessionId: string; registerId: string; number: number; businessDay: string | null; openedAt: string; closedAt: string;
-  closedBy: string | null; approvedBy: string | null; tillExpected: Record<string, number>; counted: Record<string, number>;
-  expected: Record<string, number>; variance: Record<string, number>; periodSalesTotalMinor: number; periodRefundsTotalMinor: number;
+  closedBy: string | null; approvedBy: string | null; tillExpected?: Record<string, number>; counted: Record<string, number>;
+  // 4.3c: the plugin omits tillExpected, expected, variance and paid in/out for a caller without ApproveTallyPosVariance.
+  expected?: Record<string, number>; variance?: Record<string, number>; periodSalesTotalMinor: number; periodRefundsTotalMinor: number;
   perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number; unsyncedCount: number; unsyncedTotalMinor: number;
   softwareVersion: string; orderIds: string[]; movementIds: string[]; receivedAt: string;
   countedFloatMinor?: number; paidInMinor?: number; paidOutMinor?: number; // an older plugin lacks these
@@ -30,7 +31,7 @@ export function closureFromRead(read: TallyClosureRead, storeKey: string): Closu
   return {
     id: read.closureId, server_closure_id: read.closureId, session_id: read.sessionId, register_id: read.registerId, store_key: storeKey,
     business_day: read.businessDay ?? '', closed_by: read.closedBy, number: read.number, opened_at: read.openedAt, closed_at: read.closedAt,
-    till_expected: read.tillExpected, expected: read.expected, counted: read.counted, variance: read.variance,
+    till_expected: read.tillExpected ?? {}, expected: read.expected ?? {}, counted: read.counted, variance: read.variance ?? {},
     period_sales_total_minor: read.periodSalesTotalMinor, period_refunds_total_minor: read.periodRefundsTotalMinor,
     perpetual_sales_total_minor: read.perpetualSalesTotalMinor, perpetual_refunds_total_minor: read.perpetualRefundsTotalMinor,
     unsynced_count: read.unsyncedCount, unsynced_total_minor: read.unsyncedTotalMinor, software_version: read.softwareVersion,
