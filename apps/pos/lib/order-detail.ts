@@ -5,7 +5,7 @@ import { formatMoney } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
 import { WALK_IN_EMAIL } from './customer-list';
 import { orderHistoryNotice, orderStateLabel, type OrderHistoryNotice } from './order-history';
-import { storeDayOf } from './order-list';
+import { paymentTenderName, storeDayOf } from './order-list';
 import { registerLabel, type ListedRegister } from './register-choice';
 import { sessionContext, type Session } from './session';
 
@@ -60,6 +60,7 @@ export type OrderDetailView = {
   orderNumber: string; status: OrderStatus; lineItems: { name: string; quantity: number; total: string }[];
   subtotal: string; tax: string; total: string;
   payments: { id: string; text: string; refunds: { id: string; text: string }[] }[];
+  paymentTotals: { total: string; paid: string; refunded: string | null; remaining: string };
   state: string; fulfilments: { id: string; text: string }[];
 };
 
@@ -67,10 +68,15 @@ export type OrderDetailView = {
  * The order's own figures as text; the only arithmetic is tax = totalWithTax - total.
  * Items lists the lines, then each surcharge (the till's discount, fees, rounding), then each shipping line.
  * Subtotal is Vendure's subTotalWithTax: the lines and surcharges, not shipping.
+ * Paid counts Settled and Authorized payments; Refunded counts Settled refunds. Remaining is totalWithTax - Paid, never below 0:
+ * Vendure keeps totalWithTax after a refund, so a refund never makes money due again.
  * State is Vendure's order state in words ("● Shipped"); fulfilments are listed only for an order the till did not create.
  */
 export function orderDetailView(order: VendureOrder): OrderDetailView {
   const money = (amount: number) => formatMoney({ amount, currency: order.currencyCode }) ?? '';
+  const payments = order.payments ?? [];
+  const paid = payments.filter(p => p.state === 'Settled' || p.state === 'Authorized').reduce((sum, p) => sum + p.amount, 0);
+  const refunded = payments.flatMap(p => p.refunds).filter(r => r.state === 'Settled').reduce((sum, r) => sum + r.total, 0);
   return {
     orderNumber: order.code,
     status: toOrderStatus(order.state),
@@ -88,11 +94,15 @@ export function orderDetailView(order: VendureOrder): OrderDetailView {
     subtotal: money(order.subTotalWithTax),
     tax: money(order.totalWithTax - order.total),
     total: money(order.totalWithTax),
-    payments: (order.payments ?? []).map(payment => ({
+    payments: payments.map(payment => ({
       id: payment.id,
-      text: `Paid ${money(payment.amount)} · ${orderStateLabel(payment.state)}`,
+      text: `${paymentTenderName(payment)} ${money(payment.amount)} · ${orderStateLabel(payment.state)}`,
       refunds: payment.refunds.map(refund => ({ id: refund.id, text: `Refunded ${money(refund.total)} · ${orderStateLabel(refund.state)}` })),
     })),
+    paymentTotals: {
+      total: money(order.totalWithTax), paid: money(paid), refunded: refunded > 0 ? money(refunded) : null,
+      remaining: money(Math.max(0, order.totalWithTax - paid)),
+    },
     state: `● ${orderStateLabel(order.state)}`,
     // The till fulfils its own sales at create (order.create), so only an order from elsewhere, e.g. the storefront, lists its fulfilments (Front desk ruling, 2026-11-21).
     fulfilments: order.customFields?.tallyClientOrderId ? [] : (order.fulfillments ?? []).map(f => ({
