@@ -5,8 +5,8 @@ import { sessionContext, type Session } from './session';
 export const ORDER_NOTES_QUERY = `query OrderNotes($id: ID!, $options: HistoryEntryListOptions) {
   order(id: $id) { id history(options: $options) { items { id isPublic data } } }
 }`;
-// Vendure keeps an order's notes as ORDER_NOTE history entries among its state changes; the sheet reads only the notes, oldest first.
-export const ORDER_NOTE_OPTIONS = { take: 100, sort: { createdAt: 'ASC' }, filter: { type: { eq: 'ORDER_NOTE' } } };
+// Vendure keeps an order's notes as ORDER_NOTE history entries among its state changes; the sheet reads only the notes: the newest 100, shown oldest first.
+export const ORDER_NOTE_OPTIONS = { take: 100, sort: { createdAt: 'DESC' }, filter: { type: { eq: 'ORDER_NOTE' } } };
 export const NOTE_LABEL = 'Note';
 // A private (isPublic: false) note, which Vendure never shows the customer (Front desk ruling, 2026-11-21).
 export const STAFF_NOTE_LABEL = 'Staff note';
@@ -32,7 +32,7 @@ export async function listOrderNotes(context: SyncContext, orderId: string): Pro
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = await response.json();
   if (body.errors?.length) throw new Error(body.errors[0].message);
-  return toOrderNotes(body.data.order === null ? [] : body.data.order.history.items);
+  return toOrderNotes(body.data.order === null ? [] : [...body.data.order.history.items].reverse());
 }
 
 /** The order's notes: [] until the read answers, when orderId is null, and when the read fails or is refused (no new permission is asked). */
