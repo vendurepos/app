@@ -7,7 +7,7 @@ import { CUSTOMER_EMAIL_REQUIRED_TEXT, CUSTOMER_OFFLINE_TEXT, CUSTOMER_SAVE_FORB
 
 const context = { baseUrl: 'https://store.test', headers: {} } as SyncContext;
 const row: CustomerRow = { id: 'c1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com', phone: null,
-  billingAddress: [], createdAt: '2026-01-01T00:00:00.000Z' };
+  billingAddress: [], groups: [], createdAt: '2026-01-01T00:00:00.000Z' };
 const values = customerFormValues(row);
 const raw = { __typename: 'Customer', id: row.id, firstName: row.firstName, lastName: row.lastName, emailAddress: row.email, phoneNumber: null, addresses: [] };
 const conflict = { __typename: 'EmailAddressConflictError', errorCode: 'EMAIL_ADDRESS_CONFLICT_ERROR', message: 'The email address is not available.' };

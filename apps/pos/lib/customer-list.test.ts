@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import { CUSTOMERS_FAILED_TEXT, CUSTOMERS_FORBIDDEN_TEXT, DEFAULT_CUSTOMER_SORT, nextCustomerSort, customerListNotice, customerListOptions,
-  customersReadable, listVendureCustomerPage, toCustomerRow, type VendureCustomerListItem } from './customer-list';
+  customerGroupsText, customersReadable, listVendureCustomerPage, toCustomerRow, type VendureCustomerListItem } from './customer-list';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -42,7 +42,7 @@ it('uses the flagged billing address and drops empty address parts', () => {
     { fullName: 'Ada Lovelace', company: '', streetLine1: '12 Engine Row', streetLine2: '', city: 'London',
       province: null, postalCode: 'N1 9GU', country: { code: 'GB' }, defaultBillingAddress: true },
   ] })).toEqual({ id: 'c1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com', phone: '1234',
-    createdAt: customer.createdAt, billingAddress: ['12 Engine Row', 'London N1 9GU, GB'] });
+    createdAt: customer.createdAt, billingAddress: ['12 Engine Row', 'London N1 9GU, GB'], groups: [] });
 });
 
 it('joins a second street line and keeps the country alone when the town is empty', () => {
@@ -56,7 +56,25 @@ it('does not fall back to another address and maps missing strings and phone', (
   expect(toCustomerRow({ id: 'c2', createdAt: customer.createdAt, addresses: [
     { fullName: 'Other', streetLine1: 'Other street', defaultBillingAddress: false },
   ] })).toEqual({ id: 'c2', firstName: '', lastName: '', email: '', phone: null,
-    createdAt: customer.createdAt, billingAddress: [] });
+    createdAt: customer.createdAt, billingAddress: [], groups: [] });
+});
+
+it('maps group names in name order and shows them as read-only text, or none', () => {
+  const row = toCustomerRow({ ...customer, groups: [{ id: 'g2', name: 'Trade' }, { id: 'g1', name: 'Coffee club' }] });
+  expect(row.groups).toEqual(['Coffee club', 'Trade']);
+  expect(toCustomerRow(customer).groups).toEqual([]);
+  expect(toCustomerRow({ ...customer, groups: null }).groups).toEqual([]);
+  expect(customerGroupsText(row)).toBe('Coffee club, Trade');
+  expect(customerGroupsText({ ...row, groups: [] })).toBeNull();
+  expect(customerGroupsText(null)).toBeNull();
+});
+
+it('asks for the customer group ids and names in the list items', async () => {
+  const fetchStub = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ data: { customers: { totalItems: 0, items: [] } } })));
+  vi.stubGlobal('fetch', fetchStub);
+  await listVendureCustomerPage({ baseUrl: 'https://store.test', headers: {} } as SyncContext, customerListOptions('', 0));
+  const request = JSON.parse(fetchStub.mock.calls[0][1]!.body as string);
+  expect(request.query).toMatch(/items\s*\{[^{}]*groups\s*\{\s*id\s+name\s*\}/);
 });
 
 it('maps an HTTP 200 GraphQL FORBIDDEN error to unauthorized status 403', async () => {

@@ -544,6 +544,29 @@ test("the Customers panel sorts by its headers on the store, as v2's customers t
   await expect(page.getByTestId('customers-sort-createdAt')).toContainText('▼');
 });
 
+test("the customer sheet shows the customer's groups read-only, as v2's role row; a customer with no group shows none", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-groups-value')).toHaveText('Coffee club, Trade');
+  await expect(sheet.getByText('Set in Vendure', { exact: true })).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-groups').getByRole('textbox')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('06f-customer-groups.png') });
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c2').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-add').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
+});
+
 test('the Customers panel adds and edits customers on the store; a refused save leaves the row as the store has it', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
