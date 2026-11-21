@@ -1735,7 +1735,7 @@ test('the demo signs in with one click, sells, runs a register day, keeps it ove
   await expectInCart(inCart, 1);
   await line.getByTestId('quantity-popover-trigger').click();
   await page.getByTestId('quantity-popover-keypad-key-2').click();
-  await page.getByTestId('quantity-popover-apply').click();
+  await page.getByTestId('quantity-popover-done').click();
   await expectInCart(inCart, 2);
   await checkout(page);
   await expectBalanceAsEntry(page, '€19.04');
@@ -3189,6 +3189,44 @@ test('a demo cashier takes 10 % off a line on its price keypad, and lines keep t
   await expect(page.getByTestId('quantity-popover-action-remove')).toBeVisible();
   await expect(page.getByTestId('quantity-popover-action-price')).toHaveCount(0);
   await page.getByTestId('quantity-popover-action-remove').click();
+  await expect(line).toHaveCount(0);
+});
+
+test('The quantity keypad steps the line up and down, writes on close, discards on Escape and removes at 1', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const line = page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG');
+  await expect(line).toBeVisible();
+  const inCart = page.getByTestId(`in-cart-${MUG_PRODUCT_ID}`);
+  const popover = page.getByTestId('quantity-popover');
+  await line.getByTestId('quantity-popover-trigger').click();
+  await page.getByTestId('quantity-popover-step-up').click();
+  await page.getByTestId('quantity-popover-step-up').click();
+  await expectInCart(inCart, 3);
+  await expect(page.getByTestId('quantity-popover-value')).toHaveText('3');
+  await page.getByTestId('quantity-popover-step-down').click();
+  await expectInCart(inCart, 2);
+  await page.getByTestId('quantity-popover-done').click();
+  // A closing line popover stays mounted through its fade-out: let it go before the next one opens.
+  await expect(popover).toHaveCount(0);
+  await line.getByTestId('quantity-popover-trigger').click();
+  await page.getByTestId('quantity-popover-keypad-key-5').click();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expectInCart(inCart, 2);
+  await line.getByTestId('quantity-popover-trigger').click();
+  await page.getByTestId('quantity-popover-keypad-key-4').click();
+  await page.getByTestId('quantity-popover-overlay').click();
+  await expect(popover).toHaveCount(0);
+  await expectInCart(inCart, 4);
+  await line.getByTestId('quantity-popover-trigger').click();
+  for (let step = 0; step < 3; step += 1) await page.getByTestId('quantity-popover-step-down').click();
+  await expect(page.getByTestId('quantity-popover-step-down')).toHaveCount(0);
+  await expect(page.getByTestId('quantity-popover-remove')).toBeVisible();
+  await page.getByTestId('quantity-popover-remove').click();
   await expect(line).toHaveCount(0);
 });
 

@@ -139,13 +139,15 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
             <View testID={`cart-line-highlight-${line.sku || line.id}`} pointerEvents="none" className="absolute inset-0 border border-primary bg-primary/10" />
           ) : null}
           {/* The quantity keypad carries the line's Discount and Remove, because the keypad writes nothing for 0.
-              The total is before any discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them. */}
+              The total is before any discount: the line's own discounts are its chips, as TallyUI ADR-063 shows them.
+              It is v2's grow keypad, so its steppers write at once, any close writes and Escape discards. */}
           <CartLine name={line.name} attributes={line.attributes} quantity={line.quantity} unitPrice={amount(line.unitPriceMinor)}
             regularUnitPrice={line.regularUnitPriceMinor === undefined ? undefined : amount(line.regularUnitPriceMinor)}
             lineTotal={amount(display(line.id).amountMinor)} showPrice={showPrice}
             columns={columns} sku={line.sku || undefined} imageUrl={line.imageUrl}
             onSplit={locked ? undefined : () => setRemoveError(sale.splitLine(line.id))}
             quantitySlot={locked ? undefined : <LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
+              commit="close" onRemove={() => sale.remove(line.id)}
               onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }}
               actions={lineActionIds({ canEditPrice, priceShown: showPrice }).map((id) => {
                 switch (id) {
