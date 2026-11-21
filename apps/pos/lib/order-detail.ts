@@ -62,17 +62,27 @@ export type OrderDetailView = {
   payments: { id: string; text: string; refunds: { id: string; text: string }[] }[];
 };
 
-/** The order's own figures as text; the only arithmetic is tax = totalWithTax - total. */
+/**
+ * The order's own figures as text; the only arithmetic is tax = totalWithTax - total.
+ * Items lists the lines, then each surcharge (the till's discount, fees, rounding), then each shipping line.
+ * Subtotal is Vendure's subTotalWithTax: the lines and surcharges, not shipping.
+ */
 export function orderDetailView(order: VendureOrder): OrderDetailView {
   const money = (amount: number) => formatMoney({ amount, currency: order.currencyCode }) ?? '';
   return {
     orderNumber: order.code,
     status: toOrderStatus(order.state),
-    lineItems: order.lines.map(line => ({
-      name: line.customFields?.tallyCustomName || line.productVariant.name,
-      quantity: line.quantity,
-      total: money(line.proratedLinePriceWithTax),
-    })),
+    lineItems: [
+      ...order.lines.map(line => ({
+        name: line.customFields?.tallyCustomName || line.productVariant.name,
+        quantity: line.quantity,
+        total: money(line.proratedLinePriceWithTax),
+      })),
+      ...order.surcharges.map(surcharge => ({ name: surcharge.description, quantity: 1, total: money(surcharge.priceWithTax) })),
+      ...order.shippingLines.map(shippingLine => ({
+        name: shippingLine.shippingMethod.name, quantity: 1, total: money(shippingLine.discountedPriceWithTax),
+      })),
+    ],
     subtotal: money(order.subTotalWithTax),
     tax: money(order.totalWithTax - order.total),
     total: money(order.totalWithTax),

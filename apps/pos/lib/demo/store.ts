@@ -395,7 +395,9 @@ export class DemoStore {
       customFields: { ...summary.customFields as Record<string, unknown>, tallyPayments: JSON.stringify(payload.payments), tallyShipping: null,
         tallySnapshot: JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate }) },
       lines, surcharges, shippingLines,
-      subTotal: netShares.reduce((sum, share) => sum + share, 0), subTotalWithTax: grossShares.reduce((sum, share) => sum + share, 0),
+      // Vendure counts surcharges in the subtotal; shipping stays outside it.
+      subTotal: [...netShares, ...surcharges.map(charge => charge.price)].reduce((sum, amount) => sum + amount, 0),
+      subTotalWithTax: [...grossShares, ...surcharges.map(charge => charge.priceWithTax)].reduce((sum, amount) => sum + amount, 0),
       shipping: shippingLines.reduce((sum, line) => sum + line.price, 0),
       shippingWithTax: shippingLines.reduce((sum, line) => sum + line.priceWithTax, 0),
       taxSummary: payload.taxByRate?.map(rate => ({ description: rate.code ?? `${rate.ratePpm / PPM_PER_PERCENT}%`,

@@ -101,6 +101,7 @@ it("shows a Vendure order's lines, totals, payments and refunds as text", () => 
     id: 'store-7', code: 'ABC123', state: 'PaymentSettled', currencyCode: 'EUR',
     total: 2400, totalWithTax: 2856, subTotalWithTax: 2856,
     lines: [line('line-1', 'Mug', 1904, null), line('line-2', 'Open item', 952, 'Gift wrap')],
+    surcharges: [], shippingLines: [],
     payments: [{
       id: 'pay-1', amount: 2856, state: 'Settled',
       refunds: [{ id: 'refund-1', total: 952, state: 'Settled' }],
@@ -122,6 +123,42 @@ it("shows a Vendure order's lines, totals, payments and refunds as text", () => 
     }],
   });
   expect(orderDetailView({ ...order, payments: undefined }).payments).toEqual([]);
+});
+
+it("lists the order's discount, fee, rounding and shipping under Items, and they add up to Subtotal and Total", () => {
+  // A real store's order as the plugin saves it: the till's discount, a fee and rounding as surcharges, shipping apart.
+  const order = {
+    id: 'store-8', code: 'DEF456', state: 'PaymentSettled', currencyCode: 'EUR',
+    total: 2130, totalWithTax: 2511, subTotalWithTax: 1916,
+    lines: [{
+      id: 'line-1', quantity: 2, proratedLinePriceWithTax: 1904, productVariant: { id: 'v-line-1', name: 'Mug', sku: 'SKU-line-1' },
+      customFields: {
+        tallyCustomName: null, tallyCustomSku: null, tallyUnitPrice: null, tallyPriceIncludesTax: null, tallyClientLineId: null,
+      },
+    }],
+    surcharges: [
+      { description: 'POS discount', sku: 'TALLY-DISCOUNT', price: -168, priceWithTax: -200 },
+      { description: 'Gift wrap', sku: 'TALLY-FEE', price: 200, priceWithTax: 214 },
+      { description: 'POS rounding', sku: 'TALLY-ROUNDING', price: -2, priceWithTax: -2 },
+    ],
+    shippingLines: [{
+      shippingMethod: { name: 'Courier' }, price: 500, priceWithTax: 595, discountedPrice: 500, discountedPriceWithTax: 595,
+    }],
+    payments: [],
+  } as unknown as VendureOrder;
+  // Vendure counts surcharges in subTotalWithTax; totalWithTax adds the shipping.
+  expect(1904 - 200 + 214 - 2).toBe(order.subTotalWithTax);
+  expect(order.subTotalWithTax + 595).toBe(order.totalWithTax);
+  const view = orderDetailView(order);
+  expect(view.lineItems).toEqual([
+    { name: 'Mug', quantity: 2, total: money(1904) },
+    { name: 'POS discount', quantity: 1, total: money(-200) },
+    { name: 'Gift wrap', quantity: 1, total: money(214) },
+    { name: 'POS rounding', quantity: 1, total: money(-2) },
+    { name: 'Courier', quantity: 1, total: money(595) },
+  ]);
+  expect(view.subtotal).toBe(money(1916));
+  expect(view.total).toBe(money(2511));
 });
 
 it('says an order that is gone, a refused read and a failed read in words', () => {

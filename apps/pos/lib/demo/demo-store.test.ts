@@ -266,10 +266,10 @@ it('reads v5 detail with charges separate from the exact goods allocation and ma
   expect(order.lines[1].customFields?.tallyCustomName).toBe('Gift wrapping');
   expect(order.surcharges[0].priceWithTax).toBe(119);
   expect(order.shippingLines[0].priceWithTax).toBe(238);
-  expect(order.lines.reduce((sum, line) => sum + line.proratedLinePriceWithTax, 0)).toBe(order.subTotalWithTax);
-  expect(order.subTotalWithTax).toBe(3332 - 119 - 238);
-  expect(order.subTotalWithTax + order.surcharges.reduce((sum, charge) => sum + charge.priceWithTax, 0) + order.shippingWithTax)
-    .toBe(order.totalWithTax);
+  expect(order.lines.reduce((sum, line) => sum + line.proratedLinePriceWithTax, 0)
+    + order.surcharges.reduce((sum, charge) => sum + charge.priceWithTax, 0)).toBe(order.subTotalWithTax);
+  expect(order.subTotalWithTax).toBe(3332 - 238);
+  expect(order.subTotalWithTax + order.shippingWithTax).toBe(order.totalWithTax);
   expect(order.totalWithTax).toBe(3332);
   expect(order.total).toBe(3332 - 532);
   expect(order.taxSummary).toEqual([{ description: 'Standard DE', taxRate: 19, taxBase: 2800, taxTotal: 532 }]);
