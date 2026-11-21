@@ -18,7 +18,7 @@ import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
 import { demoCategoryImage, demoProductImage } from './product-images';
-import { DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
+import { DEMO_CUSTOMER_NOTE, DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
 
 // A valid client timestamp shared by the test's order and register commands.
 const TIME = '2026-10-01T10:00:00.000Z';
@@ -828,4 +828,21 @@ it('filters a posted sale by register and cashier custom fields', async () => {
     expect(result.orders.map(order => order.id)).toEqual(ids);
     expect(result.totalItems).toBe(ids.length);
   }
+});
+
+it("keeps a customer's staff notes as CUSTOMER_NOTE history, adds one as given and keeps it, and refuses an unknown customer", () => {
+  const store = new DemoStore(storage);
+  expect(store.customerHistory('c1')).toEqual([
+    { id: 'cn1', type: 'CUSTOMER_NOTE', createdAt: '2026-02-03T10:05:00.000Z', isPublic: false, data: { note: DEMO_CUSTOMER_NOTE } },
+  ]);
+  expect(store.customerHistory('c2')).toEqual([]);
+  expect(store.addCustomerNote({ id: 'c1', note: 'Ask about the grinder service', isPublic: false })).toEqual(store.customer('c1'));
+  expect(store.addCustomerNote({ id: 'c2', note: 'Public one', isPublic: true })?.id).toBe('c2');
+  const reopened = new DemoStore(storage);
+  expect(reopened.customerHistory('c1').map(({ id, isPublic, data }) => ({ id, isPublic, note: data.note }))).toEqual([
+    { id: 'cn1', isPublic: false, note: DEMO_CUSTOMER_NOTE }, { id: 'cn2', isPublic: false, note: 'Ask about the grinder service' },
+  ]);
+  expect(reopened.customerHistory('c2').map(({ id, isPublic, type }) => ({ id, isPublic, type }))).toEqual([{ id: 'cn3', isPublic: true, type: 'CUSTOMER_NOTE' }]);
+  expect(reopened.addCustomerNote({ id: 'nobody', note: 'Lost', isPublic: false })).toBeNull();
+  expect(new DemoStore(storage).customerHistory('nobody')).toEqual([]);
 });
