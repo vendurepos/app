@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
-import { Button, Dialog, DialogContent, DialogTitle, Tabs, TabsList, TabsTrigger, Text } from '@tallyui/components';
-import { formatClosureDate, recordRegisterFact, watchFresh, type Actor, type Closure, type ClosureCollection, type RegisterSession, type useRegisterSession } from '@tallyui/pos';
+import { Button, DateRangeMenu, Dialog, DialogContent, DialogTitle, Tabs, TabsList, TabsTrigger, Text } from '@tallyui/components';
+import { formatClosureDate, presetRange, recordRegisterFact, watchFresh, type Actor, type Closure, type ClosureCollection, type DatePreset, type DayRange, type RegisterSession, type useRegisterSession } from '@tallyui/pos';
 import {
-  closureCsvFileName, closureHistoryCsv, closureHistoryRows, closureSummary, fetchChannelClosures, mergeClosures, openSessionRows, zCopyLines, type ClosureHistoryRow,
+  closureCashiers, closureCsvFileName, closureHistoryCsv, closureHistoryRows, closureSummary, fetchChannelClosures, mergeClosures, openSessionRows, zCopyLines, type ClosureFilters, type ClosureHistoryRow,
 } from './closure-history';
 import { printLines } from './print-lines';
+import { OWN_REGISTER_LABEL } from './register-choice';
 import { remoteXReport, xReportOffered } from './remote-x-report';
 import type { Session } from './session';
 import { zReportLines } from './z-report';
@@ -14,6 +15,31 @@ import { zReportLines } from './z-report';
 const NO_REMOTE: Awaited<ReturnType<typeof fetchChannelClosures>> = { closures: [], names: {}, registers: [], floats: {}, printable: [] };
 // The table view's figure columns (Expected, Counted, Result) and its Print again column, the same widths in the head and the rows.
 const CELL = 'w-32 text-right', PRINT = 'w-36';
+
+// A filter's choices as TallyUI's SalesFiltersBar draws them (its ChoiceSelect is not exported): the chosen label, and the choices below it while open.
+function FilterSelect({ id, value, options, onChange }: {
+  id: string; value: string; options: { value: string; label: string }[]; onChange(value: string): void;
+}) {
+  const [shown, setShown] = useState(false);
+  return (
+    <View className="gap-1">
+      <Pressable testID={id} accessibilityRole="button" onPress={() => setShown(!shown)} className="rounded-md border border-border bg-card px-3 py-2">
+        <Text className="text-sm text-foreground">{options.find((option) => option.value === value)?.label ?? value}</Text>
+      </Pressable>
+      {shown ? (
+        <View className="rounded-md border border-border bg-card py-1">
+          {options.map((option) => (
+            <Pressable key={option.value} testID={`${id}-option-${option.value}`} accessibilityRole="radio"
+              accessibilityState={{ checked: option.value === value }} onPress={() => { setShown(false); onChange(option.value); }}
+              className={`px-3 py-2 ${option.value === value ? 'bg-muted' : ''}`}>
+              <Text className="text-sm text-foreground">{option.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 export function ClosureList({ closures, session, registerId, storeKey, store, currency, timezone, blind, active: open, view = 'list', actor, ownSession }: {
   closures: ClosureCollection | null; session: Session | null; registerId: string;
@@ -29,6 +55,10 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
   // Another register's X report that could not print, and a counter that reads the closures again.
   const [xNotice, setXNotice] = useState<{ registerId: string; text: string | null; retry: boolean } | null>(null);
   const [reload, setReload] = useState(0);
+  // The table view's filters (v2 10b): the period, at Today first, a cashier and a register; the list view keeps every closure of 92 days.
+  const [period, setPeriod] = useState<{ preset: DatePreset | 'custom'; range: DayRange }>(() => ({ preset: 'today', range: presetRange('today', new Date(), timezone) }));
+  const [cashier, setCashier] = useState('all');
+  const [register, setRegister] = useState('all');
   // Every register's closures from the server, once per open; a late answer after the dialog closed is dropped.
   useEffect(() => {
     setRemote(NO_REMOTE); setRemoteError(false);
@@ -46,17 +76,20 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
 
   const today = formatClosureDate(new Date().toISOString(), { timezone, locale: 'en' }).date_ymd;
   const merged = mergeClosures(found, remote.closures);
+  const filters: ClosureFilters | undefined = view === 'table' ? {
+    from: period.range.from, to: period.range.to, registerId: register === 'all' ? null : register, cashier: cashier === 'all' ? null : cashier,
+  } : undefined;
   // This till's own rows keep their testIDs; another register's carry its id, as numbers repeat across registers.
   const suffix = (row: { registerId: string; number: number }) => row.registerId === registerId ? `${row.number}` : `${row.registerId}-${row.number}`;
-  const rows = closureHistoryRows(merged, { ownRegisterId: registerId, names: remote.names, storeKey, currency, timezone, today, blind });
+  const rows = closureHistoryRows(merged, { ownRegisterId: registerId, names: remote.names, storeKey, currency, timezone, today, blind, filters });
   const exportCsv = () => {
     setError('');
     try {
-      const csv = closureHistoryCsv(merged, { ownRegisterId: registerId, names: remote.names, storeKey, currency, timezone, today, store });
+      const csv = closureHistoryCsv(merged, { ownRegisterId: registerId, names: remote.names, storeKey, currency, timezone, today, store, filters });
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = closureCsvFileName(merged, { storeKey, timezone, today });
+      anchor.download = closureCsvFileName(merged, { storeKey, timezone, today, filters });
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -96,9 +129,11 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
   );
   // This till's own session is read locally (the server has it only once the outbox sends the open); left out, the server's is used.
   const own = ownSession === undefined ? undefined : ownSession && { status: ownSession.status, openedAt: ownSession.opened_at_gmt };
-  const openRows = openSessionRows(remote.registers, { ownRegisterId: registerId, timezone, own });
+  // Open sessions are listed whatever the period and the cashier (Front desk, 2026-11-21); the register filter applies to them.
+  const openRows = openSessionRows(remote.registers, { ownRegisterId: registerId, timezone, own })
+    .filter((row) => !filters?.registerId || row.registerId === filters.registerId);
   const openFloats = openRows.map((row) => row.registerId === registerId && ownSession ? ownSession.counted_float_minor : remote.floats[row.registerId]);
-  const summary = closureSummary(merged, { open: openRows.length, openFloats, storeKey, currency, timezone, today, blind });
+  const summary = closureSummary(merged, { open: openRows.length, openFloats, storeKey, currency, timezone, today, blind, filters });
   const tiles = [['discrepancy', 'Discrepancy', summary.discrepancy, 'counted − expected'], ['sessions', 'Sessions', summary.sessions, summary.sessionsNote],
     ['cash-at-open', 'Cash at open', summary.cashAtOpen, 'floats'], ['cash-activity', 'Cash activity', summary.cashActivity, 'sales − refunds ± movements'],
     ['cash-at-close', 'Cash at close', summary.cashAtClose, 'counted']];
@@ -110,6 +145,17 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
   }, []);
   const table = view === 'table' ? (
     <View className="mb-4 gap-4">
+      <View testID="closures-filters" className="flex-row flex-wrap items-start gap-2">
+        <DateRangeMenu testID="closures-filter-period" value={period} onChange={setPeriod} timezone={timezone} />
+        <FilterSelect id="closures-filter-cashier" value={cashier} onChange={setCashier}
+          options={[{ value: 'all', label: 'All cashiers' }, ...closureCashiers(merged, { storeKey, timezone, today }).map((value) => ({ value, label: value }))]} />
+        <FilterSelect id="closures-filter-register" value={register} onChange={setRegister}
+          options={[{ value: 'all', label: 'All registers' }, { value: registerId, label: OWN_REGISTER_LABEL },
+            ...Object.entries(remote.names).filter(([id]) => id !== registerId).map(([value, label]) => ({ value, label }))]} />
+        {Platform.OS === 'web' && !blind && rows.length > 0 ? (
+          <Button testID="closure-history-export" variant="secondary" className="ml-auto" onPress={exportCsv}><Text>Export CSV</Text></Button>
+        ) : null}
+      </View>
       <View className="flex-row flex-wrap gap-4">
         {tiles.map(([id, label, value, note]) => (
           <View key={id} testID={`closures-tile-${id}`} className="min-w-32 flex-1 gap-1 rounded-md border border-border p-4">
@@ -163,7 +209,7 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
             ))}
           </View>
         )) : null}
-        {filter === 'all' && rows.length === 0 ? <Text testID="closure-history-empty" className="px-4 py-3">No closures in the last 92 days.</Text> : null}
+        {filter === 'all' && rows.length === 0 ? <Text testID="closure-history-empty" className="px-4 py-3">No closures in this period.</Text> : null}
       </View>
     </View>
   ) : null;
@@ -191,7 +237,7 @@ export function ClosureList({ closures, session, registerId, storeKey, store, cu
       </ScrollView>}
       {remoteError ? <Text testID="closure-history-remote-error">{"Other registers' closures could not be loaded."}</Text> : null}
       {error ? <Text testID="closure-history-print-error" className="text-destructive">{error}</Text> : null}
-      {Platform.OS === 'web' && !blind && rows.length > 0 ? (
+      {view !== 'table' && Platform.OS === 'web' && !blind && rows.length > 0 ? (
         <Button testID="closure-history-export" variant="secondary" onPress={exportCsv}><Text>Export CSV</Text></Button>
       ) : null}
     </>
