@@ -23,6 +23,7 @@ describe('order.refund v1', () => {
   let connection: TransactionalConnection;
   let base: string;
   let refunder: Record<string, string>;
+  let auditor: Record<string, string>;
   let seller: Record<string, string>;
   beforeAll(async () => {
     await environment.init();
@@ -33,6 +34,7 @@ describe('order.refund v1', () => {
     base = await server.app.getUrl();
     refunder = await tokenWith(['TallyPosSell', 'TallyPosRefund']);
     seller = await tokenWith(['TallyPosSell']);
+    auditor = await tokenWith(['TallyPosSell', 'TallyPosRefund', 'ApproveTallyPosVariance']);
   });
   afterAll(() => server.destroy());
 
@@ -44,7 +46,7 @@ describe('order.refund v1', () => {
     expect(response.status).toBe(200);
     return (await response.json()).results[0];
   }
-  async function tokenWith(permissions: Array<'TallyPosSell' | 'TallyPosRefund'>) {
+  async function tokenWith(permissions: Array<'TallyPosSell' | 'TallyPosRefund' | 'ApproveTallyPosVariance'>) {
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
     const { createRole } = await adminClient.query<{ createRole: { id: string } }>(parse(`mutation Role($input: CreateRoleInput!) {
       createRole(input: $input) { id }
@@ -322,20 +324,22 @@ describe('order.refund v1', () => {
   });
 
   describe('refunds in register figures', () => {
+    // 4.3c: a reply carries expected cash only for a holder of ApproveTallyPosVariance, so these tests post as one.
+    const seen = (command: unknown) => post(command, auditor);
     it('a cash refund lowers the live expected cash of the session that made it', async () => {
       const session = { registerId: randomUUID(), sessionId: randomUUID() };
       const countedFloatMinor = 10000;
-      expect(await post(envelope('register.session.open', {
+      expect(await seen(envelope('register.session.open', {
         ...session, openedAt: new Date().toISOString(), countedFloatMinor,
       }))).toMatchObject({ status: 'applied' });
       const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }],
         undefined, undefined, { sessionId: session.sessionId });
-      const sold = await post(sale);
+      const sold = await seen(sale);
       expect(sold).toMatchObject({ status: 'applied' });
       const order = await readOrder(sold.serverRefs!.orderId);
       const refund = refundFor(order, session, { destination: 'cash' });
-      expect(await post(refund)).toMatchObject({ status: 'applied' });
-      const result = await post(envelope('register.session.transition', {
+      expect(await seen(refund)).toMatchObject({ status: 'applied' });
+      const result = await seen(envelope('register.session.transition', {
         sessionId: session.sessionId, status: 'open', at: new Date().toISOString(),
       }));
       expect(result).toMatchObject({ status: 'applied' });
@@ -348,16 +352,16 @@ describe('order.refund v1', () => {
       const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }],
         undefined, undefined, { sessionId: sessionA.sessionId });
       sale.payload.payments = [{ clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', amountMinor: sale.payload.totalMinor }];
-      const sold = await post(sale);
+      const sold = await seen(sale);
       expect(sold).toMatchObject({ status: 'applied' });
       const order = await readOrder(sold.serverRefs!.orderId);
-      expect(await post(envelope('register.session.transition', {
+      expect(await seen(envelope('register.session.transition', {
         sessionId: sessionA.sessionId, status: 'closed', at: new Date().toISOString(),
       }))).toMatchObject({ status: 'applied' });
       const sessionB = await openSession();
       const refund = refundFor(order, sessionB, { destination: 'original_method' });
-      expect(await post(refund)).toMatchObject({ status: 'applied' });
-      const result = await post(envelope('register.session.transition', {
+      expect(await seen(refund)).toMatchObject({ status: 'applied' });
+      const result = await seen(envelope('register.session.transition', {
         sessionId: sessionB.sessionId, status: 'open', at: new Date().toISOString(),
       }));
       expect(result).toMatchObject({ status: 'applied' });
@@ -368,17 +372,17 @@ describe('order.refund v1', () => {
       const session = { registerId: randomUUID(), sessionId: randomUUID() };
       const countedFloatMinor = 10000;
       const openedAt = new Date().toISOString();
-      expect(await post(envelope('register.session.open', { ...session, openedAt, countedFloatMinor })))
+      expect(await seen(envelope('register.session.open', { ...session, openedAt, countedFloatMinor })))
         .toMatchObject({ status: 'applied' });
       const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }],
         undefined, undefined, { sessionId: session.sessionId });
-      const sold = await post(sale);
+      const sold = await seen(sale);
       expect(sold).toMatchObject({ status: 'applied' });
       const order = await readOrder(sold.serverRefs!.orderId);
       const refund = refundFor(order, session, { destination: 'cash' });
-      expect(await post(refund)).toMatchObject({ status: 'applied' });
+      expect(await seen(refund)).toMatchObject({ status: 'applied' });
       const expectedCash = countedFloatMinor + sale.payload.totalMinor - refund.payload.totalMinor;
-      const result = await post(envelope('register.closure.submit', {
+      const result = await seen(envelope('register.closure.submit', {
         ...session, closureId: randomUUID(), number: 1, openedAt, closedAt: new Date().toISOString(),
         tillExpected: { cash: expectedCash }, counted: { cash: expectedCash },
         periodSalesTotalMinor: sale.payload.totalMinor, periodRefundsTotalMinor: refund.payload.totalMinor,
@@ -394,19 +398,19 @@ describe('order.refund v1', () => {
     it('a Failed refund leaves the session figures', async () => {
       const session = { registerId: randomUUID(), sessionId: randomUUID() };
       const countedFloatMinor = 10000;
-      expect(await post(envelope('register.session.open', {
+      expect(await seen(envelope('register.session.open', {
         ...session, openedAt: new Date().toISOString(), countedFloatMinor,
       }))).toMatchObject({ status: 'applied' });
       const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }],
         undefined, undefined, { sessionId: session.sessionId });
-      const sold = await post(sale);
+      const sold = await seen(sale);
       expect(sold).toMatchObject({ status: 'applied' });
       const order = await readOrder(sold.serverRefs!.orderId);
-      const refund = await post(refundFor(order, session, { destination: 'cash' }));
+      const refund = await seen(refundFor(order, session, { destination: 'cash' }));
       expect(refund).toMatchObject({ status: 'applied' });
       const refundId = refund.refund!.refunds[0].id;
       await connection.rawConnection.getRepository(Refund).update(environment.decode(refundId), { state: 'Failed' });
-      const result = await post(envelope('register.session.transition', {
+      const result = await seen(envelope('register.session.transition', {
         sessionId: session.sessionId, status: 'open', at: new Date().toISOString(),
       }));
       expect(result).toMatchObject({ status: 'applied' });
