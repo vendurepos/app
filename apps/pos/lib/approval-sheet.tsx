@@ -2,15 +2,15 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, DialogContent, DialogTitle, Input, InputField, Label, Text } from '@tallyui/components';
 import type { ServerCapabilities } from '@tallyui/core';
 import type { ApprovalNeeded, useRegisterSession } from '@tallyui/pos';
-import { approvalVariance, requestManagerApproval, usesStoreApproval } from './manager-approval';
+import { approvalVariance, requestManagerApproval, requestReapproval, usesStoreApproval } from './manager-approval';
 import { typedApprover } from './register-approval';
 import type { Session } from './session';
 
 type Approved = { approvedBy: string; approvedByName?: string; approval?: string; approvedVariance?: Record<string, number> };
 type Signed = { approvedBy: string; approvedByName: string; approval: string };
-/** What the open sheet is for: a typed name, or a manager's sign-in bound to one session and variance. */
-type Sheet = { kind: 'typed' }
-  | { kind: 'manager'; sessionId: string; variance: Record<string, number>; liveAtStore: boolean; result: (signed: Signed) => unknown };
+/** What the open sheet is for: a typed name, or a manager's sign-in bound to one session and variance (a refused closure's by its id). */
+type Sheet = { kind: 'typed' } | { kind: 'manager'; sessionId: string; variance: Record<string, number>; closureId?: string; liveAtStore: boolean;
+  result: (signed: Signed) => unknown };
 
 /** #332: a count over the store's limit asks a manager to sign in (the store checks it); otherwise a typed name, as before. */
 export function useApprovalSheet({ session, register, capabilities }: {
@@ -53,14 +53,16 @@ export function useApprovalSheet({ session, register, capabilities }: {
       result: ({ approvedBy, approvedByName, approval }) => ({ approvedBy, approvedByName, approval, approvedVariance: variance }) });
   };
   const reapprove = (needed: ApprovalNeeded) => show<{ approvedBy: string; approval: string }>({
-    kind: 'manager', sessionId: needed.sessionId, variance: needed.variance, liveAtStore: needed.liveAtStore,
+    kind: 'manager', sessionId: needed.sessionId, variance: needed.variance, closureId: needed.closureId, liveAtStore: needed.liveAtStore,
     result: ({ approvedBy, approval }) => ({ approvedBy, approval }),
   });
   const submit = async (manager: Extract<Sheet, { kind: 'manager' }>) => {
     const pending = resolve.current;
     setBusy(true);
     setError(null);
-    const result = await requestManagerApproval(session, { sessionId: manager.sessionId, variance: manager.variance, username: username.trim(), password });
+    const signIn = { sessionId: manager.sessionId, variance: manager.variance, username: username.trim(), password };
+    const result = manager.closureId !== undefined ? await requestReapproval(session, { ...signIn, closureId: manager.closureId })
+      : await requestManagerApproval(session, signIn);
     if (resolve.current !== pending) return; // cancelled, or another sheet opened, while the store answered
     if (result.ok) return answer(manager.result(result));
     setError(result.message);

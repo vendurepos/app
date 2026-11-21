@@ -6,7 +6,8 @@ import type { CommandResult } from '../vendored/commands';
  * 4.3c (Front desk ruling, 2026-11-21): a till that counts blind does not receive the register's derived figures. A caller
  * without ApproveTallyPosVariance on the active channel (SuperAdmin holds it) gets these keys omitted, never null; a till keeps
  * every movement's own amount and the opening float. Applied when a response is sent, never when the ledger stores a result,
- * so a replay to a holder still carries them. `register_approval_required`'s `data.variance` is kept: the till posts it back.
+ * so a replay to a holder still carries them. 4.3d: `register_approval_required`'s `data.variance` is withheld too; the
+ * till asks for approval by `data.closureId` and the store reads the variance back from that refusal's ledger row.
  */
 export const WITHHELD_SESSION_KEYS = ['expected', 'paidInMinor', 'paidOutMinor'] as const;
 export const WITHHELD_CLOSURE_KEYS = ['expected', 'variance', 'tillExpected', 'paidInMinor', 'paidOutMinor'] as const;
@@ -27,7 +28,11 @@ export function blindRegisterRead<R extends { session: object | null; closures: 
 
 /** A register command's answer (fresh, replayed or concurrent) for this caller. */
 export function blindCommandResult(ctx: RequestContext, result: CommandResult): CommandResult {
-  if (!result.register || !countsBlind(ctx)) return result;
+  if (!countsBlind(ctx)) return result;
+  if (result.error?.code === 'register_approval_required' && result.error.data) {
+    return { ...result, error: { ...result.error, data: without(result.error.data, ['variance']) } };
+  }
+  if (!result.register) return result;
   const { session, closure } = result.register;
   return { ...result, register: { ...result.register,
     ...(session ? { session: without(session, WITHHELD_RESULT_SESSION_KEYS) } : {}),

@@ -213,8 +213,9 @@ describe('register approval (contract 3)', () => {
   it('8. over the threshold with no proof is register_approval_required, carrying the server variance, not counted − tillExpected', async () => {
     const { s, r } = await session();
     // The till expects 10600 (no variance on its side); the server expects 10000, so the variance is 600.
-    await refused(closure(s, r, 10600), 'register_approval_required', `Session ${s} needs a manager's approval: its cash variance is over ${THRESHOLD}`,
-      { sessionId: s, thresholdMinor: THRESHOLD, variance: { cash: 600 } });
+    const command = closure(s, r, 10600);
+    await refused(command, 'register_approval_required', `Session ${s} needs a manager's approval: its cash variance is over ${THRESHOLD}`,
+      { sessionId: s, closureId: command.payload.closureId, thresholdMinor: THRESHOLD, variance: { cash: 600 } });
   });
 
   it('9a. register_approval_invalid unknown: a proof the store never issued', async () => {
@@ -270,8 +271,9 @@ describe('register approval (contract 3)', () => {
 
   it('12. a v2 closure over the threshold needs approval on a session opened at v3, and applies unverified on one opened at v2', async () => {
     const v3 = await session(3);
-    await refused(closure(v3.s, v3.r, 10600, {}, 2), 'register_approval_required',
-      `Session ${v3.s} needs a manager's approval: its cash variance is over ${THRESHOLD}`, { sessionId: v3.s, thresholdMinor: THRESHOLD, variance: { cash: 600 } });
+    const v2Closure = closure(v3.s, v3.r, 10600, {}, 2);
+    await refused(v2Closure, 'register_approval_required', `Session ${v3.s} needs a manager's approval: its cash variance is over ${THRESHOLD}`,
+      { sessionId: v3.s, closureId: v2Closure.payload.closureId, thresholdMinor: THRESHOLD, variance: { cash: 600 } });
     const v2 = await session(2);
     const applied = await send(closure(v2.s, v2.r, 10600, { approvedBy: 'manager-1' }, 2));
     expect(applied).toMatchObject({ status: 'applied', register: { closure: { variance: { cash: 600 } } } });
@@ -315,7 +317,7 @@ describe('register approval (contract 3)', () => {
     // deriveVariance maps only counted's keys; the server still expects the 10000 float in cash.
     const command = closure(s, r, 0, { tillExpected: {}, counted: {} });
     await refused(command, 'register_approval_required', `Session ${s} needs a manager's approval: its cash variance is over ${THRESHOLD}`,
-      { sessionId: s, thresholdMinor: THRESHOLD, variance: { cash: -10000 } });
+      { sessionId: s, closureId: command.payload.closureId, thresholdMinor: THRESHOLD, variance: { cash: -10000 } });
     const applied = await send(resend(command, await proofFor(s, { cash: -10000 })));
     expect(applied).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: true } } });
     expect((applied as { register: { closure: { variance: unknown } } }).register.closure.variance).toEqual({});
@@ -471,5 +473,56 @@ describe('register approval (contract 3)', () => {
     const clerk = await cashier(['ReadOrder']);
     expect.soft((await approve(request(s), clerk)).status, 'ReadOrder only').toBe(403);
     expect(await approvals().countBy({ sessionId: s })).toBe(0);
+  });
+
+  // 4.3d: a blind till (TallyPosSell only) learns no variance from a refusal, and asks for its proof by closure id.
+  async function post(auth: string, command: RegisterEnvelope) {
+    const response = await fetch(`${base}/tally/v1/commands`, { method: 'POST', body: JSON.stringify({ commands: [command] }),
+      headers: { 'Content-Type': 'application/json', Authorization: auth, 'X-Tally-Protocol': '1' } });
+    expect(response.status).toBe(200);
+    return (await response.json()).results[0];
+  }
+  async function blindRefusal() {
+    const { s, r } = await session();
+    const auth = await cashier();
+    const command = closure(s, r, 10600);
+    const fresh = await post(auth, command);
+    return { s, r, auth, command, fresh, closureId: String(command.payload.closureId) };
+  }
+
+  it("31. a blind cashier's over-threshold closure is refused without the variance, fresh and replayed; a holder's replay carries it", async () => {
+    const { s, auth, command, fresh, closureId } = await blindRefusal();
+    expect(fresh).toMatchObject({ status: 'rejected', error: { code: 'register_approval_required' } });
+    expect(fresh.error.data).toEqual({ sessionId: s, closureId, thresholdMinor: THRESHOLD });
+    expect(JSON.stringify(fresh)).not.toMatch(/"(variance|expected|tillExpected)"/);
+    expect(await post(auth, command)).toEqual(fresh);
+    expect((await post(superAdmin(), command)).error.data).toEqual({ sessionId: s, closureId, thresholdMinor: THRESHOLD, variance: { cash: 600 } });
+  });
+
+  it('32. the cashier gets a proof by closure id, without sending a variance, and the closure resent with it applies', async () => {
+    const { s, r, auth, command, closureId } = await blindRefusal();
+    const { status, body } = await approve({ sessionId: s, closureId, username: manager.email, password: 'secret-password' }, auth);
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty('variance');
+    expect(await post(auth, resend(command, body.approval))).toMatchObject({ status: 'applied' });
+    expect(await closureRead(r)).toMatchObject({ closureId, approvalVerified: true });
+    expect((await approvals().findOneByOrFail({ tokenHash: sha256(body.approval) })).variance).toEqual({ cash: 600 });
+  });
+
+  it('33. closure-id approvals are refused', async () => {
+    const { s, auth, command, closureId } = await blindRefusal();
+    const ask = (extra: Record<string, unknown>) => approve({ sessionId: s, username: manager.email, password: 'secret-password', ...extra }, auth);
+    const UNKNOWN = { status: 404, body: { code: 'approval_request_unknown', message: 'The store has no refused closure to approve for this session.' } };
+    expect(await ask({ closureId: uuid() })).toMatchObject(UNKNOWN);
+    // The same closure id, refused under another session of this channel.
+    const other = await session();
+    expect(await ask({ sessionId: other.s, closureId })).toMatchObject(UNKNOWN);
+    // The refusal moved to another channel: this channel holds no refusal for it.
+    const elsewhere = decode(await channel('approval-d'));
+    await connection.rawConnection.getRepository(TallyCommand).update({ id: command.id }, { channelId: String(elsewhere) });
+    expect(await ask({ closureId })).toMatchObject(UNKNOWN);
+    const BOTH = { status: 400, body: { code: 'invalid_payload', message: 'Expected exactly one of variance or closureId' } };
+    expect(await ask({ closureId, variance: { cash: 600 } })).toMatchObject(BOTH);
+    expect(await ask({})).toMatchObject(BOTH);
   });
 });

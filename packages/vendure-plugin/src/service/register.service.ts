@@ -347,7 +347,7 @@ export class RegisterService {
         if (reason) return conflict('register_approval_invalid', `The approval is not valid for this closure: ${reason}`, { reason });
       } else if (threshold !== undefined && (command.version >= 3 || (session!.openVersion ?? 1) >= 3) && Math.abs(approvalVariance.cash) > threshold) {
         return conflict('register_approval_required', `Session ${p.sessionId} needs a manager's approval: its cash variance is over ${threshold}`,
-          { sessionId: p.sessionId, thresholdMinor: threshold, variance: approvalVariance });
+          { sessionId: p.sessionId, closureId: p.closureId, thresholdMinor: threshold, variance: approvalVariance });
       }
       await repo(TallyRegisterClosure).insert({
         channelId, id: p.closureId, sessionId: session!.id, registerId: p.registerId, number: p.number, businessDay: p.businessDay ?? null,
