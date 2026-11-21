@@ -4,13 +4,15 @@ import {
 import { Allow, Ctx, ForbiddenError, Permission, RequestContext } from '@vendure/core';
 import { tallyPosPairDisplay } from '../config/permissions';
 import { DisplayRefusal, DisplaySignallingService } from '../service/display-signalling.service';
-import type { SignalMessage } from '../service/display-signalling.service';
+import type { SignalMessage, TillDevice } from '../service/display-signalling.service';
 
-const DEVICE_HEADER = 'x-tally-device-id', TOKEN_HEADER = 'x-tally-display-token';
+const DEVICE_HEADER = 'x-tally-device-id', KEY_HEADER = 'x-tally-device-key', TOKEN_HEADER = 'x-tally-display-token';
 // Input bounds: the seam names none, so these only keep junk out of Postgres. A pairing code is 6 digits today; a token
 // or claim secret is 22 characters; an SDP offer is a few kB.
 const NAME_MAX = 100, CODE_MAX = 32, SECRET_MAX = 128, PAYLOAD_MAX = 65_536, DEVICE_MAX = 64, ID_MAX = 64;
 const SIGNAL_TYPES: ReadonlySet<unknown> = new Set(['offer', 'answer', 'ice']);
+// A device key is 22 base64url characters today; up to 64 leaves room to lengthen it.
+const DEVICE_KEY = /^[A-Za-z0-9_-]{22,64}$/;
 
 type Reply = { status(code: number): { json(body: unknown): void } };
 type Rule = { check: (value: unknown) => boolean; what: string; optional?: true };
@@ -48,10 +50,22 @@ function deviceId(value: string | undefined): string {
   return value as string;
 }
 
-/** A `:claimId` or `:displayId`: one that is not 1 to 64 characters without NUL names no row, so `not_found`. */
+/**
+ * The till's `X-Tally-Device-Id` and `X-Tally-Device-Key`. A missing or malformed key is a refused key, like a wrong
+ * one, so `device_refused`; the service checks a well-formed one.
+ */
+function tillDevice(id: string | undefined, key: string | undefined): TillDevice {
+  const checked = deviceId(id);
+  if (key === undefined || !DEVICE_KEY.test(key)) throw new DisplayRefusal('device_refused');
+  return { deviceId: checked, deviceKey: key };
+}
+
+/**
+ * A `:claimId` or `:displayId`: one that is not 1 to 64 characters without NUL names no row, so it becomes `''`, which
+ * no row has, and the service answers `not_found` after the device key's check.
+ */
 function pathId(value: string): string {
-  if (!text(1, ID_MAX)(value)) throw new DisplayRefusal('not_found');
-  return value;
+  return text(1, ID_MAX)(value) ? value : '';
 }
 
 /** The display's `X-Tally-Display-Token`. A missing or oversized one is a refused token, like an unknown one. */
@@ -71,7 +85,8 @@ export class DisplayRefusalFilter implements ExceptionFilter {
 
 /**
  * The customer-display signalling routes (TallyUI ADR-085 U7). `displays/…` is the till side: the cashier's Vendure
- * session and channel token, `TallyPosPairDisplay` only, and `X-Tally-Device-Id`. `display/…` is the display side:
+ * session and channel token, `TallyPosPairDisplay` only, `X-Tally-Device-Id`, and on every route but `displays/device`
+ * the `X-Tally-Device-Key` that route issued (TallyUI#754). `display/…` is the display side:
  * public, gated by `X-Tally-Display-Token` (claim and collect by their bodies). Lists answer `{ items }`; snapshots
  * travel as `{ snapshot }`.
  */
@@ -80,65 +95,73 @@ export class DisplayRefusalFilter implements ExceptionFilter {
 export class TallyDisplaysController {
   constructor(private readonly displays: DisplaySignallingService) {}
 
+  /** Issues this device id's key once: `{ deviceKey }`. */
+  @Post('displays/device')
+  @HttpCode(200)
+  @Allow(tallyPosPairDisplay.Permission)
+  registerDevice(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string) {
+    return this.displays.registerDevice(ctx, deviceId(device));
+  }
+
   @Post('displays/codes')
   @HttpCode(200)
   @Allow(tallyPosPairDisplay.Permission)
-  mint(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string) {
-    return this.displays.mint(ctx, deviceId(device));
+  mint(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    return this.displays.mint(ctx, tillDevice(device, key));
   }
 
   @Get('displays/pending')
   @Allow(tallyPosPairDisplay.Permission)
-  async pending(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string) {
-    return { items: await this.displays.pending(ctx, deviceId(device)) };
+  async pending(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    return { items: await this.displays.pending(ctx, tillDevice(device, key)) };
   }
 
   @Post('displays/pending/:claimId/confirm')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
-  async confirm(@Ctx() ctx: RequestContext, @Param('claimId') claimId: string, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.confirm(ctx, deviceId(device), pathId(claimId));
+  async confirm(@Ctx() ctx: RequestContext, @Param('claimId') claimId: string, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    await this.displays.confirm(ctx, tillDevice(device, key), pathId(claimId));
   }
 
   @Post('displays/pending/:claimId/decline')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
-  async decline(@Ctx() ctx: RequestContext, @Param('claimId') claimId: string, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.decline(ctx, deviceId(device), pathId(claimId));
+  async decline(@Ctx() ctx: RequestContext, @Param('claimId') claimId: string, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    await this.displays.decline(ctx, tillDevice(device, key), pathId(claimId));
   }
 
   @Get('displays')
   @Allow(tallyPosPairDisplay.Permission)
-  async list(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string) {
-    return { items: await this.displays.list(ctx, deviceId(device)) };
+  async list(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    return { items: await this.displays.list(ctx, tillDevice(device, key)) };
   }
 
   @Get('displays/signals')
   @Allow(tallyPosPairDisplay.Permission)
-  async receiveSignals(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string) {
-    return { items: await this.displays.receiveSignals(ctx, deviceId(device)) };
+  async receiveSignals(@Ctx() ctx: RequestContext, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    return { items: await this.displays.receiveSignals(ctx, tillDevice(device, key)) };
   }
 
   @Delete('displays/:displayId')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
-  async forget(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.forget(ctx, deviceId(device), pathId(displayId));
+  async forget(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    await this.displays.forget(ctx, tillDevice(device, key), pathId(displayId));
   }
 
   @Post('displays/:displayId/signals')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
-  async sendSignal(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Body() body: unknown, @Headers(DEVICE_HEADER) device?: string) {
-    await this.displays.sendSignal(ctx, deviceId(device), pathId(displayId), signal(body));
+  async sendSignal(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Body() body: unknown, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
+    await this.displays.sendSignal(ctx, tillDevice(device, key), pathId(displayId), signal(body));
   }
 
   @Put('displays/:displayId/snapshot')
   @HttpCode(204)
   @Allow(tallyPosPairDisplay.Permission)
-  async postSnapshot(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Body() body: unknown, @Headers(DEVICE_HEADER) device?: string) {
+  async postSnapshot(@Ctx() ctx: RequestContext, @Param('displayId') displayId: string, @Body() body: unknown, @Headers(DEVICE_HEADER) device?: string, @Headers(KEY_HEADER) key?: string) {
     const held = fields<{ snapshot: unknown }>(body, { snapshot: { check: () => true, what: 'any JSON value' } });
-    await this.displays.postSnapshot(ctx, deviceId(device), pathId(displayId), held.snapshot);
+    await this.displays.postSnapshot(ctx, tillDevice(device, key), pathId(displayId), held.snapshot);
   }
 
   @Post('display/claim')

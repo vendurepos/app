@@ -1,7 +1,7 @@
 import { RequestContextService, TransactionalConnection, runMigrations } from '@vendure/core';
 import { TestServer } from '@vendure/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, RegisterService, TallyPos1790648006022, TallyPosRegister1790800000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000, TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000, TallyPosV51790900000000, TallyPosVp2a1790720000000 } from '../src';
+import { OrderCreateService, RegisterService, TallyPos1790648006022, TallyPosRegister1790800000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000, TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000, TallyPosDisplayDevice1791500000000, TallyPosV51790900000000, TallyPosVp2a1790720000000 } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import { createPluginTestEnvironment, dbConnectionOptions, pluginTestConfig } from './env';
 import { orderCommand } from './payloads';
@@ -23,6 +23,12 @@ describe('the TallyPos migration', () => {
     const raw = seeded.server.app.get(TransactionalConnection).rawConnection;
     const runner = raw.createQueryRunner();
     try {
+      await new TallyPosDisplayDevice1791500000000().down(runner);
+      expect((await raw.driver.createSchemaBuilder().log()).upQueries.map(item => item.query)).toEqual([
+        'CREATE TABLE "tally_display_device" ("channelId" character varying NOT NULL, "deviceId" character varying NOT NULL, "keyHash" character varying, "adoptedBy" character varying, "adoptedAt" TIMESTAMP WITH TIME ZONE, "lastCallAt" TIMESTAMP WITH TIME ZONE NOT NULL, CONSTRAINT "PK_ecad5a1633b10c85d5d3c5f7450" PRIMARY KEY ("channelId", "deviceId"))',
+        'CREATE INDEX "IDX_1cfc018cafb2a3033d784b3ac5" ON "tally_display_device" ("lastCallAt") ',
+      ]);
+      await new TallyPosDisplayDevice1791500000000().up(runner);
       await new TallyPosReceiptEmail1791400000000().down(runner);
       expect((await raw.driver.createSchemaBuilder().log()).upQueries.map(item => item.query)).toEqual([
         'CREATE TABLE "tally_receipt_email_window" ("key" character varying NOT NULL, "sends" integer NOT NULL, "expiresAt" TIMESTAMP WITH TIME ZONE NOT NULL, CONSTRAINT "PK_5c42b39a51e6e6588e0906511f3" PRIMARY KEY ("key"))',
@@ -78,7 +84,7 @@ describe('the TallyPos migration', () => {
       await new TallyPosV51790900000000().up(runner);
     } finally { await runner.release(); }
     const [{ database }] = await raw.query('SELECT current_database() AS database');
-    for (const table of ['tally_receipt_email_window', 'tally_register_approval', 'tally_display_signal', 'tally_display_snapshot', 'tally_display', 'tally_display_pending', 'tally_display_code',
+    for (const table of ['tally_display_device', 'tally_receipt_email_window', 'tally_register_approval', 'tally_display_signal', 'tally_display_snapshot', 'tally_display', 'tally_display_pending', 'tally_display_code',
       'tally_display_claim_window', 'tally_register_session_alias', 'tally_command', 'tally_register_closure', 'tally_register_movement', 'tally_register_session_status',
       'tally_register_session', 'tally_register']) await raw.query(`DROP TABLE "${table}"`);
     for (const [table, columns] of [
@@ -97,15 +103,15 @@ describe('the TallyPos migration', () => {
     const config = pluginTestConfig({ dbConnectionOptions: {
       ...dbConnectionOptions, database, synchronize: false,
       migrations: [TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000, TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
-        TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000],
+        TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000, TallyPosDisplayDevice1791500000000],
     } });
     // runMigrations prints "Your database schema does not match…" when the schema diff is not empty.
     const printed = vi.spyOn(console, 'log');
     try {
       expect(await runMigrations(config)).toEqual(['TallyPos1790648006022', 'TallyPosVp2a1790720000000', 'TallyPosRegister1790800000000', 'TallyPosV51790900000000', 'TallyPosRegisterV21791000000000', 'TallyPosRegisterOpenVersion1791100000000',
-        'TallyPosDisplay1791200000000', 'TallyPosRegisterApproval1791300000000', 'TallyPosReceiptEmail1791400000000']);
+        'TallyPosDisplay1791200000000', 'TallyPosRegisterApproval1791300000000', 'TallyPosReceiptEmail1791400000000', 'TallyPosDisplayDevice1791500000000']);
       const output = printed.mock.calls.flat().join('\n');
-      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000[\s\S]*Successfully ran migration: TallyPosRegister1790800000000[\s\S]*Successfully ran migration: TallyPosV51790900000000[\s\S]*Successfully ran migration: TallyPosRegisterV21791000000000[\s\S]*Successfully ran migration: TallyPosRegisterOpenVersion1791100000000[\s\S]*Successfully ran migration: TallyPosDisplay1791200000000[\s\S]*Successfully ran migration: TallyPosRegisterApproval1791300000000[\s\S]*Successfully ran migration: TallyPosReceiptEmail1791400000000/);
+      expect(output).toMatch(/Successfully ran migration: TallyPos1790648006022[\s\S]*Successfully ran migration: TallyPosVp2a1790720000000[\s\S]*Successfully ran migration: TallyPosRegister1790800000000[\s\S]*Successfully ran migration: TallyPosV51790900000000[\s\S]*Successfully ran migration: TallyPosRegisterV21791000000000[\s\S]*Successfully ran migration: TallyPosRegisterOpenVersion1791100000000[\s\S]*Successfully ran migration: TallyPosDisplay1791200000000[\s\S]*Successfully ran migration: TallyPosRegisterApproval1791300000000[\s\S]*Successfully ran migration: TallyPosReceiptEmail1791400000000[\s\S]*Successfully ran migration: TallyPosDisplayDevice1791500000000/);
       expect(output).not.toMatch(/does not match/);
     } finally {
       printed.mockRestore();
@@ -124,6 +130,7 @@ describe('the TallyPos migration', () => {
         'customFieldsTallysaleat', 'customFieldsTallysessionid', 'customFieldsTallyshipping', 'customFieldsTallysnapshot', 'customFieldsTallyunitprice',
       ]);
       expect(await tallyIndexes(migratedQuery)).toEqual([
+        'CREATE INDEX "IDX_1cfc018cafb2a3033d784b3ac5" ON public.tally_display_device USING btree ("lastCallAt")',
         'CREATE UNIQUE INDEX "IDX_41736c40bde0381e21d971d69c" ON public.tally_display_pending USING btree ("channelId", "deviceId", "checkCode")',
         'CREATE INDEX "IDX_49e13b724f5c31337623d0daf0" ON public.tally_display_pending USING btree ("expiresAt")',
         'CREATE INDEX "IDX_57884f6d20b5ab78302240976b" ON public.tally_register_session USING btree ("channelId", "registerId")',
@@ -153,6 +160,7 @@ describe('the TallyPos migration', () => {
         'CREATE UNIQUE INDEX "PK_b86921a4047f233675e72bb1067" ON public.tally_register_approval USING btree (id)',
         'CREATE UNIQUE INDEX "PK_cb557f149dd2aba503ab051d4fa" ON public.tally_command USING btree (id)',
         'CREATE UNIQUE INDEX "PK_e3bf54fd35c91c8b9813c6ba23f" ON public.tally_register_session_status USING btree (seq)',
+        'CREATE UNIQUE INDEX "PK_ecad5a1633b10c85d5d3c5f7450" ON public.tally_display_device USING btree ("channelId", "deviceId")',
         'CREATE UNIQUE INDEX "PK_ee2a57ca0c7852c927c5542f8c8" ON public.tally_display_pending USING btree (id)',
         'CREATE UNIQUE INDEX "UQ_11d965948dc768c2038aadd10c0" ON public.tally_register_approval USING btree ("tokenHash")',
         'CREATE UNIQUE INDEX "UQ_26c513189244bf279fbc6bc260c" ON public.tally_display_pending USING btree ("secretHash")',
