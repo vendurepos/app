@@ -26,7 +26,7 @@ export type VendureCustomerAddress = {
 export type VendureCustomerListItem = {
   id: string; firstName?: string | null; lastName?: string | null; emailAddress?: string | null;
   phoneNumber?: string | null; createdAt: string; addresses?: VendureCustomerAddress[] | null;
-  groups?: Array<{ id: string; name: string }> | null;
+  groups?: { id: string; name: string }[] | null;
 };
 export type CustomerRow = {
   id: string; firstName: string; lastName: string; email: string; phone: string | null;

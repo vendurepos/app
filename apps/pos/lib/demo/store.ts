@@ -59,7 +59,7 @@ type Command = { id: string; type: string; version: number; payload: any };
 type Session = RegisterSessionOpenPayload & { status: 'open' | 'counting' | 'closed' };
 type Movement = { movementId: string; sessionId: string; type: string; amountMinor: number; voids?: string };
 type Customer = { __typename: 'Customer'; id: string; firstName: string; lastName: string; emailAddress: string; phoneNumber: string | null;
-  createdAt: string; addresses: DemoAddress[]; groups: Array<{ id: string; name: string }> };
+  createdAt: string; addresses: DemoAddress[]; groups: { id: string; name: string }[] };
 type DemoAddress = {
   id: string; fullName: string; company: string | null; streetLine1: string; streetLine2: string | null;
   city: string; province: string | null; postalCode: string; country: { code: string };
