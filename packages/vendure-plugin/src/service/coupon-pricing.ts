@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ConfigService, Customer, CustomerService, Logger, Order, OrderCalculator, OrderLine, ProductVariant,
-  Promotion, PromotionItemAction, PromotionOrderAction, PromotionService, PromotionShippingAction,
+  Promotion, PromotionItemAction, PromotionLineAction, PromotionOrderAction, PromotionService, PromotionShippingAction,
   RequestContext, Surcharge, TaxCategory, TransactionalConnection,
 } from '@vendure/core';
 import { IsNull } from 'typeorm';
@@ -19,8 +19,8 @@ export type CouponPricingInput = {
   pricesIncludeTax: boolean;
   customer?: { customerId: string };
   codes: string[];
-  // Shipping and fees are absent: Vendure's minimum_order_amount reads subTotal, which excludes them,
-  // and the till never discounts them.
+  // Shipping and fees are absent: the till never discounts them. order.create saves fees as surcharges, which Vendure
+  // counts in subTotal, so a minimum or order-percentage coupon can come out larger on the saved order (desk ruling: not modelled).
   lines: Array<{
     clientLineId: string;
     variantId?: string;
@@ -45,6 +45,13 @@ const refusalTexts = {
   exceed: (code: string) => `Coupon ${code} and the line's discount together exceed its price`,
   'no-longer-sold': () => 'This sale has a product the store no longer sells',
 };
+
+// Postgres order for productVariantId: numeric for integer ids, plain string comparison otherwise.
+function compareVariantIds(a: string | number, b: string | number): number {
+  const integer = (id: string | number) => typeof id === 'number' || /^\d+$/.test(id);
+  if (integer(a) && integer(b)) return Number(a) - Number(b);
+  return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
+}
 
 function objectError(value: unknown, path: string, fields: string[]): string | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return `${path}: expected an object`;
@@ -148,7 +155,8 @@ export class CouponPricingService {
       if (promotion.startsAt && promotion.startsAt.getTime() > Date.now()) return this.refuse(ctx, code, 'invalid');
       const actions = promotion.actions.map(action => this.config.promotionOptions.promotionActions.find(definition => definition.code === action.code));
       if (actions.some(action => action instanceof PromotionShippingAction)) return this.refuse(ctx, code, 'shipping');
-      if (actions.some(action => action instanceof PromotionItemAction) && actions.some(action => action instanceof PromotionOrderAction)) {
+      if (actions.some(action => action instanceof PromotionItemAction || action instanceof PromotionLineAction)
+        && actions.some(action => action instanceof PromotionOrderAction)) {
         return this.refuse(ctx, code, 'mixed');
       }
       // Vendure keeps the side-effect hooks in non-public fields; bracket access lets us refuse them before pricing.
@@ -196,6 +204,9 @@ export class CouponPricingService {
         taxCategory, taxCategoryId: taxCategory.id, adjustments: [], taxLines: [],
       }));
     }
+    // order.create adds its lines in one transaction, so they share createdAt and Vendure's final pass loads them by productVariantId (order.service.js:218-219); applyOrderItemPromotions re-tests conditions line by line in that order.
+    order.lines.sort((a, b) => compareVariantIds(a.productVariantId, b.productVariantId));
+    const byBody = input.lines.map((_, index) => order.lines.find(line => line.id === index + 1)!);
     // order.create saves each line's discountMinor as a net TALLY-DISCOUNT surcharge, and Vendure counts surcharges in subTotal; the first pass sets the lines' taxLines for them.
     await this.calculator.applyPriceAdjustments(ctx, order, []);
     for (const [index, line] of input.lines.entries()) {
@@ -203,21 +214,22 @@ export class CouponPricingService {
       order.surcharges.push(new Surcharge({
         order, description: 'POS discount', sku: TALLY_DISCOUNT_SKU, listPrice: -line.discountMinor!,
         listPriceIncludesTax: false,
-        taxLines: order.lines[index].taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
+        taxLines: byBody[index].taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
       }));
     }
     // Vendure applies promotions in priorityScore order (getActivePromotionsInChannel), whatever order the codes came in.
     await this.calculator.applyPriceAdjustments(ctx, order, [...promotions].sort((a, b) => a.priorityScore - b.priorityScore));
-    const amounts = promotions.map(promotion => order.lines.map(line => {
+    const amounts = promotions.map(promotion => byBody.map(line => {
       const discounts = line.discounts.filter(discount => discount.adjustmentSource === promotion.getSourceId());
       const amount = discounts.reduce((sum, discount) => sum - (line.listPriceIncludesTax ? discount.amountWithTax : discount.amount), 0);
-      if (!Number.isSafeInteger(amount) || amount < 0) throw new Error(`Invalid coupon amount for promotion ${promotion.id}`);
+      if (!Number.isSafeInteger(amount)) throw new Error(`Invalid coupon amount for promotion ${promotion.id}`);
       return { amount, net: discounts.reduce((sum, discount) => sum - discount.amount, 0) };
     }));
+    // With the till's discounts taking subTotal below zero, Vendure's order actions return a positive adjustment (order-fixed-discount-action.js); the till never applies one.
     for (const [index, code] of input.codes.entries()) {
-      if (amounts[index].every(line => line.amount === 0)) return { status: 200, body: this.refuse(ctx, code, "doesn't-apply") };
+      if (amounts[index].every(line => line.amount === 0) || amounts[index].some(line => line.amount < 0)) return { status: 200, body: this.refuse(ctx, code, "doesn't-apply") };
     }
-    for (const [index, line] of order.lines.entries()) {
+    for (const [index, line] of byBody.entries()) {
       if (amounts.every(code => code[index].amount === 0)) continue;
       const net = amounts.reduce((sum, code) => sum + code[index].net, 0);
       if (net + (input.lines[index].discountMinor ?? 0) > line.linePrice) {

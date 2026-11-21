@@ -119,6 +119,24 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     }
   });
 
+  it("prices lines in the saved order's order, by variant id, whatever order they are sent in", async () => {
+    // The saved order loads its lines by productVariantId, and the mug's id sorts first in this harness.
+    expect(Number(decode(variantIds.mug[0]))).toBeLessThan(Number(decode(variantIds.beans[0])));
+    const id = await promotion('SORTED', { conditions: minimum('6500'), actions: percentage([variantIds.mug[0], variantIds.beans[0]]) });
+    try {
+      // Mug first: subTotal 6000 + 1000 = 7000 >= 6500, so the mug gets 10% of 6000 = 600; then the subTotal is
+      // 6400 < 6500 and the beans fail the re-tested minimum. Sent beans first, the beans would wrongly get 100.
+      const input = sale(['sorted']);
+      expect(await price(input)).toEqual(priced('sorted', id, 'SORTED'));
+      expect(await price({ ...input, lines: [...input.lines].reverse() })).toEqual(priced('sorted', id, 'SORTED'));
+    } finally {
+      const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id, enabled: false } });
+      expect(updatePromotion).toEqual({ id, enabled: false });
+    }
+  });
+
   it('prices an order discount after the till discount, to the minor unit of the saved order', async () => {
     const id = await promotion('ORDERPCT', {
       conditions: minimum('0'),
@@ -287,6 +305,20 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
     expect(await price(input)).toEqual(refused("Coupon beans10 doesn't apply to this sale"));
   });
 
+  it("a coupon doesn't apply when the till's discounts take the subtotal below zero, rather than failing", async () => {
+    const id = await promotion('NEGFIX', { conditions: [], actions: [{ code: 'order_fixed_discount', arguments: [{ name: 'discount', value: '500' }] }] });
+    try {
+      const input = sale(['negfix']);
+      input.lines = [{ clientLineId: 'l1', variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 100, discountMinor: 200 }];
+      expect(await price(input)).toEqual(refused("Coupon negfix doesn't apply to this sale"));
+    } finally {
+      const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id, enabled: false } });
+      expect(updatePromotion).toEqual({ id, enabled: false });
+    }
+  });
+
   it('refuses shipping-only promotions', async () => {
     await promotion('SHIPPING', { actions: [{ code: 'free_shipping', arguments: [] }] });
     expect(await price(sale(['shipping']))).toEqual(refused("Coupon shipping discounts shipping, which the till can't apply"));
@@ -300,6 +332,23 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
   it('refuses a promotion that combines item and order discounts', async () => {
     await promotion('MIXED', { actions: [...percentage(), { code: 'order_fixed_discount', arguments: [{ name: 'discount', value: '100' }] }] });
     expect(await price(sale(['mixed']))).toEqual(refused("Coupon mixed combines item and order discounts, which the till can't apply"));
+  });
+
+  it('refuses a promotion that combines line and order discounts', async () => {
+    const id = await promotion('LINEMIX', { actions: [
+      { code: 'order_line_fixed_discount', arguments: [{ name: 'discount', value: '10' }] },
+      { code: 'order_fixed_discount', arguments: [{ name: 'discount', value: '29' }] },
+    ] });
+    try {
+      const input = sale(['linemix']);
+      input.lines = [{ clientLineId: 'l1', variantId: variantIds.mug[0], quantity: 7, unitPriceMinor: 100 }];
+      expect(await price(input)).toEqual(refused("Coupon linemix combines item and order discounts, which the till can't apply"));
+    } finally {
+      const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id, enabled: false } });
+      expect(updatePromotion).toEqual({ id, enabled: false });
+    }
   });
 
   it('refuses promotions with side-effect hooks', async () => {
