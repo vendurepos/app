@@ -211,4 +211,26 @@ describe('10.2: POST /tally/v1/variants/:id/stock', () => {
     // so the default channel lists both locations and the edit there is refused.
     expect(await stock({ expectedSaleable: 4, saleable: 5 }, print)).toMatchObject({ status: 409, body: { code: 'stock_level_not_single' } });
   });
+
+  // A raw transaction stands in for a sale holding the Mug's stock_level row (concurrency.e2e.ts's hold) past STOCK_LOCK_TIMEOUT (5 s).
+  it('9: a lock held past the lock timeout is refused 503 stock_busy, nothing written; once released the edit passes', async () => {
+    await setOnHand(10);
+    const movements = () => connection.rawConnection.getRepository(StockMovement).count({ where: { productVariant: { id: mugId } } });
+    const before = (await adjustments()).length, moved = await movements(), onHand = (await level()).stockOnHand;
+    const holder = connection.rawConnection.createQueryRunner();
+    try {
+      await holder.startTransaction();
+      await holder.query('SELECT id FROM stock_level WHERE "productVariantId" = $1 FOR UPDATE', [mugId]);
+      expect(await stock({ expectedSaleable: 10, saleable: 7 }))
+        .toEqual({ status: 503, body: { code: 'stock_busy', message: expect.any(String) } });
+      await holder.rollbackTransaction();
+    } finally {
+      if (holder.isTransactionActive) await holder.rollbackTransaction();
+      await holder.release();
+    }
+    expect({ onHand: (await level()).stockOnHand, added: (await adjustments()).length - before, moved: (await movements()) - moved })
+      .toEqual({ onHand, added: 0, moved: 0 });
+    expect(await stock({ expectedSaleable: 10, saleable: 7 })).toEqual({ status: 200, body: { saleable: 7, stockOnHand: 7 } });
+    expect((await adjustments()).length - before).toBe(1);
+  }, 30_000);
 });
