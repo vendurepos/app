@@ -1620,7 +1620,7 @@ test('a till without the approve permission counts blind; after closing it sees 
   const count = page.getByTestId('register-count');
   await count.getByTestId('count-amount').fill('100.00');
   await expect(count.getByTestId('count-variance')).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath('09e-register-count-blind-vendurepos.png') });
+  await page.screenshot({ path: test.info().outputPath('09j-register-count-blind-vendurepos.png') });
   await count.getByTestId('count-close').click();
 
   const sheet = page.getByTestId('closure-sheet');
@@ -1629,7 +1629,7 @@ test('a till without the approve permission counts blind; after closing it sees 
   await expect(sheet.getByTestId('closure-expected-cash')).toHaveCount(0);
   await expect(sheet.getByTestId('closure-print')).toHaveCount(0);
   await expect(sheet).not.toContainText(/Expected|variance/i);
-  await page.screenshot({ path: test.info().outputPath('09f-register-closed-blind-vendurepos.png') });
+  await page.screenshot({ path: test.info().outputPath('09k-register-closed-blind-vendurepos.png') });
 });
 
 test('one click from a fresh visit at phone width', async ({ page }) => {
