@@ -137,6 +137,8 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
         where: { id: decode(result.serverRefs!.orderId) }, relations: ['promotions', 'lines', 'lines.productVariant', 'lines.taxCategory', 'shippingLines', 'shippingLines.shippingMethod', 'surcharges', 'customer'],
       });
       const savedPromotion = (await server.app.get(PromotionService).findOne(ctx, decode(id)))!;
+      // Promotion.test skips a coupon promotion the order's couponCodes don't name.
+      order.couponCodes = ['ORDERPCT'];
       await server.app.get(OrderCalculator).applyPriceAdjustments(ctx, order, [savedPromotion]);
       const amounts = [variantIds.mug[0], variantIds.beans[0]].map(variantId => {
         const line = order.lines.find(item => String(item.productVariant.id) === decode(variantId))!;
