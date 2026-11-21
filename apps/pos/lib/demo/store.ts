@@ -16,6 +16,8 @@ export const DEMO_INFO = {
   lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
 };
+// e2e only: the demo's /info without the order.refund contract, as a store on an older plugin answers.
+export const DEMO_INFO_NO_REFUND_KEY = 'vendurepos.demo.info_no_refund';
 /** The demo's second register (CHECKLIST 6.6), listed by GET /tally/v1/registers so the register picker has another to choose. */
 export const DEMO_FRONT_COUNTER = { id: 'demo-front-counter', name: 'Front counter' } as const;
 // The demo exposes the seed's tax-exclusive EUR shop-floor channel.
@@ -220,6 +222,12 @@ export class DemoStore {
         customerNotes: parsed.customerNotes && typeof parsed.customerNotes === 'object' ? parsed.customerNotes : seed().customerNotes,
         refunds: Array.isArray(parsed.refunds) ? parsed.refunds : [], variants: parsed.variants && typeof parsed.variants === 'object' ? parsed.variants : {} };
     } else this.state = seed();
+  }
+
+  info() {
+    if (this.storage?.getItem(DEMO_INFO_NO_REFUND_KEY) !== '1') return DEMO_INFO;
+    const { 'order.refund': _refund, ...contracts } = DEMO_INFO.contracts;
+    return { ...DEMO_INFO, contracts };
   }
 
   reset(): void {
