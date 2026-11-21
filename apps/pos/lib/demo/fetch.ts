@@ -31,7 +31,7 @@
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
 import { DEMO_ORDER_HISTORY } from './order-notes';
-import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_INFO, DEMO_RATES, DemoStore, type DemoStorage } from './store';
+import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_RATES, DemoStore, type DemoStorage } from './store';
 
 // Reserved, non-resolving origin: a request missed by the wrapper cannot reach a live store.
 export const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
@@ -125,7 +125,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
     const route = url.slice(origin.length).split('?')[0];
     const reply = (body: unknown, headers?: Record<string, string>, status?: number) =>
       new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
-    if (route === INFO_PATH) return reply(DEMO_INFO);
+    if (route === INFO_PATH) return reply(store.info());
     if (route === REGISTERS_PATH) return reply({ items: store.registers() });
     const search = new URL(url).searchParams;
     const read = route.startsWith(`${REGISTERS_PATH}/`) && store.register(decodeURIComponent(route.slice(REGISTERS_PATH.length + 1)),

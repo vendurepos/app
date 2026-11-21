@@ -19,7 +19,7 @@ import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_STORE_ORIGIN, installDemoStore } from './fetch';
 import { demoCategoryImage, demoProductImage } from './product-images';
-import { DEMO_CUSTOMER_NOTE, DEMO_INFO, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
+import { DEMO_CUSTOMER_NOTE, DEMO_INFO, DEMO_INFO_NO_REFUND_KEY, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
 
 // A valid client timestamp shared by the test's order and register commands.
 const TIME = '2026-10-01T10:00:00.000Z';
@@ -872,4 +872,14 @@ it("the customer notes read returns the newest 100 of more than 100 notes, oldes
   expect(notes).toHaveLength(100);
   expect(notes[0].text).toBe('note 6');
   expect(notes[99].text).toBe('note 105');
+});
+
+it("answers /info without the order.refund contract only while the e2e switch is set, and never mutates DEMO_INFO", () => {
+  const items = new Map<string, string>();
+  const storage: DemoStorage = { getItem: key => items.get(key) ?? null, setItem: (key, value) => void items.set(key, value), removeItem: key => void items.delete(key) };
+  const store = new DemoStore(storage);
+  expect(store.info()).toBe(DEMO_INFO);
+  storage.setItem(DEMO_INFO_NO_REFUND_KEY, '1');
+  expect(Object.keys(store.info().contracts)).not.toContain('order.refund');
+  expect(Object.keys(DEMO_INFO.contracts)).toContain('order.refund');
 });
