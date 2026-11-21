@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import {
   ConfigService, Customer, CustomerService, Logger, Order, OrderCalculator, OrderLine, ProductVariant,
-  Promotion, PromotionService, PromotionShippingAction, RequestContext, TaxCategory, TransactionalConnection,
+  Promotion, PromotionItemAction, PromotionOrderAction, PromotionService, PromotionShippingAction,
+  RequestContext, Surcharge, TaxCategory, TransactionalConnection,
 } from '@vendure/core';
 import { IsNull } from 'typeorm';
-import { TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY } from './constants';
+import { TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_NO_TAX_CATEGORY } from './constants';
 import { loggerCtx } from './errors';
 import { OrderCreateService } from './order-create.service';
 import { resolveTaxCategory } from './tax-class';
@@ -38,6 +39,7 @@ const refusalTexts = {
   'customer-used': (code: string) => `This customer has already used coupon ${code}`,
   ambiguous: (code: string) => `Coupon ${code} matches more than one promotion; the store must fix it`,
   shipping: (code: string) => `Coupon ${code} discounts shipping, which the till can't apply`,
+  mixed: (code: string) => `Coupon ${code} combines item and order discounts, which the till can't apply`,
   'side-effects': (code: string) => `Coupon ${code} adds items to the order, which the till can't apply`,
   "doesn't-apply": (code: string) => `Coupon ${code} doesn't apply to this sale`,
   exceed: (code: string) => `Coupon ${code} and the line's discount together exceed its price`,
@@ -145,7 +147,10 @@ export class CouponPricingService {
       }
       if (promotion.startsAt && promotion.startsAt.getTime() > Date.now()) return this.refuse(ctx, code, 'invalid');
       const actions = promotion.actions.map(action => this.config.promotionOptions.promotionActions.find(definition => definition.code === action.code));
-      if (actions.every(action => action instanceof PromotionShippingAction)) return this.refuse(ctx, code, 'shipping');
+      if (actions.some(action => action instanceof PromotionShippingAction)) return this.refuse(ctx, code, 'shipping');
+      if (actions.some(action => action instanceof PromotionItemAction) && actions.some(action => action instanceof PromotionOrderAction)) {
+        return this.refuse(ctx, code, 'mixed');
+      }
       // Vendure keeps the side-effect hooks in non-public fields; bracket access lets us refuse them before pricing.
       if (actions.some(action => action?.['onActivateFn'] || action?.['onDeactivateFn'])) return this.refuse(ctx, code, 'side-effects');
       promotions.push(promotion);
@@ -189,6 +194,16 @@ export class CouponPricingService {
         listPrice: line.unitPriceMinor, initialListPrice: line.unitPriceMinor,
         listPriceIncludesTax: line.taxInclusive ?? input.pricesIncludeTax,
         taxCategory, taxCategoryId: taxCategory.id, adjustments: [], taxLines: [],
+      }));
+    }
+    // order.create saves each line's discountMinor as a net TALLY-DISCOUNT surcharge, and Vendure counts surcharges in subTotal; the first pass sets the lines' taxLines for them.
+    await this.calculator.applyPriceAdjustments(ctx, order, []);
+    for (const [index, line] of input.lines.entries()) {
+      if (!(line.discountMinor! > 0)) continue;
+      order.surcharges.push(new Surcharge({
+        order, description: 'POS discount', sku: TALLY_DISCOUNT_SKU, listPrice: -line.discountMinor!,
+        listPriceIncludesTax: false,
+        taxLines: order.lines[index].taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
       }));
     }
     // Vendure applies promotions in priorityScore order (getActivePromotionsInChannel), whatever order the codes came in.

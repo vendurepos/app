@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  defaultPromotionActions, LanguageCode, Order, OrderLine, Promotion, PromotionItemAction, PromotionService,
+  defaultPromotionActions, LanguageCode, Order, OrderCalculator, OrderLine, Promotion, PromotionItemAction, PromotionService,
   RequestContext, RequestContextService, Surcharge, TransactionalConnection,
 } from '@vendure/core';
 import { parse } from 'graphql';
@@ -102,6 +102,57 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
       { lineId: 'l1', amountMinor: 600 }, { lineId: 'l2', amountMinor: 100 },
     ]));
     for (const line of answer.body.priced.both10.lines) expect(Number.isSafeInteger(line.amountMinor)).toBe(true);
+  });
+
+  it("a till discount that takes the subtotal below a coupon's minimum makes it not apply", async () => {
+    const id = await promotion('MIN6500', { conditions: minimum('6500') });
+    try {
+      expect(await price(sale(['min6500']))).toEqual(priced('min6500', id, 'MIN6500'));
+      const input = sale(['min6500']);
+      input.lines[0].discountMinor = 1000;
+      expect(await price(input)).toEqual(refused("Coupon min6500 doesn't apply to this sale"));
+    } finally {
+      const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id, enabled: false } });
+      expect(updatePromotion).toEqual({ id, enabled: false });
+    }
+  });
+
+  it('prices an order discount after the till discount, to the minor unit of the saved order', async () => {
+    const id = await promotion('ORDERPCT', {
+      conditions: minimum('0'),
+      actions: [{ code: 'order_percentage_discount', arguments: [{ name: 'discount', value: '10' }] }],
+    });
+    try {
+      const input = sale(['orderpct']);
+      input.lines[0].discountMinor = 1000;
+      const answer = await price(input);
+      const result = await run(orderCommand([
+        { variantId: variantIds.mug[0], quantity: 3, unitPriceMinor: 2000, discountMinor: 1000 },
+        { variantId: variantIds.beans[0], quantity: 2, unitPriceMinor: 500 },
+      ]));
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied' });
+      const order = await connection.getRepository(ctx, Order).findOneOrFail({
+        where: { id: decode(result.serverRefs!.orderId) }, relations: ['promotions', 'lines', 'lines.productVariant', 'lines.taxCategory', 'shippingLines', 'shippingLines.shippingMethod', 'surcharges', 'customer'],
+      });
+      const savedPromotion = (await server.app.get(PromotionService).findOne(ctx, decode(id)))!;
+      await server.app.get(OrderCalculator).applyPriceAdjustments(ctx, order, [savedPromotion]);
+      const amounts = [variantIds.mug[0], variantIds.beans[0]].map(variantId => {
+        const line = order.lines.find(item => String(item.productVariant.id) === decode(variantId))!;
+        return line.discounts.filter(discount => discount.adjustmentSource === savedPromotion.getSourceId())
+          .reduce((sum, discount) => sum - discount.amount, 0);
+      });
+      expect(answer).toEqual(priced('orderpct', id, 'ORDERPCT', [
+        { lineId: 'l1', amountMinor: amounts[0] }, { lineId: 'l2', amountMinor: amounts[1] },
+      ]));
+      expect(amounts[0] + amounts[1]).toBe(600);
+    } finally {
+      const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id, enabled: false } });
+      expect(updatePromotion).toEqual({ id, enabled: false });
+    }
   });
 
   it('prices buy_x_get_y_free on the free line only', async () => {
@@ -237,6 +288,16 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
   it('refuses shipping-only promotions', async () => {
     await promotion('SHIPPING', { actions: [{ code: 'free_shipping', arguments: [] }] });
     expect(await price(sale(['shipping']))).toEqual(refused("Coupon shipping discounts shipping, which the till can't apply"));
+  });
+
+  it('refuses a promotion that mixes shipping with an item discount', async () => {
+    await promotion('SHIPMIX', { actions: [...percentage(), { code: 'free_shipping', arguments: [] }] });
+    expect(await price(sale(['shipmix']))).toEqual(refused("Coupon shipmix discounts shipping, which the till can't apply"));
+  });
+
+  it('refuses a promotion that combines item and order discounts', async () => {
+    await promotion('MIXED', { actions: [...percentage(), { code: 'order_fixed_discount', arguments: [{ name: 'discount', value: '100' }] }] });
+    expect(await price(sale(['mixed']))).toEqual(refused("Coupon mixed combines item and order discounts, which the till can't apply"));
   });
 
   it('refuses promotions with side-effect hooks', async () => {
