@@ -33,10 +33,12 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 const s = createDisplaySignalling();
-const t = 'till-display-1';
+const t = { deviceId: 'till-display-1', deviceKey: 'till-key-1' };
 
-type Row = [name: string, run: () => Promise<unknown>, method: string, path: string, side: 'till' | 'display' | 'token', body?: unknown];
+type Side = 'register' | 'till' | 'display' | 'token';
+type Row = [name: string, run: () => Promise<unknown>, method: string, path: string, side: Side, body?: unknown];
 const rows: Row[] = [
+  ['registerDevice', () => s.registerDevice(ctx, t.deviceId), 'POST', 'displays/device', 'register'],
   ['mint', () => s.mint(ctx, t), 'POST', 'displays/codes', 'till'],
   ['pending', () => s.pending(ctx, t), 'GET', 'displays/pending', 'till'],
   ['confirm', () => s.confirm(ctx, t, 'c1'), 'POST', 'displays/pending/c1/confirm', 'till'],
@@ -59,18 +61,28 @@ describe('requests', () => {
   });
 
   it.each(rows)('%s: method, URL, headers and body', async (_name, run, method, path, side, body) => {
-    answer(200, { items: [], snapshot: null });
+    answer(200, { items: [], snapshot: null, deviceKey: 'issued-key' });
     await run();
     expect(calls).toHaveLength(1);
     const [{ source, url, init }] = calls;
     expect(init.method).toBe(method);
     expect(url).toBe(`${BASE}/tally/v1/${path}`);
-    const own = side === 'till' ? { ...SESSION, 'X-Tally-Device-Id': t } : side === 'token' ? { 'X-Tally-Display-Token': 'tok' } : {};
+    // Every till route sends the device's key beside its id; registerDevice, which issues the key, sends the id alone.
+    const own = side === 'till' ? { ...SESSION, 'X-Tally-Device-Id': t.deviceId, 'X-Tally-Device-Key': t.deviceKey }
+      : side === 'register' ? { ...SESSION, 'X-Tally-Device-Id': t.deviceId }
+        : side === 'token' ? { 'X-Tally-Display-Token': 'tok' } : {};
     expect(init.headers).toEqual(body === undefined ? own : { ...own, ...JSON_TYPE });
     expect(init.body === undefined ? undefined : JSON.parse(init.body as string)).toEqual(body);
     // Till calls use the global fetch and the session's signal; display calls use the display's own fetch.
-    expect(source).toBe(side === 'till' ? 'global' : 'display');
-    expect(init.signal).toBe(side === 'till' ? controller.signal : undefined);
+    const tillSide = side === 'till' || side === 'register';
+    expect(source).toBe(tillSide ? 'global' : 'display');
+    expect(init.signal).toBe(tillSide ? controller.signal : undefined);
+  });
+
+  it('sends the key of the device it is given, never another', async () => {
+    answer(200, { items: [] });
+    await s.list(ctx, { deviceId: 'till-display-2', deviceKey: 'till-key-2' });
+    expect(calls[0].init.headers).toMatchObject({ 'X-Tally-Device-Id': 'till-display-2', 'X-Tally-Device-Key': 'till-key-2' });
   });
 });
 
@@ -89,6 +101,11 @@ describe('responses', () => {
     expect(await s.readSnapshot(dctx, 'tok')).toEqual({ total: 5 });
     answer(200, { snapshot: null });
     expect(await s.readSnapshot(dctx, 'tok')).toBeNull();
+  });
+
+  it('returns the key registerDevice is issued', async () => {
+    answer(200, { deviceKey: 'issued-key' });
+    expect(await s.registerDevice(ctx, t.deviceId)).toEqual({ deviceKey: 'issued-key' });
   });
 
   it('returns mint, claim and collect as answered', async () => {
@@ -125,6 +142,20 @@ describe('errors', () => {
     expect([error.code, error.message]).toEqual(['forbidden', 'm']);
     answer(403, { code: 'token_refused', message: 'gone' });
     expect((await refusal(() => s.readSnapshot(dctx, 'tok'))).code).toBe('token_refused');
+  });
+
+  it('gives device_refused for a refused device key', async () => {
+    answer(403, { code: 'device_refused', message: 'refused' });
+    const error = await refusal(() => s.mint(ctx, t));
+    expect([error.code, error.message]).toEqual(['device_refused', 'refused']);
+    expect((await refusal(() => s.registerDevice(ctx, t.deviceId))).code).toBe('device_refused');
+  });
+
+  it('gives server when registerDevice is answered with no key', async () => {
+    answer(200, {});
+    expect((await refusal(() => s.registerDevice(ctx, t.deviceId))).code).toBe('server');
+    answer(204);
+    expect((await refusal(() => s.registerDevice(ctx, t.deviceId))).code).toBe('server');
   });
 
   it('gives server for a code the seam does not name', async () => {

@@ -6,7 +6,7 @@ import { createVendureConnector } from '@tallyui/connector-vendure';
 import type { OrderCreateEnvelope, StoreSettings } from '@tallyui/core';
 import {
   addEntryToCart, addPosOrderCollection, catalogueEntries, createOrderBuilder, finalizeOrder,
-  posOrderSchema, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useTax,
+  posOrderCollection, posOrderSchema, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useTax,
   type PosOrder, type TaxContext, type TaxProviderProps,
 } from '@tallyui/pos';
 import { createElement } from 'react';
@@ -145,9 +145,11 @@ describe('the till discount totals and frozen 3.19.0 orders', () => {
     const frozen: FrozenOrders = JSON.parse(await readFile(frozenPath, 'utf8'));
     expect(frozen.tallyuiVersion).toBe('3.19.0');
     expect(Object.keys(frozen.cells)).toEqual(matrix.map(({ key }) => key));
-    // U1: a schema bump must replace this with a migration test that opens the old
-    // documents through the new collection's migration strategies.
-    expect(frozen.schemaVersion).toBe(posOrderSchema.version);
+    // U1: the frozen orders were stored at pos_orders schema 12 (TallyUI 3.19.0). Each one is taken through every
+    // migration strategy of the current collection from 13 up to the current schema version, in order, as RxDB
+    // would on open; the migrated document must then pass the current schema (U2) and resend the frozen envelope.
+    expect(frozen.schemaVersion).toBe(12);
+    const { migrationStrategies } = posOrderCollection();
     const db = await createRxDatabase({
       name: 'discount_matrix_reopen', multiInstance: false,
       storage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }),
@@ -155,7 +157,14 @@ describe('the till discount totals and frozen 3.19.0 orders', () => {
     try {
       const orders = await addPosOrderCollection(db);
       for (const { key } of matrix) {
-        const { doc, envelope } = frozen.cells[key];
+        const { envelope } = frozen.cells[key];
+        let doc = frozen.cells[key].doc;
+        for (let version = frozen.schemaVersion + 1; version <= posOrderSchema.version; version++) {
+          const strategy = migrationStrategies[version];
+          expect(strategy, `${key}: pos_orders migration strategy ${version}`).toBeTypeOf('function');
+          doc = (await strategy(structuredClone(doc), orders))!;
+          expect(doc, `${key}: strategy ${version} keeps the stored sale`).toBeTruthy();
+        }
         // U2: validate the old document against the current schema and resend it.
         await orders.insert(doc);
         const readBack = (await orders.findOne(doc.id).exec())!.toMutableJSON();
