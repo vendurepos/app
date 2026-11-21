@@ -325,6 +325,29 @@ describe('register v2 later commands: aliases and superseded sessions (ADR-078)'
       .toMatchObject({ sessionId: s1, voids: record.payload.movementId });
   });
 
+  it('a reused movementId and a void of a void are refused unstored', async () => {
+    const [s1, r] = [uuid(), uuid()];
+    const movements = connection.rawConnection.getRepository(TallyRegisterMovement);
+    const unstored = async (command: RegisterEnvelope, message: string) => {
+      expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message } });
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id })).toBeNull();
+    };
+    expect(await send(open(s1, r))).toMatchObject({ status: 'applied' });
+    const m1 = movement(s1, 'paid_in', 2000);
+    const m1Id = m1.payload.movementId as string;
+    expect(await send(m1)).toMatchObject({ status: 'applied' });
+    const reused = movement(s1, 'paid_out', 500);
+    reused.payload.movementId = m1Id;
+    await unstored(reused, `movementId: movement ${m1Id} is already recorded`);
+    expect(await movements.findOneBy({ channelId, id: m1Id })).toMatchObject({ type: 'paid_in', amountMinor: 2000, commandId: m1.id });
+    const v1 = envelope('register.movement.void', { sessionId: s1, movementId: uuid(), voids: m1Id, createdAt: AT });
+    expect(await send(v1)).toMatchObject({ status: 'applied' });
+    const v1Id = v1.payload.movementId as string;
+    const voidOfVoid = envelope('register.movement.void', { sessionId: s1, movementId: uuid(), voids: v1Id, createdAt: AT });
+    await unstored(voidOfVoid, `voids: no movement ${v1Id} in session ${s1}`);
+    expect((await movements.findBy({ channelId, sessionId: s1 })).map(m => m.id).sort()).toEqual([m1Id, v1Id].sort());
+  });
+
   it('stores the v2 superseded refusal for movements, closing transitions and closures without register writes', async () => {
     const [s1, s3, r] = [uuid(), uuid(), uuid()];
     expect(await send(open(s1, r, { openedBy: 'ann' }))).toMatchObject({ status: 'applied' });
