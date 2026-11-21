@@ -3,6 +3,7 @@ import { devices, expect, test, type Page } from '@playwright/test';
 import { FONT_FACES } from '@tallyui/theme';
 import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
+import { DEMO_FACETS, demoBrand } from '../lib/demo/facets';
 import { DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, takePayment, typeAmount } from './checkout';
@@ -738,6 +739,37 @@ test("the Products panel filters by In Stock and by category, as v2's filter pil
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await panel.getByTestId('products-category-chip').getByText('Drinkware', { exact: true }).click();
   await expect(panel.getByTestId('products-category-chip')).toHaveCount(0);
+  await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
+});
+
+test("the Products panel filters by each public facet, one pill per facet, as v2's Tags and Brands pills", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  const brandId = DEMO_FACETS.find(f => f.code === 'brand')!.id;
+  const brand = panel.getByTestId(`products-facet-${brandId}`);
+  await expect(brand).toBeVisible();
+  await expect(brand).toHaveText('Brand');
+  await expect(panel.getByTestId(`products-facet-${DEMO_FACETS.find(f => f.isPrivate)!.id}`)).toHaveCount(0);
+  await expect(panel.getByTestId(`products-facet-${DEMO_FACETS.find(f => f.code === 'category')!.id}`)).toHaveCount(0);
+  await expect(panel.getByTestId('products-facet-pills')).toHaveCSS('overflow-x', 'auto');
+  await brand.click();
+  const picker = panel.getByTestId(`products-facet-picker-${brandId}`);
+  await expect(picker).toBeVisible();
+  await picker.getByText('Tally', { exact: true }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(brand).toContainText('Brand: Tally');
+  const n = CATALOGUE.filter(p => demoBrand(p) === 'Tally').flatMap(p => p.variants).length;
+  await expect(panel.getByTestId('products-count')).toHaveText(`Showing ${Math.min(n, 25)} of ${n} products`);
+  // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/08h-products-facets-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.screenshot({ path: test.info().outputPath('08h-products-facets-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await brand.click();
+  await expect(brand).toHaveText('Brand');
   await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
 });
 

@@ -4,7 +4,7 @@ import { stockTarget, type StockTarget, type VendureVariantStock } from './produ
 
 /** One variant's row in the Products panel (CHECKLIST 10.2), with display and edit fields. */
 export interface ProductRow { id: string; name: string; sku: string; price: string; stock: string;
-  imageUrl: string | null; stockStatus: StockStatus; categories: string; categoryIds: string[];
+  imageUrl: string | null; stockStatus: StockStatus; categories: string; categoryIds: string[]; facetValueIds: string[];
   priceText: string; stockText: string; managed: boolean; stockTarget: StockTarget | null }
 /** The Products panel's header sort value for a row (v2's sortable headers): Name, SKU, Stock and Price; a missing value sorts last. */
 export function productRowSortValue(row: ProductRow, field: string): ProductSortValue {
@@ -38,6 +38,7 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
       imageUrl: traits.getImageUrl(product) ?? null, stockStatus: variant.stock.status,
       categories: traits.getCategoryNames(product).join(', ') || '—',
       categoryIds: (traits.getCategories?.(product) ?? []).map(c => c.id),
+      facetValueIds: ((product as { facetValues?: { id: string }[] }).facetValues ?? []).map(value => value.id),
       priceText: current ? moneyToMajor(current).toFixed(minorUnitDigits(current.currency)) : '',
       stockText: variant.stock.quantity == null ? '' : String(variant.stock.quantity), managed: variant.stock.quantity != null,
       stockTarget: stockTarget((product as { variants?: ({ id: string | number } & VendureVariantStock)[] }).variants?.find(v => String(v.id) === variant.id), outOfStockThreshold),
@@ -45,13 +46,14 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
   });
 }
 
-/** The panel's own filters (v2's In Stock and Category pills); null category means all. */
-export interface ProductRowFilters { inStock: boolean; categoryId: string | null }
+/** The panel's own filters (v2's In Stock, Category, Tags and Brands pills); null category means all; facets maps a facet id to its chosen value id. */
+export interface ProductRowFilters { inStock: boolean; categoryId: string | null; facets?: Record<string, string> }
 
-/** In Stock drops only out-of-stock rows (untracked and backorder variants stay sellable); a category keeps that category's rows. */
+/** In Stock drops only out-of-stock rows (untracked and backorder variants stay sellable); a category keeps that category's rows; each chosen facet value keeps that value's rows. */
 export function filterProductRows(rows: ProductRow[], filters: ProductRowFilters): ProductRow[] {
   return rows.filter(row => (!filters.inStock || row.stockStatus !== 'out_of_stock') &&
-    (!filters.categoryId || row.categoryIds.includes(filters.categoryId)));
+    (!filters.categoryId || row.categoryIds.includes(filters.categoryId)) &&
+    Object.values(filters.facets ?? {}).every(id => row.facetValueIds.includes(id)));
 }
 
 /** The categories of the listed products, each once, by name (the Category pill's choices). */
