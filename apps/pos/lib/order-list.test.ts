@@ -43,11 +43,17 @@ it('maps supported filters, trims search and converts inclusive store days to UT
 it('maps customer, store day, tenders, status and history to a table row', () => {
   expect(toOrderTableRow(order, 'America/New_York')).toEqual({ id: '2', code: 'AB12', stateLabel: 'Payment settled',
     status: 'completed', placedAt: order.orderPlacedAt, day: '2026-11-16', customer: 'Ada Lovelace', cashierRef: 'ref-1',
-    paymentMethods: 'Cash, Card', totalMinor: 952, currency: 'EUR', history: toOrderHistoryRow(order) });
+    paymentMethods: 'Cash, Card', totalMinor: 952, currency: 'EUR', history: toOrderHistoryRow(order), via: 'pos' });
   expect(toOrderTableRow({ ...order, customer: null }, 'UTC').customer).toBeNull();
   expect(toOrderTableRow({ ...order, customer: { ...order.customer!, firstName: '', lastName: '' } }, 'UTC').customer).toBe('ada@example.com');
   const fallback = toOrderTableRow({ ...order, orderPlacedAt: null, customFields: undefined, payments: undefined }, 'UTC');
   expect(fallback).toMatchObject({ placedAt: order.updatedAt, day: '2026-11-18', cashierRef: null, paymentMethods: '' });
+});
+
+it('marks an order POS when the till sent it, and Online otherwise', () => {
+  expect(toOrderTableRow({ ...order, customFields: { ...order.customFields!, tallyClientOrderId: 'c-1' } }, 'UTC').via).toBe('pos');
+  expect(toOrderTableRow({ ...order, customFields: { ...order.customFields!, tallyClientOrderId: null } }, 'UTC').via).toBe('online');
+  expect(toOrderTableRow({ ...order, customFields: undefined }, 'UTC').via).toBe('online');
 });
 
 it("shows the plugin's walk-in as no customer, so its row reads Guest, and keeps a named customer's name", () => {

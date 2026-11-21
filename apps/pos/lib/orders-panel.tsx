@@ -11,7 +11,7 @@ import { needsAttention, type OrderFilterValue, type OutboxState, type PosOrder 
 import { isWalkIn } from './customer-list';
 import { RefreshIcon } from './nav-icons';
 import {
-  groupOrdersByDay, ORDER_SEARCH_DEBOUNCE_MS, ORDER_STATUS_OPTIONS, storeDayOf,
+  groupOrdersByDay, ORDER_SEARCH_DEBOUNCE_MS, ORDER_STATUS_OPTIONS, ORDER_VIA_A11Y, ORDER_VIA_LABEL, storeDayOf,
   toOrderTableRow, useOrderList, VENDURE_ORDER_FILTER_FIELDS, type OrderListQuery, type OrderTableRow,
 } from './order-list';
 import { fetchRegisters, registerFilterOptions, type ListedRegister } from './register-choice';
@@ -145,6 +145,8 @@ function OrderTableRowView({ row, wide, timezone, onOpen }: {
     hour: '2-digit', minute: '2-digit', timeZone: timezone === 'device' ? undefined : timezone,
   });
   const total = formatMoney({ amount: row.totalMinor, currency: row.currency });
+  const via = <Text testID={`orders-row-via-${row.id}`} accessibilityLabel={ORDER_VIA_A11Y[row.via]}
+    className="text-xs text-muted-foreground">{ORDER_VIA_LABEL[row.via]}</Text>;
   return (
     <Pressable testID={`orders-row-${row.id}`} accessibilityRole="button" accessibilityLabel={`Order ${row.code}`} onPress={() => onOpen(row.history)}>
       <TableRow>
@@ -152,14 +154,14 @@ function OrderTableRowView({ row, wide, timezone, onOpen }: {
           <TableCell><OrderStatusBadge status={row.status} /></TableCell>
           <TableCell><Text className="font-medium">{row.code}</Text></TableCell>
           <TableCell><Text className={row.customer === null ? 'text-muted-foreground' : undefined}>{row.customer ?? 'Guest'}</Text></TableCell>
-          <TableCell><Text>{time}</Text></TableCell>
+          <TableCell><HStack className="items-center gap-2"><Text>{time}</Text>{via}</HStack></TableCell>
           <TableCell><Text>{row.cashierRef ?? ''}</Text></TableCell>
           <TableCell><Text>{row.paymentMethods}</Text></TableCell>
           <TableCell><Text className="text-right tabular-nums">{total}</Text></TableCell>
         </> : <TableCell className="gap-2">
           <HStack className="justify-between"><Text className="font-medium">{row.code}</Text><Text className="tabular-nums">{total}</Text></HStack>
           <HStack className="items-center gap-2"><OrderStatusBadge status={row.status} />
-            <Text className="text-muted-foreground">{`${row.customer ?? 'Guest'} · ${time}`}</Text>
+            <Text className="text-muted-foreground">{`${row.customer ?? 'Guest'} · ${time}`}</Text>{via}
           </HStack>
         </TableCell>}
       </TableRow>
