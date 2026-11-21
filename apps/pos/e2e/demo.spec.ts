@@ -767,6 +767,7 @@ test("the Products refresh beside the count pulls the catalogue again, as v2's 0
   const variants = CATALOGUE.flatMap(product => product.variants).length;
   const count = `Showing 25 of ${variants} products`;
   await expect(page.getByTestId('products-count')).toHaveText(count);
+  await page.mouse.move(480, 0); // off the rail, so its tooltip does not cover the search
   await page.screenshot({ path: test.info().outputPath('08i-products-refresh-vendurepos.png') });
   await expect(page.getByTestId('products-refresh')).toHaveAttribute('aria-label', 'Refresh products');
   // Count the catalogue pulls from here on: each opens with the connector's GetProductsMark, and GetProducts follows only on a change.
