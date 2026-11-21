@@ -68,12 +68,12 @@ export function CustomerSheet({ session, row, open, onClose, onSaved }: {
       </DialogHeader>
       <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false} />
       {groupsText !== null && <HStack testID="customer-sheet-groups" className="items-center justify-between px-4">
-        <Text className="text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
+        <Text className="w-20 text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
         <Text testID="customer-sheet-groups-value" className="flex-1 px-3 text-sm">{groupsText}</Text>
         <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
       </HStack>}
-      {account !== null && <HStack testID="customer-sheet-account" className="items-center justify-between px-4">
-        <Text className="text-sm text-muted-foreground">{CUSTOMER_ACCOUNT_LABEL}</Text>
+      {row !== null && account !== null && <HStack testID="customer-sheet-account" className="items-center justify-between px-4">
+        <Text className="w-20 text-sm text-muted-foreground">{CUSTOMER_ACCOUNT_LABEL}</Text>
         <Text testID="customer-sheet-account-value" className="flex-1 px-3 text-sm">{account}</Text>
         <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
       </HStack>}
