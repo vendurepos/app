@@ -10,6 +10,7 @@ import { loadAutoShowReceipt, saveAutoShowReceipt } from '../lib/auto-show-recei
 import { CartSideSettings } from '../lib/cart-side-settings';
 import { resetCartSettings } from '../lib/cart-settings-reset';
 import type { TillCustomerDisplay } from '../lib/customer-display';
+import { displayPageUrl } from '../lib/display-url';
 import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadOpenOrdersPosition, saveOpenOrdersPosition } from '../lib/open-orders-position-setting';
 import { loadScannerMinLength, saveScannerMinLength, SCANNER_MIN_LENGTH_RANGE } from '../lib/scanner-settings';
@@ -30,14 +31,47 @@ import { boundRegisterId } from '../lib/till-ids';
 import { TileSizeSettings } from '../lib/tile-size-settings';
 import { useCatalogueConnector } from '../lib/use-catalogue';
 
+/** Help under the display page URL: the second screen opens that page, then shows the code the till confirms. */
+export const DISPLAY_URL_HELP = 'Open this page on the second screen, then enter the pairing code it shows.';
+
+/** Web only: the display page's URL for this store, to copy or open (native has no hosted origin). */
+function DisplayUrlRow({ storeUrl }: { storeUrl: string }) {
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const url = displayPageUrl(window.location.origin, storeUrl);
+  return (
+    <Card testID="display-url-row" className="w-full max-w-[420px]">
+      <CardContent className="pt-6">
+        <VStack space="sm">
+          <Text className="font-medium">Display page URL</Text>
+          <Text testID="display-url" selectable className="text-sm">{url}</Text>
+          <HStack space="sm">
+            {typeof navigator !== 'undefined' && !!navigator.clipboard && (
+              <Button testID="display-url-copy" size="sm" variant="secondary"
+                onPress={() => navigator.clipboard.writeText(url).then(() => setCopied(true), () => setCopied(false))}><Text>Copy URL</Text></Button>
+            )}
+            <Button testID="display-url-open" size="sm" variant="secondary"
+              onPress={() => { window.open(url, '_blank', 'noopener'); }}><Text>Open in browser</Text></Button>
+          </HStack>
+          {copied === true && <Text testID="display-url-copied">Copied.</Text>}
+          {copied === false && <Text testID="display-url-copy-error">{"Couldn't copy the URL."}</Text>}
+          <Text className="text-sm text-muted-foreground">{DISPLAY_URL_HELP}</Text>
+        </VStack>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Settings › Customer display over the till's handles; leaving it cancels a pairing, so no code stays showing. */
-function CustomerDisplaySection({ handles }: { handles: TillCustomerDisplay }) {
+function CustomerDisplaySection({ handles, storeUrl }: { handles: TillCustomerDisplay; storeUrl: string }) {
   const { pairing, service } = handles;
   useEffect(() => () => pairing.cancel(), [pairing]);
   return (
-    <CustomerDisplaySettings className="w-full max-w-[420px]" pairing={useTillPairing(pairing)} displays={useTillDisplays(service)}
-      onStartPairing={() => void pairing.start()} onConfirm={(id) => void pairing.confirm(id)} onDecline={(id) => void pairing.decline(id)}
-      onCancelPairing={() => pairing.cancel()} onForget={(id) => void pairing.forget(id)} />
+    <>
+      {Platform.OS === 'web' && <DisplayUrlRow storeUrl={storeUrl} />}
+      <CustomerDisplaySettings className="w-full max-w-[420px]" pairing={useTillPairing(pairing)} displays={useTillDisplays(service)}
+        onStartPairing={() => void pairing.start()} onConfirm={(id) => void pairing.confirm(id)} onDecline={(id) => void pairing.decline(id)}
+        onCancelPairing={() => pairing.cancel()} onForget={(id) => void pairing.forget(id)} />
+    </>
   );
 }
 
@@ -295,7 +329,7 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
           </CardContent>
         </Card>
       ) : null}
-      {section === 'customer-display' && customerDisplay ? <CustomerDisplaySection handles={customerDisplay} /> : null}
+      {section === 'customer-display' && customerDisplay ? <CustomerDisplaySection handles={customerDisplay} storeUrl={session.url} /> : null}
       {section === 'theme' && <ThemeSettings />}
       {section === 'sync-log' && <SyncLogCard />}
       {/* The till's panel closes; the /settings route goes back (app/settings.tsx). */}

@@ -8,8 +8,11 @@ import { sessionContext, type Session } from './session';
 export const CUSTOMER_PAGE_SIZE = 25;
 // Wait for typing to pause so each key press is not a request.
 export const CUSTOMER_SEARCH_DEBOUNCE_MS = 300;
-// The vendurepos plugin's walk-in customer (connector-vendure's WALK_IN_EMAIL, not exported) is never listed.
-export const WALK_IN_EMAIL = 'walk-in@vendurepos.local';
+// The vendurepos plugin's walk-in customer (packages/vendure-plugin/src/service/constants.ts; connector-vendure's own constant reads .local), never listed and shown as Guest.
+export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
+export function isWalkIn(customer: { email?: string | null; emailAddress?: string | null } | null | undefined): boolean {
+  return customer?.email === WALK_IN_EMAIL || customer?.emailAddress === WALK_IN_EMAIL;
+}
 // A missing customer permission needs the store admin's help.
 export const CUSTOMERS_FORBIDDEN_TEXT = "This till can't read the store's customers: its role lacks the Read customer permission. Ask the store's admin to add it.";
 // Other failures can be retried from the list.

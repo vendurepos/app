@@ -953,6 +953,20 @@ test('Settings › Customer display mints a pairing code on the dev store', asyn
   await expect(page.getByTestId('signed-in-store')).toHaveText(`Signed in to ${STORE_URL}`);
   await page.getByTestId('settings-open').click();
   await page.getByTestId('settings-section-customer-display').click();
+  // Web only: the display page's URL for this store (session.url is the sign-in field, as the header shows above).
+  const displayUrl = `${new URL(page.url()).origin}/display?store=${encodeURIComponent(STORE_URL)}`;
+  await expect(page.getByTestId('display-url')).toHaveText(displayUrl);
+  await expect(page.getByTestId('pairing-code')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('11-settings-customer-display-vendurepos.png') });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByTestId('display-url-copy').click();
+  await expect(page.getByTestId('display-url-copied')).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(displayUrl);
+  const popupOpened = page.waitForEvent('popup');
+  await page.getByTestId('display-url-open').click();
+  const popup = await popupOpened;
+  expect(popup.url()).toContain('/display?store=');
+  await popup.close();
   const mint = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/tally/v1/displays/codes'));
   await page.getByTestId('pairing-start').click();
   expect((await mint).ok()).toBe(true);
@@ -2676,5 +2690,46 @@ test('the Products panel refuses a stock edit when another till changed the stoc
     await setOnHand(level.stockOnHand);
   }
   expect(await read()).toEqual(seeded);
+  expect(cspConsole).toEqual([]);
+});
+
+test('a walk-in sale reads Guest in Orders and on its sheet, and the walk-in is never listed or offered', async ({ page }) => {
+  await signIn(page);
+  await openRegister(page);
+  // No customer picked: the plugin puts the sale on its walk-in customer.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
+  const panel = page.getByTestId('orders-panel');
+  await expect(panel.getByText(/· Synced$/)).toHaveCount(1, { timeout: 30_000 });
+  await panel.getByTestId(/^order-open-/).first().click();
+  await expect(page.getByTestId('order-sheet-customer')).toHaveText('Guest');
+  // Vendure's order code, the sheet's heading, names the sale's row in the store's table.
+  const code = await page.getByTestId('order-sheet-detail').getByText(/^[A-Z0-9]{16}$/).textContent();
+  await page.getByTestId('order-sheet-close').click();
+  await page.getByTestId('orders-scope-store').click();
+  const row = panel.getByRole('button', { name: `Order ${code}`, exact: true });
+  await expect(row).toContainText('Guest');
+  await expect(row).not.toContainText('walk-in');
+  await row.click();
+  await expect(page.getByTestId('order-sheet-customer')).toHaveText('Guest');
+  await page.getByTestId('order-sheet-close').click();
+
+  await page.getByTestId('customers-open').click();
+  await page.getByTestId('customers-search').fill('walk-in');
+  await expect(page.getByTestId('customers-empty')).toHaveText('No customers match this search.');
+  await expect(page.getByTestId('customers-panel').locator('[data-testid^="customers-row-"]')).toHaveCount(0);
+
+  await page.getByTestId('customers-open').click();
+  await page.getByTestId('customer-chip').click();
+  const picker = page.getByTestId('customer-picker');
+  await picker.getByLabel('Search customers', { exact: true }).fill('walk-in');
+  await expect(picker.getByText('No customers found.', { exact: true })).toBeVisible();
+  await expect(picker.getByText(/walk-in@/)).toHaveCount(0);
+  expect(await cspViolations(page)).toEqual([]);
   expect(cspConsole).toEqual([]);
 });
