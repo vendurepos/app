@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Image, ScrollView, View } from 'react-native';
+import { Image, Pressable, ScrollView, View } from 'react-native';
 import { Button, CategoryNav, DEFAULT_PRODUCT_FILTERS, FilterChip, HStack, Input, InputField, ProductFilterBar, ProductTable, SearchInput, Switch, Text, VStack, type ProductTableColumn } from '@tallyui/components';
 import { currencySymbol, type ProductTraits } from '@tallyui/core';
 import { type ProductSort } from '@tallyui/pos';
@@ -97,7 +97,8 @@ export function ProductsPanel({ products, traits, currency, session }: { product
         </View>
       </HStack>
       <HStack dataSet={{ print: 'hide' }} className="items-center gap-2 border-b border-border px-4 py-2" testID="products-filters">
-        <ProductFilterBar value={{ ...DEFAULT_PRODUCT_FILTERS, inStock: filters.inStock }} chips={FILTER_CHIPS}
+        {/* grow-0: TallyUI's bar is a growing ScrollView; without it the facet pills start mid-row. */}
+        <ProductFilterBar className="grow-0" value={{ ...DEFAULT_PRODUCT_FILTERS, inStock: filters.inStock }} chips={FILTER_CHIPS}
           onChange={next => { setFilters(f => ({ ...f, inStock: next.inStock })); setLimit(PAGE_SIZE); }}
           onTermPress={() => { setFacetOpen(null); setCategoryOpen(open => !open); }} />
         {filters.categoryId ? <View testID="products-category-chip">
@@ -110,12 +111,16 @@ export function ProductsPanel({ products, traits, currency, session }: { product
           {facets.map(facet => {
             const value = facet.values.find(v => v.id === filters.facets?.[facet.id]);
             return <View key={facet.id} testID={`products-facet-${facet.id}`}>
-              <FilterChip label={value ? `${facet.name}: ${value.name}` : facet.name} active={!!value} onPress={() => {
-                if (value) {
-                  setFilters(f => ({ ...f, facets: Object.fromEntries(Object.entries(f.facets ?? {}).filter(([id]) => id !== facet.id)) }));
-                  setLimit(PAGE_SIZE);
-                } else { setCategoryOpen(false); setFacetOpen(open => open === facet.id ? null : facet.id); }
-              }} />
+              {value ? <FilterChip label={`${facet.name}: ${value.name}`} active onPress={() => {
+                setFilters(f => ({ ...f, facets: Object.fromEntries(Object.entries(f.facets ?? {}).filter(([id]) => id !== facet.id)) }));
+                setLimit(PAGE_SIZE);
+              }} /> :
+                // The look of ProductFilterBar's Category chip, as v2's Tags and Brands pills (TallyUI exports no single chip).
+                <Pressable role="button" aria-pressed={false}
+                  onPress={() => { setCategoryOpen(false); setFacetOpen(open => open === facet.id ? null : facet.id); }}
+                  className="min-h-11 flex-row items-center rounded-full border border-border bg-card px-3">
+                  <Text className="text-sm text-foreground">{facet.name}</Text>
+                </Pressable>}
             </View>;
           })}
         </ScrollView> : null}
