@@ -134,14 +134,27 @@ describe('CPN-1: POST /tally/v1/coupons/price', () => {
   });
 
   it('excludes an enabled automatic promotion', async () => {
+    const order10 = await promotion('ORDER10', {
+      conditions: minimum('0'),
+      actions: [{ code: 'order_percentage_discount', arguments: [{ name: 'discount', value: '10' }] }],
+    });
+    const before = await price(sale(['order10']));
+    expect(before.status).toBe(200);
     const id = await promotion(null, { conditions: minimum('0'), actions: percentage([variantIds.mug[0]], '50') });
     try {
       expect(await price(sale())).toEqual(priced('cpn10', cpn10, 'CPN10'));
+      // An order-level coupon is computed on a subTotal that already has line promotions taken off: had the automatic
+      // 50% been priced alongside it, its amounts would shrink.
+      expect(await price(sale(['order10']))).toEqual(before);
     } finally {
       const { updatePromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
         updatePromotion(input: $input) { ... on Promotion { id enabled } }
       }`), { input: { id, enabled: false } });
       expect(updatePromotion).toEqual({ id, enabled: false });
+      const { updatePromotion: updateOrderPromotion } = await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id: order10, enabled: false } });
+      expect(updateOrderPromotion).toEqual({ id: order10, enabled: false });
     }
   });
 
