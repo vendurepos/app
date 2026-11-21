@@ -1042,6 +1042,44 @@ test("the order sheet shows the order's notes, a private one as Staff note, neve
   await expect(page.getByText(DEMO_PUBLIC_NOTE)).toHaveCount(0);
 });
 
+test("the order sheet lists the sale's fee and shipping under Items, the fee inside Subtotal, as v2's order detail", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const form = cart.getByRole('group', { name: 'Add charge' });
+  for (const [kind, name, amount, taxClass] of [['Fee', 'Gift wrap', '2.00', 'Reduced DE'], ['Shipping', 'Courier', '5.00']]) {
+    await cart.getByTestId('add-charge').click();
+    await form.getByRole('button', { name: kind, exact: true }).click();
+    await form.getByLabel('Name', { exact: true }).fill(name);
+    await form.getByLabel('Amount', { exact: true }).fill(amount);
+    if (taxClass) await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: taxClass, exact: true }).click();
+    await form.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(form).toHaveCount(0);
+  }
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  const receipt = page.getByTestId('receipt');
+  const total = (await receipt.getByTestId('receipt-total').textContent())!.trim();
+  await receipt.getByTestId('new-sale').click();
+  await expect(await orderEntries(page)).toHaveText([/ · Synced$/]);
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  const detail = page.getByTestId('order-sheet-detail');
+  // The fee is Reduced DE 7 % (€2.14 gross) and inside Subtotal (€9.52 + €2.14); shipping is Standard DE 19 %, outside it.
+  await expect(detail).toContainText('Gift wrap x1');
+  await expect(detail).toContainText('€2.14');
+  await expect(detail).toContainText('Courier x1');
+  await expect(detail).toContainText('€5.95');
+  await expect(detail).toContainText('Subtotal€11.66');
+  await expect(detail).toContainText(`Total${total}`);
+  await page.screenshot({ path: test.info().outputPath('07g-order-charges-vendurepos.png') });
+});
+
 test("the Orders register filter lists the store's registers by name, as v2's orders", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
