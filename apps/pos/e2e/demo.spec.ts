@@ -28,6 +28,7 @@ declare global {
     fakeScanner: EventTarget;
     ordersRequests: number; releaseOrders: () => void;
     customersRequests: number; releaseCustomers: () => void;
+    productsRequests: number;
   }
 }
 
@@ -834,6 +835,32 @@ test("the Products panel lists the catalogue's variants with SKU, price and stoc
   await wedgeScan(page, 'TALLY-MUG');
   await expect(panel).toHaveCount(0);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test("the Products refresh beside the count pulls the catalogue again, as v2's 08", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const variants = CATALOGUE.flatMap(product => product.variants).length;
+  const count = `Showing 25 of ${variants} products`;
+  await expect(page.getByTestId('products-count')).toHaveText(count);
+  await page.mouse.move(480, 0); // off the rail, so its tooltip does not cover the search
+  await page.screenshot({ path: test.info().outputPath('08i-products-refresh-vendurepos.png') });
+  await expect(page.getByTestId('products-refresh')).toHaveAttribute('aria-label', 'Refresh products');
+  // Count the catalogue pulls from here on: each opens with the connector's GetProductsMark, and GetProducts follows only on a change.
+  await page.evaluate(() => {
+    const pass = window.fetch;
+    window.productsRequests = 0;
+    window.fetch = async (input, init) => {
+      if (typeof init?.body === 'string' && init.body.includes('query GetProductsMark(')) window.productsRequests++;
+      return pass(input, init);
+    };
+  });
+  await page.getByTestId('products-refresh').click();
+  await expect.poll(() => page.evaluate(() => window.productsRequests)).toBeGreaterThanOrEqual(1);
+  await expect(page.getByTestId('products-count')).toHaveText(count);
 });
 
 test("the Products panel shows each variant's image, stock status and categories, as v2's products table", async ({ page }) => {
