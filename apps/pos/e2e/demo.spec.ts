@@ -350,6 +350,12 @@ test('Support at the foot of the rail opens the quick start, GitHub issues and t
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openRegister(page);
+  // apps/pos/app.json's version, v2's rail foot.
+  await expect(page.getByTestId('nav-rail-footer').getByTestId('nav-version')).toHaveText('v0.1.0');
+  // The version line sits below Support.
+  const versionBox = await page.getByTestId('nav-version').boundingBox();
+  const supportOpenBox = await page.getByTestId('support-open').boundingBox();
+  expect(versionBox!.y).toBeGreaterThan(supportOpenBox!.y);
   await page.getByTestId('support-open').click();
   await expect(page.getByTestId('support-sheet')).toBeVisible();
   await expect(page.getByTestId('support-quickstart')).toHaveAttribute('href', 'https://vendurepos.com/docs/quick-start');
@@ -366,6 +372,16 @@ test('Support at the foot of the rail opens the quick start, GitHub issues and t
   await wedgeScan(page, 'TALLY-MUG');
   await expect(page.getByTestId('support-sheet')).toHaveCount(0);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test('At phone width the drawer carries the version at its foot', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByTestId('register-bar-menu').click();
+  await expect(page.getByTestId('nav-drawer-footer').getByTestId('nav-version')).toHaveText('v0.1.0');
 });
 
 test('a scan on the demo sign-in screen adds nothing to the next sale', async ({ page }) => {

@@ -337,7 +337,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     // rail, which takes no dataSet, is hidden by the shell's print variant.
     <AppShell navItems={tillNavItems(tillNavEntries({ ordersShown: outbox.orders !== null, customersShown, registerShown: sessionStatus === 'open',
       rejected: outbox.state.rejected ?? 0, notices: notices.length, unreadErrors }))} activeId={activeTillNav({ ordersOpen, productsOpen, customersOpen, reportsOpen, healthOpen, registerOpen: registerPanelShown, notificationsOpen, settingsOpen })}
-      onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden">
+      onNavigate={navigate} registerBar={registerBar} className="print:[&>[data-testid=nav-rail]]:hidden"
+      navFooter={<Text testID="nav-version" className="text-xs text-muted-foreground">{`v${APP_VERSION}`}</Text>}>
     <VStack className="flex-1 bg-background">
       <Stack.Screen options={{ headerShown: false }} />
       <CashierSheet open={cashierOpen} onOpenChange={setCashierOpen} name={identity} store={store} registerName={registerName} locked={signOutLocked}
