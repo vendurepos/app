@@ -1,4 +1,5 @@
-import { getDeviceId } from '@tallyui/pos';
+import { getDeviceId, type TillDeviceKeyStore } from '@tallyui/pos';
+import type { KeyValueStore } from './session';
 
 type IdStorage = Parameters<typeof getDeviceId>[0];
 type KeyStorage = NonNullable<IdStorage>;
@@ -13,6 +14,21 @@ export const deviceId = (storage: IdStorage) => getDeviceId(storage, DEVICE_ID_K
 // The display seam's X-Tally-Device-Id is not bound to the session (plugin README, #304), and the register id is in every order's registerId and every command, which any cashier who reads orders sees: so the display id is a separate random UUID only this till holds (9.8b, desk note 5).
 export const DISPLAY_DEVICE_ID_KEY = 'vendurepos.display_device_id';
 export const displayDeviceId = (storage: IdStorage) => getDeviceId(storage, DISPLAY_DEVICE_ID_KEY);
+// The display device's key (TallyUI#754), a credential for every till-side display call. It lives beside
+// DISPLAY_DEVICE_ID_KEY in the same device-local store, so the id and its key are lost together, and neither is ever
+// put in RxDB or replicated. One key per store (`${DISPLAY_DEVICE_KEY_KEY}:${storeId}`), because the plugin issues one
+// per channel and device id.
+export const DISPLAY_DEVICE_KEY_KEY = 'vendurepos.display_device_key';
+
+/** This store's display device key in this device's own store; createTillDevice loads, saves and clears it. */
+export const displayDeviceKeys = (storage: KeyValueStore, storeId: string): TillDeviceKeyStore => {
+  const entry = `${DISPLAY_DEVICE_KEY_KEY}:${storeId}`;
+  return {
+    load: async () => storage.getItem(entry),
+    save: async (key) => { storage.setItem(entry, key); },
+    clear: async () => { storage.removeItem(entry); },
+  };
+};
 export const boundRegisterId = (storage: IdStorage) => getDeviceId(storage, BOUND_REGISTER_ID_KEY);
 
 // The register this till minted for itself, kept once the till binds to another (Settings › General, CHECKLIST 6.6).

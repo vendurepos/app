@@ -1,7 +1,7 @@
 import { devices, expect, test, type Page, type Route } from '@playwright/test';
 import { lineAction } from './cart-line';
-import { checkout, takePayment, typeAmount } from './checkout';
-import { openRegister } from './register';
+import { checkout, expectBalanceAsEntry, takePayment, typeAmount } from './checkout';
+import { expectClosureCash, openRegister } from './register';
 import { wedgeScan } from './wedge';
 
 declare global {
@@ -251,7 +251,7 @@ test('the cart waits for the store tax settings, totals a sale with them, takes 
   // Cash 50.00 for the €43.12 total: €6.88 change.
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toHaveText('€43.12');
+  await expectBalanceAsEntry(page, '€43.12');
   await typeAmount(page, '50.00');
   await takePayment(page);
   await expect(tender.getByTestId('tender-change')).toContainText('€6.88');
@@ -706,8 +706,8 @@ test('a register day: open with a float, sell, move cash, count and close; the Z
   await count.getByTestId('count-amount').fill('104.52');
   await count.getByTestId('count-close').click();
   const sheet = page.getByTestId('closure-sheet');
-  await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €104.52');
-  await expect(sheet.getByTestId('closure-counted-cash')).toHaveText('Counted €104.52');
+  await expectClosureCash(page, 'Expected', '€104.52');
+  await expectClosureCash(page, 'Counted', '€104.52');
   // The Z report as printed: TallyUI's closure document, through the print frame.
   await sheet.getByTestId('closure-print').click();
   const printed = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
@@ -787,7 +787,7 @@ test('a discounted sale: line and order discounts, paid, and applied by the plug
   await expectFigures('cart', figures);
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toHaveText('€29.91');
+  await expectBalanceAsEntry(page, '€29.91');
   await typeAmount(page, '30.00');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -873,7 +873,7 @@ test("a closure waits for its session's orders: the Z notes them, the next sessi
   await page.getByTestId('register-count').getByTestId('count-amount').fill('119.04');
   await page.getByTestId('register-count').getByTestId('count-close').click();
   const sheet = page.getByTestId('closure-sheet');
-  await expect(sheet.getByTestId('closure-expected-cash')).toHaveText('Expected €119.04');
+  await expectClosureCash(page, 'Expected', '€119.04');
   await expect(page.getByTestId('closure-unsynced')).toHaveText('2 orders still syncing');
   await sheet.getByTestId('closure-print').click();
   expect(await page.frameLocator('#vendurepos-print').locator('p').allTextContents())
@@ -1325,6 +1325,8 @@ test.describe('on a narrow screen', () => {
     await page.getByTestId('register-open-panel').click();
     await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
     const counted = page.getByTestId('register-count').getByTestId('count-amount');
+    // TallyUI 4.0.0 folds the denomination tiles under the count's Denominations row.
+    await page.getByTestId('register-count').getByTestId('count-denominations').click();
     const fiveTile = page.getByTestId('den-tile-500');
     await fiveTile.click();
     await fiveTile.click();
@@ -2060,14 +2062,14 @@ test('fees, a shipping charge and a custom item, one with a tax class, are appli
     await form.getByLabel('Name', { exact: true }).fill(name);
     await form.getByLabel('Amount', { exact: true }).fill(amount);
     if (taxClass) await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: taxClass, exact: true }).click();
-    await form.getByRole('button', { name: 'Apply', exact: true }).click();
+    await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
     await expect(form).toHaveCount(0);
   }
   await cart.getByTestId('add-charge').click();
   await form.getByRole('button', { name: 'Shipping', exact: true }).click();
   await form.getByLabel('Name', { exact: true }).fill('Courier 2');
   await form.getByLabel('Amount', { exact: true }).fill('3.00');
-  await form.getByRole('button', { name: 'Apply', exact: true }).click();
+  await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   // lib/sale-cart.tsx's SHIPPING_SINGLE_REFUSAL.
   await expect(form.getByRole('alert')).toHaveText('This store takes one shipping charge per order.');
   await form.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -2417,7 +2419,7 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await expectBalanceAsEntry(page, '€19.04');
   await typeAmount(page, '19.04');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
@@ -2506,7 +2508,7 @@ test('a till refund tapped twice at once sends one refund and Vendure applies on
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   const tender = page.getByTestId('tender-pane');
-  await expect(tender.getByTestId('tender-balance')).toContainText('€19.04');
+  await expectBalanceAsEntry(page, '€19.04');
   await typeAmount(page, '19.04');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();

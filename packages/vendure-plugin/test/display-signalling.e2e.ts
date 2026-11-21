@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Global } from '@nestjs/common';
 import { PluginCommonModule, TransactionalConnection, VendurePlugin } from '@vendure/core';
 import { DisplaySignallingError } from '@tallyui/core';
-import type { DisplaySignalling, DisplaySignallingContext, DisplaySignallingErrorCode, SyncContext } from '@tallyui/core';
+import type { DisplaySignalling, DisplaySignallingContext, DisplaySignallingErrorCode, SyncContext, TillDevice } from '@tallyui/core';
 import { displaySignallingContract } from '@tallyui/core/server';
 import type { DisplaySignallingHarness } from '@tallyui/core/server';
 import { parse } from 'graphql';
@@ -12,7 +12,8 @@ import { TALLY_DISPLAY_CLOCK } from '../src/service/display-signalling.service';
 import { bootstrapSecondInstance, createPluginTestEnvironment } from './env';
 
 const MINUTE = 60_000, DAY = 24 * 60 * MINUTE;
-const TABLES = ['tally_display_signal', 'tally_display_snapshot', 'tally_display', 'tally_display_pending', 'tally_display_code', 'tally_display_claim_window'];
+const TABLES = ['tally_display_signal', 'tally_display_snapshot', 'tally_display', 'tally_display_pending', 'tally_display_code', 'tally_display_claim_window',
+  'tally_display_device'];
 const ICE = [{ urls: 'stun:stun.example.test:3478' }];
 
 // V6: the one clock behind every expiry and window, moved by `advance`. Global, so both instances' services take it.
@@ -39,22 +40,23 @@ async function call<T>(baseUrl: string, doFetch: typeof fetch, method: string, p
 
 /** A test-only client of the routes, as lane 9.8b's connector will be. */
 const signalling: DisplaySignalling = (() => {
-  const till = (ctx: SyncContext, deviceId: string) => <T>(method: string, path: string, body?: unknown) =>
-    call<T>(ctx.baseUrl, fetch, method, path, { ...ctx.headers, 'X-Tally-Device-Id': deviceId }, body);
+  const till = (ctx: SyncContext, device: TillDevice) => <T>(method: string, path: string, body?: unknown) =>
+    call<T>(ctx.baseUrl, fetch, method, path, { ...ctx.headers, 'X-Tally-Device-Id': device.deviceId, 'X-Tally-Device-Key': device.deviceKey }, body);
   const display = (d: DisplaySignallingContext, token?: string) => <T>(method: string, path: string, body?: unknown) =>
     call<T>(d.baseUrl, d.fetch ?? fetch, method, path, token === undefined ? {} : { 'X-Tally-Display-Token': token }, body);
   const id = encodeURIComponent;
   type Items<T> = { items: T[] };
   return {
-    mint: (ctx, deviceId) => till(ctx, deviceId)('POST', 'displays/codes'),
-    pending: async (ctx, deviceId) => (await till(ctx, deviceId)<Items<never>>('GET', 'displays/pending')).items,
-    confirm: async (ctx, deviceId, claimId) => { await till(ctx, deviceId)('POST', `displays/pending/${id(claimId)}/confirm`); },
-    decline: async (ctx, deviceId, claimId) => { await till(ctx, deviceId)('POST', `displays/pending/${id(claimId)}/decline`); },
-    list: async (ctx, deviceId) => (await till(ctx, deviceId)<Items<never>>('GET', 'displays')).items,
-    forget: async (ctx, deviceId, displayId) => { await till(ctx, deviceId)('DELETE', `displays/${id(displayId)}`); },
-    sendSignal: async (ctx, deviceId, displayId, message) => { await till(ctx, deviceId)('POST', `displays/${id(displayId)}/signals`, message); },
-    receiveSignals: async (ctx, deviceId) => (await till(ctx, deviceId)<Items<never>>('GET', 'displays/signals')).items,
-    postSnapshot: async (ctx, deviceId, displayId, body) => { await till(ctx, deviceId)('PUT', `displays/${id(displayId)}/snapshot`, { snapshot: body }); },
+    registerDevice: (ctx, deviceId) => call(ctx.baseUrl, fetch, 'POST', 'displays/device', { ...ctx.headers, 'X-Tally-Device-Id': deviceId }),
+    mint: (ctx, device) => till(ctx, device)('POST', 'displays/codes'),
+    pending: async (ctx, device) => (await till(ctx, device)<Items<never>>('GET', 'displays/pending')).items,
+    confirm: async (ctx, device, claimId) => { await till(ctx, device)('POST', `displays/pending/${id(claimId)}/confirm`); },
+    decline: async (ctx, device, claimId) => { await till(ctx, device)('POST', `displays/pending/${id(claimId)}/decline`); },
+    list: async (ctx, device) => (await till(ctx, device)<Items<never>>('GET', 'displays')).items,
+    forget: async (ctx, device, displayId) => { await till(ctx, device)('DELETE', `displays/${id(displayId)}`); },
+    sendSignal: async (ctx, device, displayId, message) => { await till(ctx, device)('POST', `displays/${id(displayId)}/signals`, message); },
+    receiveSignals: async (ctx, device) => (await till(ctx, device)<Items<never>>('GET', 'displays/signals')).items,
+    postSnapshot: async (ctx, device, displayId, body) => { await till(ctx, device)('PUT', `displays/${id(displayId)}/snapshot`, { snapshot: body }); },
     claim: (d, request) => display(d)('POST', 'display/claim', request),
     collect: (d, claimSecret) => display(d)('POST', 'display/collect', { claimSecret }),
     displaySendSignal: async (d, token, message) => { await display(d, token)('POST', 'display/signals', message); },
@@ -131,16 +133,20 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
   const count = async (table: string, where = 'true') =>
     Number((await connection.rawConnection.query(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`))[0].n);
   const refused = async (promise: Promise<unknown>) => promise.then(() => 'resolved', (error: { code?: string }) => error.code);
+  /** Registers `deviceId` with `ctx`: the till's credential for its other calls. */
+  const register = async (ctx: SyncContext, deviceId: string): Promise<TillDevice> =>
+    ({ deviceId, deviceKey: (await signalling.registerDevice(ctx, deviceId)).deviceKey });
+  const mintAs = async (ctx: SyncContext, deviceId: string) => signalling.mint(ctx, await register(ctx, deviceId));
   /** A display paired with `ctx` up to the confirm, and its claim secret. */
-  async function confirmed(ctx: SyncContext, deviceId: string, d: DisplaySignallingContext) {
-    const { code } = await signalling.mint(ctx, deviceId);
+  async function confirmed(ctx: SyncContext, device: TillDevice, d: DisplaySignallingContext) {
+    const { code } = await signalling.mint(ctx, device);
     const claim = await signalling.claim(d, { code, displayName: 'Counter' });
-    const entry = (await signalling.pending(ctx, deviceId)).find(p => p.checkCode === claim.checkCode)!;
-    await signalling.confirm(ctx, deviceId, entry.claimId);
+    const entry = (await signalling.pending(ctx, device)).find(p => p.checkCode === claim.checkCode)!;
+    await signalling.confirm(ctx, device, entry.claimId);
     return claim;
   }
-  async function paired(ctx: SyncContext, deviceId: string, d: DisplaySignallingContext) {
-    const result = await signalling.collect(d, (await confirmed(ctx, deviceId, d)).claimSecret);
+  async function paired(ctx: SyncContext, device: TillDevice, d: DisplaySignallingContext) {
+    const result = await signalling.collect(d, (await confirmed(ctx, device, d)).claimSecret);
     if (result.status !== 'paired') throw new Error('not paired');
     return result;
   }
@@ -161,7 +167,20 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
       storedText: async () => JSON.stringify(await Promise.all(TABLES.map(table =>
         connection.rawConnection.query(`SELECT row_to_json(t) AS row FROM "${table}" AS t`)))),
       storedCounts: async () => ({ codes: await count('tally_display_code'), pending: await count('tally_display_pending'),
-        displays: await count('tally_display'), snapshots: await count('tally_display_snapshot') }),
+        displays: await count('tally_display'), snapshots: await count('tally_display_snapshot'), devices: await count('tally_display_device') }),
+      // As the migration leaves a till: a paired display with a token, and its device row with no key.
+      seedLegacyDevice: async deviceId => {
+        const token = randomBytes(16).toString('base64url'), displayId = randomBytes(16).toString('hex');
+        const channelId = environment.decode(channels.a.id), now = new Date(Date.now() + offset);
+        await connection.rawConnection.query(`INSERT INTO "tally_display" ("id", "channelId", "deviceId", "name", "cashierId", "confirmedAt", "tokenHash")
+          VALUES ($1, $2, $3, 'Legacy', 'cashier-legacy', $4, $5)`, [displayId, channelId, deviceId, now, createHash('sha256').update(token).digest('hex')]);
+        await connection.rawConnection.query('INSERT INTO "tally_display_device" ("channelId", "deviceId", "lastCallAt") VALUES ($1, $2, $3)',
+          [channelId, deviceId, now]);
+        return { displayId, token };
+      },
+      adoptionLog: async () => (await connection.rawConnection.query(`SELECT "deviceId", "adoptedBy" FROM "tally_display_device"
+        WHERE "adoptedBy" IS NOT NULL ORDER BY "adoptedAt"`)).map((row: { deviceId: string; adoptedBy: string }) =>
+        ({ deviceId: row.deviceId, cashierId: row.adoptedBy })),
     };
   };
 
@@ -172,8 +191,9 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
   it('(a) two instances racing one code: exactly one claim spends it', async () => {
     await fresh();
     const ctx = await pairTill('race-a');
+    const device = await register(ctx, 'till-race');
     for (let round = 0; round < 5; round += 1) {
-      const { code } = await signalling.mint(ctx, 'till-race');
+      const { code } = await signalling.mint(ctx, device);
       const results = await Promise.allSettled([base, second.url].map((at, i) =>
         signalling.claim(display(`192.0.2.${10 + round * 2 + i}`, at), { code, displayName: `Race ${i}` })));
       expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
@@ -185,8 +205,9 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
   it('(b) two instances racing one collect: exactly one token is issued', async () => {
     await fresh();
     const ctx = await pairTill('race-b');
+    const device = await register(ctx, 'till-race');
     for (let round = 0; round < 5; round += 1) {
-      const { claimSecret } = await confirmed(ctx, 'till-race', display('192.0.2.30'));
+      const { claimSecret } = await confirmed(ctx, device, display('192.0.2.30'));
       const results = await Promise.allSettled([base, second.url].map(at => signalling.collect(display('192.0.2.30', at), claimSecret)));
       expect(results.map(r => r.status === 'fulfilled' ? r.value.status : (r.reason as { code: string }).code).sort())
         .toEqual(['collect_refused', 'paired']);
@@ -198,22 +219,23 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     await fresh();
     const inB = await pairTill('channel', 'b');
     const inA = await pairTill('channel', 'a');
+    const onB = await register(inB, 'till-shared'), onA = await register(inA, 'till-shared');
     // One device id in both channels, so only the channel keeps them apart.
     const d = display('192.0.2.40');
-    const { displayId, token } = await paired(inB, 'till-shared', d);
-    expect((await signalling.list(inB, 'till-shared')).map(r => r.displayId)).toEqual([displayId]);
-    await signalling.sendSignal(inB, 'till-shared', displayId, { type: 'offer', payload: 'o1' });
-    await signalling.postSnapshot(inB, 'till-shared', displayId, { seq: 1 });
+    const { displayId, token } = await paired(inB, onB, d);
+    expect((await signalling.list(inB, onB)).map(r => r.displayId)).toEqual([displayId]);
+    await signalling.sendSignal(inB, onB, displayId, { type: 'offer', payload: 'o1' });
+    await signalling.postSnapshot(inB, onB, displayId, { seq: 1 });
     expect(await signalling.displayReceiveSignals(d, token)).toEqual([{ type: 'offer', payload: 'o1' }]);
     expect(await signalling.readSnapshot(d, token)).toEqual({ seq: 1 });
     await signalling.displaySendSignal(d, token, { type: 'answer', payload: 'a1' });
 
-    expect(await signalling.list(inA, 'till-shared')).toEqual([]);
-    expect(await signalling.receiveSignals(inA, 'till-shared')).toEqual([]);
-    expect(await refused(signalling.forget(inA, 'till-shared', displayId))).toBe('not_found');
-    expect(await refused(signalling.sendSignal(inA, 'till-shared', displayId, { type: 'ice', payload: 'x' }))).toBe('not_found');
-    expect(await refused(signalling.postSnapshot(inA, 'till-shared', displayId, { seq: 2 }))).toBe('not_found');
-    expect(await signalling.receiveSignals(inB, 'till-shared')).toEqual([{ type: 'answer', payload: 'a1', displayId }]);
+    expect(await signalling.list(inA, onA)).toEqual([]);
+    expect(await signalling.receiveSignals(inA, onA)).toEqual([]);
+    expect(await refused(signalling.forget(inA, onA, displayId))).toBe('not_found');
+    expect(await refused(signalling.sendSignal(inA, onA, displayId, { type: 'ice', payload: 'x' }))).toBe('not_found');
+    expect(await refused(signalling.postSnapshot(inA, onA, displayId, { seq: 2 }))).toBe('not_found');
+    expect(await signalling.receiveSignals(inB, onB)).toEqual([{ type: 'answer', payload: 'a1', displayId }]);
     expect(await signalling.readSnapshot(d, token)).toEqual({ seq: 1 });
     expect(await count('tally_display')).toBe(1);
   });
@@ -240,49 +262,51 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
   it('(f) the store-wide cap refuses claims only: the till still mints and confirms, and the display collects', async () => {
     await fresh();
     const ctx = await pairTill('cap');
+    const device = await register(ctx, 'till-cap');
     const d = display('192.0.2.50');
-    const { code } = await signalling.mint(ctx, 'till-cap');
+    const { code } = await signalling.mint(ctx, device);
     const claim = await signalling.claim(d, { code, displayName: 'Counter' });
     for (let i = 0; i < 100; i += 1) {
       expect(await refused(signalling.claim(display(`203.0.113.${Math.floor(i / 9) + 1}`), { code: '999999x', displayName: 'Guess' }))).toBe('claim_refused');
     }
-    const fresher = await signalling.mint(ctx, 'till-cap');
+    const fresher = await signalling.mint(ctx, device);
     expect(await refused(signalling.claim(display('192.0.2.51'), { code: fresher.code, displayName: 'Paused' }))).toBe('claim_refused');
-    const [entry] = await signalling.pending(ctx, 'till-cap');
-    await signalling.confirm(ctx, 'till-cap', entry.claimId);
+    const [entry] = await signalling.pending(ctx, device);
+    await signalling.confirm(ctx, device, entry.claimId);
     expect(await signalling.collect(d, claim.claimSecret)).toMatchObject({ status: 'paired' });
   });
 
   it('(g) pruning deletes the rows: pending, snapshot, both failure windows, and both inboxes of a display unseen for 30 days', async () => {
     await fresh();
     const ctx = await pairTill('prune');
+    const device = await register(ctx, 'till-prune');
     const d = display('192.0.2.60');
-    const { displayId, token } = await paired(ctx, 'till-prune', d);
-    await signalling.claim(display('192.0.2.61'), { code: (await signalling.mint(ctx, 'till-prune')).code, displayName: 'Lapsing' });
-    await signalling.postSnapshot(ctx, 'till-prune', displayId, { seq: 1 });
+    const { displayId, token } = await paired(ctx, device, d);
+    await signalling.claim(display('192.0.2.61'), { code: (await signalling.mint(ctx, device)).code, displayName: 'Lapsing' });
+    await signalling.postSnapshot(ctx, device, displayId, { seq: 1 });
     await refused(signalling.claim(display('192.0.2.62'), { code: 'no-such-code', displayName: 'Guess' }));
     expect([await count('tally_display_pending'), await count('tally_display_snapshot'), await count('tally_display_claim_window')]).toEqual([1, 1, 2]);
 
     offset += 61_000;
-    await signalling.list(ctx, 'till-prune');
+    await signalling.list(ctx, device);
     expect(await count('tally_display_snapshot')).toBe(0);
     expect(await count('tally_display_claim_window')).toBe(1);
     expect(await count('tally_display_claim_window', `"key" = 'store'`)).toBe(1);
     offset += 10 * MINUTE;
-    await signalling.list(ctx, 'till-prune');
+    await signalling.list(ctx, device);
     expect([await count('tally_display_pending'), await count('tally_display_claim_window')]).toEqual([0, 0]);
 
-    await signalling.sendSignal(ctx, 'till-prune', displayId, { type: 'offer', payload: 'o1' });
+    await signalling.sendSignal(ctx, device, displayId, { type: 'offer', payload: 'o1' });
     await signalling.displaySendSignal(d, token, { type: 'answer', payload: 'a1' });
     expect([await count('tally_display_signal', '"toTill"'), await count('tally_display_signal', 'NOT "toTill"')]).toEqual([1, 1]);
     offset += 30 * DAY;
-    await signalling.list(ctx, 'till-prune');
+    await signalling.list(ctx, device);
     expect([await count('tally_display'), await count('tally_display_signal')]).toEqual([0, 0]);
   });
 
   it('(h) concurrent failed claims across both instances stop at the limit', async () => {
     await fresh();
-    const { code } = await signalling.mint(await pairTill('limit-race'), 'till-limit');
+    const { code } = await mintAs(await pairTill('limit-race'), 'till-limit');
     const results = await Promise.all(Array.from({ length: 30 }, (_, i) =>
       refused(signalling.claim(display('192.0.2.70', i % 2 ? second.url : base), { code: '000000x', displayName: 'Guess' }))));
     expect(results).toEqual(Array(30).fill('claim_refused'));
@@ -295,7 +319,8 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
 
   it('(i) the public routes refuse bad input in the seam\'s shape', async () => {
     const json = { 'Content-Type': 'application/json' };
-    const headers = { ...(await pairTill('bad-input')).headers, 'X-Tally-Device-Id': 'till-i' };
+    const ctx = await pairTill('bad-input');
+    const headers = { ...ctx.headers, 'X-Tally-Device-Id': 'till-i', 'X-Tally-Device-Key': (await register(ctx, 'till-i')).deviceKey };
     expect(await answer('displays/%00', { method: 'DELETE', headers })).toEqual([404, { code: 'not_found', message: expect.any(String) }]);
     expect(await answer('display/claim', { method: 'POST', headers: json, body: '{' }))
       .toEqual([400, { code: 'invalid_request', message: expect.any(String) }]);
@@ -307,7 +332,8 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
   it('(i2) the controller\'s own checks refuse a bad device header, bad fields and a missing display token, storing nothing', async () => {
     await fresh();
     const ctx = await pairTill('own-checks');
-    const { displayId } = await paired(ctx, 'till-i2', display('192.0.2.110'));
+    const device = await register(ctx, 'till-i2');
+    const { displayId } = await paired(ctx, device, display('192.0.2.110'));
     const stored = () => Promise.all(TABLES.map(table => count(table)));
     const before = await stored();
     const refusal = (status: number, code: string) => [status, { code, message: expect.any(String) }];
@@ -319,7 +345,7 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     expect(await send(ctx.headers, offer)).toEqual(refusal(400, 'invalid_request'));
     expect(await send({ ...ctx.headers, 'X-Tally-Device-Id': 'd'.repeat(65) }, offer)).toEqual(refusal(400, 'invalid_request'));
     // A valid header, with a field the route does not know, then a type outside offer, answer and ice.
-    const till = { ...ctx.headers, 'X-Tally-Device-Id': 'till-i2' };
+    const till = { ...ctx.headers, 'X-Tally-Device-Id': 'till-i2', 'X-Tally-Device-Key': device.deviceKey };
     expect(await send(till, { ...offer, extra: 1 })).toEqual(refusal(400, 'invalid_request'));
     expect(await send(till, { type: 'bye', payload: 'o1' })).toEqual(refusal(400, 'invalid_request'));
     // The claim's own bounds: an empty name, a name of 101 characters, a code of 33.
@@ -341,15 +367,16 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
       FROM generate_series(0, 9999) AS n`, [environment.decode(channels.b.id), new Date(Date.now() + offset + 10 * MINUTE)]);
     expect(await count('tally_display_pending')).toBe(10_000);
     const ctx = await pairTill('check-codes');
-    const { code } = await signalling.mint(ctx, 'till-j');
+    const device = await register(ctx, 'till-j');
+    const { code } = await signalling.mint(ctx, device);
     const claim = await signalling.claim(display('192.0.2.80'), { code, displayName: 'Counter' });
     expect(claim.checkCode).toMatch(/^\d{4}$/);
-    expect((await signalling.pending(ctx, 'till-j')).map(p => p.checkCode)).toEqual([claim.checkCode]);
+    expect((await signalling.pending(ctx, device)).map(p => p.checkCode)).toEqual([claim.checkCode]);
   });
 
   it('(k) the store-wide cap holds under parallel claims across both instances', async () => {
     await fresh();
-    const { code } = await signalling.mint(await pairTill('store-race'), 'till-k');
+    const { code } = await mintAs(await pairTill('store-race'), 'till-k');
     // 130 wrong claims from 13 sources, 10 each, so no source limit alone stops them before the store's 100.
     const results = await Promise.all(Array.from({ length: 130 }, (_, i) =>
       refused(signalling.claim(display(`198.51.100.${1 + (i % 13)}`, i % 2 ? second.url : base), { code: '000000x', displayName: 'Guess' }))));
@@ -366,14 +393,14 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     await connection.rawConnection.query(`INSERT INTO "tally_display_pending" ("id", "channelId", "deviceId", "secretHash", "displayName",
       "checkCode", "expiresAt") SELECT 'full-' || n, $1, 'till-full-' || n, md5('full-' || n), 'Full', '0000', $2
       FROM generate_series(1, 50) AS n`, [environment.decode(channels.a.id), new Date(Date.now() + offset + 10 * MINUTE)]);
-    const { code } = await signalling.mint(await pairTill('pending-cap'), 'till-l');
+    const { code } = await mintAs(await pairTill('pending-cap'), 'till-l');
     const d = display('192.0.2.100');
     expect(await refused(signalling.claim(d, { code, displayName: 'Counter' }))).toBe('claim_refused');
     expect(await count('tally_display_code', `"code" = '${code}' AND NOT "spent"`)).toBe(1);
     expect(await count('tally_display_claim_window', `"key" = 'store' AND "failures" > 0`)).toBe(0);
     await connection.rawConnection.query(`DELETE FROM "tally_display_pending" WHERE "id" = 'full-1'`);
     expect((await signalling.claim(d, { code, displayName: 'Counter' })).checkCode).toMatch(/^\d{4}$/);
-    const other = await signalling.mint(await pairTill('pending-cap', 'b'), 'till-l-b');
+    const other = await mintAs(await pairTill('pending-cap', 'b'), 'till-l-b');
     expect((await signalling.claim(display('192.0.2.101'), { code: other.code, displayName: 'Counter' })).checkCode).toMatch(/^\d{4}$/);
   });
 });

@@ -53,7 +53,7 @@ auth, CORS, tax strategy and a first sale. Install it with
 `npm install @vendurepos/plugin@0.3.0`.
 
 1. Add the plugin to your Vendure config. If using the bundled migrations instead
-   of generating a migration for your store, register all nine below; do not run
+   of generating a migration for your store, register all ten below; do not run
    both approaches for the same schema changes:
 
    ```ts
@@ -61,6 +61,7 @@ auth, CORS, tax strategy and a first sale. Install it with
      TallyPosPlugin, TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
      TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
      TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000,
+     TallyPosDisplayDevice1791500000000,
    } from '@vendurepos/plugin';
 
    export const config: VendureConfig = {
@@ -72,6 +73,7 @@ auth, CORS, tax strategy and a first sale. Install it with
          TallyPos1790648006022, TallyPosVp2a1790720000000, TallyPosRegister1790800000000,
          TallyPosV51790900000000, TallyPosRegisterV21791000000000, TallyPosRegisterOpenVersion1791100000000,
          TallyPosDisplay1791200000000, TallyPosRegisterApproval1791300000000, TallyPosReceiptEmail1791400000000,
+         TallyPosDisplayDevice1791500000000,
          /* your own migrations */
        ],
        // …
@@ -81,10 +83,13 @@ auth, CORS, tax strategy and a first sale. Install it with
 
    The migrations create the `tally_command` ledger, the read-only `Order` and `OrderLine`
    custom-field columns, the unique index on `tallyClientOrderId`, and plain indexes on
-   `tallyRegisterId` and `tallySessionId`, recovery fields, the register tables, the customer-display tables and the receipt-email limit table.
+   `tallyRegisterId` and `tallySessionId`, recovery fields, the register tables, the customer-display tables, the receipt-email limit table and the till device-key table.
    Run them with `runMigrations(config)` before starting Vendure.
    Upgrading to `TallyPosReceiptEmail1791400000000`: run the migration before starting the new version. During a rolling deploy, instances still on the old version count receipt emails in their own memory until they stop, so the caps hold exactly only once every instance runs the new version.
    To roll back, revert the plugin version and leave the `tally_receipt_email_window` table in place: the old version ignores it. To remove the table as well, stop every instance, run this migration's `down` with the new version's package (the old package does not contain the migration), then start the old version; never drop the table by hand, or its `migrations` row stays and a later upgrade skips the migration.
+   Upgrading to `TallyPosDisplayDevice1791500000000`: run the migration before starting the new version, and update the
+   POS app with it. Every till-side customer-display route now needs the `X-Tally-Device-Key` that
+   `POST /tally/v1/displays/device` issues, so a till on an older app is refused (`403 device_refused`) until it updates.
 
 2. POS orders send no order-confirmation email. If you use `@vendure/email-plugin` (an
    optional peer dependency), install `tallyOrderConfirmationHandler` from the
@@ -294,9 +299,12 @@ state is in Postgres, so any server instance answers any call.
   or to their addresses, never `true`: `true` takes the left-most `X-Forwarded-For`, which the client writes, so
   every guess would count as a new source. Without it every display shares the proxy's address as one source,
   which is stricter, never looser.
-- `X-Tally-Device-Id` is the till's own label and is not bound to the session, as in TallyUI's reference: anyone with
-  `TallyPosPairDisplay` in a channel can act for any device id there. The till generates it randomly, so it is not
-  guessable.
+- `POST /tally/v1/displays/device` with `X-Tally-Device-Id` answers `200 { "deviceKey": "…" }` once per channel and
+  device id; a repeat is `403 device_refused`. A device id that already had displays before this version adopts its
+  displays at its first register, once. Every other till route needs `X-Tally-Device-Key` beside
+  `X-Tally-Device-Id`; a missing, malformed or wrong key is `403 device_refused`. Only the key's SHA-256 is stored.
+  A device that owns no display, code or pending pairing and makes no till call for over 30 days is dropped, and its
+  id registers again.
 - `GET /tally/v1/info` advertises `customerDisplay: { v: 1, snapshot: 1, iceServers? }`. Set the ICE servers with
   `TallyPosPlugin.init({ customerDisplay: { iceServers: [{ urls: 'stun:stun.example.com:3478' }] } })`; without the
   option the till uses its default STUN servers, and `[]` means LAN only.

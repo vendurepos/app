@@ -34,7 +34,9 @@ const memoryStorage = (): KeyValueStore => {
   const stored = new Map<string, string>();
   return { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => { stored.set(key, value); }, removeItem: (key) => { stored.delete(key); } };
 };
+const ISSUED_KEY = 'issued-device-key';
 const fakeSignalling = () => ({
+  registerDevice: vi.fn(async () => ({ deviceKey: ISSUED_KEY })),
   mint: vi.fn(async () => ({ code: '123456', expiresAt: new Date(Date.now() + 600_000).toISOString() })),
   pending: vi.fn(async () => []), confirm: vi.fn(async () => {}), decline: vi.fn(async () => {}),
   list: vi.fn(async () => []), forget: vi.fn(async () => {}), sendSignal: vi.fn(async () => {}),
@@ -45,9 +47,8 @@ const fakeSignalling = () => ({
 }) satisfies DisplaySignalling;
 
 const open: TillCustomerDisplay[] = [];
-const start = (current: () => Session = () => session) => {
+const start = (current: () => Session = () => session, storage = memoryStorage()) => {
   const signalling = fakeSignalling();
-  const storage = memoryStorage();
   const handles = createTillCustomerDisplay({ session: current, advertisement, signalling, storage });
   open.push(handles);
   return { handles, signalling, storage };
@@ -78,15 +79,58 @@ it("(b) takes the store's advertisement, and none from a store without one or fr
   expect(customerDisplayAdvertisement({ ...session, url: DEMO_STORE_ORIGIN }, capabilities)).toBeNull();
 });
 
-it("(c) mints a code with the session's headers and the display device id, never the register id", async () => {
+it("(c) mints a code with the session's headers and the display device id, never the register id, and its key", async () => {
   const { handles, signalling, storage } = start();
   await handles.pairing.start();
   expect(handles.pairing.phase).toMatchObject({ phase: 'code', code: '123456' });
   expect(signalling.mint).toHaveBeenCalledTimes(1);
-  const [ctx, sentId] = signalling.mint.mock.calls[0] as unknown as Parameters<DisplaySignalling['mint']>;
+  const [ctx, sent] = signalling.mint.mock.calls[0] as unknown as Parameters<DisplaySignalling['mint']>;
   expect(ctx.headers).toEqual(sessionContext(session).headers);
-  expect(sentId).toBe(displayDeviceId(storage));
-  expect(sentId).not.toBe(deviceId(storage));
+  expect(sent.deviceId).toBe(displayDeviceId(storage));
+  expect(sent.deviceId).not.toBe(deviceId(storage));
+  // The key header's value: the key this display device id was issued.
+  expect(signalling.registerDevice).toHaveBeenCalledTimes(1);
+  expect((signalling.registerDevice.mock.calls[0] as unknown as Parameters<DisplaySignalling['registerDevice']>)[1])
+    .toBe(displayDeviceId(storage));
+  expect(sent.deviceKey).toBe(ISSUED_KEY);
+});
+
+it('(c2) keeps the issued key under vendurepos.display_device_key, and a later display on the same storage reuses it', async () => {
+  const storage = memoryStorage();
+  const first = start(undefined, storage);
+  await first.handles.pairing.start();
+  expect(first.signalling.registerDevice).toHaveBeenCalledTimes(1);
+  expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-a')).toBe(ISSUED_KEY);
+  first.handles.close();
+
+  const second = start(undefined, storage);
+  await second.handles.pairing.start();
+  expect(second.signalling.registerDevice).not.toHaveBeenCalled();
+  const [, sent] = second.signalling.mint.mock.calls[0] as unknown as Parameters<DisplaySignalling['mint']>;
+  expect(sent).toEqual({ deviceId: displayDeviceId(storage), deviceKey: ISSUED_KEY });
+});
+
+it("(c3) keeps a key per store: X, then Y, then X again reuses X's key and does not register again", async () => {
+  const storage = memoryStorage();
+  const sessionY: Session = { ...session, channelToken: 'channel-b' };
+  const x = start(() => session, storage);
+  x.signalling.registerDevice.mockResolvedValueOnce({ deviceKey: 'key-x' });
+  await x.handles.pairing.start();
+  x.handles.close();
+
+  const y = start(() => sessionY, storage);
+  y.signalling.registerDevice.mockResolvedValueOnce({ deviceKey: 'key-y' });
+  await y.handles.pairing.start();
+  expect(y.signalling.registerDevice).toHaveBeenCalledTimes(1);
+  y.handles.close();
+
+  const again = start(() => session, storage);
+  await again.handles.pairing.start();
+  expect(again.signalling.registerDevice).not.toHaveBeenCalled();
+  const [, sent] = again.signalling.mint.mock.calls[0] as unknown as Parameters<DisplaySignalling['mint']>;
+  expect(sent).toEqual({ deviceId: displayDeviceId(storage), deviceKey: 'key-x' });
+  expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-a')).toBe('key-x');
+  expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-b')).toBe('key-y');
 });
 
 it("(d) configFor reads the session getter's current session", () => {

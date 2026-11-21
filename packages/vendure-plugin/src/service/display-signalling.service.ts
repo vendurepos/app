@@ -1,8 +1,9 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { RequestContext, TransactionalConnection } from '@vendure/core';
+import { Logger, RequestContext, TransactionalConnection } from '@vendure/core';
 import type { EntityManager } from 'typeorm';
 import { rateLimitSource } from '../vendored/rate-limit-source';
+import { loggerCtx } from './errors';
 
 /** The Nest token for the clock behind every expiry and window (`() => number`, ms); absent means `Date.now`. Tests override it. */
 export const TALLY_DISPLAY_CLOCK = Symbol('TALLY_DISPLAY_CLOCK');
@@ -18,15 +19,17 @@ export type CustomerDisplayOptions = {
 
 /** The seam's refusal codes (`DisplaySignallingErrorCode`) that a server sends, and `invalid_request` for malformed input. */
 export type DisplayRefusalCode =
-  'forbidden' | 'limit' | 'claim_refused' | 'collect_refused' | 'not_found' | 'token_refused' | 'too_large' | 'invalid_request';
+  'forbidden' | 'limit' | 'claim_refused' | 'collect_refused' | 'not_found' | 'device_refused' | 'token_refused' | 'too_large' | 'invalid_request';
 const STATUS: Record<DisplayRefusalCode, number> = {
-  forbidden: 403, limit: 429, claim_refused: 403, collect_refused: 403, not_found: 404, token_refused: 401, too_large: 413, invalid_request: 400,
+  forbidden: 403, limit: 429, claim_refused: 403, collect_refused: 403, not_found: 404, device_refused: 403, token_refused: 401, too_large: 413,
+  invalid_request: 400,
 };
 // One fixed message per code: every claim refusal and every collect refusal reads the same, so a guesser learns nothing.
 const MESSAGES: Record<DisplayRefusalCode, string> = {
   forbidden: 'This session may not pair a customer display', limit: 'This device already holds 5 unspent codes',
   claim_refused: 'The code was not accepted', collect_refused: 'The claim was not accepted', not_found: 'Unknown display or claim',
-  token_refused: 'The display token was not accepted', too_large: 'The snapshot is over 204800 bytes', invalid_request: 'Invalid request',
+  device_refused: 'This device key was not accepted', token_refused: 'The display token was not accepted',
+  too_large: 'The snapshot is over 204800 bytes', invalid_request: 'Invalid request',
 };
 
 /** Every refusal of a signalling route; the controller answers it as `{ code, message }` with its status. */
@@ -39,6 +42,8 @@ export class DisplayRefusal extends Error {
 }
 
 export type SignalMessage = { type: 'offer' | 'answer' | 'ice'; payload: string };
+/** The till's credential on every till-side call (TallyUI#754): its device id and the key `registerDevice` issued it. */
+export type TillDevice = { deviceId: string; deviceKey: string };
 type Till = { channelId: string; deviceId: string };
 type Query = (sql: string, params?: unknown[]) => Promise<Array<Record<string, any>>>;
 
@@ -58,6 +63,8 @@ const MAX_DRAWS = 50;
 const PENDING_MAX = 50;
 
 const sha256Hex = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+/** Two SHA-256 hex strings, compared in constant time. */
+const sameHash = (x: string, y: string) => x.length === y.length && timingSafeEqual(Buffer.from(x, 'utf8'), Buffer.from(y, 'utf8'));
 /** 128 bits, base64url without padding: 22 characters. */
 const newSecret = () => randomBytes(16).toString('base64url');
 const newId = () => randomBytes(16).toString('hex');
@@ -69,11 +76,17 @@ const refuse = (code: DisplayRefusalCode) => new DisplayRefusal(code);
 
 // Lazy pruning (V7): every call first deletes what has expired, in one statement. A display's snapshot and both
 // inboxes go with it by ON DELETE CASCADE. A window row a claim holds is skipped, never waited on; a later call prunes it.
+// A device idle for over 30 days that owns no display, code or pending pairing in its channel goes too, so its id
+// registers again; one whose last display this same statement deletes goes on a later call.
 const PRUNE = `WITH codes AS (DELETE FROM "tally_display_code" WHERE "expiresAt" <= $1),
   pending AS (DELETE FROM "tally_display_pending" WHERE "expiresAt" <= $1),
   snapshots AS (DELETE FROM "tally_display_snapshot" WHERE "postedAt" <= $2),
   windows AS (DELETE FROM "tally_display_claim_window" WHERE "key" IN (SELECT "key" FROM "tally_display_claim_window"
-    WHERE "expiresAt" <= $1 FOR UPDATE SKIP LOCKED))
+    WHERE "expiresAt" <= $1 FOR UPDATE SKIP LOCKED)),
+  devices AS (DELETE FROM "tally_display_device" AS v WHERE v."lastCallAt" < $3
+    AND NOT EXISTS (SELECT 1 FROM "tally_display" AS o WHERE o."channelId" = v."channelId" AND o."deviceId" = v."deviceId")
+    AND NOT EXISTS (SELECT 1 FROM "tally_display_code" AS o WHERE o."channelId" = v."channelId" AND o."deviceId" = v."deviceId")
+    AND NOT EXISTS (SELECT 1 FROM "tally_display_pending" AS o WHERE o."channelId" = v."channelId" AND o."deviceId" = v."deviceId"))
   -- Equals COALESCE("lastSeenAt", "confirmedAt") <= $3, written so the two column indexes can serve it.
   DELETE FROM "tally_display" WHERE "lastSeenAt" <= $3 OR ("lastSeenAt" IS NULL AND "confirmedAt" <= $3)`;
 
@@ -99,9 +112,36 @@ export class DisplaySignallingService {
     return { v: 1, snapshot: 1, ...(this.options.iceServers ? { iceServers: this.options.iceServers } : {}) };
   }
 
-  async mint(ctx: RequestContext, deviceId: string): Promise<{ code: string; expiresAt: string }> {
+  /**
+   * Issues the device key once (TallyUI#754): a new id is created with it; a pre-migration id (no key hash, never
+   * adopted) adopts its displays with it, recorded with the cashier; any other id is `device_refused`. Each step is one
+   * conditional statement, so of two racing registers exactly one gets a key. Only the key's SHA-256 hex is stored.
+   */
+  async registerDevice(ctx: RequestContext, deviceId: string): Promise<{ deviceKey: string }> {
     const now = await this.prune();
     const till = this.till(ctx, deviceId);
+    const deviceKey = newSecret();
+    const keyHash = sha256Hex(deviceKey);
+    const cashierId = this.cashierId(ctx);
+    const issued = await this.transaction(async query => {
+      const [created] = await query(`INSERT INTO "tally_display_device" ("channelId", "deviceId", "keyHash", "lastCallAt") VALUES ($1, $2, $3, $4)
+        ON CONFLICT ("channelId", "deviceId") DO NOTHING RETURNING "deviceId"`, [till.channelId, till.deviceId, keyHash, at(now)]);
+      if (created) return 'created';
+      const [adopted] = await query(`UPDATE "tally_display_device" SET "keyHash" = $3, "adoptedBy" = $4, "adoptedAt" = $5, "lastCallAt" = $5
+        WHERE "channelId" = $1 AND "deviceId" = $2 AND "keyHash" IS NULL AND "adoptedBy" IS NULL RETURNING "deviceId"`,
+      [till.channelId, till.deviceId, keyHash, cashierId, at(now)]);
+      return adopted ? 'adopted' : null;
+    });
+    if (issued === null) throw refuse('device_refused');
+    if (issued === 'adopted') {
+      Logger.info(`Customer display device ${JSON.stringify(deviceId)} in channel ${till.channelId} adopted by ${JSON.stringify(cashierId)}`, loggerCtx);
+    }
+    return { deviceKey };
+  }
+
+  async mint(ctx: RequestContext, device: TillDevice): Promise<{ code: string; expiresAt: string }> {
+    const now = await this.prune();
+    const till = await this.device(ctx, device, now);
     return this.transaction(async query => {
       // One device's mints run one at a time, so the unspent count and the insert cannot interleave.
       await query('SELECT pg_advisory_xact_lock(hashtext($1))', [`tally-display-mint:${till.channelId}:${till.deviceId}`]);
@@ -119,19 +159,19 @@ export class DisplaySignallingService {
     });
   }
 
-  async pending(ctx: RequestContext, deviceId: string) {
-    await this.prune();
-    const till = this.till(ctx, deviceId);
+  async pending(ctx: RequestContext, device: TillDevice) {
+    const now = await this.prune();
+    const till = await this.device(ctx, device, now);
     const rows = await this.query(`SELECT "id", "displayName", "checkCode", "expiresAt" FROM "tally_display_pending"
       WHERE "channelId" = $1 AND "deviceId" = $2 ORDER BY "expiresAt", "id"`, [till.channelId, till.deviceId]);
     return rows.map(row => ({ claimId: row.id, displayName: row.displayName, checkCode: row.checkCode, expiresAt: iso(row.expiresAt) }));
   }
 
   /** Confirms a claim: the display's row, owned by this device and cashier, waits for its first collect. A moving display keeps its id. */
-  async confirm(ctx: RequestContext, deviceId: string, claimId: string): Promise<void> {
+  async confirm(ctx: RequestContext, device: TillDevice, claimId: string): Promise<void> {
     const now = await this.prune();
-    const till = this.till(ctx, deviceId);
-    const cashierId = ctx.session?.user?.identifier ?? String(ctx.activeUserId);
+    const till = await this.device(ctx, device, now);
+    const cashierId = this.cashierId(ctx);
     await this.transaction(async query => {
       const [entry] = await query(`DELETE FROM "tally_display_pending" WHERE "id" = $1 AND "channelId" = $2 AND "deviceId" = $3
         AND "expiresAt" > $4 RETURNING "secretHash", "displayName", "movingDisplayId"`, [claimId, till.channelId, till.deviceId, at(now)]);
@@ -144,17 +184,17 @@ export class DisplaySignallingService {
     });
   }
 
-  async decline(ctx: RequestContext, deviceId: string, claimId: string): Promise<void> {
-    await this.prune();
-    const till = this.till(ctx, deviceId);
+  async decline(ctx: RequestContext, device: TillDevice, claimId: string): Promise<void> {
+    const now = await this.prune();
+    const till = await this.device(ctx, device, now);
     const deleted = await this.query(`DELETE FROM "tally_display_pending" WHERE "id" = $1 AND "channelId" = $2 AND "deviceId" = $3
       RETURNING "id"`, [claimId, till.channelId, till.deviceId]);
     if (!deleted.length) throw refuse('not_found');
   }
 
-  async list(ctx: RequestContext, deviceId: string) {
+  async list(ctx: RequestContext, device: TillDevice) {
     const now = await this.prune();
-    const till = this.till(ctx, deviceId);
+    const till = await this.device(ctx, device, now);
     const rows = await this.query(`SELECT "id", "name", "cashierId", "lastSeenAt" FROM "tally_display"
       WHERE "channelId" = $1 AND "deviceId" = $2 ORDER BY "confirmedAt", "id"`, [till.channelId, till.deviceId]);
     return rows.map(row => ({
@@ -164,17 +204,17 @@ export class DisplaySignallingService {
     }));
   }
 
-  async forget(ctx: RequestContext, deviceId: string, displayId: string): Promise<void> {
-    await this.prune();
-    const till = this.till(ctx, deviceId);
+  async forget(ctx: RequestContext, device: TillDevice, displayId: string): Promise<void> {
+    const now = await this.prune();
+    const till = await this.device(ctx, device, now);
     const deleted = await this.query(`DELETE FROM "tally_display" WHERE "id" = $1 AND "channelId" = $2 AND "deviceId" = $3
       RETURNING "id"`, [displayId, till.channelId, till.deviceId]);
     if (!deleted.length) throw refuse('not_found');
   }
 
-  async sendSignal(ctx: RequestContext, deviceId: string, displayId: string, message: SignalMessage): Promise<void> {
-    await this.prune();
-    const till = this.till(ctx, deviceId);
+  async sendSignal(ctx: RequestContext, device: TillDevice, displayId: string, message: SignalMessage): Promise<void> {
+    const now = await this.prune();
+    const till = await this.device(ctx, device, now);
     await this.transaction(async query => {
       await this.owned(query, till, displayId);
       await query('INSERT INTO "tally_display_signal" ("displayId", "toTill", "type", "payload") VALUES ($1, false, $2, $3)',
@@ -183,9 +223,9 @@ export class DisplaySignallingService {
   }
 
   /** Drains this device's inbox: each message once, in send order, only from displays it owns now. */
-  async receiveSignals(ctx: RequestContext, deviceId: string): Promise<Array<SignalMessage & { displayId: string }>> {
-    await this.prune();
-    const till = this.till(ctx, deviceId);
+  async receiveSignals(ctx: RequestContext, device: TillDevice): Promise<Array<SignalMessage & { displayId: string }>> {
+    const now = await this.prune();
+    const till = await this.device(ctx, device, now);
     const rows = await this.query(`DELETE FROM "tally_display_signal" AS s USING "tally_display" AS d
       WHERE s."displayId" = d."id" AND s."toTill" AND d."channelId" = $1 AND d."deviceId" = $2
       RETURNING s."seq", s."displayId", s."type", s."payload"`, [till.channelId, till.deviceId]);
@@ -193,9 +233,9 @@ export class DisplaySignallingService {
   }
 
   /** Keeps `body` as the display's only snapshot; one over 204 800 UTF-8 bytes of JSON is refused and the old one stays. */
-  async postSnapshot(ctx: RequestContext, deviceId: string, displayId: string, body: unknown): Promise<void> {
+  async postSnapshot(ctx: RequestContext, device: TillDevice, displayId: string, body: unknown): Promise<void> {
     const now = await this.prune();
-    const till = this.till(ctx, deviceId);
+    const till = await this.device(ctx, device, now);
     await this.transaction(async query => {
       await this.owned(query, till, displayId);
       const text = JSON.stringify(body) ?? 'null';
@@ -285,6 +325,26 @@ export class DisplaySignallingService {
 
   private till(ctx: RequestContext, deviceId: string): Till {
     return { channelId: String(ctx.channelId), deviceId };
+  }
+
+  /** The confirming or adopting session's user identifier: an administrator's email, or the API key's user. */
+  private cashierId(ctx: RequestContext): string {
+    return ctx.session?.user?.identifier ?? String(ctx.activeUserId);
+  }
+
+  /**
+   * The till, when its key's hash matches its device row in this channel; then its `lastCallAt` is refreshed. A missing,
+   * wrong, swapped or unregistered key, or a keyless pre-migration row, is `device_refused`, written nowhere.
+   */
+  private async device(ctx: RequestContext, device: TillDevice, now: number): Promise<Till> {
+    const till = this.till(ctx, device.deviceId);
+    const [row] = await this.query('SELECT "keyHash" FROM "tally_display_device" WHERE "channelId" = $1 AND "deviceId" = $2',
+      [till.channelId, till.deviceId]);
+    const keyHash = sha256Hex(device.deviceKey);
+    if (!row || row.keyHash === null || !sameHash(keyHash, row.keyHash)) throw refuse('device_refused');
+    await this.query('UPDATE "tally_display_device" SET "lastCallAt" = $4 WHERE "channelId" = $1 AND "deviceId" = $2 AND "keyHash" = $3',
+      [till.channelId, till.deviceId, keyHash, at(now)]);
+    return till;
   }
 
   /** Holds the till's own display row until the transaction ends, so a forget cannot strand what it writes; `not_found` otherwise. */
