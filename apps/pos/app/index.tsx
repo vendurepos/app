@@ -108,6 +108,8 @@ const FRAME_WIDE_MIN_HEIGHT = 480;
 // How long the Cart tab lights up when an add on the Products tab lands in the cart (vendurepos #70), and a cart line
 // when an add lands where the cart shows.
 const CART_HIGHLIGHT_MS = 600;
+// How long the till says a sale's receipt didn't print, with Auto-show receipt off (9.5b review): long enough to read.
+const PRINT_FAILED_TOAST_MS = 10_000;
 /** The one filter pill the till shows (CHECKLIST 1.6). */
 const IN_STOCK_PILL = ['inStock'] as const;
 // Fixed at load (nativeCamera never changes), so the hook order is stable.
@@ -606,6 +608,14 @@ function Sale({
   // receipt still mounts for one commit, so SaleReceipt's auto-print (a child's effect, run before this one; window.print()
   // returns once its dialog closes) prints it first.
   const saleDone = useAddToast();
+  // A direct print that fails once its receipt has gone (Auto-show off, or New sale before the printer answered) shows
+  // here, until the next add or PRINT_FAILED_TOAST_MS. While the receipt shows, its own status line says it.
+  const printFailedToast = useAddToast(PRINT_FAILED_TOAST_MS);
+  function onPrintFailedAfterClose(text: string) {
+    // It says the sale is done too, and two toasts would sit on top of each other.
+    saleDone.hide();
+    printFailedToast.show(text);
+  }
   const skippedReceipt = useRef<string | null>(null);
   useEffect(() => {
     if (stage.kind !== 'receipt' || stage.order.id === skippedReceipt.current || loadAutoShowReceipt()) return;
@@ -617,7 +627,10 @@ function Sale({
     // Only the cart takes new lines: a tender or a receipt is for the sale as it stands (a scan has just left them).
     if (stage.kind !== 'cart' && !scanned) return;
     const added = sale.add(entry, connector.traits.product);
-    if (typeof added === 'object' && added.lineId) toast.show(added.lineId);
+    if (typeof added === 'object' && added.lineId) {
+      printFailedToast.hide();
+      toast.show(added.lineId);
+    }
     setScanNotice(null);
     // Confirmed in place: on Products the Cart tab's count and total tick up and the tab lights up briefly; where the
     // cart shows, the line lights up.
@@ -770,7 +783,8 @@ function Sale({
             highlightSku={highlightSku} />
         ) : tenderPane) : stage.kind === 'receipt' ? (
           <ScrollView>
-            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId} />
+            <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId}
+              onPrintFailedAfterClose={onPrintFailedAfterClose} />
           </ScrollView>
         ) : register.session?.status === 'conflict' ? cart(
           <RegisterConflictCard register={register} registerContract={capabilities?.register} onChoseAnother={onRebindRegister} className="mt-2 border border-border" />
@@ -796,6 +810,8 @@ function Sale({
       {/* A line removed meanwhile shows nothing. */}
       <AddToast name={sale.order.lineItems.find((line) => line.id === toast.lineId)?.name ?? null} />
       <AddToast name={saleDone.lineId} title="Sale complete" testID="sale-complete-toast" />
+      <AddToast name={printFailedToast.lineId} title={printFailedToast.lineId ?? ''} testID="print-failed-toast"
+        variant="destructive" />
     </View>
   );
 }

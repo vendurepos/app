@@ -8,7 +8,22 @@ export const PRINTER_CONNECTIONS: ReadonlyArray<{ value: SavedPrinterConnection;
   { value: 'bluetooth', label: 'Bluetooth' },
   { value: 'usb', label: 'USB' },
 ];
+export type SavedPrinterVendor = NonNullable<PrinterProfile['vendor']>;
+// A network printer's make; PrinterProfile reads a missing vendor as `generic`.
+export const PRINTER_VENDORS: readonly { value: SavedPrinterVendor; label: string }[] = [
+  { value: 'epson', label: 'Epson' },
+  { value: 'star', label: 'Star' },
+  { value: 'generic', label: 'Other' },
+];
 export const DEFAULT_PRINTER_PORT = 9100; // v2's default raw-print port, as PrinterProfile's doc says.
+
+// An unknown vendor is dropped, not the printer: the rest of the profile still holds.
+function withKnownVendor(profile: PrinterProfile): PrinterProfile {
+  if (profile.vendor === undefined || PRINTER_VENDORS.some(({ value }) => value === profile.vendor)) return profile;
+  const kept = { ...profile };
+  delete kept.vendor;
+  return kept;
+}
 
 export function loadPrinterProfiles(store: KeyValueStore = defaultStore()): PrinterProfile[] {
   try {
@@ -17,7 +32,7 @@ export function loadPrinterProfiles(store: KeyValueStore = defaultStore()): Prin
       profile !== null && typeof profile === 'object' && typeof profile.id === 'string' &&
       typeof profile.name === 'string' && profile.name.length > 0 &&
       PRINTER_CONNECTIONS.some(({ value }) => value === profile.connectionType) &&
-      (profile.columns === undefined || typeof profile.columns === 'number')) : [];
+      (profile.columns === undefined || typeof profile.columns === 'number')).map(withKnownVendor) : [];
   } catch {
     return [];
   }
@@ -39,8 +54,9 @@ export function printerPaper(profile: PrinterProfile): ReceiptPaper {
 }
 
 export function printerSummary(profile: PrinterProfile): string {
-  const address = profile.address && profile.connectionType === 'network' && profile.port
-    ? `${profile.address}:${profile.port}` : profile.address;
+  const network = profile.connectionType === 'network';
+  const address = profile.address && network && profile.port ? `${profile.address}:${profile.port}` : profile.address;
   return [PRINTER_CONNECTIONS.find(({ value }) => value === profile.connectionType)?.label,
+    network ? PRINTER_VENDORS.find(({ value }) => value === (profile.vendor ?? 'generic'))?.label : undefined,
     address, printerPaper(profile) === '58mm' ? '58 mm' : '80 mm'].filter(Boolean).join(' · ');
 }

@@ -68,8 +68,23 @@ it.each([[32, '58mm'], [42, '80mm'], [undefined, '80mm']] as const)('maps %s col
   expect(printerPaper({ ...printer, columns })).toBe(paper);
 });
 
-it('summarizes a network address with its port and paper width', () => {
-  expect(printerSummary(printer)).toBe('Network · 192.168.1.50:9100 · 80 mm');
+it('round-trips each vendor and still loads an old profile with none', () => {
+  const { vendor: _, ...old } = printer;
+  for (const profile of [printer, { ...printer, id: 'star', vendor: 'star' as const }, { ...printer, id: 'other', vendor: 'generic' as const }, { ...old, id: 'old' }]) {
+    savePrinterProfile(profile, store);
+  }
+  expect(loadPrinterProfiles(store).map((profile) => profile.vendor)).toEqual(['epson', 'star', 'generic', undefined]);
+});
+
+it('drops an unknown vendor and keeps the rest of the profile', () => {
+  store.setItem(PRINTER_PROFILES_KEY, JSON.stringify([{ ...printer, vendor: 'zebra' }]));
+  const { vendor: _, ...rest } = printer;
+  expect(loadPrinterProfiles(store)).toStrictEqual([rest]);
+});
+
+it('summarizes a network address with its make, port and paper width', () => {
+  expect(printerSummary(printer)).toBe('Network · Epson · 192.168.1.50:9100 · 80 mm');
+  expect(printerSummary({ ...printer, vendor: 'generic' })).toBe('Network · Other · 192.168.1.50:9100 · 80 mm');
 });
 
 it('summarizes USB without an address', () => {
