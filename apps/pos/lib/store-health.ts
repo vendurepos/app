@@ -83,10 +83,23 @@ export type AttentionRow = { order: PosOrder; reason: string; retry: boolean };
 /** A refused sale that Retry can fix: a requeueable code, exactly where TallyUI's OrdersList offers Retry. */
 export const canSendAgain = (order: PosOrder): boolean => order.syncStatus === 'rejected' && isRequeueable(order.error?.code);
 
+const FIELD_PATH = /^[A-Za-z_]\w*(\[\d+\])?(\.[A-Za-z_]\w*(\[\d+\])?)*$/;
+
+/** An `invalid_payload` refusal's field paths (its message is `; `-joined `<path>: <reason>` items), deduped, at most 3.
+ * Only the path is ever returned: the reason after it is the server's text. */
+export function refusedFields(error: { code?: string; message?: string } | undefined): string[] {
+  if (error?.code !== 'invalid_payload' || !error.message) return [];
+  const paths = error.message.split('; ').filter(part => part.includes(': ')).map(part => part.slice(0, part.indexOf(': ')));
+  return [...new Set(paths.filter(path => FIELD_PATH.test(path)))].slice(0, 3);
+}
+
 /** Why an order needs attention, in Store health's words; `stuck` gives a pending sale's reason. */
 export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): string {
   const entry = stuck?.orders.find((entry) => entry.commandId === order.commandId);
-  if (order.syncStatus === 'rejected') return 'Refused by the store' + (order.error?.code ? ` — ${order.error.code}` : '');
+  if (order.syncStatus === 'rejected') {
+    const fields = refusedFields(order.error);
+    return 'Refused by the store' + (order.error?.code ? ` — ${order.error.code}` : '') + (fields.length ? `: ${fields.join(', ')}` : '');
+  }
   if (order.syncStatus === 'pending') return "Can't reach the store" + (entry ? ` — ${entry.reason}` : '');
   return order.lateSessionId !== undefined ? 'Taken after the register closed' : 'Synced with a warning';
 }

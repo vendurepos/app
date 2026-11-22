@@ -80,6 +80,16 @@ it("keeps a register command result's key and outcome, never its figures", () =>
   expect(redactLogData({ result: ['applied'] })).toBeUndefined();
 });
 
+it("keeps a refused order's code and message, and never a code without an order and a message", () => {
+  expect(redactLogData({ orderId: 'o1', code: 'invalid_payload', message: 'payments[0].methodId: must be a string' }))
+    .toEqual({ orderId: 'o1', errorCode: 'invalid_payload', error: 'payments[0].methodId: must be a string' });
+  expect(redactLogData({ orderId: 'o1', code: 'platform_error', message: 'ask ann@example.com' }))
+    .toEqual({ orderId: 'o1', errorCode: 'platform_error', error: 'ask [email]' });
+  expect(redactLogData({ code: '123456' })).toBeUndefined();
+  expect(redactLogData({ code: '123456', message: 'paired' })).toBeUndefined();
+  expect(redactLogData({ orderId: 'o1', code: 'x' })).toEqual({ orderId: 'o1' });
+});
+
 it('keeps error text from cause, error and a context object, and drops other data', () => {
   expect(redactLogData({ cause: new Error('boom'), ids: ['a'] })).toEqual({ cause: 'boom' });
   expect(redactLogData({ context: { registerId: 'r1', error: 'x', extra: { a: 1 } } })).toEqual({ registerId: 'r1', error: 'x' });

@@ -22,7 +22,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 }
 
-/** An allow-list: ids, outcomes and error text from `data` (and its `context`); everything else is dropped. */
+/** An allow-list: ids, outcomes and error text from `data` (and its `context`), and a refused order's code and message,
+ * since the refusal sentence points the owner at this log; everything else is dropped. */
 export function redactLogData(data: Record<string, unknown> | undefined): KeptLogData | undefined {
   if (!data) return undefined;
   // A top-level key wins over the same key in `context`.
@@ -46,6 +47,13 @@ export function redactLogData(data: Record<string, unknown> | undefined): KeptLo
       if (typeof error.code === 'string') kept.errorCode = text(error.code);
       if (kept.error === undefined && typeof error.message === 'string') kept.error = text(error.message);
     }
+  }
+  // The outbox's refusal ({ orderId, code, message }) keeps its code and message: the till's refusal sentence sends the
+  // owner to this log. All three are needed, so a bare `code` (a display pairing code) is never kept.
+  const { orderId, code, message } = source;
+  if (typeof orderId === 'string' && typeof code === 'string' && typeof message === 'string') {
+    kept.errorCode = text(code);
+    if (kept.error === undefined) kept.error = text(message);
   }
   return Object.keys(kept).length > 0 ? kept : undefined;
 }
