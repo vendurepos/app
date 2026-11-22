@@ -46,6 +46,8 @@ export type SignalMessage = { type: 'offer' | 'answer' | 'ice'; payload: string 
 export type TillDevice = { deviceId: string; deviceKey: string };
 type Till = { channelId: string; deviceId: string };
 type Query = (sql: string, params?: unknown[]) => Promise<Array<Record<string, any>>>;
+/** DeletionResult's values, from @vendure/common, which the plugin does not depend on. */
+type DeletionResult = 'DELETED' | 'NOT_DELETED';
 
 // The floor of ADR-085 d4–d6 and d8, as TallyUI's reference server has it.
 const MINUTE = 60_000;
@@ -314,6 +316,44 @@ export class DisplaySignallingService {
   async readSnapshot(token: string): Promise<unknown> {
     const [held] = await this.byToken(token, (query, displayId) => query('SELECT "body" FROM "tally_display_snapshot" WHERE "displayId" = $1', [displayId]));
     return held ? JSON.parse(held.body) as unknown : null;
+  }
+
+  /** The admin's view of this channel's devices (9.8e): ids, key state, times and display names, never a secret or a cashier. */
+  async listDevices(ctx: RequestContext) {
+    await this.prune();
+    const channelId = String(ctx.channelId);
+    const devices = await this.query(`SELECT "deviceId", "keyHash" IS NOT NULL AS "keyIssued", "adoptedAt", "lastCallAt" FROM "tally_display_device"
+      WHERE "channelId" = $1 ORDER BY "lastCallAt" DESC, "deviceId"`, [channelId]);
+    const displays = await this.query(`SELECT "id", "deviceId", "name", "confirmedAt", "lastSeenAt" FROM "tally_display"
+      WHERE "channelId" = $1 ORDER BY "confirmedAt"`, [channelId]);
+    return devices.map(device => ({
+      deviceId: device.deviceId as string, keyIssued: device.keyIssued as boolean, adoptedAt: device.adoptedAt, lastCallAt: device.lastCallAt,
+      displays: displays.filter(display => display.deviceId === device.deviceId)
+        .map(display => ({ id: display.id, name: display.name, confirmedAt: display.confirmedAt, lastSeenAt: display.lastSeenAt })),
+    }));
+  }
+
+  /**
+   * An admin reset (9.8e): deletes the device row with every display, code and pending pairing it owns in this channel,
+   * in one transaction, so the id registers as new. The device row goes first and takes its lock, so a racing register
+   * waits and then sees it gone. Never returns an id to the keyless state. An id with no rows deletes nothing.
+   */
+  async resetDevice(ctx: RequestContext, deviceId: string): Promise<{ result: DeletionResult; message?: string }> {
+    await this.prune();
+    const till = this.till(ctx, deviceId);
+    const params = [till.channelId, till.deviceId];
+    const [devices, pending, displays, codes] = await this.transaction(async query => [
+      (await query('DELETE FROM "tally_display_device" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
+      // Pending before display, the order `confirm` takes them in, so a racing confirm cannot deadlock the reset.
+      (await query('DELETE FROM "tally_display_pending" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
+      // A display's snapshot and both inboxes go with it by ON DELETE CASCADE.
+      (await query('DELETE FROM "tally_display" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
+      (await query('DELETE FROM "tally_display_code" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
+    ]);
+    const deleted = devices + displays + codes + pending;
+    if (deleted === 0) return { result: 'NOT_DELETED', message: 'No customer display device with this id in this channel' };
+    Logger.info(`Customer display device ${JSON.stringify(deviceId)} in channel ${till.channelId} reset by user ${String(ctx.activeUserId)}: ${displays} displays, ${codes} codes, ${pending} pending pairings`, loggerCtx);
+    return { result: 'DELETED' };
   }
 
   /** Deletes whatever has expired and gives the time the call runs at. */

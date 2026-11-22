@@ -7,7 +7,7 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/spikes/s1-order-recipe.md`).
 
 The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
-commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough). The plugin also declares `ApproveTallyPosVariance` for managers who approve a close over the variance threshold. It opens neither route, and nothing checks it until the approval route lands. It also declares `TallyPosRefund`, which the coming `order.refund` command will check. It opens neither route either, and the till role preset leaves it out: a store grants refunds to the roles it chooses. medusapos ADR 0023's `UseTallyPos` is `TallyPosSell` (or `CreateOrder`) here. These permission names are public API once a role stores them, so they are never renamed.
+commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough). The plugin also declares `ApproveTallyPosVariance` for managers who approve a close over the variance threshold. It opens neither route, and nothing checks it until the approval route lands. It also declares `TallyPosRefund`, which the coming `order.refund` command will check. It opens neither route either, and the till role preset leaves it out: a store grants refunds to the roles it chooses. `TallyPosResetDisplayDevice` lists a channel's customer-display devices and resets one through the Admin API; SuperAdmin holds it, and the till role preset leaves it out. medusapos ADR 0023's `UseTallyPos` is `TallyPosSell` (or `CreateOrder`) here. These permission names are public API once a role stores them, so they are never renamed.
 
 **Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
 so it emits no event. A command already in the ledger always replays its recorded answer first. A
@@ -324,6 +324,11 @@ state is in Postgres, so any server instance answers any call.
   `X-Tally-Device-Id`; a missing, malformed or wrong key is `403 device_refused`. Only the key's SHA-256 is stored.
   A device that owns no display, code or pending pairing and makes no till call for over 30 days is dropped, and its
   id registers again.
+- An admin reset unsticks a till whose key was lost. The Admin API's `tallyDisplayDevices` (no keys, tokens or codes)
+  and `tallyResetDisplayDevice(deviceId)` need `TallyPosResetDisplayDevice` in the device's channel, so send that
+  channel's `vendure-token`. A reset deletes the device with its displays, codes and pending pairings: the till's next
+  call is `403 device_refused`, its register then gets a new key, and its displays must be paired again. A reset is
+  logged with the admin's user id. An unknown id answers `NOT_DELETED`.
 - A database fault on these routes answers `500` with no `code`, and the till keeps its key. Only `403 device_refused`
   makes a till drop its key and register again. The key travels in the `X-Tally-Device-Key` header, so an
   `errorHandlers` entry or proxy that records request headers should redact it.

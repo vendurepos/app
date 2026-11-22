@@ -7,3 +7,5 @@ export const tallyPosApproveVariance = new PermissionDefinition({ name: 'Approve
 export const tallyPosRefund = new PermissionDefinition({ name: 'TallyPosRefund', description: 'Refund a sale at a VendurePOS till' });
 /** Pair, list, signal and forget customer displays at a VendurePOS till (TallyUI ADR-085's `customer_display.pair`). The only permission the till-side `/tally/v1/displays` routes accept; TallyPosSell and CreateOrder do not open them. */
 export const tallyPosPairDisplay = new PermissionDefinition({ name: 'TallyPosPairDisplay', description: 'Pair a customer display at a VendurePOS till' });
+/** Lists a channel's customer-display devices and resets one, so a till whose device key was lost registers again (9.8e). */
+export const tallyPosResetDisplayDevice = new PermissionDefinition({ name: 'TallyPosResetDisplayDevice', description: "Reset a VendurePOS till's customer-display device" });
