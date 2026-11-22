@@ -69,7 +69,7 @@ import { SaleCart } from '../lib/sale-cart';
 import { SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { loadCameraPanelHeight, saveCameraPanelHeight } from '../lib/scanner-settings';
-import { defaultStore, tillIdentity, type Session } from '../lib/session';
+import { defaultStore, sessionContext, tillIdentity, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { SignInAgain } from '../lib/sign-in-again';
 import { signOutLockReason } from '../lib/sign-out-lock';
@@ -392,7 +392,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
           {openOrder ? <OrderSheet session={session} row={openOrder} timezone={TIMEZONE} onClose={() => setOpenOrder(null)} onRetry={outbox.requeue} footer={(order, reload) => <RefundSheet order={order}
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
             capabilities={readSettingsCapabilities} onRefunded={reload} />}
-            receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back} />} /> : null}
+            receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back}
+              capabilities={readSettingsCapabilities} context={sessionContext(session)} />} /> : null}
           <View className="flex-1" style={openOrder ? { display: 'none' } : undefined}>
             <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
               till={{ orders: outbox.recent, onRetry: outbox.requeue, stuck: outbox.state.stuck }}
@@ -541,6 +542,7 @@ function Sale({
   const catalogueFilters = useCatalogueFilters(settingsOpen);
   const approvalSheet = useApprovalSheet({ session, register, capabilities });
   const identity = tillIdentity(session);
+  const receiptContext = useMemo(() => sessionContext(session), [session]);
   const [tenderDrawer, setTenderDrawer] = useState<string | null>(null);
   // The sale's register: the drawer its tender pinned (pay-gate), else the bound one (Front desk, 2026-11-20).
   const saleRegisterId = tenderDrawer ?? boundRegisterId;
@@ -791,7 +793,7 @@ function Sale({
         )) : stage.kind === 'receipt' ? (
           <ScrollView>
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId}
-              onPrintFailedAfterClose={onPrintFailedAfterClose} />
+              onPrintFailedAfterClose={onPrintFailedAfterClose} orders={outbox.orders} capabilities={capabilities} context={receiptContext} />
           </ScrollView>
         ) : register.session?.status === 'conflict' ? cart(
           <RegisterConflictCard register={register} registerContract={capabilities?.register} onChoseAnother={onRebindRegister} className="mt-2 border border-border" />

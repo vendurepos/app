@@ -2,9 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ServerCapabilities, SyncContext } from '@tallyui/core';
 import { RECEIPT_EMAIL_DAILY_LIMIT_TEXT, RECEIPT_EMAIL_DISABLED_TEXT, RECEIPT_EMAIL_FAILED_TEXT, RECEIPT_EMAIL_FORBIDDEN_TEXT,
   RECEIPT_EMAIL_INVALID_TEXT, RECEIPT_EMAIL_NOT_TILL_ORDER_TEXT, RECEIPT_EMAIL_ORDER_GONE_TEXT, RECEIPT_EMAIL_ORDER_LIMIT_TEXT,
-  RECEIPT_EMAIL_RATE_LIMITED_TEXT, RECEIPT_EMAIL_UNAUTHORIZED_TEXT, RECEIPT_EMAIL_UNKNOWN_TEXT, canEmailReceipt, sendReceiptEmail } from './receipt-email';
+  RECEIPT_EMAIL_RATE_LIMITED_TEXT, RECEIPT_EMAIL_TIMEOUT_MS, RECEIPT_EMAIL_UNAUTHORIZED_TEXT, RECEIPT_EMAIL_UNKNOWN_TEXT, canEmailReceipt,
+  sendReceiptEmail } from './receipt-email';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 const context = { baseUrl: 'https://store.test', headers: { Authorization: 'Bearer t' } } as unknown as SyncContext;
 const respond = (status: number, body?: unknown) => vi.fn(async () =>
   new Response(typeof body === 'string' ? body : JSON.stringify(body ?? {}), { status }));
@@ -64,5 +65,27 @@ it('never retries a send whose request threw', async () => {
   const fetch = vi.fn(async () => { throw new TypeError('network'); });
   vi.stubGlobal('fetch', fetch);
   expect(await sendReceiptEmail(context, 'DEMO-000001', 'a@b.co')).toBe(RECEIPT_EMAIL_UNKNOWN_TEXT);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it.each([408, 524])('reads a %i as may or may not have been sent, and never retries it', async (status) => {
+  const fetch = respond(status, '<html>Timed out</html>');
+  vi.stubGlobal('fetch', fetch);
+  expect(await sendReceiptEmail(context, 'DEMO-000001', 'a@b.co')).toBe(RECEIPT_EMAIL_UNKNOWN_TEXT);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('ends a send that never answers when the timeout fires, as may or may not have been sent, and never retries it', async () => {
+  vi.useFakeTimers();
+  // A real fetch rejects with an AbortError when its signal aborts.
+  const fetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init.signal!.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+  }));
+  vi.stubGlobal('fetch', fetch);
+  const sent = sendReceiptEmail(context, 'DEMO-000001', 'a@b.co');
+  await vi.advanceTimersByTimeAsync(RECEIPT_EMAIL_TIMEOUT_MS - 1);
+  expect(fetch.mock.calls[0][1].signal!.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await sent).toBe(RECEIPT_EMAIL_UNKNOWN_TEXT);
   expect(fetch).toHaveBeenCalledTimes(1);
 });

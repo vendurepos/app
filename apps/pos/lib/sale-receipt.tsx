@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import { Button, discountLabel, orderReference, Text, VStack } from '@tallyui/components';
-import { buildReceiptData, CurrencyProvider, type useSale } from '@tallyui/pos';
+import type { ServerCapabilities, SyncContext } from '@tallyui/core';
+import { buildReceiptData, CurrencyProvider, type PosOrder, type useSale } from '@tallyui/pos';
+import type { RxCollection } from 'rxdb';
 import { loadAutoPrint } from './auto-print-setting';
+import { canEmailReceipt } from './receipt-email';
+import { EmailReceiptAction, ReceiptEmailPanel, receiptEmailDefault, useReceiptEmailToggle, useStoredOrderCode } from './receipt-email-action';
 import { printFailedAfterClose, useReceiptPrinter } from './receipt-printer';
 import { ReceiptView } from './receipt-view';
 
 /**
  * The completed sale's receipt, from the order as finalized and stored; New sale starts the next one.
  * `onPrintFailedAfterClose` hears of a direct print (auto or Print receipt) that failed once this receipt had gone;
- * while it shows, its own status line says so.
+ * while it shows, its own status line says so. Email receipt shows once the store has the order (its code is in `orders`).
  */
-export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFailedAfterClose }: {
+export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFailedAfterClose, orders, capabilities, context }: {
   sale: ReturnType<typeof useSale>; store: string; cashier: string; registerId: string; till?: boolean;
   onPrintFailedAfterClose?(text: string): void;
+  orders?: RxCollection<PosOrder> | null; capabilities?: ServerCapabilities; context?: SyncContext;
 }) {
   const mounted = useRef(true);
   useEffect(() => {
@@ -23,6 +28,9 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
   const printedFor = useRef<string | null>(null);
   const { stage } = sale;
   const receiptOrderId = stage.kind === 'receipt' ? stage.order.id : null;
+  // The outbox keys the stored order by the PosOrder's own id; the sale order's id is only its `saleId`.
+  const code = useStoredOrderCode(orders ?? null, stage.kind === 'receipt' ? stage.posOrder.id : null);
+  const email = useReceiptEmailToggle();
   const receipt = useMemo(() => stage.kind === 'receipt'
     ? buildReceiptData(stage.order, { storeName: store, cashier, register: registerId }) : null, [stage, store, cashier, registerId]);
   const { printer, busy, status, print: printDirect } = useReceiptPrinter();
@@ -43,6 +51,7 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
   }, [receiptOrderId, print, afterPrint]);
   if (stage.kind !== 'receipt' || receipt === null) return null;
   const { order, posOrder } = stage;
+  const emailTo = canEmailReceipt(capabilities) && code !== null && context !== undefined ? { code, context } : null;
   return (
     <>
       <ReceiptView receipt={receipt} testID="receipt"
@@ -62,6 +71,7 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
                 <Text>Print with the dialog</Text>
               </Button>
             ) : null}
+            {emailTo ? <EmailReceiptAction testID="receipt-email" open={email.open} onToggle={email.toggle} /> : null}
             <Button testID="new-sale" className="flex-1" onPress={sale.newSale}>
               <Text>New sale</Text>
             </Button>
@@ -71,6 +81,10 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
         <VStack dataSet={{ print: 'hide' }} space="none" className="px-3 pb-3">
           <Text testID="receipt-print-status">{status.text}</Text>
         </VStack>
+      ) : null}
+      {emailTo && email.open ? (
+        <ReceiptEmailPanel testID="receipt-email-panel" context={emailTo.context} orderCode={emailTo.code}
+          defaultAddress={receiptEmailDefault(order.customer)} sendKey={email.sendKey} />
       ) : null}
     </>
   );

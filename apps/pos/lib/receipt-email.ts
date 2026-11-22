@@ -18,10 +18,15 @@ export const RECEIPT_EMAIL_RATE_LIMITED_TEXT = 'Too many receipts sent just now.
 export const RECEIPT_EMAIL_ORDER_LIMIT_TEXT = "This order's receipt has been emailed as many times as the store allows.";
 /** A user or channel daily cap was hit (429 user_daily_limit or channel_daily_limit). */
 export const RECEIPT_EMAIL_DAILY_LIMIT_TEXT = 'The daily limit for emailed receipts has been reached.';
-/** The request threw (network, abort) or a gateway answered (502, 503, 504), so the send may or may not have happened. */
+/** The request threw (network, timeout) or a timeout or gateway status answered (408, 502, 503, 504, 524), so the send may or may not have happened. */
 export const RECEIPT_EMAIL_UNKNOWN_TEXT = "The store didn't answer, so the receipt may or may not have been sent. Check with the customer before sending it again.";
 /** Any other answer: another 5xx, an unknown code, a non-JSON body or a 2xx that is not the route's. */
 export const RECEIPT_EMAIL_FAILED_TEXT = "Can't send the receipt. Try again.";
+
+// A hung send must end. The route is not idempotent, so a timeout reads as unknown (RECEIPT_EMAIL_UNKNOWN_TEXT), never as a retry.
+export const RECEIPT_EMAIL_TIMEOUT_MS = 20_000;
+// Answers that may come after the store sent the email: a request timeout (408), a gateway's error (502, 503, 504) or Cloudflare's timeout (524).
+const UNKNOWN_STATUSES = new Set([408, 502, 503, 504, 524]);
 
 // The cashier text for each `status code` refusal the plugin's receipt-email route writes (packages/vendure-plugin/README.md, "Receipt email").
 const REFUSALS: Record<string, string> = {
@@ -43,20 +48,26 @@ export function canEmailReceipt(capabilities: ServerCapabilities | undefined): b
  * The route is not idempotent (each accepted call sends one email), so this never retries; it never logs the address or the body.
  */
 export async function sendReceiptEmail(context: SyncContext, orderCode: string, address: string): Promise<string | null> {
+  // One timer covers the request and the body read; an abort rejects either, as a network failure would.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), RECEIPT_EMAIL_TIMEOUT_MS);
   let response: Response;
+  let body: { queued?: unknown; code?: unknown; retryAt?: unknown } | null;
   try {
-    response = await fetch(`${context.baseUrl}/tally/v1/orders/${encodeURIComponent(orderCode)}/receipt-email`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...context.headers }, body: JSON.stringify({ emailAddress: address.trim() }) });
-  } catch { return RECEIPT_EMAIL_UNKNOWN_TEXT; }
-  const body = await response.json().catch(() => null);
+    try {
+      response = await fetch(`${context.baseUrl}/tally/v1/orders/${encodeURIComponent(orderCode)}/receipt-email`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...context.headers }, body: JSON.stringify({ emailAddress: address.trim() }),
+        signal: abort.signal });
+    } catch { return RECEIPT_EMAIL_UNKNOWN_TEXT; }
+    body = await response.json().catch(() => null);
+  } finally { clearTimeout(timer); }
   // Queued only on the route's own answer: a 2xx from anything else (a proxy's page) sent nothing.
   if (response.status === 202 && body?.queued === true) return null;
-  // A gateway's error may come after the store sent the email, and the route is not idempotent.
-  if (response.status === 502 || response.status === 503 || response.status === 504) return RECEIPT_EMAIL_UNKNOWN_TEXT;
+  if (UNKNOWN_STATUSES.has(response.status)) return RECEIPT_EMAIL_UNKNOWN_TEXT;
   const code = typeof body?.code === 'string' ? body.code : undefined;
   if (response.status === 401 || response.status === 403) return code === 'forbidden' ? RECEIPT_EMAIL_FORBIDDEN_TEXT : RECEIPT_EMAIL_UNAUTHORIZED_TEXT;
   if (response.status === 404 && !code) return RECEIPT_EMAIL_DISABLED_TEXT;
   const text = (code !== undefined && REFUSALS[`${response.status} ${code}`]) || RECEIPT_EMAIL_FAILED_TEXT;
-  const retryAt = text === RECEIPT_EMAIL_DAILY_LIMIT_TEXT && typeof body.retryAt === 'string' ? Date.parse(body.retryAt) : NaN;
+  const retryAt = text === RECEIPT_EMAIL_DAILY_LIMIT_TEXT && typeof body?.retryAt === 'string' ? Date.parse(body.retryAt) : NaN;
   return Number.isNaN(retryAt) ? text : `${text} Try again after ${new Date(retryAt).toLocaleString()}.`;
 }
