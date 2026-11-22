@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import { Button, discountLabel, orderReference, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, CurrencyProvider, type useSale } from '@tallyui/pos';
@@ -8,12 +8,21 @@ import { ReceiptView } from './receipt-view';
 
 /**
  * The completed sale's receipt, from the order as finalized and stored; New sale starts the next one.
- * `onAutoPrintFailed` hears of a failed auto-print to the direct printer, after this receipt may have gone.
+ * `onPrintFailedAfterClose` hears of a direct print (auto or Print receipt) that failed once this receipt had gone;
+ * while it shows, its own status line says so.
  */
-export function SaleReceipt({ sale, store, cashier, registerId, till, onAutoPrintFailed }: {
+export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFailedAfterClose }: {
   sale: ReturnType<typeof useSale>; store: string; cashier: string; registerId: string; till?: boolean;
-  onAutoPrintFailed?(text: string): void;
+  onPrintFailedAfterClose?(text: string): void;
 }) {
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const afterPrint = useCallback((failure: string | null) => {
+    if (failure !== null && !mounted.current) onPrintFailedAfterClose?.(failure);
+  }, [onPrintFailedAfterClose]);
   const printedFor = useRef<string | null>(null);
   const { stage } = sale;
   const receiptOrderId = stage.kind === 'receipt' ? stage.order.id : null;
@@ -29,8 +38,8 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onAutoPrin
   useEffect(() => {
     if (receiptOrderId === null || receiptOrderId === printedFor.current) return;
     printedFor.current = receiptOrderId;
-    if (loadAutoPrint()) void print?.().then((failure) => { if (failure !== null) onAutoPrintFailed?.(failure); });
-  }, [receiptOrderId, print, onAutoPrintFailed]);
+    if (loadAutoPrint()) void print?.().then(afterPrint);
+  }, [receiptOrderId, print, afterPrint]);
   if (stage.kind !== 'receipt' || receipt === null) return null;
   const { order, posOrder } = stage;
   return (
@@ -43,7 +52,7 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onAutoPrin
           <>
             {/* The direct printer or the browser's print dialog; native has no print path yet, so no button there. */}
             {print ? (
-              <Button testID="receipt-print" variant="secondary" disabled={busy} onPress={() => void print()}>
+              <Button testID="receipt-print" variant="secondary" disabled={busy} onPress={() => void print().then(afterPrint)}>
                 <Text>Print receipt</Text>
               </Button>
             ) : null}

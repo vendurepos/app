@@ -608,11 +608,10 @@ function Sale({
   // receipt still mounts for one commit, so SaleReceipt's auto-print (a child's effect, run before this one; window.print()
   // returns once its dialog closes) prints it first.
   const saleDone = useAddToast();
-  // With auto-show off, the receipt has gone before its auto-print to a direct printer settles: a failure shows here,
-  // until the next add or PRINT_FAILED_TOAST_MS. With auto-show on, the receipt's own status line says it.
+  // A direct print that fails once its receipt has gone (Auto-show off, or New sale before the printer answered) shows
+  // here, until the next add or PRINT_FAILED_TOAST_MS. While the receipt shows, its own status line says it.
   const printFailedToast = useAddToast(PRINT_FAILED_TOAST_MS);
-  function onAutoPrintFailed(text: string) {
-    if (loadAutoShowReceipt()) return;
+  function onPrintFailedAfterClose(text: string) {
     // It says the sale is done too, and two toasts would sit on top of each other.
     saleDone.hide();
     printFailedToast.show(text);
@@ -785,7 +784,7 @@ function Sale({
         ) : tenderPane) : stage.kind === 'receipt' ? (
           <ScrollView>
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId}
-              onAutoPrintFailed={onAutoPrintFailed} />
+              onPrintFailedAfterClose={onPrintFailedAfterClose} />
           </ScrollView>
         ) : register.session?.status === 'conflict' ? cart(
           <RegisterConflictCard register={register} registerContract={capabilities?.register} onChoseAnother={onRebindRegister} className="mt-2 border border-border" />
