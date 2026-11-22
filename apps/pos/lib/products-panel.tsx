@@ -62,7 +62,7 @@ export function ProductsPanel({ products, traits, currency, session }: { product
     { id: 'image', header: 'Image', hideHeader: true, flex: 0.6, render: row => row.imageUrl ?
       <Image source={{ uri: row.imageUrl }} testID={`product-image-${row.id}`} accessibilityLabel={row.name}
         resizeMode="cover" className="h-10 w-10 rounded" /> : <View testID={`product-image-${row.id}`} className="h-10 w-10 rounded bg-muted" /> },
-    { id: 'name', header: 'Name', flex: 3, sortValue: row => productRowSortValue(row, 'name'), render: row => row.group ? <VStack className="items-start gap-0.5">
+    { id: 'name', header: 'Name', flex: 2.5, sortValue: row => productRowSortValue(row, 'name'), render: row => row.group ? <VStack className="items-start gap-0.5">
       <Text>{row.name}</Text>
       <Pressable testID={`product-variations-${row.group.productId}`} accessibilityRole="button" aria-expanded={row.group.open}
         accessibilityLabel={`Show variations of ${row.name}`} onPress={() => toggle(row.group!.productId)}>
@@ -83,9 +83,10 @@ export function ProductsPanel({ products, traits, currency, session }: { product
       <Text testID={`product-stock-status-${row.id}`}>{STOCK_STATUS_LABELS[row.stockStatus]}</Text>
     </HStack> },
     { id: 'categories', header: 'Categories', flex: 1.5, render: row => <Text numberOfLines={1} testID={`product-categories-${row.id}`}>{row.categories}</Text> },
-    { id: 'price', header: 'Price', align: 'right', sortValue: row => productRowSortValue(row, 'price'), render: row => priceEditable && !row.group ?
+    // Price 1.5, taken from Name: at 960 px a group's range ("€8.99 – €29.99") stays on one line (CHECKLIST 10.2l; v2's 08 wraps it, one line is our call).
+    { id: 'price', header: 'Price', align: 'right', flex: 1.5, sortValue: row => productRowSortValue(row, 'price'), render: row => priceEditable && !row.group ?
       <EditField testID={`product-price-${row.id}`} label={`Price of ${row.name}`} prefix={currencySymbol(currency)} value={row.priceText}
-        keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text>{row.price}</Text> },
+        keyboardType="decimal-pad" onSave={text => save(row, { field: 'price', text })} /> : <Text testID={row.group ? `product-price-range-${row.group.productId}` : undefined}>{row.price}</Text> },
   ], [editable, priceEditable, save, currency, toggle]);
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
