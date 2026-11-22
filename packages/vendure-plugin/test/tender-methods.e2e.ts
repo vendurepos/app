@@ -292,11 +292,39 @@ describe('tender methods', () => {
     }
     await remove('held-gone');
     const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
-    await expect(recipe.resolveNeedsAdmin(ctx, command.id, 'rejected', 'card sale discarded')).rejects.toThrow('its method held-gone no longer exists in this channel');
+    await expect(recipe.resolveNeedsAdmin(ctx, command.id, 'rejected', 'card sale discarded')).rejects.toThrow('its method held-gone no longer exists in this channel; add a Tally POS payment method with code held-gone, then reject again');
     expect(await connection.rawConnection.getRepository(TallyCommand).findOneByOrFail({ id: command.id })).toMatchObject({ status: 'needs_admin' });
     const [order] = await connection.rawConnection.getRepository(Order).find({
       where: { customFields: { tallyClientOrderId: command.payload.clientOrderId } }, relations: ['payments'] });
     expect(order.payments.map(payment => [payment.method, payment.state])).toEqual([['held-gone', 'Settled']]);
+    // 3.2a-2 fix 3: the advice works; a recreated method with that code lets the rejection cancel the payment.
+    await createMethod('held-gone', 'Held gone', { tender: 'card', checker: true });
+    try {
+      await recipe.resolveNeedsAdmin(ctx, command.id, 'rejected', 'card sale discarded');
+      const [rejected] = await connection.rawConnection.getRepository(Order).find({
+        where: { customFields: { tallyRejectedClientOrderId: command.payload.clientOrderId } }, relations: ['payments'] });
+      expect(rejected.payments.map(payment => [payment.method, payment.state])).toEqual([['held-gone', 'Cancelled']]);
+    } finally {
+      await remove('held-gone');
+    }
+  });
+
+  // R4: a second enabled method coded tally-pos makes Vendure's resolution of tally-pos arbitrary, so every sale is refused.
+  it('(y) a second enabled method coded tally-pos refuses every sale store_configuration, unstored', async () => {
+    const { createPaymentMethod: { id } } = await adminClient.query<{ createPaymentMethod: { id: string } }>(parse(`
+      mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: {
+      code: 'tally-pos', enabled: true, handler: { code: 'dummy-payment-handler', arguments: [{ name: 'automaticSettle', value: 'true' }] },
+      translations: [{ languageCode: 'en', name: 'Second tally-pos', description: '' }] } });
+    try {
+      for (const command of [sale(10, [{ method: 'external', methodId: 'card-terminal' }]), sale(7, [{ method: 'cash' }])]) {
+        expect(await send(command)).toMatchObject({ id: command.id, status: 'rejected', error: { code: 'store_configuration' } });
+        expect(await connection.rawConnection.getRepository(TallyCommand).countBy({ id: command.id })).toBe(0);
+      }
+    } finally {
+      await adminClient.query(parse('mutation Delete($id: ID!) { deletePaymentMethod(id: $id, force: true) { result } }'), { id });
+    }
+    const restored = sale(7, [{ method: 'cash' }]);
+    expect(await send(restored)).toMatchObject({ id: restored.id, status: 'applied' });
   });
 
   describe('older tills with no cash method on the channel', () => {

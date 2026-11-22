@@ -282,7 +282,7 @@ export class OrderCreateService {
           if (unusable) throw refuse(`payment ${payment.id} cannot be cancelled: its method ${payment.method} ${{
             disabled: 'is disabled; enable it and reject again',
             duplicate_code: 'shares its code with another payment method; give one a unique code and reject again',
-            unknown: 'no longer exists in this channel; cancel the payment in the Vendure Dashboard' }[unusable]}`);
+            unknown: `no longer exists in this channel; add a Tally POS payment method with code ${payment.method}, then reject again` }[unusable]}`);
           const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
           if (isGraphQlErrorResult(cancelledPayment) || cancelledPayment.state !== 'Cancelled') {
             throw refuse(`payment ${payment.id} cannot be cancelled`);

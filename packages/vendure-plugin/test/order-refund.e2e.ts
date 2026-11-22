@@ -603,7 +603,18 @@ describe('order.refund v1', () => {
     expect(later.result.warnings).toEqual([later.fallback('unknown')]);
     expect([later.payment.method, later.payment.metadata.tender.methodId]).toEqual(['tally-pos', 'gone']);
     await refused(refundFor(sold.order, session), sold.order.id, 'payment_method_unavailable',
-      'Payment method gone no longer exists in this channel; refund this payment in the Vendure Dashboard', { paymentId: sold.order.payments[0].id, method: 'gone' });
+      'Payment method gone no longer exists in this channel; add a Tally POS payment method with code gone, then refund again',
+      { paymentId: sold.order.payments[0].id, method: 'gone' });
     expect(await refundRows(sold.order)).toBe(0);
+    // 3.2a-2 fix 3: the advice works; a recreated method with that code takes the refund.
+    const recreated = await createMethod('gone', 'tally-pos');
+    try {
+      expect(await post(refundFor(sold.order, session))).toMatchObject({ status: 'applied' });
+      const rows = await connection.rawConnection.getRepository(Refund)
+        .findBy({ paymentId: In(sold.order.payments.map(({ id }) => environment.decode(id))) });
+      expect(rows.map(row => row.state)).toEqual(['Settled']);
+    } finally {
+      await removeMethod(recreated);
+    }
   });
 });

@@ -139,7 +139,7 @@ export class RefundService {
           if (unusable) throw refusal(unusable === 'disabled' ? 'payment_method_disabled' : 'payment_method_unavailable', `Payment method ${payment.method} ${{
             disabled: 'is disabled; enable it in the store, then refund again',
             duplicate_code: 'shares its code with another payment method in this channel; give one a unique code, then refund again',
-            unknown: 'no longer exists in this channel; refund this payment in the Vendure Dashboard' }[unusable]}`);
+            unknown: `no longer exists in this channel; add a Tally POS payment method with code ${payment.method}, then refund again` }[unusable]}`);
           withTallyRefund(tx, { ...tallyRefund,
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: String(line.id), quantity: input.quantity })),
           });

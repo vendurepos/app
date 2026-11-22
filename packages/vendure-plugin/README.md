@@ -144,7 +144,7 @@ An `order.create` 10 payment's `methodId` records the Payment under that method.
 the channel, disabled, sharing its code with another method, or failing its own checker (a throw counts; no other
 method's checker runs) is recorded under `tally-pos` with a `payment_method_fallback` warning, reason `unknown`,
 `disabled`, `duplicate_code` or `ineligible`; the tender keeps the code. A shared code is never listed or charged. Refunds
-are refused `payment_method_disabled`, or for a shared or deleted method `payment_method_unavailable`, unstored; so is an admin's rejection.
+are refused `payment_method_disabled`, or for a shared or deleted method `payment_method_unavailable`, unstored; so is an admin's rejection. For a deleted method, recreate a Tally POS method with that code to refund or reject.
 
 Once a Tally method with code `cash` (or `external`) is enabled on the channel, new tender with that `method` is
 recorded under it, even from older tills. Orders taken before then stay under `tally-pos`. Nothing is rewritten.
