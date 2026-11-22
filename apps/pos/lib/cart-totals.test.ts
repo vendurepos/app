@@ -73,6 +73,15 @@ describe('the cart under the store tax settings', () => {
     expect(totals.taxRows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(totals.taxMinor);
   });
 
+  it("splits a fee entered without a mode in the store's mode", () => {
+    const perLine = { ...settings, taxRounding: { granularity: 'per_line_items', mode: 'half_up' } as const };
+    const builder = createOrderBuilder({ currency: settings.currency, taxContext: saleTaxContext(perLine) });
+    addEntryToCart(builder, entry('TALLY-MUG'), traits, 'EUR');
+    builder.addFee({ name: 'Service', amountMinor: 99, taxClass: '2' });
+    // Service 99 excl. 7 % = 6.93 -> 7 (in the inclusive mode it would be 99 - 93 net = 6).
+    expect(cartTotals(builder.getSnapshot()).taxRows.map(({ name, amountMinor }) => [name, amountMinor])).toEqual([['Standard DE 19%', 152], ['Reduced DE 7%', 7]]);
+  });
+
   it('offers category ids as tax classes in key order, excluding the default', () => {
     expect(chargeTaxClasses({ default: 'Standard DE', '1': 'Standard DE', '2': 'Reduced DE' })).toEqual([
       { id: '1', label: 'Standard DE' }, { id: '2', label: 'Reduced DE' },
