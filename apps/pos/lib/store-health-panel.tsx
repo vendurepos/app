@@ -4,15 +4,16 @@ import {
   Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, orderReference, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, VStack,
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
+import { measureCollectionBytes } from '@tallyui/database';
 import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { sessionContext, type Session } from './session';
 import { SyncCadenceCard } from './sync-cadence-card';
-import { confirmRedownload, coveragePercent, formatStorageUsed, readServerTotals, readStorageUsed, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
+import { confirmRedownload, coveragePercent, formatCollectionSize, formatStorageUsed, readServerTotals, readStorageUsed, recordsOnDevice, redownloadBlocked, redownloadSummary, type AttentionRow, type ReadyToSell, type ServerTotals } from './store-health';
 
 export function StoreHealthPanel({ session, ready, waiting, productCount, variantCount, catalogueSynced, collections, attention, onRetry, onOpen, onViewLog, onCheckNow, onRedownload, redownloading }: {
   session: Session; ready: ReadyToSell; waiting: number; productCount: number; variantCount: number; catalogueSynced: boolean;
-  collections: { orders: RxCollection | null; refunds: RxCollection | null; parked: RxCollection | null; closures: RxCollection | null };
+  collections: { products: RxCollection | null; orders: RxCollection | null; refunds: RxCollection | null; parked: RxCollection | null; closures: RxCollection | null };
   attention: AttentionRow[]; onRetry: (orderIds: string[]) => Promise<number>; onOpen: (order: PosOrder) => void;
   onViewLog: () => void; onCheckNow: () => Promise<void>; onRedownload: () => Promise<void>; redownloading: boolean;
 }): JSX.Element {
@@ -29,9 +30,9 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
   }
   async function checkNow() {
     setChecking(true);
-    try { await onCheckNow(); } finally { setChecking(false); }
+    try { await onCheckNow(); setMeasureRun(run => run + 1); } finally { setChecking(false); }
   }
-  const { orders, refunds, parked, closures } = collections;
+  const { products, orders, refunds, parked, closures } = collections;
   const [counts, setCounts] = useState<Record<'orders' | 'refunds' | 'parked' | 'closures', number | null>>({ orders: null, refunds: null, parked: null, closures: null });
   useEffect(() => {
     setCounts({ orders: null, refunds: null, parked: null, closures: null });
@@ -40,6 +41,25 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
       sources[key]?.count().$.subscribe(count => setCounts(current => ({ ...current, [key]: count }))));
     return () => subscriptions.forEach(subscription => subscription?.unsubscribe());
   }, [orders, refunds, parked, closures]);
+  // On demand: the panel opens only when the merchant asks. Variants live inside their product's document, so have no size.
+  const [measureRun, setMeasureRun] = useState(0);
+  const [sizes, setSizes] = useState<Record<'products' | 'orders' | 'refunds' | 'parked' | 'closures', number | null | undefined>>({ products: undefined, orders: undefined, refunds: undefined, parked: undefined, closures: undefined });
+  useEffect(() => {
+    setSizes({ products: undefined, orders: undefined, refunds: undefined, parked: undefined, closures: undefined });
+    const controller = new AbortController();
+    const sources = { products, orders, refunds, parked, closures };
+    void (async () => {
+      for (const key of ['products', 'orders', 'refunds', 'parked', 'closures'] as const) {
+        const collection = sources[key];
+        let size: number | null = null;
+        if (collection) try { size = (await measureCollectionBytes(collection, { signal: controller.signal })).bytes; }
+        catch (error) { if (!controller.signal.aborted) console.warn(`Failed to measure ${key}`, error); }
+        if (controller.signal.aborted) return;
+        setSizes(current => ({ ...current, [key]: size }));
+      }
+    })();
+    return () => controller.abort();
+  }, [products, orders, refunds, parked, closures, measureRun]);
   const [totals, setTotals] = useState<ServerTotals>({ products: null, variants: null, orders: null });
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +140,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
                 <TableHead className="w-28"><Text className="text-right">On device</Text></TableHead>
                 <TableHead className="w-28"><Text className="text-right">On server</Text></TableHead>
                 <TableHead className="w-28"><Text className="text-right">Coverage</Text></TableHead>
+                <TableHead className="w-24"><Text className="text-right">Size</Text></TableHead>
               </TableRow></TableHeader>
               <TableBody>{rows.map(row => <View key={row.key} testID={`store-health-row-${row.key}`}><TableRow>
                 <TableCell><VStack space="none">
@@ -141,6 +162,8 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
                 <TableCell className="w-28 items-end">{row.coverage === null
                   ? <Text className="text-muted-foreground">this till</Text>
                   : <Progress testID={`store-health-coverage-${row.key}`} value={row.coverage} aria-valuenow={row.coverage} className="h-2 w-20" />}</TableCell>
+                <TableCell className="w-24"><Text testID={`store-health-size-${row.key}`} className={`text-right${row.key === 'variants' ? ' text-muted-foreground' : ''}`}>
+                  {row.key === 'variants' ? 'in Products' : formatCollectionSize(sizes[row.key as keyof typeof sizes])}</Text></TableCell>
               </TableRow></View>)}</TableBody>
             </Table>
             <Button testID="store-health-check-now" variant="outline" className="mt-4 self-start" disabled={checking} onPress={() => void checkNow()}>

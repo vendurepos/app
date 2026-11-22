@@ -1208,6 +1208,13 @@ test("Store health shows Ready to sell, nothing waiting, the products on this de
   await expect(page.getByTestId('store-health-server-variants')).toHaveText(String(demoStore.products().flatMap(product => product.variants).length));
   await expect(page.getByTestId('store-health-coverage-variants')).toHaveAttribute('aria-valuenow', '100');
   await page.mouse.move(480, 0);
+  // 10.3m: each collection's size, measured when the panel opens; variants live in their product's document.
+  await expect(page.getByTestId('store-health-size-products')).toHaveText(/^≈ \d+ (B|KB|MB)$/);
+  await expect(page.getByTestId('store-health-size-variants')).toHaveText('in Products');
+  for (const key of ['orders', 'refunds', 'parked', 'closures']) {
+    await expect(page.getByTestId(`store-health-size-${key}`)).toHaveText(/^(0 B|≈ \d+ (B|KB|MB))$/);
+  }
+  await page.screenshot({ path: test.info().outputPath('13m-store-health-size-vendurepos.png') });
   await page.screenshot({ path: test.info().outputPath('13l-store-health-variants-vendurepos.png') });
   await expect(page.getByTestId('store-health-server-refunds')).toHaveText('—');
   await page.getByTestId('store-health-open').click();
