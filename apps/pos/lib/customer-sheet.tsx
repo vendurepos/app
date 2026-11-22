@@ -3,7 +3,7 @@ import { Pressable, TextInput } from 'react-native';
 import { Button, CustomerForm, CustomerOrderHistory, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text, VStack } from '@tallyui/components';
 import type { AddressEditorValue, OrderHistoryRow } from '@tallyui/components';
 import { formatMoney, type Customer } from '@tallyui/core';
-import { addressEditorValue, addressPatch, CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer, useCustomerAddresses } from './customer-edit';
+import { addressEditorValue, addressPatch, CUSTOMER_ADDRESS_VENDURE_TEXT, CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer, useCustomerAddresses } from './customer-edit';
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
 import { CUSTOMER_ACCOUNT_LABEL, useCustomerAccount } from './customer-account';
 import { addCustomerNote, useCustomerNotes } from './customer-notes';
@@ -76,6 +76,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
       </DialogHeader>
       <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false}
         addresses={source.stored ? addressValue : undefined} onChangeAddresses={next => { setAddressValue(next); setError(null); }} countries={source.countries} />
+      {source.inVendure && <Text testID="customer-sheet-address-vendure" className="px-4 text-sm text-muted-foreground">{CUSTOMER_ADDRESS_VENDURE_TEXT}</Text>}
       {groupsText !== null && <HStack testID="customer-sheet-groups" className="items-center justify-between px-4">
         <Text className="w-20 text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
         <Text testID="customer-sheet-groups-value" className="flex-1 px-3 text-sm">{groupsText}</Text>

@@ -3,7 +3,8 @@ import { CustomerServiceError, type SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import type { CustomerRow } from './customer-list';
 import type { updateVendureCustomer } from '@tallyui/connector-vendure';
-import { addressEditorValue, addressPatch, CUSTOMER_ADDRESS_REMOVE_TEXT, CUSTOMER_ADDRESS_REQUIRED_TEXT, CUSTOMER_EMAIL_REQUIRED_TEXT, CUSTOMER_OFFLINE_TEXT, CUSTOMER_SAVE_FORBIDDEN_TEXT,
+import { ADDRESS_FIELDS_QUERY, addressEditorAllowed, addressEditorValue, addressPatch, CUSTOMER_ADDRESS_REMOVE_TEXT, CUSTOMER_ADDRESS_REQUIRED_TEXT, CUSTOMER_ADDRESS_STALE_TEXT,
+  readAddressCustomFields, CUSTOMER_EMAIL_REQUIRED_TEXT, CUSTOMER_OFFLINE_TEXT, CUSTOMER_SAVE_FORBIDDEN_TEXT,
   customerAccess, customerFormValues, customerInput, customerPatch, customerSaveError, readCustomerAddresses, saveCustomer } from './customer-edit';
 
 const context = { baseUrl: 'https://store.test', headers: {} } as SyncContext;
@@ -178,4 +179,76 @@ it('follows billing for a shipping address shown as Same as billing, and refuses
   }
   await expect(saveCustomer(context, row, values, { stored: shared, edited: { billing: undefined } })).resolves.toEqual({ error: CUSTOMER_ADDRESS_REMOVE_TEXT });
   expect(fetchStub).not.toHaveBeenCalled();
+});
+
+const config = (Address: { name: string }[]) => new Response(JSON.stringify({ data: { globalSettings: { serverConfig: { customFieldConfig: { Address } } } } }));
+it('offers the address editor only on a store with no Address custom fields', async () => {
+  const fetchStub = vi.fn<typeof fetch>().mockResolvedValueOnce(config([{ name: 'gateCode' }])).mockResolvedValueOnce(config([]));
+  vi.stubGlobal('fetch', fetchStub);
+  await expect(addressEditorAllowed(readAddressCustomFields(context))).resolves.toBe(false);
+  await expect(addressEditorAllowed(readAddressCustomFields(context))).resolves.toBe(true);
+  expect(fetchStub.mock.calls[0][0]).toBe('https://store.test/admin-api');
+  expect(JSON.parse(fetchStub.mock.calls[0][1]!.body as string).query).toBe(ADDRESS_FIELDS_QUERY);
+});
+it('offers no address editor when the custom-field config read fails', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(new Response('', { status: 500 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ message: 'Cannot query field' }] })))
+    .mockRejectedValueOnce(new TypeError('Failed to fetch')));
+  for (let i = 0; i < 3; i++) await expect(addressEditorAllowed(readAddressCustomFields(context))).resolves.toBe(false);
+});
+it('re-reads the addresses before an address write, and writes nothing when they changed or the read fails', async () => {
+  const live = [billingRaw, shippingRaw];
+  const requests = storeStub(live);
+  const stored = (await readCustomerAddresses(context, row.id))!;
+  const edited = { ...addressEditorValue(stored), billing: { ...stored.billing, city: 'Cambridge' } };
+  await expect(saveCustomer(context, row, values, { stored, edited })).resolves.toMatchObject({ customer: { id: row.id } });
+  expect(requests().filter(request => /^\s*query List\b/.test(request.query))).toHaveLength(2);
+  expect(writes(requests())).toHaveLength(1);
+  live[0] = { ...billingRaw, city: 'Oxford' };
+  const before = requests().length;
+  await expect(saveCustomer(context, row, { ...values, lastName: 'King' }, { stored, edited })).resolves.toEqual({ error: CUSTOMER_ADDRESS_STALE_TEXT });
+  expect(writes(requests().slice(before))).toEqual([]);
+  const failing = vi.fn().mockResolvedValue(new Response('', { status: 500 }));
+  vi.stubGlobal('fetch', failing);
+  await expect(saveCustomer(context, row, values, { stored, edited })).resolves.toEqual({ error: CUSTOMER_ADDRESS_STALE_TEXT });
+  expect(failing).toHaveBeenCalledTimes(1);
+});
+const inputOf = (address: typeof billingRaw) => {
+  const { id: _id, defaultBillingAddress: _b, defaultShippingAddress: _s, country, ...rest } = address;
+  return { ...rest, countryCode: country.code };
+};
+it('round trip: a shipping-only edit writes shipping whole and never sends billing', async () => {
+  const requests = storeStub([billingRaw, shippingRaw]);
+  const stored = (await readCustomerAddresses(context, row.id))!;
+  const edited = addressEditorValue(stored);
+  await expect(saveCustomer(context, row, values, { stored, edited: { ...edited, shipping: { ...edited.shipping, city: 'Bath' } } }))
+    .resolves.toMatchObject({ customer: { id: row.id } });
+  expect(writes(requests())).toEqual([{ query: expect.stringContaining('updateCustomerAddress'),
+    variables: { input: { id: shippingRaw.id, ...inputOf(shippingRaw), city: 'Bath' } } }]);
+});
+it('round trip: one shared address with billing edited and shipping Same as billing keeps every stored input but the city', async () => {
+  const sharedRaw = { ...billingRaw, defaultShippingAddress: true };
+  const requests = storeStub([sharedRaw]);
+  const stored = (await readCustomerAddresses(context, row.id))!;
+  const edited = addressEditorValue(stored);
+  expect(edited.shipping).toBeUndefined();
+  await expect(saveCustomer(context, row, values, { stored, edited: { ...edited, billing: { ...edited.billing, city: 'Cambridge' } } }))
+    .resolves.toMatchObject({ customer: { id: row.id } });
+  const inputs = { ...inputOf(sharedRaw), city: 'Cambridge' };
+  // connector-vendure: billing moves to a new address, the shared one loses its billing flag, then takes the shipping write.
+  expect(writes(requests())).toEqual([
+    { query: expect.stringContaining('createCustomerAddress'), variables: { customerId: row.id, input: { ...inputs, defaultBillingAddress: true } } },
+    { query: expect.stringContaining('updateCustomerAddress'), variables: { input: { id: sharedRaw.id, defaultBillingAddress: false } } },
+    { query: expect.stringContaining('updateCustomerAddress'), variables: { input: { id: sharedRaw.id, ...inputs } } },
+  ]);
+});
+it('round trip: a cleared field goes through the connector as cleared, the rest as stored', async () => {
+  const requests = storeStub([billingRaw, shippingRaw]);
+  const stored = (await readCustomerAddresses(context, row.id))!;
+  const edited = addressEditorValue(stored);
+  await expect(saveCustomer(context, row, values, { stored, edited: { ...edited, billing: { ...edited.billing, address2: '' } } }))
+    .resolves.toMatchObject({ customer: { id: row.id } });
+  expect(writes(requests())).toEqual([{ query: expect.stringContaining('updateCustomerAddress'),
+    variables: { input: { id: billingRaw.id, ...inputOf(billingRaw), streetLine2: '' } } }]);
 });

@@ -5,6 +5,7 @@
  * StoreSettingsTaxRates — store-settings.ts; apps/pos/lib/sign-in.ts.
  * GlobalStockSettings — global-settings.ts; apps/pos/lib/sign-in.ts.
  * globalSettings (unnamed barcode schema) — apps/pos/lib/barcode-field.ts.
+ * AddressCustomFields (none, so the demo keeps the address editor) — apps/pos/lib/customer-edit.ts.
  * logout (unnamed) — apps/pos/lib/logout.ts.
  * GetProducts — replication/products.ts, replication/variant-feed.ts, reconcile/ids.ts, sync/products.ts.
  * GetProductsMark — replication/products.ts.
@@ -219,9 +220,9 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
       case 'PublicFacets': case 'facets': data = { facets: page(DEMO_FACETS, variables.options) }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
-      case 'GlobalStockSettings': case 'globalSettings': data = { globalSettings: {
+      case 'GlobalStockSettings': case 'globalSettings': case 'AddressCustomFields': data = { globalSettings: {
         trackInventory: true, outOfStockThreshold: 0,
-        serverConfig: { entityCustomFields: [{ entityName: 'ProductVariant', customFields: [{ name: 'barcode', type: 'string', list: false }] }] },
+        serverConfig: { customFieldConfig: { Address: [] }, entityCustomFields: [{ entityName: 'ProductVariant', customFields: [{ name: 'barcode', type: 'string', list: false }] }] },
       } }; break;
       case 'GetProduct': case 'product': data = { product: store.products().find(product => product.id === variables.id) ?? null }; break;
       case 'GetProducts': case 'GetProductsMark': case 'GetProductIds': case 'products':

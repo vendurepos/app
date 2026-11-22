@@ -65,7 +65,10 @@ export function customerSaveError(error: unknown): string {
 export const CUSTOMER_ADDRESS_REQUIRED_TEXT = 'An address needs its first address line and its country.';
 export const CUSTOMER_ADDRESS_REMOVE_TEXT = "The till can't remove a saved address. Change it, or remove it in Vendure.";
 export const CUSTOMER_ADDRESS_AFTER_CREATE_TEXT = 'The customer was added without the address. Edit the customer to add it.';
-// The parts Vendure keeps on an address (connector-vendure's toVendureAddressInput); it keeps no address email.
+export const CUSTOMER_ADDRESS_VENDURE_TEXT = 'This store keeps extra address fields. Edit addresses in Vendure.';
+export const CUSTOMER_ADDRESS_STALE_TEXT = "This customer's addresses changed in Vendure. Close the sheet and open it again.";
+// The parts connector-vendure's toVendureAddressInput writes. Vendure keeps no address email, and its Address custom
+// fields are not among them (a store that has any edits addresses in Vendure, see addressEditorAllowed).
 const ADDRESS_PARTS = ['firstName', 'lastName', 'company', 'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phone'] as const;
 type AddressPatch = Pick<CustomerPatch, 'billing' | 'shipping'>;
 const sameAddress = (a?: CustomerAddress, b?: CustomerAddress) => ADDRESS_PARTS.every(part => (a?.[part] ?? '') === (b?.[part] ?? ''));
@@ -97,15 +100,37 @@ export async function readCustomerAddresses(context: SyncContext, id: string): P
   const [customer] = (await listVendureCustomers(context, { filter: { id: { eq: id } }, take: 1 })).customers;
   return customer ? { billing: customer.billing, shipping: customer.shipping } : null;
 }
-export const COUNTRIES_QUERY = 'query Countries { countries(options: { filter: { enabled: { eq: true } }, sort: { name: ASC }, take: 1000 }) { items { code name } } }';
-export async function readCountries(context: SyncContext): Promise<NonNullable<AddressFieldsProps['countries']>> {
+async function adminRead(context: SyncContext, query: string) {
   const response = await fetch(`${context.baseUrl}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
-    signal: context.signal, body: JSON.stringify({ query: COUNTRIES_QUERY }) });
+    signal: context.signal, body: JSON.stringify({ query }) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = await response.json(); if (body.errors?.length) throw new Error(body.errors[0].message);
-  return body.data.countries.items.map((country: { code: string; name: string }) => ({ value: country.code, label: country.name }));
+  return body.data;
 }
-export type CustomerAddressSource = { stored: AddressEditorValue | null; countries?: AddressFieldsProps['countries'] };
+export const COUNTRIES_QUERY = 'query Countries { countries(options: { filter: { enabled: { eq: true } }, sort: { name: ASC }, take: 1000 }) { items { code name } } }';
+export async function readCountries(context: SyncContext): Promise<NonNullable<AddressFieldsProps['countries']>> {
+  return (await adminRead(context, COUNTRIES_QUERY)).countries.items.map((country: { code: string; name: string }) => ({ value: country.code, label: country.name }));
+}
+// CustomFieldConfig is a union, so the name comes through the CustomField interface (as barcode-field.ts reads it).
+export const ADDRESS_FIELDS_QUERY = 'query AddressCustomFields { globalSettings { serverConfig { customFieldConfig { Address { ... on CustomField { name } } } } } }';
+export async function readAddressCustomFields(context: SyncContext): Promise<string[]> {
+  return (await adminRead(context, ADDRESS_FIELDS_QUERY)).globalSettings.serverConfig.customFieldConfig.Address.map((field: { name: string }) => field.name);
+}
+/**
+ * connector-vendure writes an address that is both default billing and shipping as a new address from its 9 inputs, so
+ * the old address's custom fields would be lost: a store with any Address custom field, or whose config can't be read, gets no editor.
+ */
+export function addressEditorAllowed(read: Promise<string[]>): Promise<boolean> {
+  return read.then(fields => fields.length === 0, () => false);
+}
+const addressFieldReads = new WeakMap<Session, Promise<string[]>>();
+/** Read once per session; a failed read is dropped, so the next sheet asks again. */
+function sessionAddressFields(session: Session, context: SyncContext): Promise<string[]> {
+  let read = addressFieldReads.get(session);
+  if (!read) { addressFieldReads.set(session, read = readAddressCustomFields(context)); read.catch(() => addressFieldReads.delete(session)); }
+  return read;
+}
+export type CustomerAddressSource = { stored: AddressEditorValue | null; countries?: AddressFieldsProps['countries']; inVendure?: boolean };
 /** Read when the sheet opens: stored is null until the read answers and when it fails, so no address is written unseen. */
 export function useCustomerAddresses(session: Session, open: boolean, customerId: string | null): CustomerAddressSource {
   const [source, setSource] = useState<CustomerAddressSource>({ stored: null });
@@ -113,11 +138,17 @@ export function useCustomerAddresses(session: Session, open: boolean, customerId
     setSource({ stored: null }); if (!open) return;
     let cancelled = false; const context = sessionContext(session);
     // Without the countries list the country is a text field.
-    void Promise.all([customerId === null ? {} : readCustomerAddresses(context, customerId), readCountries(context).catch(() => undefined)])
-      .then(([stored, countries]) => { if (!cancelled) setSource({ stored, countries }); }, () => {});
+    void Promise.all([customerId === null ? {} : readCustomerAddresses(context, customerId), readCountries(context).catch(() => undefined),
+      addressEditorAllowed(sessionAddressFields(session, context))])
+      .then(([stored, countries, allowed]) => { if (!cancelled) setSource(allowed ? { stored, countries } : { stored: null, inVendure: true }); }, () => {});
     return () => { cancelled = true; };
   }, [session, open, customerId]);
   return source;
+}
+/** The connector picks the address it writes at write time, so the addresses must still be the ones the sheet opened with. */
+async function addressesUnchanged(context: SyncContext, id: string, stored: AddressEditorValue): Promise<boolean> {
+  const fresh = await readCustomerAddresses(context, id).catch(error => { if (error instanceof ConnectorUnauthorizedError) throw error; return null; });
+  return fresh !== null && sameAddress(fresh.billing, stored.billing) && sameAddress(fresh.shipping, stored.shipping);
 }
 export async function saveCustomer(context: SyncContext, row: CustomerRow | null, values: CustomerFormValues,
   addresses?: { stored: AddressEditorValue; edited: AddressEditorValue }): Promise<{ customer: Customer } | { error: string }> {
@@ -136,6 +167,7 @@ export async function saveCustomer(context: SyncContext, row: CustomerRow | null
     const patch = customerPatch(row, values);
     if ('error' in patch) return patch;
     if (Object.keys(patch).length + Object.keys(address).length === 0) return { error: 'Nothing to save.' };
+    if (Object.keys(address).length && !(await addressesUnchanged(context, row.id, addresses!.stored))) return { error: CUSTOMER_ADDRESS_STALE_TEXT };
     return { customer: await updateVendureCustomer(context, row.id, { ...patch, ...address }) };
   } catch (error) { return { error: customerSaveError(error) }; }
 }
