@@ -403,6 +403,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         </VStack>
       ) : null}
       {reportsOpen ? <ReportsPanel session={session} orders={outbox.orders} refunds={registerStore?.refunds ?? null} currency={currency}
+        onOpenOrders={() => { setReportsOpen(false); setOrdersOpen(true); }}
         closures={registerStore && boundRegisterId ? <ClosureList view="table" closures={registerStore.closures} session={session} registerId={boundRegisterId}
           storeKey={ordersDatabaseName(session)} store={store} currency={currency} timezone={TIMEZONE} blind={register.blind} active actor={actor} ownSession={register.session} /> : undefined}
         timezone={TIMEZONE} drawer={<ReportsDrawerCard register={register} currency={currency} cashier={identity}
