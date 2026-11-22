@@ -1672,13 +1672,19 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
   await page.getByTestId('receipt').getByTestId('new-sale').click();
+  // The store's figures (8.1f) include the sale once it has reached the demo store: 3 seeded orders and this one.
+  await expect.poll(async () => (await demoState(page))?.orders.length).toBe(4);
 
   await page.getByTestId('reports-open').click();
   await expect(page.getByTestId('reports-panel')).toBeVisible();
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
-  await expect(page.getByTestId('hero-median')).toHaveText('€9.52');
-  await expect(page.getByTestId('hero-largest')).toHaveText('€9.52');
+  // The store's report has no per-order totals, so the hero shows no median or largest tile.
+  await expect(page.getByTestId('hero-median')).toHaveCount(0);
+  await expect(page.getByTestId('hero-largest')).toHaveCount(0);
+  await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-products')).toContainText('€9.52');
   await page.getByTestId('reports-print-summary').click();
   const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
   expect(summary.slice(0, 1)).toEqual(['Sales summary']);
@@ -1722,6 +1728,65 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await wedgeScan(page, 'TALLY-MUG');
   await expect(page.getByTestId('reports-panel')).toHaveCount(0);
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
+});
+
+test("Reports shows the store's figures online, and this till's only when offline", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expectBalanceAsEntry(page, '€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect.poll(async () => (await demoState(page))?.orders.length).toBe(4);
+  await page.getByTestId('reports-open').click();
+  await expect(page.getByTestId('reports-panel')).toBeVisible();
+
+  // Store mode: the store's gross for the mug (€9.52), never the till's net (€8.00), and no sync statuses.
+  await expect(page.getByTestId('hero-total')).toContainText('€9.52');
+  await expect(page.getByTestId('hero-median')).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-products')).toContainText('€9.52');
+  await expect(page.getByTestId('card-products')).not.toContainText('€8.00');
+  await page.getByTestId('sales-filter-status').click();
+  await expect(page.getByTestId('sales-filter-status-option-all')).toBeVisible();
+  await expect(page.getByTestId('sales-filter-status-option-applied')).toHaveCount(0);
+  await expect(page.getByTestId('sales-filter-status-option-pending')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // Offline: this till's own figures, under the line that says so.
+  await page.context().setOffline(true);
+  await expect(page.getByTestId('reports-till-only')).toHaveText('This till only, offline');
+  await expect(page.getByTestId('hero-median')).toHaveText('€9.52');
+  await expect(page.getByTestId('card-categories')).toBeVisible();
+  await expect(page.getByTestId('card-products')).toContainText('€8.00');
+  await expect(page.getByTestId('card-products')).not.toContainText('€9.52');
+  await page.getByTestId('sales-filter-status').click();
+  await expect(page.getByTestId('sales-filter-status-option-applied')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Back online: the store's figures again.
+  await page.context().setOffline(false);
+  await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
+  await expect(page.getByTestId('hero-median')).toHaveCount(0);
+});
+
+test("Reports shows this till's figures only when the store refuses the report", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('vendurepos.demo.report_forbidden', '1'));
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('reports-open').click();
+  await expect(page.getByTestId('reports-panel')).toBeVisible();
+  await expect(page.getByTestId('reports-till-only')).toHaveText('This till only');
+  await expect(page.getByTestId('card-categories')).toBeVisible();
+  await expect(page.getByTestId('hero-median')).toBeVisible();
 });
 
 test('Reports opens on the drawer card: since, float + cash sales = expected, Print X-report and the register panel', async ({ page }) => {

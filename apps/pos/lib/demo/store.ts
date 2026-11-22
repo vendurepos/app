@@ -5,6 +5,7 @@ import { barcodeOf, CATALOGUE, type CatalogueProduct } from './catalogue';
 import { demoFacetValues } from './facets';
 import { demoProductImage } from './product-images';
 import type { TallyClosureRead } from '../closure-history';
+import type { SalesReportV2 } from '../sales-report';
 import type { ListedRegister } from '../register-choice';
 
 // All mutable demo data is saved together, including the command ledger.
@@ -71,6 +72,8 @@ const STOCK_LOCATION_ID = '2';
 const PERCENT = 100;
 // Payload tax rates use parts per million; Vendure uses percentages.
 const PPM_PER_PERCENT = 10_000;
+// The plugin's v2 sales report lists at most this many products (report.service.ts MAX_PRODUCTS).
+const DEMO_REPORT_MAX_PRODUCTS = 100;
 // The real plugin records POS payments under this method code.
 const DEMO_PAYMENT_METHOD = 'tally-pos';
 // Ada Lovelace's (c1) seeded staff note, shown on her customer sheet and never on a receipt.
@@ -99,6 +102,8 @@ type DemoRefund = {
   id: string; orderId: string; paymentIndex: number; total: number; shipping: number;
   lines: { orderLineId: string; quantity: number }[]; reason: string;
   clientRefundId: string; sessionId: string; method: string;
+  // The till's refund time and cashier (absent on refunds saved before 8.1f), read by salesReport().
+  createdAt?: string; cashierRef?: string;
 };
 // The fields of order()'s detail the refund rules read.
 type RefundableOrder = {
@@ -479,6 +484,100 @@ export class DemoStore {
     };
   }
 
+  /**
+   * GET /tally/v1/reports/sales/v2, aggregated as the plugin's salesV2 (report.service.ts) does: till sales only (not the
+   * storefront order), sale time in [from, to), the register and cashier filters, and each order's amounts from order().
+   */
+  salesReport(query: { from: string; to: string; timezone: string; registerId?: string; cashierId?: string }): SalesReportV2 {
+    type Detail = { subTotal: number; subTotalWithTax: number; shipping: number; shippingWithTax: number;
+      lines: { quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string; name: string; sku: string } }[];
+      taxSummary: { description: string; taxRate: number; taxBase: number; taxTotal: number }[] };
+    const from = Date.parse(query.from), to = Date.parse(query.to);
+    const inRange = (at: string) => Date.parse(at) >= from && Date.parse(at) < to;
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: query.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' });
+    const hourKey = (at: string) => {
+      const part = Object.fromEntries(parts.formatToParts(new Date(at)).map(({ type, value }) => [type, value]));
+      return `${part.year}-${part.month}-${part.day}T${part.hour}`;
+    };
+    const bucket = <T>(map: Map<string, T>, key: string, make: () => T) => map.get(key) ?? map.set(key, make()).get(key)!;
+    const byHour = new Map<string, SalesReportV2['byHour'][number]>();
+    const hourOf = (at: string) => { const hour = hourKey(at); return bucket(byHour, hour, () => ({ hour, orderCount: 0, salesMinor: 0, refundsMinor: 0 })); };
+    const byMethod = new Map<string, SalesReportV2['byMethod'][number] & { ids: Set<string> }>();
+    const methodOf = (method: string) => bucket(byMethod, method, () => ({ method, salesMinor: 0, refundsMinor: 0, orderCount: 0, refundCount: 0, ids: new Set<string>() }));
+    const products = new Map<string, SalesReportV2['products'][number]>();
+    const taxes = new Map<string, SalesReportV2['taxes'][number]>();
+    const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: 0, itemCount: 0 };
+    // A till sale the register filter keeps: the refunds' test, before their own cashier filter.
+    const tillSale = (payload: OrderCreatePayload) => payload.clientOrderId !== DEMO_WEB_ORDER.clientOrderId
+      && (query.registerId === undefined || payload.registerId === query.registerId);
+    this.state.orders.forEach((payload, index) => {
+      if (!tillSale(payload) || !inRange(payload.createdAt)) return;
+      if (query.cashierId !== undefined && payload.cashierRef !== query.cashierId) return;
+      const id = String(index + 1);
+      const detail = this.order(id) as unknown as Detail;
+      const sales = detail.subTotalWithTax + detail.shippingWithTax;
+      const hour = hourOf(payload.createdAt);
+      hour.orderCount++;
+      hour.salesMinor += sales;
+      orders.count++;
+      orders.salesMinor += sales;
+      orders.taxMinor += detail.subTotalWithTax - detail.subTotal + detail.shippingWithTax - detail.shipping;
+      orders.discountsMinor += payload.discountMinor ?? 0;
+      for (const line of detail.lines) {
+        orders.itemCount += line.quantity;
+        const { id: productVariantId, name, sku } = line.productVariant;
+        const product = bucket(products, productVariantId, () => ({ productVariantId, sku, name, quantity: 0, salesMinor: 0 }));
+        product.quantity += line.quantity;
+        product.salesMinor += line.proratedLinePriceWithTax;
+      }
+      for (const payment of payload.payments) {
+        const method = methodOf(payment.method);
+        method.salesMinor += payment.amountMinor;
+        method.ids.add(id);
+      }
+      for (const row of detail.taxSummary) {
+        const tax = bucket(taxes, `${row.description}\u0000${row.taxRate}`, () => ({ description: row.description, ratePercent: row.taxRate, baseMinor: 0, taxMinor: 0 }));
+        tax.baseMinor += row.taxBase;
+        tax.taxMinor += row.taxTotal;
+      }
+    });
+    const refunds = { count: 0, totalMinor: 0, orderCount: 0 };
+    const refundedSales = new Set<string>();
+    for (const refund of this.state.refunds) {
+      const sale = this.state.orders[Number(refund.orderId) - 1];
+      if (!refund.createdAt || !inRange(refund.createdAt) || !sale || !tillSale(sale)) continue;
+      // A refund counts under its own cashier, else its sale's, as the plugin's cashier filter reads it.
+      if (query.cashierId !== undefined && (refund.cashierRef ?? sale.cashierRef) !== query.cashierId) continue;
+      hourOf(refund.createdAt).refundsMinor += refund.total;
+      const method = methodOf(refund.method);
+      method.refundsMinor += refund.total;
+      method.refundCount++;
+      refunds.count++;
+      refunds.totalMinor += refund.total;
+      refundedSales.add(refund.orderId);
+    }
+    refunds.orderCount = refundedSales.size;
+    // A day is its hours' date in the same zone, so the day and hour rows add up alike.
+    const byDay = new Map<string, SalesReportV2['byDay'][number]>();
+    for (const hour of byHour.values()) {
+      const day = bucket(byDay, hour.hour.slice(0, 10), () => ({ day: hour.hour.slice(0, 10), orderCount: 0, salesMinor: 0, refundsMinor: 0 }));
+      day.orderCount += hour.orderCount;
+      day.salesMinor += hour.salesMinor;
+      day.refundsMinor += hour.refundsMinor;
+    }
+    const ascending = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    const sortedProducts = [...products.values()].sort((a, b) => b.salesMinor - a.salesMinor || ascending(a.sku, b.sku));
+    return {
+      version: 2, from: query.from, to: query.to, timezone: query.timezone, currencyCode: 'EUR',
+      registerId: query.registerId ?? null, cashierId: query.cashierId ?? null, orders, refunds,
+      byMethod: [...byMethod.values()].map(({ ids, ...row }) => ({ ...row, orderCount: ids.size })).sort((a, b) => ascending(a.method, b.method)),
+      byDay: [...byDay.values()].sort((a, b) => ascending(a.day, b.day)),
+      byHour: [...byHour.values()].sort((a, b) => ascending(a.hour, b.hour)),
+      products: sortedProducts.slice(0, DEMO_REPORT_MAX_PRODUCTS), productsTruncated: sortedProducts.length > DEMO_REPORT_MAX_PRODUCTS,
+      taxes: [...taxes.values()].sort((a, b) => a.ratePercent - b.ratePercent),
+    };
+  }
+
   apply(command: Command): CommandResult {
     const { id, type, version, payload: p } = command;
     const refuse = (code: string, message: string, data?: Record<string, unknown>): CommandResult =>
@@ -652,6 +751,7 @@ export class DemoStore {
         shipping: refunds.length ? 0 : shippingMinor,
         lines: refunds.length ? [] : lines.map(({ input }) => ({ orderLineId: input.orderLineId, quantity: input.quantity })),
         reason: p.reason, clientRefundId: p.clientRefundId, sessionId: p.sessionId, method: payment.metadata.tender.method,
+        createdAt: p.createdAt, cashierRef: p.cashierRef,
       };
       this.state.refunds.push(stored);
       refunds.push({ id: stored.id, paymentId: payment.id, totalMinor: share, state: 'Settled' });
