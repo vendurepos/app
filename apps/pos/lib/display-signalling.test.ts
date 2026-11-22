@@ -163,6 +163,11 @@ describe('errors', () => {
     expect((await refusal(() => s.mint(ctx, t))).code).toBe('server');
   });
 
+  it("Vendure's own 500 body (statusCode, an empty message, no code) is server", async () => {
+    answer(500, { statusCode: 500, message: '', timestamp: '2026-11-22T00:00:00.000Z', path: '/shop/tally/v1/displays/codes' });
+    expect((await refusal(() => s.mint(ctx, t))).code).toBe('server');
+  });
+
   it('gives server for a body that is not JSON', async () => {
     reply = { status: 502, text: '<html>Bad Gateway</html>' };
     expect((await refusal(() => s.list(ctx, t))).code).toBe('server');

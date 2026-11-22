@@ -1,3 +1,4 @@
+import { DisplaySignallingError } from '@tallyui/core';
 import type { DisplayAdvertisement, DisplayRecord, DisplaySignalling, ServerCapabilities } from '@tallyui/core';
 import { decodeDisplayMessage, encodeDisplayMessage, makeEnvelope, type TillDisplayServiceOptions } from '@tallyui/pos';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -131,6 +132,34 @@ it("(c3) keeps a key per store: X, then Y, then X again reuses X's key and does 
   expect(sent).toEqual({ deviceId: displayDeviceId(storage), deviceKey: 'key-x' });
   expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-a')).toBe('key-x');
   expect(storage.getItem('vendurepos.display_device_key:https://store.test#channel-b')).toBe('key-y');
+});
+
+const KEY_ENTRY = 'vendurepos.display_device_key:https://store.test#channel-a';
+type MintArgs = Parameters<DisplaySignalling['mint']>;
+
+it('(f) a server fault keeps the stored key and does not register again', async () => {
+  const storage = memoryStorage();
+  storage.setItem(KEY_ENTRY, 'kept-key');
+  const { handles, signalling } = start(undefined, storage);
+  signalling.mint.mockRejectedValueOnce(new DisplaySignallingError('server'));
+  // The pairing may surface the error in its phase instead of rejecting.
+  await handles.pairing.start().catch(() => undefined);
+  expect(signalling.registerDevice).not.toHaveBeenCalled();
+  expect(storage.getItem(KEY_ENTRY)).toBe('kept-key');
+  const [, sent] = signalling.mint.mock.calls[0] as unknown as MintArgs;
+  expect(sent).toEqual({ deviceId: displayDeviceId(storage), deviceKey: 'kept-key' });
+});
+
+it('(g) a device_refused clears the stored key and registers exactly once more', async () => {
+  const storage = memoryStorage();
+  storage.setItem(KEY_ENTRY, 'stale-key');
+  const { handles, signalling } = start(undefined, storage);
+  signalling.mint.mockRejectedValueOnce(new DisplaySignallingError('device_refused'));
+  await handles.pairing.start().catch(() => undefined);
+  expect(signalling.registerDevice).toHaveBeenCalledTimes(1);
+  expect(storage.getItem(KEY_ENTRY)).toBe(ISSUED_KEY);
+  const keys = signalling.mint.mock.calls.map((call) => (call as unknown as MintArgs)[1].deviceKey);
+  expect(keys.slice(0, 2)).toEqual(['stale-key', ISSUED_KEY]);
 });
 
 it("(d) configFor reads the session getter's current session", () => {

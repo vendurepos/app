@@ -305,6 +305,9 @@ state is in Postgres, so any server instance answers any call.
   `X-Tally-Device-Id`; a missing, malformed or wrong key is `403 device_refused`. Only the key's SHA-256 is stored.
   A device that owns no display, code or pending pairing and makes no till call for over 30 days is dropped, and its
   id registers again.
+- A database fault on these routes answers `500` with no `code`, and the till keeps its key. Only `403 device_refused`
+  makes a till drop its key and register again. The key travels in the `X-Tally-Device-Key` header, so an
+  `errorHandlers` entry or proxy that records request headers should redact it.
 - `GET /tally/v1/info` advertises `customerDisplay: { v: 1, snapshot: 1, iceServers? }`. Set the ICE servers with
   `TallyPosPlugin.init({ customerDisplay: { iceServers: [{ urls: 'stun:stun.example.com:3478' }] } })`; without the
   option the till uses its default STUN servers, and `[]` means LAN only.
