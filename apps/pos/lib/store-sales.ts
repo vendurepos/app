@@ -104,3 +104,9 @@ export function reportsView(
     tillOnly: store.status === 'offline' || store.status === 'error' ? TILL_ONLY_OFFLINE : TILL_ONLY,
   };
 }
+
+/** The state while the query `key` is fetching: the last store figures if they answered this same query, else loading. */
+export function whileFetching(current: StoreSales, okKey: string | null, key: string): StoreSales {
+  // Only a refresh of the same query keeps them: figures for another period, register or cashier never stay on screen.
+  return current.status === 'ok' && okKey === key ? current : { status: 'loading' };
+}

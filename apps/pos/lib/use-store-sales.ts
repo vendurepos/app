@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SalesFilters } from '@tallyui/components';
 import { comparisonRange, orderFiltersQuery, type DayRange } from '@tallyui/pos';
 import { fetchSalesReportV2, type SalesReportOutcome } from './sales-report';
 import type { Session } from './session';
-import { storeHourly, storeSalesFigures, type StoreSales } from './store-sales';
+import { storeHourly, storeSalesFigures, whileFetching, type StoreSales } from './store-sales';
 import { isOneDay } from './till-reports';
 
 // The browser's online signal, as app/index.tsx reads it; a platform without navigator counts as online.
@@ -26,11 +26,18 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
     window.addEventListener('offline', update);
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
   }, []);
+  // The query the shown `ok` figures answered (null when none is shown), and the session they were fetched under.
+  const okKey = useRef<string | null>(null);
+  const lastSession = useRef(session);
   const { range, preset, compare: mode, registerId, cashierId } = filters;
   useEffect(() => {
-    if (!online) { setStore({ status: 'offline' }); return; }
-    if (!session) { setStore({ status: 'unsupported' }); return; }
-    setStore({ status: 'loading' });
+    if (lastSession.current !== session) { lastSession.current = session; okKey.current = null; }
+    const key = JSON.stringify([range.from, range.to, preset, mode, registerId, cashierId, timezone]);
+    const settle = (next: StoreSales) => { okKey.current = next.status === 'ok' ? key : null; setStore(next); };
+    if (!online) { settle({ status: 'offline' }); return; }
+    if (!session) { settle({ status: 'unsupported' }); return; }
+    // A refresh of the same query (only refreshKey moved) keeps the store's figures until the new ones come.
+    setStore((current) => whileFetching(current, okKey.current, key));
     const day: DayRange = { from: range.from, to: range.to };
     const compare = comparisonRange(day, mode, preset === 'custom' ? undefined : preset);
     const controller = new AbortController();
@@ -42,14 +49,14 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
     Promise.all([fetchRange(day), fetchRange(compare)]).then(([a, b]) => {
       if (controller.signal.aborted) return; // answered after the filters moved on
       if (a.status === 'ok' && b.status === 'ok') {
-        setStore({ status: 'ok', figures: storeSalesFigures(a.report, b.report, day, compare),
+        settle({ status: 'ok', figures: storeSalesFigures(a.report, b.report, day, compare),
           hourly: storeHourly(a.report, b.report, day, compare, isOneDay(filters)) });
         return;
       }
       const failed = (status: SalesReportOutcome['status']) => a.status === status || b.status === status;
-      setStore({ status: failed('forbidden') ? 'forbidden' : failed('unsupported') ? 'unsupported' : 'error' });
+      settle({ status: failed('forbidden') ? 'forbidden' : failed('unsupported') ? 'unsupported' : 'error' });
     }, (error: unknown) => {
-      if ((error as { name?: unknown })?.name !== 'AbortError') setStore({ status: 'error' });
+      if ((error as { name?: unknown })?.name !== 'AbortError') settle({ status: 'error' });
     });
     return () => controller.abort();
     // filters is read only through the fields listed, so a new object with the same fields does not refetch.

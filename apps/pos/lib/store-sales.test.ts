@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SalesFigures } from '@tallyui/pos';
 import type { SalesReportV2 } from './sales-report';
-import { NO_MARGIN, reportsView, storeHourly, storeSalesFigures, type Spread, type StoreSales } from './store-sales';
+import { NO_MARGIN, reportsView, storeHourly, storeSalesFigures, whileFetching, type Spread, type StoreSales } from './store-sales';
 
 const DAY = { from: '2026-11-20', to: '2026-11-20' };
 const BEFORE = { from: '2026-11-19', to: '2026-11-19' };
@@ -155,5 +155,19 @@ describe('reportsView', () => {
       expect(view.tillOnly).toBe('This till only');
       expect(view.hide).toEqual([]);
     }
+  });
+});
+
+describe('whileFetching', () => {
+  const ok: StoreSales = { status: 'ok', figures: storeSalesFigures(REPORT, COMPARE, DAY, BEFORE), hourly: null };
+
+  it('keeps the store figures while the same query refreshes', () => {
+    expect(whileFetching(ok, 'k', 'k')).toBe(ok);
+  });
+
+  it('drops the store figures when the query changes or never answered', () => {
+    expect(whileFetching(ok, 'k', 'other')).toEqual({ status: 'loading' });
+    expect(whileFetching(ok, null, 'k')).toEqual({ status: 'loading' });
+    expect(whileFetching({ status: 'error' }, 'k', 'k')).toEqual({ status: 'loading' });
   });
 });
