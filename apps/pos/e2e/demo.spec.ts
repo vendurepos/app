@@ -3904,14 +3904,32 @@ async function openPrintSheet(page: Page) {
   await expect(page.getByTestId('receipt-dialog')).toBeVisible();
 }
 
+/** The sheet's Print, then `second`, in one task (as `doubleTap`): the second click always lands in the slide-out. */
+async function printThen(page: Page, second: string) {
+  await page.evaluate((id) => {
+    for (const each of ['receipt-print-button', id]) document.querySelector<HTMLElement>(`[data-testid="${each}"]`)!.click();
+  }, second);
+}
+
 test('New sale while the receipt sheet slides out drops its print dialog, so the next till is not printed', async ({ page }) => {
   await openPrintSheet(page);
-  await page.getByTestId('receipt-print-button').click();
-  await page.getByTestId('new-sale').click();
+  await printThen(page, 'new-sale');
   await expect(page.getByTestId('receipt')).toHaveCount(0);
   await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
   // The dropped print would come with the sheet's unmount, already passed: a moment more, then count.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.printCalls)).toBe(0);
+});
+
+test('Orders opened while the receipt sheet slides out drops its print dialog, so the panel is not printed', async ({ page }) => {
+  await openPrintSheet(page);
+  await printThen(page, 'orders-open');
+  await expect(page.getByTestId('orders-panel')).toBeVisible();
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+  // The till, and its receipt, is hidden behind the panel, not unmounted.
+  await expect(page.getByTestId('receipt')).toBeHidden();
+  await expect(page.getByTestId('receipt')).toHaveCount(1);
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.printCalls)).toBe(0);
 });
