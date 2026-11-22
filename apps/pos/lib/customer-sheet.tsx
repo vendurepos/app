@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Pressable, TextInput } from 'react-native';
+import { Pressable, ScrollView, TextInput } from 'react-native';
 import { Button, CustomerForm, CustomerOrderHistory, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text, VStack } from '@tallyui/components';
 import type { AddressEditorValue, OrderHistoryRow } from '@tallyui/components';
 import { formatMoney, type Customer } from '@tallyui/core';
@@ -70,10 +70,12 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   };
   return <Dialog open={open} onOpenChange={next => { if (!next) close(); }}>
     <DialogContent testID="customer-sheet" dataSet={{ print: 'hide' }}
-      className="right-0 left-auto top-0 h-full max-w-md translate-x-0 translate-y-0 rounded-none border-0 border-l">
+      className="right-0 left-auto top-0 h-full max-w-md flex-col translate-x-0 translate-y-0 rounded-none border-0 border-l">
       <DialogHeader className="text-left">
         <DialogTitle>{row ? `Edit ${`${row.firstName} ${row.lastName}`.trim() || row.email}` : 'New customer'}</DialogTitle>
       </DialogHeader>
+      {/* The body scrolls so the Save and Close footer stays on screen when the address editor makes the sheet taller than the window. */}
+      <ScrollView testID="customer-sheet-body" className="flex-1" contentContainerClassName="gap-4">
       <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false}
         addresses={source.stored ? addressValue : undefined} onChangeAddresses={next => { setAddressValue(next); setError(null); }} countries={source.countries} />
       {source.inVendure && <Text testID="customer-sheet-address-vendure" className="px-4 text-sm text-muted-foreground">{CUSTOMER_ADDRESS_VENDURE_TEXT}</Text>}
@@ -108,6 +110,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
         </HStack></Pressable>} />}
       {!online && <Text testID="customer-sheet-offline">{CUSTOMER_OFFLINE_TEXT}</Text>}
       {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
+      </ScrollView>
       <HStack space="sm" className="mt-auto justify-between">
         <Button testID="customer-sheet-save" disabled={saving || !online || (row !== null && Object.keys(customerPatch(row, values)).length + Object.keys(addressChange).length === 0)} onPress={save}>
           <Text>Save</Text>

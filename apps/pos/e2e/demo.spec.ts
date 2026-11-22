@@ -651,6 +651,26 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
 });
 
+test('the customer sheet body scrolls on a short screen; Save and Close stay on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  // c3 (Alan Turing) has a seeded address, so the address editor makes the sheet taller than the window.
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-save')).toBeInViewport();
+  await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  const orders = sheet.getByTestId('customer-sheet-orders');
+  await orders.scrollIntoViewIfNeeded();
+  await expect(orders).toBeInViewport();
+  await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  await sheet.getByTestId('customer-sheet-close').click();
+  await expect(sheet).toBeHidden();
+});
+
 test("the customer sheet shows the customer's account read-only, as v2's username row: registered and verified, not verified, or a guest", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
