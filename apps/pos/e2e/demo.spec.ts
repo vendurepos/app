@@ -3882,7 +3882,7 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
 
-test('a demo cashier pays part of a sale by typing an amount, then the rest', async ({ page }) => {
+test('a demo cashier pays part of a sale by typing an amount, and the rest is left to pay', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
