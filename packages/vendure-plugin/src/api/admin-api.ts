@@ -1,8 +1,10 @@
 import { createRequire } from 'node:module';
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { Allow, ChannelService, Ctx, ID, Permission, RequestContext, RoleService, TransactionalConnection, UserInputError } from '@vendure/core';
+import { tallyPosResetDisplayDevice } from '../config/permissions';
 import { POS_TILL_PERMISSIONS, POS_TILL_ROLE_CODE } from '../config/pos-till-role';
 import { TallyCommand } from '../entities/tally-command.entity';
+import { DisplaySignallingService } from '../service/display-signalling.service';
 import { OrderCreateService } from '../service/order-create.service';
 import type { OrderCreateResult } from '../service/order-create.service';
 
@@ -31,13 +33,40 @@ type TallyNeedsAdminResolved {
   status: String!
 }
 
+"A till's customer-display device in the active channel. Never carries a key, token, secret, code or check code."
+type TallyDisplayDevice {
+  deviceId: String!
+  "Whether a device key has been issued for this id; a keyless row is a pre-migration device that has not registered yet."
+  keyIssued: Boolean!
+  "When a pre-migration device adopted its displays, if it did."
+  adoptedAt: DateTime
+  "The last till call that passed the key check, or the registration."
+  lastCallAt: DateTime!
+  displays: [TallyDisplayDeviceDisplay!]!
+}
+
+type TallyDisplayDeviceDisplay {
+  id: String!
+  name: String!
+  confirmedAt: DateTime!
+  lastSeenAt: DateTime
+}
+
 extend type Query {
   tallyNeedsAdminCommands: [TallyNeedsAdminCommand!]!
+  "The active channel's customer-display devices, most recent till call first. Needs TallyPosResetDisplayDevice."
+  tallyDisplayDevices: [TallyDisplayDevice!]!
 }
 
 extend type Mutation {
   tallyEnsurePosTillRole: Role!
   tallyResolveNeedsAdmin(commandId: String!, resolution: TallyNeedsAdminResolution!, note: String!): TallyNeedsAdminResolved!
+  """
+  Deletes the device with every display, code and pending pairing it owns in the active channel, so the id registers
+  as new. DELETED when anything was deleted; NOT_DELETED when the channel has nothing under this id.
+  Needs TallyPosResetDisplayDevice.
+  """
+  tallyResetDisplayDevice(deviceId: String!): DeletionResponse!
 }
 `);
 
@@ -45,7 +74,7 @@ extend type Mutation {
 export class TallyAdminResolver {
   constructor(
     private connection: TransactionalConnection, private orderCreate: OrderCreateService,
-    private roles: RoleService, private channels: ChannelService,
+    private roles: RoleService, private channels: ChannelService, private signalling: DisplaySignallingService,
   ) {}
 
   @Mutation()
@@ -97,5 +126,17 @@ export class TallyAdminResolver {
     if (!args.note.trim()) throw new UserInputError('A note is required to resolve a sale');
     const result = await this.orderCreate.resolveNeedsAdmin(ctx, args.commandId, args.resolution, args.note.trim());
     return { id: result.id, status: result.status };
+  }
+
+  @Query()
+  @Allow(tallyPosResetDisplayDevice.Permission)
+  tallyDisplayDevices(@Ctx() ctx: RequestContext) {
+    return this.signalling.listDevices(ctx);
+  }
+
+  @Mutation()
+  @Allow(tallyPosResetDisplayDevice.Permission)
+  tallyResetDisplayDevice(@Ctx() ctx: RequestContext, @Args() { deviceId }: { deviceId: string }) {
+    return this.signalling.resetDevice(ctx, deviceId);
   }
 }

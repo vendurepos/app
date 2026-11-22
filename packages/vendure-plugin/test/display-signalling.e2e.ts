@@ -155,6 +155,12 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     const response = await fetch(`${base}/tally/v1/${path}`, init);
     return [response.status, await response.json()];
   };
+  /** One Admin API GraphQL call with `headers` (a session and a channel token), as its parsed JSON body. */
+  const gql = (headers: Record<string, string>, query: string, variables?: Record<string, unknown>) => fetch(`${base}/admin-api`, {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables }) }).then(r => r.json());
+  const RESET = 'mutation Reset($deviceId: String!) { tallyResetDisplayDevice(deviceId: $deviceId) { result message } }';
+  const NOT_DELETED = { data: { tallyResetDisplayDevice: { result: 'NOT_DELETED', message: 'No customer display device with this id in this channel' } } };
+  const resetter = () => sessionWith('resetter-a', ['TallyPosResetDisplayDevice'], 'a');
   const fresh = () => connection.rawConnection.query(`TRUNCATE ${TABLES.map(table => `"${table}"`).join(', ')}`);
 
   const make = async (): Promise<DisplaySignallingHarness> => {
@@ -461,6 +467,146 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
       const adoptions = spies[0].mock.calls.filter(([message]) => String(message).includes('"till-n"') && String(message).includes('"cashier-n"'));
       expect(adoptions).toHaveLength(1);
       for (const call of spies.flatMap(spy => spy.mock.calls)) expect(JSON.stringify(call)).not.toContain(deviceKey);
+    } finally {
+      spies.forEach(spy => spy.mockRestore());
+    }
+  });
+
+  it('(o) a reset deletes the device and all its rows, the old key is refused, and the id registers again', async () => {
+    await fresh();
+    const admin = await resetter();
+    const ctx = await pairTill('cashier-o');
+    const oldDevice = await register(ctx, 'till-o');
+    const d = display('192.0.2.120');
+    const { displayId, token } = await paired(ctx, oldDevice, d);
+    await signalling.postSnapshot(ctx, oldDevice, displayId, { seq: 1 });
+    await signalling.sendSignal(ctx, oldDevice, displayId, { type: 'offer', payload: 'o1' });
+    await signalling.mint(ctx, oldDevice);
+    await signalling.claim(display('192.0.2.121'), { code: (await signalling.mint(ctx, oldDevice)).code, displayName: 'Waiting' });
+    await paired(ctx, await register(ctx, 'till-o2'), display('192.0.2.122'));
+    const owned = (deviceId: string) => Promise.all(['tally_display_device', 'tally_display', 'tally_display_code', 'tally_display_pending']
+      .map(table => count(table, `"deviceId" = '${deviceId}'`)));
+    const inboxes = () => Promise.all(['tally_display_snapshot', 'tally_display_signal'].map(table => count(table, `"displayId" = '${displayId}'`)));
+    // Before: the paired code and the claimed one are spent, one is live.
+    expect([await owned('till-o'), await inboxes()]).toEqual([[1, 1, 3, 1], [1, 1]]);
+
+    expect(await gql(admin, RESET, { deviceId: 'till-o' })).toEqual({ data: { tallyResetDisplayDevice: { result: 'DELETED', message: null } } });
+    expect([await owned('till-o'), await inboxes()]).toEqual([[0, 0, 0, 0], [0, 0]]);
+    expect((await owned('till-o2')).slice(0, 2)).toEqual([1, 1]);
+    expect(await refused(signalling.mint(ctx, oldDevice))).toBe('device_refused');
+    expect(await refused(signalling.readSnapshot(d, token))).toBe('token_refused');
+    const renewed = await register(ctx, 'till-o');
+    expect(renewed.deviceKey).not.toBe(oldDevice.deviceKey);
+    expect(await signalling.mint(ctx, renewed)).toMatchObject({ code: expect.any(String) });
+    expect((await gql(admin, RESET, { deviceId: 'till-o' })).data.tallyResetDisplayDevice.result).toBe('DELETED');
+  });
+
+  it('(p) a reset is scoped to the active channel', async () => {
+    await fresh();
+    const inA = await pairTill('cashier-p'), inB = await pairTill('cashier-p', 'b');
+    const onA = await register(inA, 'till-p'), onB = await register(inB, 'till-p');
+    await paired(inA, onA, display('192.0.2.130'));
+    await paired(inB, onB, display('192.0.2.131'));
+    expect((await gql(await resetter(), RESET, { deviceId: 'till-p' })).data.tallyResetDisplayDevice.result).toBe('DELETED');
+    const rows = (channel: 'a' | 'b') => Promise.all(['tally_display_device', 'tally_display'].map(table =>
+      count(table, `"channelId" = '${environment.decode(channels[channel].id)}' AND "deviceId" = 'till-p'`)));
+    expect([await rows('a'), await rows('b')]).toEqual([[0, 0], [1, 1]]);
+    expect(await signalling.mint(inB, onB)).toMatchObject({ code: expect.any(String) });
+  });
+
+  it('(q) without the permission, both operations are Forbidden, and nothing changes', async () => {
+    await fresh();
+    const inA = await pairTill('cashier-q'), inB = await pairTill('cashier-q', 'b');
+    await paired(inA, await register(inA, 'till-q'), display('192.0.2.140'));
+    await paired(inB, await register(inB, 'till-q'), display('192.0.2.141'));
+    const rows = () => Promise.all(['tally_display_device', 'tally_display'].map(table => count(table, `"deviceId" = 'till-q'`)));
+    expect(await rows()).toEqual([2, 2]);
+    const sessions = [
+      await sessionWith('noreset-q', ['TallyPosPairDisplay', 'TallyPosSell', 'UpdateSettings'], 'a'),
+      await sessionWith('till-role-q', POS_TILL_PERMISSIONS, 'a'),
+      // The resetter holds the permission in channel a only.
+      { ...await resetter(), 'vendure-token': channels.b.token },
+    ];
+    for (const [i, headers] of sessions.entries()) {
+      for (const operation of ['query { tallyDisplayDevices { deviceId } }', 'mutation { tallyResetDisplayDevice(deviceId: "till-q") { result } }']) {
+        const response = await gql(headers, operation);
+        expect([i, operation, response.errors?.[0]?.extensions?.code]).toEqual([i, operation, 'FORBIDDEN']);
+        expect(await rows()).toEqual([2, 2]);
+      }
+    }
+  });
+
+  it('(r) an unknown id answers NOT_DELETED, deletes nothing, and logs nothing', async () => {
+    await fresh();
+    const admin = await resetter();
+    await register(await pairTill('cashier-r'), 'till-r');
+    const stored = () => Promise.all(TABLES.map(table => count(table)));
+    const before = await stored();
+    const info = vi.spyOn(Logger, 'info');
+    try {
+      for (const deviceId of ['no-such-device', '', 'x'.repeat(65)]) {
+        const response = await gql(admin, RESET, { deviceId });
+        expect(response).toEqual(NOT_DELETED);
+        if (deviceId) expect(response.data.tallyResetDisplayDevice.message).not.toContain(deviceId);
+      }
+      expect(info.mock.calls.filter(([message]) => String(message).includes('reset by'))).toEqual([]);
+    } finally {
+      info.mockRestore();
+    }
+    expect(await stored()).toEqual(before);
+  });
+
+  it('(s) the list shows the channel\'s devices and hides every secret, and a reset is logged with the admin id only', async () => {
+    const harness = await make();
+    const admin = await resetter();
+    const ctx = await pairTill('cashier-s');
+    const s1 = await register(ctx, 'till-s1');
+    const { displayId, token } = await paired(ctx, s1, display('192.0.2.150'));
+    // A second apart on the service's clock each, so the order by lastCallAt is s3, s2, s1.
+    offset += 1000;
+    const s2 = await register(ctx, 'till-s2');
+    await signalling.mint(ctx, s2);
+    await signalling.claim(display('192.0.2.151'), { code: (await signalling.mint(ctx, s2)).code, displayName: 'Waiting' });
+    const inB = await pairTill('cashier-s', 'b');
+    const sB = await register(inB, 'till-s-b');
+    offset += 1000;
+    const legacy = await harness.seedLegacyDevice('till-s3');
+
+    const listed = await gql(admin, `query { tallyDisplayDevices { deviceId keyIssued adoptedAt lastCallAt
+      displays { id name confirmedAt lastSeenAt } } }`);
+    const devices = listed.data.tallyDisplayDevices as Array<{ deviceId: string; keyIssued: boolean; adoptedAt: string | null; lastCallAt: string;
+      displays: Array<{ id: string; name: string }> }>;
+    expect(devices.map(device => [device.deviceId, device.keyIssued, device.adoptedAt])).toEqual([
+      ['till-s3', false, null], ['till-s2', true, null], ['till-s1', true, null]]);
+    expect(devices[0].lastCallAt).toMatch(/^\d{4}-\d\d-\d\dT/);
+    expect(devices[2].displays.map(row => [row.id, row.name])).toEqual([[displayId, 'Counter']]);
+    expect(devices[1].displays).toEqual([]);
+    const values = async (sql: string) => (await connection.rawConnection.query(sql) as Array<Record<string, string | null>>)
+      .flatMap(row => Object.values(row)).filter((value): value is string => value !== null);
+    const keyHashes = await values('SELECT "keyHash" FROM "tally_display_device"');
+    const secrets = [
+      ...keyHashes, ...await values('SELECT "tokenHash", "secretHash" FROM "tally_display"'), ...await values('SELECT "code" FROM "tally_display_code"'),
+      ...await values('SELECT "secretHash", "checkCode" FROM "tally_display_pending"'),
+      s1.deviceKey, s2.deviceKey, sB.deviceKey, token, legacy.token, 'cashier-s', 'cashier-s-b', 'cashier-legacy',
+    ];
+    expect(secrets.length).toBeGreaterThanOrEqual(15);
+    // A short code is matched as a whole JSON string, so a year in a timestamp or a run of digits in a hex id never matches by chance.
+    for (const secret of secrets) expect(JSON.stringify(listed)).not.toContain(secret.length < 8 ? JSON.stringify(secret) : secret);
+    const fields = async (type: string) => ((await gql(admin, `query { __type(name: "${type}") { fields { name } } }`)).data.__type.fields as
+      Array<{ name: string }>).map(field => field.name).sort();
+    expect(await fields('TallyDisplayDevice')).toEqual(['adoptedAt', 'deviceId', 'displays', 'keyIssued', 'lastCallAt']);
+    expect(await fields('TallyDisplayDeviceDisplay')).toEqual(['confirmedAt', 'id', 'lastSeenAt', 'name']);
+
+    const { me } = (await gql(admin, 'query { me { id } }')).data;
+    const spies = (['info', 'warn', 'error', 'debug', 'verbose'] as const).map(level => vi.spyOn(Logger, level));
+    try {
+      expect((await gql(admin, RESET, { deviceId: 'till-s1' })).data.tallyResetDisplayDevice.result).toBe('DELETED');
+      const resets = spies[0].mock.calls.filter(([message]) =>
+        String(message).includes('"till-s1"') && String(message).includes(`reset by user ${environment.decode(me.id)}`));
+      expect(resets).toHaveLength(1);
+      for (const call of spies.flatMap(spy => spy.mock.calls)) {
+        for (const secret of [s1.deviceKey, s2.deviceKey, ...keyHashes, token, 'resetter-a']) expect(JSON.stringify(call)).not.toContain(secret);
+      }
     } finally {
       spies.forEach(spy => spy.mockRestore());
     }

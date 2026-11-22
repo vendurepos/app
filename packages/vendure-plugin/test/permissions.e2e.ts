@@ -56,7 +56,7 @@ describe('till route permissions', () => {
     return { Authorization: `Bearer ${token}` };
   }
 
-  it('ApproveTallyPosVariance and TallyPosRefund are assignable permissions, and the SuperAdmin role holds them', async () => {
+  it('ApproveTallyPosVariance, TallyPosRefund and TallyPosResetDisplayDevice are assignable permissions, and the SuperAdmin role holds them', async () => {
     const { globalSettings, roles } = await adminClient.query<{
       globalSettings: { serverConfig: { permissions: Array<{ name: string; assignable: boolean }> } };
       roles: { items: Array<{ permissions: string[] }> };
@@ -67,9 +67,11 @@ describe('till route permissions', () => {
     expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'ApproveTallyPosVariance', assignable: true });
     expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'TallyPosRefund', assignable: true });
     expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'TallyPosSell', assignable: true });
+    expect(globalSettings.serverConfig.permissions).toContainEqual({ name: 'TallyPosResetDisplayDevice', assignable: true });
     expect(roles.items).toHaveLength(1);
     expect(roles.items[0].permissions).toContain('ApproveTallyPosVariance');
     expect(roles.items[0].permissions).toContain('TallyPosRefund');
+    expect(roles.items[0].permissions).toContain('TallyPosResetDisplayDevice');
   });
 
   it('a TallyPosSell-only administrator sells and reads /info', async () => {

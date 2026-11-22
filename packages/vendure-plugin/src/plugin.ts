@@ -14,7 +14,7 @@ import { TallyRegistersController } from './api/registers.controller';
 import { TallyReportsController } from './api/reports.controller';
 import { TallyStockEditController } from './api/stock-edit.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
-import { tallyPosSell, tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund } from './config/permissions';
+import { tallyPosSell, tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund, tallyPosResetDisplayDevice } from './config/permissions';
 import {
   TallyPriceStrategy, TallyStockLocationStrategy, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
@@ -124,7 +124,7 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
     const byCode = (a: { code: string }, b: { code: string }) => a.code === b.code;
     config.customFields.Order = withMissing(config.customFields.Order, orderCustomFields, byName);
     config.customFields.OrderLine = withMissing(config.customFields.OrderLine, orderLineCustomFields, byName);
-    config.authOptions.customPermissions = withMissing(config.authOptions.customPermissions, [tallyPosSell, tallyPosApproveVariance, tallyPosRefund, tallyPosPairDisplay], (a, b) => a.Permission === b.Permission);
+    config.authOptions.customPermissions = withMissing(config.authOptions.customPermissions, [tallyPosSell, tallyPosApproveVariance, tallyPosRefund, tallyPosPairDisplay, tallyPosResetDisplayDevice], (a, b) => a.Permission === b.Permission);
     registerOrderIndexes();
     const { orderOptions } = config;
     if (!(orderOptions.orderItemPriceCalculationStrategy instanceof TallyPriceStrategy)) {
