@@ -3892,6 +3892,30 @@ test.describe('with a network printer', () => {
   });
 });
 
+/** A sale's receipt sheet, open, with no printer: Print goes to the print dialog once the sheet has slid out. */
+async function openPrintSheet(page: Page) {
+  await recordPrintDialog(page);
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await sellMug(page);
+  await page.getByTestId('receipt').getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+}
+
+test('New sale while the receipt sheet slides out drops its print dialog, so the next till is not printed', async ({ page }) => {
+  await openPrintSheet(page);
+  await page.getByTestId('receipt-print-button').click();
+  await page.getByTestId('new-sale').click();
+  await expect(page.getByTestId('receipt')).toHaveCount(0);
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  // The dropped print would come with the sheet's unmount, already passed: a moment more, then count.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.printCalls)).toBe(0);
+});
+
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
