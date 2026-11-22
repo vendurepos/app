@@ -33,7 +33,7 @@ it.each([
   [404, { code: 'receipt_email_disabled' }, RECEIPT_EMAIL_DISABLED_TEXT],
   [404, {}, RECEIPT_EMAIL_DISABLED_TEXT],
   [403, { code: 'forbidden' }, RECEIPT_EMAIL_FORBIDDEN_TEXT],
-  [403, {}, RECEIPT_EMAIL_FORBIDDEN_TEXT],
+  [403, {}, RECEIPT_EMAIL_UNAUTHORIZED_TEXT],
   [401, {}, RECEIPT_EMAIL_UNAUTHORIZED_TEXT],
   [400, { code: 'invalid_payload' }, RECEIPT_EMAIL_INVALID_TEXT],
   [404, { code: 'order_not_found' }, RECEIPT_EMAIL_ORDER_GONE_TEXT],
@@ -44,7 +44,10 @@ it.each([
   [429, { code: 'channel_daily_limit' }, RECEIPT_EMAIL_DAILY_LIMIT_TEXT],
   [429, { code: 'something_new' }, RECEIPT_EMAIL_FAILED_TEXT],
   [500, {}, RECEIPT_EMAIL_FAILED_TEXT],
-  [502, '<html>Bad gateway</html>', RECEIPT_EMAIL_FAILED_TEXT],
+  [500, '<html>Server error</html>', RECEIPT_EMAIL_FAILED_TEXT],
+  [502, {}, RECEIPT_EMAIL_UNKNOWN_TEXT],
+  [503, '<html>Unavailable</html>', RECEIPT_EMAIL_UNKNOWN_TEXT],
+  [504, {}, RECEIPT_EMAIL_UNKNOWN_TEXT],
 ])('reads a %i %j as %j', async (status, body, expected) => {
   vi.stubGlobal('fetch', respond(status, body));
   expect(await sendReceiptEmail(context, 'DEMO-000001', 'a@b.co')).toBe(expected);

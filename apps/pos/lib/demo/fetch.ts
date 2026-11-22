@@ -61,7 +61,7 @@ const INFO_PATH = '/tally/v1/info';
 const REGISTERS_PATH = '/tally/v1/registers';
 // The plugin's receipt-email route (CHECKLIST 12.1), with the order code as its one captured segment.
 const RECEIPT_EMAIL_ROUTE = /^\/tally\/v1\/orders\/([^/]+)\/receipt-email$/;
-// One plain address: no list, space, quote or angle bracket (spec 12.1b-1).
+// One plain address: no list, space, quote or angle bracket. The plugin's check is stricter (receipt-email.controller.ts EMAIL).
 const PLAIN_EMAIL = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
 // Unrecognised REST routes return the server's not-found status.
 const NOT_FOUND = 404;
@@ -147,11 +147,14 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
     const receipt = request.method === 'POST' ? RECEIPT_EMAIL_ROUTE.exec(route) : null;
     if (receipt) {
       // The demo sends nothing and keeps no address, not even in demo storage.
+      // In the plugin's order: the payload, then the order, then whether a till made it.
       const code = decodeURIComponent(receipt[1]);
-      if (!store.orderSummaries().some(order => order.code === code)) return reply({ code: 'order_not_found', message: `No order ${code} in this channel` }, undefined, 404);
       const given = (await request.json().catch(() => null))?.emailAddress;
       const emailAddress = typeof given === 'string' ? given.trim() : '';
       if (!PLAIN_EMAIL.test(emailAddress)) return reply({ code: 'invalid_payload', message: 'Expected a body of { emailAddress }, one email address' }, undefined, 400);
+      const order = store.orderSummaries().find(summary => summary.code === code) as { customFields: { tallyClientOrderId: string | null } } | undefined;
+      if (!order) return reply({ code: 'order_not_found', message: `No order ${code} in this channel` }, undefined, 404);
+      if (!order.customFields.tallyClientOrderId) return reply({ code: 'not_till_order', message: 'Not a till sale' }, undefined, 409);
       return reply({ queued: true, emailAddress }, undefined, 202);
     }
     if (route !== ADMIN_PATH) return reply({ statusCode: NOT_FOUND, message: `Cannot ${request.method} ${route}`, error: 'Not Found' }, undefined, NOT_FOUND);

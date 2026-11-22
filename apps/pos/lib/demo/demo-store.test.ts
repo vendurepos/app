@@ -912,7 +912,9 @@ it("answers /info without the order.refund contract only while the e2e switch is
 });
 
 it('answers the receipt-email route for a known order and a plain address, keeping nothing', async () => {
-  const code = String(new DemoStore().orderSummaries()[0].code);
+  const summaries = new DemoStore().orderSummaries() as { code: string; customFields: { tallyClientOrderId: string | null } }[];
+  const code = summaries.find(summary => summary.customFields.tallyClientOrderId)!.code;
+  const web = summaries.find(summary => !summary.customFields.tallyClientOrderId)!.code;
   const post = (orderCode: string, body: unknown) => fetch(`${DEMO_STORE_ORIGIN}/tally/v1/orders/${encodeURIComponent(orderCode)}/receipt-email`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const before = storage.getItem(DEMO_STORAGE_KEY);
@@ -922,6 +924,10 @@ it('answers the receipt-email route for a known order and a plain address, keepi
   expect([unknown.status, (await unknown.json()).code]).toEqual([404, 'order_not_found']);
   const list = await post(code, { emailAddress: 'a@b.co, c@d.co' });
   expect([list.status, (await list.json()).code]).toEqual([400, 'invalid_payload']);
+  const first = await post('NOPE-1', { emailAddress: 'a@b.co, c@d.co' });
+  expect([first.status, (await first.json()).code]).toEqual([400, 'invalid_payload']);
+  const storefront = await post(web, { emailAddress: 'a@b.co' });
+  expect([storefront.status, (await storefront.json()).code]).toEqual([409, 'not_till_order']);
   expect(storage.getItem(DEMO_STORAGE_KEY)).toBe(before);
   expect(await sendReceiptEmail(sessionContext(await signedIn()), code, 'a@b.co')).toBeNull();
 });

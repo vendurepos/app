@@ -4,10 +4,10 @@ import type { ServerCapabilities, SyncContext } from '@tallyui/core';
 export const RECEIPT_EMAIL_INVALID_TEXT = 'Enter one email address, such as name@example.com.';
 /** The store's plugin has receipt email off, or predates the route (a 404 with no code). */
 export const RECEIPT_EMAIL_DISABLED_TEXT = "This store doesn't email receipts. The store's admin can turn it on in the VendurePOS plugin.";
-/** The cashier's role lacks a permission the route needs (any 403). */
+/** The plugin's own 403 `forbidden`: the role reaches the route but lacks ReadOrder. */
 export const RECEIPT_EMAIL_FORBIDDEN_TEXT = "This account can't email receipts. Ask the store's admin to add the Read order permission to its role.";
-/** The session has expired (401). */
-export const RECEIPT_EMAIL_UNAUTHORIZED_TEXT = 'Your session has ended. Sign in again, then send the receipt again.';
+/** A 401, or a 403 without the plugin's `forbidden` code: Vendure's AuthGuard refusal, which ADR 0023 reads as sign in again. */
+export const RECEIPT_EMAIL_UNAUTHORIZED_TEXT = 'This till needs to sign in again. Sign in, then send the receipt again.';
 /** The order code is no longer in the store's channel (404 order_not_found). */
 export const RECEIPT_EMAIL_ORDER_GONE_TEXT = "This order isn't in the store any more.";
 /** The order was not made on a till (409 not_till_order). */
@@ -17,10 +17,10 @@ export const RECEIPT_EMAIL_RATE_LIMITED_TEXT = 'Too many receipts sent just now.
 /** The order's own send cap was hit (429 order_send_limit). */
 export const RECEIPT_EMAIL_ORDER_LIMIT_TEXT = "This order's receipt has been emailed as many times as the store allows.";
 /** A user or channel daily cap was hit (429 user_daily_limit or channel_daily_limit). */
-export const RECEIPT_EMAIL_DAILY_LIMIT_TEXT = "The store's daily limit for emailed receipts has been reached.";
-/** The request threw (network, abort), so the send may or may not have happened. */
+export const RECEIPT_EMAIL_DAILY_LIMIT_TEXT = 'The daily limit for emailed receipts has been reached.';
+/** The request threw (network, abort) or a gateway answered (502, 503, 504), so the send may or may not have happened. */
 export const RECEIPT_EMAIL_UNKNOWN_TEXT = "The store didn't answer, so the receipt may or may not have been sent. Check with the customer before sending it again.";
-/** Any other answer: a 5xx, an unknown code, a non-JSON body or a 2xx that is not the route's. */
+/** Any other answer: another 5xx, an unknown code, a non-JSON body or a 2xx that is not the route's. */
 export const RECEIPT_EMAIL_FAILED_TEXT = "Can't send the receipt. Try again.";
 
 // The cashier text for each `status code` refusal the plugin's receipt-email route writes (packages/vendure-plugin/README.md, "Receipt email").
@@ -51,10 +51,10 @@ export async function sendReceiptEmail(context: SyncContext, orderCode: string, 
   const body = await response.json().catch(() => null);
   // Queued only on the route's own answer: a 2xx from anything else (a proxy's page) sent nothing.
   if (response.status === 202 && body?.queued === true) return null;
-  if (response.ok) return RECEIPT_EMAIL_FAILED_TEXT;
-  if (response.status === 401) return RECEIPT_EMAIL_UNAUTHORIZED_TEXT;
-  if (response.status === 403) return RECEIPT_EMAIL_FORBIDDEN_TEXT;
+  // A gateway's error may come after the store sent the email, and the route is not idempotent.
+  if (response.status === 502 || response.status === 503 || response.status === 504) return RECEIPT_EMAIL_UNKNOWN_TEXT;
   const code = typeof body?.code === 'string' ? body.code : undefined;
+  if (response.status === 401 || response.status === 403) return code === 'forbidden' ? RECEIPT_EMAIL_FORBIDDEN_TEXT : RECEIPT_EMAIL_UNAUTHORIZED_TEXT;
   if (response.status === 404 && !code) return RECEIPT_EMAIL_DISABLED_TEXT;
   const text = (code !== undefined && REFUSALS[`${response.status} ${code}`]) || RECEIPT_EMAIL_FAILED_TEXT;
   const retryAt = text === RECEIPT_EMAIL_DAILY_LIMIT_TEXT && typeof body.retryAt === 'string' ? Date.parse(body.retryAt) : NaN;
