@@ -213,6 +213,41 @@ describe('order.refund v1', () => {
     expect(after.payments.flatMap(payment => payment.refunds).reduce((sum, refund) => sum + refund.total, 0)).toBe(P);
   });
 
+  // Money P1 (Fable money-path review, finding 1): a till line discount is stored as a negative Surcharge, not on the line.
+  async function sellDiscounted(lines: Array<{ variantId: string; unitPriceMinor: number; discountMinor?: number }>) {
+    const command = { ...orderCommand(lines.map(line => ({ ...line, quantity: 1 }))), version: 10 };
+    const result = await post(command);
+    expect(result).toMatchObject({ status: 'applied' });
+    const order = await readOrder(result.serverRefs!.orderId);
+    const paid = order.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    expect(paid).toBe(command.payload.totalMinor);
+    return { order, paid };
+  }
+  const wholeLine = (order: ReadOrder, line: ReadOrder['lines'][number], session: { registerId: string; sessionId: string }, totalMinor: number) =>
+    refundFor(order, session, { lines: [{ orderLineId: line.id, quantity: line.quantity, restock: true }], shippingMinor: 0, totalMinor });
+
+  it('refunds a discounted line for what the customer paid, and the rest of the order stays refundable', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellDiscounted([
+      { variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200 },
+      { variantId: variantIds.beans[0], unitPriceMinor: 500 },
+    ]);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    const b = order.lines.find(line => line.productVariant.id === variantIds.beans[0])!;
+    const paidForA = paid - b.proratedLinePriceWithTax;
+    expect(await post(wholeLine(order, a, session, paidForA))).toMatchObject({ status: 'applied', refund: { totalMinor: paidForA } });
+    expect(await post(wholeLine(order, b, session, b.proratedLinePriceWithTax)))
+      .toMatchObject({ status: 'applied', refund: { totalMinor: b.proratedLinePriceWithTax } });
+    const refunds = (await readOrder(order.id)).payments.flatMap(payment => payment.refunds).filter(refund => refund.state !== 'Failed');
+    expect(refunds.reduce((sum, refund) => sum + refund.total, 0)).toBe(paid);
+  });
+
+  it('a single discounted line refunds in full for the amount paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellDiscounted([{ variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200 }]);
+    expect(await post(wholeLine(order, order.lines[0], session, paid))).toMatchObject({ status: 'applied', refund: { totalMinor: paid } });
+  });
+
   it('refusals are unstored and name the contract code', async () => {
     const session = await openSession();
     const { order, clientOrderId } = await sell(2);
