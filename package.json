@@ -13,6 +13,7 @@
     "e2e:demo": "bash scripts/e2e-demo.sh",
     "e2e:hosted": "bash scripts/e2e-hosted.sh",
     "measure:sync": "bash scripts/measure-sync.sh",
+    "browsers": "PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --filter @vendurepos/pos exec playwright install chromium-headless-shell",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"

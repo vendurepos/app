@@ -48,6 +48,9 @@ pnpm lint
 
 CI (`.github/workflows/ci.yml`) runs install, typecheck and test.
 
+Install the e2e browser only with `pnpm browsers` (it skips Playwright's
+browser GC, so it never removes a browser another worktree needs).
+
 ## Scope
 
 - `vendurepos-web` (the marketing site) is a separate repo and out of scope
