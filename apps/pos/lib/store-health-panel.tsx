@@ -30,7 +30,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
   }
   async function checkNow() {
     setChecking(true);
-    try { await onCheckNow(); setMeasureRun(run => run + 1); } finally { setChecking(false); }
+    try { await onCheckNow(); } finally { setMeasureRun(run => run + 1); setChecking(false); }
   }
   const { products, orders, refunds, parked, closures } = collections;
   const [counts, setCounts] = useState<Record<'orders' | 'refunds' | 'parked' | 'closures', number | null>>({ orders: null, refunds: null, parked: null, closures: null });
@@ -41,7 +41,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
       sources[key]?.count().$.subscribe(count => setCounts(current => ({ ...current, [key]: count }))));
     return () => subscriptions.forEach(subscription => subscription?.unsubscribe());
   }, [orders, refunds, parked, closures]);
-  // On demand: the panel opens only when the merchant asks. Variants live inside their product's document, so have no size.
+  // On demand: the panel opens only when the merchant asks, and again when the catalogue's first pull lands (catalogueSynced; a re-download resets it). Variants live inside their product's document, so have no size.
   const [measureRun, setMeasureRun] = useState(0);
   const [sizes, setSizes] = useState<Record<'products' | 'orders' | 'refunds' | 'parked' | 'closures', number | null | undefined>>({ products: undefined, orders: undefined, refunds: undefined, parked: undefined, closures: undefined });
   useEffect(() => {
@@ -59,7 +59,7 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
       }
     })();
     return () => controller.abort();
-  }, [products, orders, refunds, parked, closures, measureRun]);
+  }, [products, orders, refunds, parked, closures, measureRun, catalogueSynced]);
   const [totals, setTotals] = useState<ServerTotals>({ products: null, variants: null, orders: null });
   useEffect(() => {
     let cancelled = false;
