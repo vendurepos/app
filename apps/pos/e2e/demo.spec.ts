@@ -1659,6 +1659,64 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await expect(page.getByTestId('order-receipt').getByTestId('order-receipt-total')).toHaveText('€23.52');
 });
 
+test('a demo cashier emails the receipt after a sale', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await sellMug(page);
+
+  // Offered once the demo store has the order and its code.
+  const button = page.getByTestId('receipt-email');
+  await expect(button).toBeVisible();
+  await button.click();
+  const panel = page.getByTestId('receipt-email-panel');
+  await expect(panel.getByTestId('receipt-email-form')).toBeVisible();
+  const address = panel.getByTestId('receipt-email-address');
+  await expect(address).toHaveValue('');
+
+  await address.fill('not-an-address');
+  await panel.getByTestId('receipt-email-send').click();
+  await expect(panel.getByTestId('receipt-email-error')).toHaveText('Enter an email address.');
+  await address.fill('customer@example.com');
+  await panel.getByTestId('receipt-email-send').click();
+  await expect(panel.getByTestId('receipt-email-sent')).toHaveText('Email sent');
+
+  // Closed and opened again: a fresh form, to send again.
+  await button.click();
+  await expect(panel).toBeHidden();
+  await button.click();
+  await expect(panel.getByTestId('receipt-email-address')).toHaveValue('');
+  await expect(panel.getByTestId('receipt-email-sent')).toBeHidden();
+});
+
+test("a demo cashier emails a finished sale's receipt from the order sheet", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await sellMug(page);
+  await page.getByTestId('new-sale').click();
+
+  await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
+  await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+  await page.getByTestId('order-sheet-receipt').click();
+  await page.getByTestId('order-receipt-email').click();
+  const panel = page.getByTestId('order-receipt-email-panel');
+  await expect(panel.getByTestId('receipt-email-form')).toBeVisible();
+
+  // The printed reprint carries no form.
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.getByTestId('order-receipt')).toBeVisible();
+  await expect(panel.getByTestId('receipt-email-form')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+
+  await panel.getByTestId('receipt-email-address').fill('customer@example.com');
+  await panel.getByTestId('receipt-email-send').click();
+  await expect(panel.getByTestId('receipt-email-sent')).toHaveText('Email sent');
+});
+
 test("Reports shows the till's sale for today, and a scan closes it and adds", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -3824,7 +3882,7 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
 
-test('a demo cashier pays part of a sale by typing an amount, then the rest', async ({ page }) => {
+test('a demo cashier pays part of a sale by typing an amount, and the rest is left to pay', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
