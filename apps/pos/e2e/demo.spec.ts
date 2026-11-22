@@ -2228,7 +2228,7 @@ test('Settings shows one section at a time, General first, and stacks behind Men
   await expect(page.getByTestId('signed-in-store')).toBeVisible();
   await page.getByTestId('settings-open').click();
   await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('tile-size-auto')).toBeVisible();
+  await expect(page.getByTestId('catalogue-settings-auto')).toBeVisible();
   await expect(page.getByTestId('price-edit-toggle')).toHaveAttribute('role', 'switch');
   await expect(page.getByTestId('price-edit-toggle')).toHaveAttribute('aria-checked', 'true');
   await page.getByTestId('price-edit-toggle').click();
@@ -2239,7 +2239,7 @@ test('Settings shows one section at a time, General first, and stacks behind Men
   await expect(page.getByTestId('variance-limit')).toHaveCount(0);
   await page.getByTestId('settings-section-register').click();
   await expect(page.getByTestId('variance-limit')).toBeVisible();
-  await expect(page.getByTestId('tile-size-auto')).toHaveCount(0);
+  await expect(page.getByTestId('catalogue-settings-auto')).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId('variance-limit')).toBeVisible();
   await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
@@ -2254,9 +2254,14 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
   await openSettings(page, 'general');
-  await expect(page.getByTestId('tile-size-auto')).toHaveAttribute('aria-pressed', 'true');
-  await page.getByTestId('tile-size-3').click();
-  await expect(page.getByTestId('tile-size-3')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('catalogue-settings-auto')).toHaveAttribute('aria-checked', 'true');
+  // Auto off puts the slider at v2's 4 a row; one step left is three.
+  await page.getByTestId('catalogue-settings-auto').click();
+  const thumb = page.getByTestId('catalogue-settings-tile-size').getByRole('slider');
+  await expect(thumb).toHaveAttribute('aria-valuenow', '4');
+  await thumb.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(thumb).toHaveAttribute('aria-valuenow', '3');
   await page.getByTestId('settings-back').click();
 
   // All products is a level, whose back poster takes the grid's first slot.
@@ -2281,7 +2286,7 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
   }
 
   await openSettings(page, 'general');
-  await page.getByTestId('tile-size-auto').click();
+  await page.getByTestId('catalogue-settings-auto').click();
   await page.getByTestId('settings-back').click();
   await expect(tiles.nth(3)).toBeVisible();
   await expect(async () => {
@@ -2290,6 +2295,50 @@ test('Settings keeps the tile size for this till, and the grid takes it at once'
     expect(first).not.toBeNull();
     expect(fourth?.y).toBe(first!.y);
   }).toPass();
+});
+
+test('Settings › General › Products keeps the tile fields for this till, and the grid takes them at once', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openAllProducts(page);
+  const mug = page.getByTestId('product-tile-Tally Fixture Mug');
+  await mug.scrollIntoViewIfNeeded();
+  await expect(mug).not.toContainText('TALLY-MUG');
+  const price = (await mug.innerText()).match(/€\d+\.\d{2}/)![0];
+
+  await openSettings(page, 'general');
+  const sku = page.getByTestId('catalogue-settings-field-sku');
+  const priceSwitch = page.getByTestId('catalogue-settings-field-price');
+  await expect(sku).toHaveAttribute('aria-checked', 'false');
+  await expect(priceSwitch).toHaveAttribute('aria-checked', 'true');
+  await sku.click();
+  await priceSwitch.click();
+  await expect(sku).toHaveAttribute('aria-checked', 'true');
+  await expect(priceSwitch).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('catalogue-settings').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('02f-product-tile-fields-vendurepos.png') });
+  await page.getByTestId('settings-back').click();
+  await mug.scrollIntoViewIfNeeded();
+  await expect(mug).toContainText('SKU TALLY-MUG');
+  await expect(mug).not.toContainText(price);
+  await page.screenshot({ path: test.info().outputPath('02f-product-tile-fields-grid-vendurepos.png') });
+
+  await page.reload();
+  await expectSignedIn(page);
+  await openAllProducts(page);
+  await mug.scrollIntoViewIfNeeded();
+  await expect(mug).toContainText('SKU TALLY-MUG');
+  await expect(mug).not.toContainText(price);
+
+  await openSettings(page, 'general');
+  await sku.click();
+  await priceSwitch.click();
+  await page.getByTestId('settings-back').click();
+  await mug.scrollIntoViewIfNeeded();
+  await expect(mug).toContainText(price);
+  await expect(mug).not.toContainText('TALLY-MUG');
 });
 
 test('Settings keeps the product sort for this till, and the grid takes it on return', async ({ page }) => {
@@ -4530,7 +4579,7 @@ test("the product pane's settings button opens Settings › General at the Produ
   await page.screenshot({ path: test.info().outputPath('02f-product-settings-entry-vendurepos.png') });
   await page.getByTestId('product-settings-open').click();
   await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('tile-size')).toBeInViewport();
+  await expect(page.getByTestId('catalogue-settings')).toBeInViewport();
   // Scrolled to Products: the Prices card above it has left the top of the panel.
   await expect(page.getByTestId('price-edit-toggle')).not.toBeInViewport();
 });
