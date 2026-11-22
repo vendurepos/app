@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PrinterProfile, ReceiptData } from '@tallyui/pos';
-import { directPrinter, printedOn, printFailed, printReceiptTo, printTestTo } from './receipt-printer';
+import { directPrinter, printedOn, printFailed, printFailedAfterClose, printReceiptTo, printTestTo } from './receipt-printer';
 
 // TEST-NET-1: never a real printer. The sinks read globalThis.fetch per request, so a stubbed fetch catches every job.
 const epson: PrinterProfile = { id: 'front', name: 'Front counter', connectionType: 'network', vendor: 'epson', address: '192.0.2.10', port: 9100, columns: 42 };
@@ -98,4 +98,5 @@ it('posts a test page to the Epson printer', async () => {
 it('words the cashier lines', () => {
   expect(printedOn('Front counter')).toBe('Sent to Front counter.');
   expect(printFailed('Front counter')).toBe("Can't print on Front counter. Check that it is on and on this network, then try again, or print with the dialog.");
+  expect(printFailedAfterClose('Front counter')).toBe("Can't print on Front counter. Check that it is on and on this network, then reprint it from Orders.");
 });

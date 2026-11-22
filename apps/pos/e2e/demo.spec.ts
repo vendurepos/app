@@ -3223,6 +3223,7 @@ test('Settings › Printing adds, edits and removes a printer kept on this devic
 // TEST-NET-1, never a real printer: page.route answers it as an Epson ePOS-Print printer.
 const PRINTER_HOST = '192.0.2.10';
 const PRINTER_FAILED = "Can't print on Front counter. Check that it is on and on this network, then try again, or print with the dialog.";
+const PRINTER_FAILED_AFTER_CLOSE = "Can't print on Front counter. Check that it is on and on this network, then reprint it from Orders.";
 
 /**
  * The Epson printer at PRINTER_HOST: answers ePOS-Print's success while reachable, aborts every request when not.
@@ -3349,6 +3350,8 @@ test.describe('with a network printer', () => {
     await openRegister(page);
     await sellMug(page);
     await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
+    // A second job would POST only once the first resolved, so it could land just after this line: wait it out.
+    await page.waitForTimeout(1000);
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
   });
@@ -3368,16 +3371,17 @@ test.describe('with a network printer', () => {
     await page.getByTestId('settings-back').click();
     await openRegister(page);
     await sellMug(page);
-    await expect(page.getByTestId('print-failed-toast')).toHaveText(`${PRINTER_FAILED} Reprint it from Orders.`);
-    // It stands for Sale complete, never on top of it.
-    await expect(page.getByTestId('sale-complete-toast')).toHaveCount(0);
+    await expect(page.getByTestId('print-failed-toast')).toHaveText(PRINTER_FAILED_AFTER_CLOSE);
+    // It stands for Sale complete, never on top of it. Counted now: an awaited toHaveCount(0) would pass once Sale
+    // complete timed out by itself.
+    expect(await page.getByTestId('sale-complete-toast').count()).toBe(0);
     await expect(page.getByTestId('receipt')).toHaveCount(0);
     await expect(page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
-    // The next add takes it away.
+    // The next add takes it away, well before its own 10 s timer would.
     await page.getByTestId('product-tile-Tally Fixture Mug').click();
-    await expect(page.getByTestId('print-failed-toast')).toHaveCount(0);
+    await expect(page.getByTestId('print-failed-toast')).toHaveCount(0, { timeout: 2000 });
   });
 
   test('a receipt that fails to print after New sale still says so on the till', async ({ page }) => {
@@ -3401,7 +3405,7 @@ test.describe('with a network printer', () => {
     await expect(page.getByTestId('receipt')).toHaveCount(0);
     printer.reachable = false;
     release();
-    await expect(page.getByTestId('print-failed-toast')).toHaveText(`${PRINTER_FAILED} Reprint it from Orders.`);
+    await expect(page.getByTestId('print-failed-toast')).toHaveText(PRINTER_FAILED_AFTER_CLOSE);
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
   });

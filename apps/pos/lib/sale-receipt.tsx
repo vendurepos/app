@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { Button, discountLabel, orderReference, Text, VStack } from '@tallyui/components';
 import { buildReceiptData, CurrencyProvider, type useSale } from '@tallyui/pos';
 import { loadAutoPrint } from './auto-print-setting';
-import { useReceiptPrinter } from './receipt-printer';
+import { printFailedAfterClose, useReceiptPrinter } from './receipt-printer';
 import { ReceiptView } from './receipt-view';
 
 /**
@@ -20,15 +20,16 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  const afterPrint = useCallback((failure: string | null) => {
-    if (failure !== null && !mounted.current) onPrintFailedAfterClose?.(failure);
-  }, [onPrintFailedAfterClose]);
   const printedFor = useRef<string | null>(null);
   const { stage } = sale;
   const receiptOrderId = stage.kind === 'receipt' ? stage.order.id : null;
   const receipt = useMemo(() => stage.kind === 'receipt'
     ? buildReceiptData(stage.order, { storeName: store, cashier, register: registerId }) : null, [stage, store, cashier, registerId]);
   const { printer, busy, status, print: printDirect } = useReceiptPrinter();
+  // Only a direct print fails; the till's notice offers Orders, not the dialog button that went with the receipt.
+  const afterPrint = useCallback((failure: string | null) => {
+    if (failure !== null && !mounted.current && printer !== null) onPrintFailedAfterClose?.(printFailedAfterClose(printer.name));
+  }, [onPrintFailedAfterClose, printer]);
   // A direct printer takes the receipt (resolving to its failure line, or null); without one, the browser's print dialog does.
   const print = useMemo(() => {
     if (Platform.OS !== 'web' || receipt === null) return undefined;

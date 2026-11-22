@@ -810,7 +810,7 @@ function Sale({
       {/* A line removed meanwhile shows nothing. */}
       <AddToast name={sale.order.lineItems.find((line) => line.id === toast.lineId)?.name ?? null} />
       <AddToast name={saleDone.lineId} title="Sale complete" testID="sale-complete-toast" />
-      <AddToast name={printFailedToast.lineId} title={`${printFailedToast.lineId} Reprint it from Orders.`} testID="print-failed-toast"
+      <AddToast name={printFailedToast.lineId} title={printFailedToast.lineId ?? ''} testID="print-failed-toast"
         variant="destructive" />
     </View>
   );

@@ -10,6 +10,9 @@ export const printedOn = (name: string) => `Sent to ${name}.`;
 /** The cashier's line for any failed job, whatever its PrintError code. */
 export const printFailed = (name: string) =>
   `Can't print on ${name}. Check that it is on and on this network, then try again, or print with the dialog.`;
+/** The till's notice for a failed job once its receipt has gone, so there is no dialog button to offer. */
+export const printFailedAfterClose = (name: string) =>
+  `Can't print on ${name}. Check that it is on and on this network, then reprint it from Orders.`;
 
 /**
  * The till's receipt printer: the first printer with a web sink (Epson ePOS or Star WebPRNT), the default one first;
