@@ -4315,6 +4315,9 @@ test('A product with variants opens its variant tiles in place, with option chip
   await mWhite.click();
   const line = page.getByTestId('cart').getByTestId('cart-line-TEE-M-WHT');
   await expect(line).toBeVisible();
+  // CHECKLIST 2.5: the variant's attributes show under the line's name, as in v2 ("Size: M · Colour: White", U+00B7).
+  await expect(line).toContainText('Size: M · Colour: White');
+  await page.screenshot({ path: test.info().outputPath('04m-cart-variant-attributes-vendurepos.png') });
   // Picking a variant leaves the drill open, so the same tile adds again.
   await expect(crumb).toBeVisible();
   await mWhite.click();
