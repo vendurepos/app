@@ -5,7 +5,17 @@ import { stockTarget, type StockTarget, type VendureVariantStock } from './produ
 /** One variant's row in the Products panel (CHECKLIST 10.2), with display and edit fields. */
 export interface ProductRow { id: string; productId: string; productName: string; name: string; sku: string; price: string; stock: string;
   imageUrl: string | null; stockStatus: StockStatus; categories: string; categoryIds: string[]; facetValueIds: string[];
-  priceText: string; stockText: string; managed: boolean; stockTarget: StockTarget | null }
+  priceText: string; stockText: string; managed: boolean; stockTarget: StockTarget | null; optionSummary: OptionSummary }
+/** v2's lines under a variable product's name (CHECKLIST 10.2m), e.g. "Size: S, M": each option group with the values its live variants carry. */
+export type OptionSummary = { name: string; values: string[] }[];
+
+/** Each option group in its own value order, kept to the values at least one live variant carries; a group left empty is dropped. */
+function optionSummary<Doc>(product: Doc, traits: ProductTraits<Doc>): OptionSummary {
+  const variants = traits.getVariants?.(product) ?? [];
+  return (traits.getVariantOptions?.(product) ?? [])
+    .map(group => ({ name: group.name, values: group.values.filter(value => variants.some(variant => variant.options?.[group.name] === value)) }))
+    .filter(group => group.values.length > 0);
+}
 /** The Products panel's header sort value for a row (v2's sortable headers): Name, SKU, Stock and Price; a missing value sorts last. */
 export function productRowSortValue(row: ProductRow, field: string): ProductSortValue {
   if (field === 'name') return row.name;
@@ -27,7 +37,10 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
   const entries = catalogueEntries(searchProducts(products, term, traits), traits, { currency });
   const code = term.trim().toLowerCase();
   const exact = code ? entries.filter(({ variant }) => variant.sku?.toLowerCase() === code || variant.barcode?.toLowerCase() === code) : [];
+  // Once per product, from all its live variants (not only those the search or filters leave), as v2.
+  const summaries = new Map<Doc, OptionSummary>();
   return (exact.length ? exact : entries).map(({ product, variant }) => {
+    if (!summaries.has(product)) summaries.set(product, optionSummary(product, traits));
     const name = traits.getName(product);
     const option = variant.title?.startsWith(name) ? variant.title.slice(name.length).trim() : variant.title ?? '';
     const current = resolvePrice(variant.prices, currency)?.current;
@@ -42,6 +55,7 @@ export function productRows<Doc>(products: Doc[], term: string, traits: ProductT
       priceText: current ? moneyToMajor(current).toFixed(minorUnitDigits(current.currency)) : '',
       stockText: variant.stock.quantity == null ? '' : String(variant.stock.quantity), managed: variant.stock.quantity != null,
       stockTarget: stockTarget((product as { variants?: ({ id: string | number } & VendureVariantStock)[] }).variants?.find(v => String(v.id) === variant.id), outOfStockThreshold),
+      optionSummary: summaries.get(product)!,
     };
   });
 }
