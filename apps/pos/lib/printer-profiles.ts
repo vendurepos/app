@@ -60,3 +60,22 @@ export function printerSummary(profile: PrinterProfile): string {
     network ? PRINTER_VENDORS.find(({ value }) => value === (profile.vendor ?? 'generic'))?.label : undefined,
     address, printerPaper(profile) === '58mm' ? '58 mm' : '80 mm'].filter(Boolean).join(' · ');
 }
+
+export const TEMPLATE_PRINTERS_KEY = 'vendurepos.printer.templatePrinters';
+
+/** Template id to printer profile id (or SYSTEM_PRINTER_ID); a template with no entry is Auto. Per device. */
+export function loadTemplatePrinters(store: KeyValueStore = defaultStore()): Record<string, string> {
+  try {
+    const saved: unknown = JSON.parse(store.getItem(TEMPLATE_PRINTERS_KEY) ?? '{}');
+    if (saved === null || typeof saved !== 'object' || Array.isArray(saved)) return {};
+    return Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch {
+    return {};
+  }
+}
+
+/** Saves a template's printer; null removes the entry, so the template goes back to Auto. */
+export function saveTemplatePrinter(templateId: string, printerId: string | null, store: KeyValueStore = defaultStore()): void {
+  const { [templateId]: _, ...routing } = loadTemplatePrinters(store);
+  store.setItem(TEMPLATE_PRINTERS_KEY, JSON.stringify(printerId === null ? routing : { ...routing, [templateId]: printerId }));
+}

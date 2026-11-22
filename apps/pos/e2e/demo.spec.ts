@@ -3598,6 +3598,53 @@ test.describe('with a network printer', () => {
     await page.getByTestId('order-receipt-print-dialog').click();
     await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
   });
+
+  test('Settings › Printing routes each receipt template to a printer, kept on this device, and Print receipt follows it', async ({ page }) => {
+    await recordPrintDialog(page);
+    const printer = await epsonPrinter(page);
+    const printCalls = () => page.evaluate(() => window.printCalls);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await expect(page.getByTestId('template-row-standard-type')).toHaveText('HTML');
+    await expect(page.getByTestId('template-row-standard-printer')).toHaveText('Print dialog');
+    await expect(page.getByTestId('template-printer-standard-auto')).toHaveCount(0);
+    await expect(page.getByTestId('template-row-thermal-80mm-type')).toHaveText('Thermal 80 mm');
+    await expect(page.getByTestId('template-row-thermal-80mm-printer')).toHaveText('Auto — Front counter');
+    await expect(page.getByTestId('template-row-thermal-58mm-printer')).toHaveText('Auto — Print dialog');
+    await page.getByTestId('receipt-templates').scrollIntoViewIfNeeded();
+    // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/11c-settings-receipt-templates-vendurepos.webp (cwebp -q 80).
+    await page.setViewportSize({ width: 960, height: 600 });
+    await page.mouse.move(480, 0);
+    await page.screenshot({ path: test.info().outputPath('11c-settings-receipt-templates-vendurepos.png') });
+    await page.setViewportSize(devices['Desktop Chrome'].viewport);
+    await page.getByTestId('template-printer-thermal-80mm-system').click();
+    await expect(page.getByTestId('template-row-thermal-80mm-printer')).toHaveText('Print dialog');
+    // Kept on this device: a reload reads it back.
+    await page.reload();
+    await expectSignedIn(page);
+    await openSettings(page, 'printing');
+    await expect(page.getByTestId('template-row-thermal-80mm-printer')).toHaveText('Print dialog');
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await sellMug(page);
+    await page.getByTestId('receipt').getByTestId('receipt-print').click();
+    await expect.poll(printCalls).toBe(1);
+    expect(printer.posts).toBe(0);
+    await expect(page.getByTestId('receipt-print-status')).toHaveCount(0);
+    // Back to Auto: the next receipt goes to the printer again.
+    await page.getByTestId('new-sale').click();
+    await openSettings(page, 'printing');
+    await page.getByTestId('template-printer-thermal-80mm-auto').click();
+    await expect(page.getByTestId('template-row-thermal-80mm-printer')).toHaveText('Auto — Front counter');
+    await page.getByTestId('settings-back').click();
+    await sellMug(page);
+    await page.getByTestId('receipt').getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    expect(await printCalls()).toBe(1);
+  });
 });
 
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {

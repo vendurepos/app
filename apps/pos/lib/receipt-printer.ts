@@ -3,7 +3,8 @@ import {
   createEscPosTransport, createPrintQueue, escpos, mintUuid, networkSinkFor,
   type PrintJob, type PrinterProfile, type ReceiptData,
 } from '@tallyui/pos';
-import { loadPrinterProfiles, printerPaper } from './printer-profiles';
+import { loadPrinterProfiles, loadTemplatePrinters, printerPaper } from './printer-profiles';
+import { receiptPrinter } from './receipt-templates';
 
 /** The cashier's line after a job reached the printer. */
 export const printedOn = (name: string) => `Sent to ${name}.`;
@@ -15,12 +16,11 @@ export const printFailedAfterClose = (name: string) =>
   `Can't print on ${name}. Check that it is on and on this network, then reprint it from Orders.`;
 
 /**
- * The till's receipt printer: the first printer with a web sink (Epson ePOS or Star WebPRNT), the default one first;
- * null sends receipts to the print dialog. Stands in for v2's template-to-printer mapping until 9.5c.
+ * The till's receipt printer: the printer the receipt templates go to (Epson ePOS or Star WebPRNT, the default one
+ * first), as routed in Settings › Printing; null sends receipts to the print dialog.
  */
-export function directPrinter(profiles: readonly PrinterProfile[]): PrinterProfile | null {
-  return [...profiles].sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true))
-    .find((profile) => networkSinkFor(profile) !== null) ?? null;
+export function directPrinter(profiles: readonly PrinterProfile[], overrides: Readonly<Record<string, string>> = {}): PrinterProfile | null {
+  return receiptPrinter(profiles, overrides);
 }
 
 // The latest saved profile for each printer id, set before every job, so a queued job's transport is built with the
@@ -67,7 +67,7 @@ export async function printTestTo(profile: PrinterProfile): Promise<string | nul
  * line. `print` resolves to the failure line, or null; a call while a job runs is ignored.
  */
 export function useReceiptPrinter() {
-  const [printer] = useState(() => directPrinter(loadPrinterProfiles()));
+  const [printer] = useState(() => directPrinter(loadPrinterProfiles(), loadTemplatePrinters()));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; failed: boolean } | null>(null);
   // `busy` disables the button only from the next render: a double tap lands before it.
