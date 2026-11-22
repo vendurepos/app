@@ -2,8 +2,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { CustomerServiceError, type SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import type { CustomerRow } from './customer-list';
-import { CUSTOMER_EMAIL_REQUIRED_TEXT, CUSTOMER_OFFLINE_TEXT, CUSTOMER_SAVE_FORBIDDEN_TEXT,
-  customerAccess, customerFormValues, customerInput, customerPatch, customerSaveError, saveCustomer } from './customer-edit';
+import type { updateVendureCustomer } from '@tallyui/connector-vendure';
+import { addressEditorValue, addressPatch, CUSTOMER_ADDRESS_REMOVE_TEXT, CUSTOMER_ADDRESS_REQUIRED_TEXT, CUSTOMER_EMAIL_REQUIRED_TEXT, CUSTOMER_OFFLINE_TEXT, CUSTOMER_SAVE_FORBIDDEN_TEXT,
+  customerAccess, customerFormValues, customerInput, customerPatch, customerSaveError, readCustomerAddresses, saveCustomer } from './customer-edit';
 
 const context = { baseUrl: 'https://store.test', headers: {} } as SyncContext;
 const row: CustomerRow = { id: 'c1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com', phone: null,
@@ -111,4 +112,70 @@ it('grants no access on GraphQL errors, HTTP failures or a rejected fetch', asyn
     .mockResolvedValueOnce(new Response('', { status: 403 }))
     .mockRejectedValueOnce(new TypeError('Failed to fetch')));
   for (let i = 0; i < 3; i++) await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false });
+});
+
+// A full stored billing address and a different shipping address, as Vendure's customers list answers them.
+const billingRaw = { id: 'b1', fullName: 'Ada Lovelace', company: 'Engines Ltd', streetLine1: '12 Engine Row', streetLine2: 'Flat 2', city: 'London',
+  province: 'Greater London', postalCode: 'N1 9GU', country: { code: 'GB' }, phoneNumber: '+44 20 7946 0000', defaultBillingAddress: true, defaultShippingAddress: false };
+const shippingRaw = { id: 's1', fullName: 'Ada King', company: 'Analytical Works', streetLine1: '1 Dock Road', streetLine2: 'Unit 3', city: 'Bristol',
+  province: 'Avon', postalCode: 'BS1 1AA', country: { code: 'GB' }, phoneNumber: '+44 117 496 0000', defaultBillingAddress: false, defaultShippingAddress: true };
+type PatchInput = Parameters<typeof updateVendureCustomer>[2];
+function storeStub(addresses: Record<string, unknown>[]) {
+  const fetchStub = vi.fn<typeof fetch>(async (_url, init) => {
+    const { query } = JSON.parse(init!.body as string);
+    const name = /^\s*(?:query|mutation) (\w+)/.exec(query)![1];
+    const data = name === 'List' ? { customers: { totalItems: 1, items: [{ ...raw, createdAt: '2026-01-01T00:00:00.000Z', addresses }] } }
+      : name === 'Addresses' ? { customer: { ...raw, addresses } } : name === 'Create' ? { createCustomer: raw }
+      : name === 'CreateAddress' ? { createCustomerAddress: { id: 'n1' } } : { updateCustomerAddress: { id: 'x' } };
+    return new Response(JSON.stringify({ data }));
+  });
+  vi.stubGlobal('fetch', fetchStub);
+  return () => fetchStub.mock.calls.map(call => JSON.parse(call[1]!.body as string) as { query: string; variables: Record<string, any> });
+}
+const writes = (requests: { query: string; variables: Record<string, any> }[]) => requests.filter(request => /^\s*mutation/.test(request.query));
+it('round trip: editing only the billing city writes billing whole with only the city changed, and never touches shipping', async () => {
+  const requests = storeStub([billingRaw, shippingRaw]);
+  const stored = (await readCustomerAddresses(context, row.id))!;
+  const edited = addressEditorValue(stored);
+  expect(edited.shipping).toEqual(stored.shipping);
+  const patch: PatchInput | { error: string } = addressPatch(stored, { ...edited, billing: { ...edited.billing, city: 'Cambridge' } });
+  expect(patch).toEqual({ billing: { ...stored.billing, city: 'Cambridge' } });
+  expect('shipping' in patch).toBe(false);
+  await expect(saveCustomer(context, row, values, { stored, edited: { ...edited, billing: { ...edited.billing, city: 'Cambridge' } } }))
+    .resolves.toMatchObject({ customer: { id: row.id } });
+  const { id, defaultBillingAddress: _b, defaultShippingAddress: _s, country, ...rest } = billingRaw;
+  expect(writes(requests())).toEqual([{ query: expect.stringContaining('updateCustomerAddress'),
+    variables: { input: { ...rest, id, countryCode: country.code, city: 'Cambridge' } } }]);
+});
+it('sends a cleared field as cleared and keeps every other field', () => {
+  const stored = { billing: { firstName: 'Ada Lovelace', address1: '12 Engine Row', address2: 'Flat 2', city: 'London', country: 'GB' } };
+  const { address2: _cleared, ...billing } = stored.billing;
+  expect(addressPatch(stored, { billing })).toEqual({ billing: { ...stored.billing, address2: '' } });
+});
+it('gives a customer with no address a billing address only, and an untouched or empty one none', async () => {
+  const billing = { address1: '5 Mill Lane', city: 'Leeds', country: 'GB', email: 'not-stored@example.com' };
+  expect(addressPatch({}, { billing })).toEqual({ billing: { address1: '5 Mill Lane', city: 'Leeds', country: 'GB' } });
+  expect(addressPatch({}, { billing: {} })).toEqual({});
+  const requests = storeStub([]);
+  await expect(saveCustomer(context, null, values, { stored: {}, edited: { billing } })).resolves.toMatchObject({ customer: { id: row.id } });
+  const [create, address, ...more] = writes(requests());
+  expect(create.query).toContain('createCustomer(');
+  expect(address.variables).toEqual({ customerId: row.id, input: { fullName: '', company: '', streetLine1: '5 Mill Lane', streetLine2: '', city: 'Leeds',
+    province: '', postalCode: '', countryCode: 'GB', phoneNumber: '', defaultBillingAddress: true } });
+  expect(more).toEqual([]);
+});
+it('follows billing for a shipping address shown as Same as billing, and refuses an incomplete or removed address before any request', async () => {
+  const shared = { billing: { address1: '12 Engine Row', city: 'London', country: 'GB' }, shipping: { address1: '12 Engine Row', city: 'London', country: 'GB' } };
+  const edited = addressEditorValue(shared);
+  expect(edited).toEqual({ billing: shared.billing, shipping: undefined });
+  const billing = { ...shared.billing, city: 'Cambridge' };
+  expect(addressPatch(shared, { ...edited, billing })).toEqual({ billing, shipping: billing });
+  const fetchStub = vi.fn();
+  vi.stubGlobal('fetch', fetchStub);
+  for (const target of [row, null]) {
+    await expect(saveCustomer(context, target, values, { stored: target ? shared : {}, edited: { billing: { city: 'Leeds' } } }))
+      .resolves.toEqual({ error: CUSTOMER_ADDRESS_REQUIRED_TEXT });
+  }
+  await expect(saveCustomer(context, row, values, { stored: shared, edited: { billing: undefined } })).resolves.toEqual({ error: CUSTOMER_ADDRESS_REMOVE_TEXT });
+  expect(fetchStub).not.toHaveBeenCalled();
 });

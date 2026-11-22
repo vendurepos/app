@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerInput, type CustomerPatch, type SyncContext } from '@tallyui/core';
-import { createVendureCustomer, updateVendureCustomer } from '@tallyui/connector-vendure';
-import type { CustomerFormValues } from '@tallyui/components';
+import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerAddress, type CustomerInput, type CustomerPatch, type SyncContext } from '@tallyui/core';
+import { createVendureCustomer, listVendureCustomers, updateVendureCustomer } from '@tallyui/connector-vendure';
+import type { AddressEditorValue, AddressFieldsProps, CustomerFormValues } from '@tallyui/components';
 import type { CustomerRow } from './customer-list';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import { sessionContext, type Session } from './session';
@@ -62,15 +62,80 @@ export function customerSaveError(error: unknown): string {
   }
   return `${CUSTOMER_SAVE_FAILED_TEXT}. Try again.`;
 }
-export async function saveCustomer(context: SyncContext, row: CustomerRow | null, values: CustomerFormValues): Promise<{ customer: Customer } | { error: string }> {
+export const CUSTOMER_ADDRESS_REQUIRED_TEXT = 'An address needs its first address line and its country.';
+export const CUSTOMER_ADDRESS_REMOVE_TEXT = "The till can't remove a saved address. Change it, or remove it in Vendure.";
+export const CUSTOMER_ADDRESS_AFTER_CREATE_TEXT = 'The customer was added without the address. Edit the customer to add it.';
+// The parts Vendure keeps on an address (connector-vendure's toVendureAddressInput); it keeps no address email.
+const ADDRESS_PARTS = ['firstName', 'lastName', 'company', 'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phone'] as const;
+type AddressPatch = Pick<CustomerPatch, 'billing' | 'shipping'>;
+const sameAddress = (a?: CustomerAddress, b?: CustomerAddress) => ADDRESS_PARTS.every(part => (a?.[part] ?? '') === (b?.[part] ?? ''));
+/** The editor's starting value: a stored shipping address equal to billing shows as "Same as billing". */
+export function addressEditorValue(stored: AddressEditorValue): AddressEditorValue {
+  return { billing: stored.billing, shipping: stored.billing && sameAddress(stored.shipping, stored.billing) ? undefined : stored.shipping };
+}
+/**
+ * The address half of a save. connector-vendure writes a sent address whole and blanks any part it lacks, so a changed
+ * address goes out complete: untouched parts as stored, a cleared part as ''. An unchanged address is left out, which
+ * leaves it as stored. "Same as billing" follows billing only for a customer that has a shipping address; none creates none.
+ */
+export function addressPatch(stored: AddressEditorValue, edited: AddressEditorValue): AddressPatch | { error: string } {
+  const patch: AddressPatch = {};
+  for (const kind of ['billing', 'shipping'] as const) {
+    const before = stored[kind];
+    const next = kind === 'shipping' && !edited.shipping && before ? edited.billing : edited[kind];
+    if (!next) { if (before) return { error: CUSTOMER_ADDRESS_REMOVE_TEXT }; continue; }
+    if (sameAddress(next, before)) continue;
+    const sent: CustomerAddress = {};
+    for (const part of ADDRESS_PARTS) if (next[part] !== undefined || before?.[part] !== undefined) sent[part] = next[part] ?? '';
+    if (!sent.address1?.trim() || !sent.country) return { error: CUSTOMER_ADDRESS_REQUIRED_TEXT };
+    patch[kind] = sent;
+  }
+  return patch;
+}
+/** The customer's default addresses through the connector's own read, so they map back exactly through its write. */
+export async function readCustomerAddresses(context: SyncContext, id: string): Promise<AddressEditorValue | null> {
+  const [customer] = (await listVendureCustomers(context, { filter: { id: { eq: id } }, take: 1 })).customers;
+  return customer ? { billing: customer.billing, shipping: customer.shipping } : null;
+}
+export const COUNTRIES_QUERY = 'query Countries { countries(options: { filter: { enabled: { eq: true } }, sort: { name: ASC }, take: 1000 }) { items { code name } } }';
+export async function readCountries(context: SyncContext): Promise<NonNullable<AddressFieldsProps['countries']>> {
+  const response = await fetch(`${context.baseUrl}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
+    signal: context.signal, body: JSON.stringify({ query: COUNTRIES_QUERY }) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = await response.json(); if (body.errors?.length) throw new Error(body.errors[0].message);
+  return body.data.countries.items.map((country: { code: string; name: string }) => ({ value: country.code, label: country.name }));
+}
+export type CustomerAddressSource = { stored: AddressEditorValue | null; countries?: AddressFieldsProps['countries'] };
+/** Read when the sheet opens: stored is null until the read answers and when it fails, so no address is written unseen. */
+export function useCustomerAddresses(session: Session, open: boolean, customerId: string | null): CustomerAddressSource {
+  const [source, setSource] = useState<CustomerAddressSource>({ stored: null });
+  useEffect(() => {
+    setSource({ stored: null }); if (!open) return;
+    let cancelled = false; const context = sessionContext(session);
+    // Without the countries list the country is a text field.
+    void Promise.all([customerId === null ? {} : readCustomerAddresses(context, customerId), readCountries(context).catch(() => undefined)])
+      .then(([stored, countries]) => { if (!cancelled) setSource({ stored, countries }); }, () => {});
+    return () => { cancelled = true; };
+  }, [session, open, customerId]);
+  return source;
+}
+export async function saveCustomer(context: SyncContext, row: CustomerRow | null, values: CustomerFormValues,
+  addresses?: { stored: AddressEditorValue; edited: AddressEditorValue }): Promise<{ customer: Customer } | { error: string }> {
   try {
+    const address = addresses ? addressPatch(addresses.stored, addresses.edited) : {};
+    if ('error' in address) return address;
     if (!row) {
       const input = customerInput(values);
-      return 'error' in input ? input : { customer: await createVendureCustomer(context, input) };
+      if ('error' in input) return input;
+      const customer = await createVendureCustomer(context, input);
+      if (Object.keys(address).length === 0) return { customer };
+      // createVendureCustomer writes no address, so the addresses follow through the connector's update.
+      try { return { customer: await updateVendureCustomer(context, customer.id, address) }; }
+      catch (error) { return { error: `${CUSTOMER_ADDRESS_AFTER_CREATE_TEXT} ${customerSaveError(error)}` }; }
     }
     const patch = customerPatch(row, values);
     if ('error' in patch) return patch;
-    if (Object.keys(patch).length === 0) return { error: 'Nothing to save.' };
-    return { customer: await updateVendureCustomer(context, row.id, patch) };
+    if (Object.keys(patch).length + Object.keys(address).length === 0) return { error: 'Nothing to save.' };
+    return { customer: await updateVendureCustomer(context, row.id, { ...patch, ...address }) };
   } catch (error) { return { error: customerSaveError(error) }; }
 }

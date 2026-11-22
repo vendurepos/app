@@ -9,6 +9,7 @@ import { loadOrderHistory } from '../order-history';
 import { loadOrderPage } from '../order-list';
 import { loadCustomerPage } from '../customer-list';
 import { listCustomerNotes } from '../customer-notes';
+import { addressEditorValue, readCountries, readCustomerAddresses, saveCustomer } from '../customer-edit';
 import { orderDetailView } from '../order-detail';
 import { storedReceiptData } from '../stored-receipt';
 import { readCapabilities } from '../use-sale-settings';
@@ -667,6 +668,23 @@ it('Reset demo removes created customers', async () => {
   installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
   expect((await connector.searchCustomers!(context, 'demo.vendurepos.com')).map(customer => customer.id))
     .toEqual(['c2', 'c4', 'c6', 'c5', 'c1', 'c7', 'c3', 'c8']);
+});
+
+it('reads and writes customer addresses through the app and real connector: a billing edit keeps every other field, and persists', async () => {
+  const session = await signedIn(), context = sessionContext(session);
+  expect((await readCountries(context)).map(country => country.value)).toEqual(['DE', 'GB', 'US']);
+  const stored = (await readCustomerAddresses(context, 'c3'))!;
+  expect(stored.billing).toEqual({ firstName: 'Alan Turing', company: 'Bombe Works', address1: '7 Enigma Lane', city: 'Wilmslow', postcode: 'SK9 1AA', country: 'GB' });
+  const page = await loadCustomerPage(session, 'alan@', 0);
+  if (!('customers' in page)) throw new Error('customers not listed');
+  const row = page.customers[0]!;
+  const billing = { ...stored.billing, city: 'Manchester' };
+  await expect(saveCustomer(context, row, { firstName: 'Alan', lastName: 'Turing', email: row.email, phone: '', address: '' },
+    { stored, edited: { ...addressEditorValue(stored), billing } })).resolves.toMatchObject({ customer: { id: 'c3' } });
+  installed.uninstall();
+  installed = installDemoStore(DEMO_STORE_ORIGIN, { storage });
+  // The seeded address was both defaults and shown as Same as billing, so shipping follows billing.
+  expect(await readCustomerAddresses(context, 'c3')).toEqual({ billing, shipping: billing });
 });
 
 // The till the refund tests open: register 'register', session 'session', float EUR 10.00.

@@ -52,6 +52,8 @@ const DEMO_CHANNEL_ID = '1';
 // The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
 // The demo's till role also approves register variances, so its count shows every figure (ApproveTallyPosVariance unblinds it, lib/register-blind.ts).
 const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
+// The countries the demo store ships to, for the customer address editor's country picker (Admin `countries`).
+const DEMO_COUNTRIES = [{ code: 'DE', name: 'Germany' }, { code: 'GB', name: 'United Kingdom' }, { code: 'US', name: 'United States' }];
 // e2e only: a till without the approve permission, which counts blind.
 export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
 // e2e only: an account without TallyPosSell or ReadOrder, which the sales report v2 refuses with 403.
@@ -186,7 +188,10 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'activeAdministrator': data = { activeAdministrator: request.headers.get('Authorization') === `Bearer ${DEMO_AUTH_TOKEN}` ? { id: ADMINISTRATOR_ID } : null }; break;
       case 'logout': data = { logout: { success: true } }; break;
       case 'Search': case 'customers': data = { customers: store.customers(variables) }; break;
-      case 'CustomerList': data = { customers: page(store.customerList(), variables.options) }; break;
+      case 'CustomerList': case 'List': data = { customers: page(store.customerList(), variables.options) }; break;
+      case 'Countries': data = { countries: { items: DEMO_COUNTRIES } }; break;
+      case 'CreateAddress': data = { createCustomerAddress: store.saveAddress(variables.input, String(variables.customerId)) }; break;
+      case 'UpdateAddress': data = { updateCustomerAddress: store.saveAddress(variables.input) }; break;
       case 'Orders': case 'orders':
         // Detail list queries select lines and payments as well as the summary fields.
         data = { orders: page(store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) })), variables.options) }; break;

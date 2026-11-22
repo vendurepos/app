@@ -101,7 +101,7 @@ type Customer = { __typename: 'Customer'; id: string; firstName: string; lastNam
   createdAt: string; addresses: DemoAddress[]; groups: { id: string; name: string }[] };
 type DemoAddress = {
   id: string; fullName: string; company: string | null; streetLine1: string; streetLine2: string | null;
-  city: string; province: string | null; postalCode: string; country: { code: string };
+  city: string; province: string | null; postalCode: string; country: { code: string }; phoneNumber?: string | null;
   defaultBillingAddress: boolean; defaultShippingAddress: boolean;
 };
 // One Vendure Refund on one payment; paymentIndex is the order's payment, method its till method.
@@ -350,6 +350,21 @@ export class DemoStore {
     }
     this.save();
     return customer;
+  }
+
+  /** createCustomerAddress (with customerId) or updateCustomerAddress: Vendure's AddressInput fields, as given. */
+  saveAddress({ id, countryCode, ...fields }: Partial<Omit<DemoAddress, 'country'>> & { countryCode?: string }, customerId?: string) {
+    const owner = this.state.customers.find(customer => customerId ? customer.id === customerId : customer.addresses.some(address => address.id === id));
+    if (!owner) return null;
+    let address = owner.addresses.find(entry => entry.id === id);
+    // Seeded ids follow the customer's index, so a new id is the first one no address holds.
+    const taken = new Set(this.state.customers.flatMap(customer => customer.addresses.map(entry => entry.id)));
+    let next = 1; while (taken.has(`a${next}`)) next += 1;
+    if (!address) owner.addresses.push(address = { id: `a${next}`, fullName: '', company: null,
+      streetLine1: '', streetLine2: null, city: '', province: null, postalCode: '', country: { code: '' }, defaultBillingAddress: false, defaultShippingAddress: false });
+    Object.assign(address, fields, countryCode !== undefined ? { country: { code: countryCode } } : {});
+    this.save();
+    return address;
   }
 
   products() {
