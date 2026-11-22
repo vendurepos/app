@@ -35,7 +35,7 @@ it('shows the session-ended notice when the store answers a product pull with 40
   vi.mocked(useState).mockReturnValueOnce([[], vi.fn()])
     .mockReturnValueOnce([null, setLastSyncedAt]).mockReturnValueOnce([null, setError])
     .mockReturnValueOnce([undefined, vi.fn()]).mockReturnValueOnce([undefined, vi.fn()])
-    .mockReturnValueOnce([0, vi.fn()]).mockReturnValueOnce([false, vi.fn()]);
+    .mockReturnValueOnce([0, vi.fn()]).mockReturnValueOnce([false, vi.fn()]).mockReturnValueOnce([null, vi.fn()]);
   vi.mocked(useMemo).mockImplementation((create) => create());
   let cleanup: (() => void) | void = undefined;
   vi.mocked(useEffect).mockImplementationOnce((effect) => { cleanup = effect(); });

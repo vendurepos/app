@@ -32,6 +32,13 @@ export function formatStorageUsed(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
+/** A collection's measured size: undefined while measuring (…), null when unmeasurable (—), else ≈ its storage size. */
+export function formatCollectionSize(bytes: number | null | undefined): string {
+  if (bytes === undefined) return '…';
+  if (bytes === null) return '—';
+  return bytes === 0 ? '0 B' : `≈ ${formatStorageUsed(bytes)}`;
+}
+
 /** Browser storage used for this origin, or null when its estimate is unavailable. */
 export async function readStorageUsed(storage: { estimate?: () => Promise<{ usage?: number }> } | undefined): Promise<number | null> {
   if (!storage?.estimate) return null;

@@ -416,7 +416,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
         waiting={changesWaiting(outbox.state, registerOutbox.state)} productCount={catalogue.products.length}
         variantCount={catalogue.products.reduce((total, product) => total + (Array.isArray(product.variants) ? product.variants.length : 0), 0)} catalogueSynced={!!catalogue.lastSyncedAt}
-        collections={{ orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }}
+        collections={{ products: catalogue.productsCollection, orders: outbox.orders, refunds: registerStore?.refunds ?? null, parked: drafts, closures: registerStore?.closures ?? null }}
         onCheckNow={() => syncNow([outbox, registerOutbox], refreshCatalogue)}
         redownloading={catalogue.redownloading}
         onRedownload={async () => {

@@ -1208,6 +1208,13 @@ test("Store health shows Ready to sell, nothing waiting, the products on this de
   await expect(page.getByTestId('store-health-server-variants')).toHaveText(String(demoStore.products().flatMap(product => product.variants).length));
   await expect(page.getByTestId('store-health-coverage-variants')).toHaveAttribute('aria-valuenow', '100');
   await page.mouse.move(480, 0);
+  // 10.3m: each collection's size, measured when the panel opens; variants live in their product's document.
+  await expect(page.getByTestId('store-health-size-products')).toHaveText(/^≈ \d+ (B|KB|MB)$/);
+  await expect(page.getByTestId('store-health-size-variants')).toHaveText('in Products');
+  for (const key of ['orders', 'refunds', 'parked', 'closures']) {
+    await expect(page.getByTestId(`store-health-size-${key}`)).toHaveText(/^(0 B|≈ \d+ (B|KB|MB))$/);
+  }
+  await page.screenshot({ path: test.info().outputPath('13m-store-health-size-vendurepos.png') });
   await page.screenshot({ path: test.info().outputPath('13l-store-health-variants-vendurepos.png') });
   await expect(page.getByTestId('store-health-server-refunds')).toHaveText('—');
   await page.getByTestId('store-health-open').click();
@@ -1234,6 +1241,8 @@ test('Store health checks everything now, and Clear & re-download empties and re
   await expect(checkNow).toBeEnabled();
   const redownload = page.getByTestId('store-health-redownload');
   const confirm = page.getByTestId('store-health-redownload-confirm');
+  await expect(page.getByTestId('store-health-size-products')).toHaveText(/^≈ \d+ (B|KB|MB)$/);
+  const sizeBefore = await page.getByTestId('store-health-size-products').innerText();
   await redownload.click();
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText(`${CATALOGUE.length} products are removed`);
@@ -1248,6 +1257,8 @@ test('Store health checks everything now, and Clear & re-download empties and re
   // The button returns only on the restarted sync's first pull, so the count and Ready below are the refilled ones.
   await expect(redownload).toHaveText('Clear & re-download');
   await expect(page.getByTestId('store-health-count-products')).toHaveText(String(CATALOGUE.length));
+  // 10.3m: measured again on the refilled catalogue, not the empty one.
+  await expect(page.getByTestId('store-health-size-products')).toHaveText(sizeBefore);
   await expect(page.getByTestId('store-health-ready')).toHaveText('✓ Ready to sell');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await wedgeScan(page, 'TALLY-MUG');

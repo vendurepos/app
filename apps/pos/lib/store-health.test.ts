@@ -1,13 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, formatStorageUsed, readServerTotals, readStorageUsed, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, formatCollectionSize, formatStorageUsed, readServerTotals, readStorageUsed, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
 
 it('words storage used in B, KB, MB and GB, in steps of 1024', () => {
   expect(formatStorageUsed(512)).toBe('512 B');
   expect(formatStorageUsed(699 * 1024)).toBe('699 KB');
   expect(formatStorageUsed(33 * 1024 ** 2)).toBe('33 MB');
   expect(formatStorageUsed(1.5 * 1024 ** 3)).toBe('1.5 GB');
+});
+
+it('words a collection size: … while measuring, — when unmeasurable, 0 B when empty, else ≈ its size', () => {
+  expect(formatCollectionSize(undefined)).toBe('…');
+  expect(formatCollectionSize(null)).toBe('—');
+  expect(formatCollectionSize(0)).toBe('0 B');
+  expect(formatCollectionSize(697)).toBe('≈ 697 B');
+  expect(formatCollectionSize(1536)).toBe('≈ 2 KB');
+  expect(formatCollectionSize(5 * 1024 ** 2)).toBe('≈ 5 MB');
 });
 
 it('reads storage used from the estimate, and null when it is missing or fails', async () => {
