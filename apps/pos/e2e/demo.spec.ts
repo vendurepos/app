@@ -2424,6 +2424,67 @@ test('Settings › General › Products keeps the tile fields for this till, and
   await expect(mug).not.toContainText('TALLY-MUG');
 });
 
+test('Settings › General › Products keeps Browse by and Variations for this till, and the till takes them at once', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const browse = page.getByTestId('category-browse');
+  const chip = page.locator('[data-testid^="category-nav-"]').first();
+  const search = page.getByPlaceholder('Search or scan barcode / SKU');
+  const tee = page.getByTestId('product-tile-Tally T-Shirt');
+  const setting = (id: string) => page.getByTestId(id);
+
+  await openSettings(page, 'general');
+  await expect(setting('category-browse-setting-tiles')).toHaveAttribute('aria-pressed', 'true');
+  await expect(setting('variations-setting-drill')).toHaveAttribute('aria-pressed', 'true');
+  for (const id of ['category-browse-setting-chips', 'variations-setting-popover']) {
+    await setting(id).click();
+    await expect(setting(id)).toHaveAttribute('aria-pressed', 'true');
+  }
+  await page.getByTestId('settings-back').click();
+  await expect(browse).toHaveCount(0);
+  await expect(chip).toBeVisible();
+
+  await search.fill('T-Shirt');
+  await tee.click();
+  const overlay = page.getByTestId('variation-popover-overlay');
+  await expect(overlay).toBeVisible();
+  await expect(page.getByTestId('variations-parent-tile')).toHaveCount(0);
+  // The popover is drawn at opacity 0 until it has been placed by its tile.
+  await expect(page.getByTestId('variation-popover').locator('xpath=..')).toHaveCSS('opacity', '1');
+  await page.screenshot({ path: test.info().outputPath('02f-product-browse-variations-vendurepos.png') });
+  await page.keyboard.press('Escape');
+  await expect(overlay).toHaveCount(0);
+
+  await page.reload();
+  await expectSignedIn(page);
+  await expect(chip).toBeVisible();
+  await expect(browse).toHaveCount(0);
+  await openSettings(page, 'general');
+  await setting('variations-setting-list').click();
+  await page.getByTestId('settings-back').click();
+  await search.fill('T-Shirt');
+  await tee.click();
+  // TallyUI 4.2.0's grid list chooser has no testIDs (variation-row-* are the table's rows): its label and a variant's SKU.
+  const chooser = page.getByLabel('Choose variant');
+  await expect(chooser.getByRole('button', { name: /TEE-S-BLK/ })).toBeVisible();
+  // At 600 high the open chooser squeezes the category tiles to nothing: its own Cancel closes it.
+  await chooser.getByRole('button', { name: 'Cancel' }).click();
+  await expect(chooser).toHaveCount(0);
+
+  await openSettings(page, 'general');
+  await setting('category-browse-setting-tiles').click();
+  await setting('variations-setting-drill').click();
+  await page.getByTestId('settings-back').click();
+  await search.fill('');
+  await expect(browse).toBeVisible();
+  await search.fill('T-Shirt');
+  await tee.click();
+  await expect(page.getByTestId('variations-parent-tile')).toBeVisible();
+});
+
 test('Settings keeps the product sort for this till, and the grid takes it on return', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
