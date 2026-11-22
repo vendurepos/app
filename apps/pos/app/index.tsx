@@ -752,7 +752,7 @@ function Sale({
       {/* The tab not shown is hidden, never unmounted: the catalogue keeps its search and the cart its stage. */}
       <View testID="till-catalogue" dataSet={{ print: 'hide' }} className="flex-1" style={catalogueHidden ? { display: 'none' } : undefined}>
         {/* A failed first pull is not loading despite having no sync timestamp. */}
-        {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`), and it opens on the category tiles, as v2's sell screen does (02-sell-empty-wcpos). */}
+        {/* The v2 till shows category navigation and the grid/table toggle by default (WCPOS monorepo `next`, `contexts/ui-settings/initial-settings.json`). Browse by and Variations come from Settings › General › Products (catalogueView): v2's tiles and v2's "Open in place" by default. */}
         <Catalogue
           {...catalogueView}
           {...catalogueFilters}
@@ -761,9 +761,6 @@ function Sale({
           cameraScanner={catalogueHidden ? undefined : { ...camera, height: cameraHeight, onHeightChange: (height) => saveCameraPanelHeight(height),
             viewfinder: nativeCamera?.Viewfinder, permission: cameraPermission }}
           showCategoryNav
-          categoryBrowse="tiles"
-          // v2's "Open in place" (03-variations-wcpos): variant tiles with option chips, and the product as Back.
-          variationsStyle="drill"
           showViewToggle
           // v2's filter row with its In Stock pill alone, on by default (TallyUI's default filters); the other pills need TallyUI or a ruling (CHECKLIST 1.6).
           showFilterBar
