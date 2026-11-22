@@ -712,6 +712,7 @@ export class OrderCreateService {
     // TallyUI #286: from v4 every discountMinor is tax-exclusive, so the surcharge is net whatever the line's mode, and
     // Vendure grosses it up by the line's taxLines with its own rounding. v2/v3 send it in the line's own mode.
     const netDiscounts = command.version >= 4;
+    const lineDiscounts: Record<string, string> = {};
     for (const line of payload.lines) {
       if (!(line.discountMinor! > 0)) continue;
       const orderLine = order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId) ?? pluginBug(`No order line for clientLineId ${line.clientLineId}`);
@@ -721,6 +722,7 @@ export class OrderCreateService {
         taxLines: orderLine.taxLines.map(({ taxRate, description }) => ({ taxRate, description })),
       }));
       order.surcharges.push(surcharge);
+      lineDiscounts[String(orderLine.id)] = String(surcharge.id);
       await this.testObserver?.('surchargeSave', ctx, order);
     }
     // ADR 0005: fees are Surcharges and never discounted.
@@ -845,8 +847,12 @@ export class OrderCreateService {
     }
     order.customFields.tallyPayments = JSON.stringify(payload.payments);
     order.orderPlacedAt = new Date(payload.createdAt);
+    // #460: lineDiscounts is the link from each order line id to its TALLY_DISCOUNT_SKU surcharge id, which refunds read.
+    // An empty map is an order with no line discounts; no lineDiscounts key at all means the order was sold before links.
     if (command.version >= 3) {
-      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate });
+      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts });
+    } else if (Object.keys(lineDiscounts).length) {
+      order.customFields.tallySnapshot = JSON.stringify({ lineDiscounts });
     }
     await this.connection.getRepository(ctx, Order).save(order);
     // P2.11a: order.create 7's sale note, as Vendure's own public order note, in the sale's transaction. A replay never

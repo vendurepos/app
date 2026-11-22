@@ -10,7 +10,7 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
-  buildRefundEnvelope, pendingRefund, refundMessage, refundTotalMinor, sendTillRefund, REFUND_AMOUNT_MISMATCH_TEXT,
+  buildRefundEnvelope, pendingRefund, refundMessage, refundTotalMinor, sendTillRefund, REFUND_AMOUNT_MISMATCH_TEXT, REFUND_DISCOUNT_UNLINKED_TEXT,
   REFUND_FORBIDDEN_TEXT, REFUND_NO_SESSION_TEXT, REFUND_NOT_TILL_ORDER_TEXT, REFUND_NOTHING_TEXT, REFUND_PENDING_TEXT,
   REFUND_QUANTITY_EXCEEDS_TEXT, REFUND_UNAUTHORIZED_TEXT, REFUND_UNKNOWN_TEXT, type RefundAttempt, type RefundTill,
 } from './till-refund';
@@ -173,6 +173,7 @@ it('says every rejection code and outcome in words', () => {
   expect(rejected('nothing_to_refund')).toEqual(words(REFUND_NOTHING_TEXT));
   expect(rejected('quantity_exceeds')).toEqual(words(REFUND_QUANTITY_EXCEEDS_TEXT));
   expect(rejected('amount_mismatch')).toEqual(words(REFUND_AMOUNT_MISMATCH_TEXT));
+  expect(rejected('discount_unlinked')).toEqual(words(REFUND_DISCOUNT_UNLINKED_TEXT));
   expect(rejected('order_state', { state: 'PaymentAuthorized' }))
     .toEqual(words("The store can't refund an order that is Payment authorized."));
   expect(rejected('not_till_order')).toEqual(words(REFUND_NOT_TILL_ORDER_TEXT));

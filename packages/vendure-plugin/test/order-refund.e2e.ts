@@ -4,6 +4,7 @@ import { parse } from 'graphql';
 import { In } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TallyCommand } from '../src';
+import { REFUND_DISCOUNT_UNLINKED_MESSAGE } from '../src/service/refund-line-totals';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -214,8 +215,8 @@ describe('order.refund v1', () => {
   });
 
   // Money P1 (Fable money-path review, finding 1): a till line discount is stored as a negative Surcharge, not on the line.
-  async function sellDiscounted(lines: Array<{ variantId: string; unitPriceMinor: number; discountMinor?: number }>) {
-    const command = { ...orderCommand(lines.map(line => ({ ...line, quantity: 1 }))), version: 10 };
+  async function sellDiscounted(lines: Array<{ variantId: string; unitPriceMinor: number; discountMinor?: number; quantity?: number }>) {
+    const command = { ...orderCommand(lines.map(line => ({ quantity: 1, ...line }))), version: 10 };
     const result = await post(command);
     expect(result).toMatchObject({ status: 'applied' });
     const order = await readOrder(result.serverRefs!.orderId);
@@ -246,6 +247,81 @@ describe('order.refund v1', () => {
     const session = await openSession();
     const { order, paid } = await sellDiscounted([{ variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200 }]);
     expect(await post(wholeLine(order, order.lines[0], session, paid))).toMatchObject({ status: 'applied', refund: { totalMinor: paid } });
+  });
+
+  // #460: refunds of part of a line, each sent at the plugin's share of the discounted total.
+  const partOf = (order: ReadOrder, line: ReadOrder['lines'][number], session: { registerId: string; sessionId: string }, quantity: number, totalMinor: number) =>
+    refundFor(order, session, { lines: [{ orderLineId: line.id, quantity, restock: true }], shippingMinor: 0, totalMinor });
+  const storedOrder = (order: ReadOrder) => connection.rawConnection.getRepository(Order)
+    .findOneOrFail({ where: { id: environment.decode(order.id) }, relations: ['surcharges'] });
+  // An order sold before #460: its snapshot rewritten to the old {display, taxByRate} shape, with no lineDiscounts.
+  async function unlink(order: ReadOrder) {
+    const { lineDiscounts, ...old } = JSON.parse((await storedOrder(order)).customFields.tallySnapshot!);
+    expect(lineDiscounts).toBeDefined();
+    expect(Object.keys(old)).toEqual(['display', 'taxByRate']);
+    await connection.rawConnection.getRepository(Order).update(environment.decode(order.id), { customFields: { tallySnapshot: JSON.stringify(old) } });
+  }
+
+  it('a partial quantity of a discounted line refunds its share of what was paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellDiscounted([{ variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200, quantity: 3 }]);
+    const line = order.lines[0];
+    expect(line.proratedLinePriceWithTax).toBeGreaterThan(paid);
+    const first = Math.round(paid / 3);
+    expect(await post(partOf(order, line, session, 1, first))).toMatchObject({ status: 'applied', refund: { totalMinor: first } });
+    expect(await post(partOf(order, line, session, 2, paid - first))).toMatchObject({ status: 'applied', refund: { totalMinor: paid - first } });
+    const refunds = (await readOrder(order.id)).payments.flatMap(payment => payment.refunds).filter(refund => refund.state !== 'Failed');
+    expect(refunds.reduce((sum, refund) => sum + refund.total, 0)).toBe(paid);
+  });
+
+  it('the snapshot links each discount surcharge to its line, and an order with no discounts has an empty link map', async () => {
+    const { order } = await sellDiscounted([
+      { variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200 },
+      { variantId: variantIds.beans[0], unitPriceMinor: 500 },
+    ]);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    const stored = await storedOrder(order);
+    const discounts = stored.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT');
+    expect(discounts).toHaveLength(1);
+    expect(JSON.parse(stored.customFields.tallySnapshot!).lineDiscounts).toEqual({ [environment.decode(a.id)]: String(discounts[0].id) });
+    const plain = (await sellDiscounted([{ variantId: variantIds.mug[0], unitPriceMinor: 1000 }])).order;
+    expect(JSON.parse((await storedOrder(plain)).customFields.tallySnapshot!).lineDiscounts).toEqual({});
+  });
+
+  it('a legacy order with an unlinked discount refuses one line, and refunds everything left for what was paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellDiscounted([
+      { variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200 },
+      { variantId: variantIds.beans[0], unitPriceMinor: 500 },
+    ]);
+    await unlink(order);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    // Sent at the undiscounted line price, as today's till does: before #460 this refunded more than was paid.
+    await refused(wholeLine(order, a, session, a.proratedLinePriceWithTax), order.id, 'discount_unlinked', REFUND_DISCOUNT_UNLINKED_MESSAGE);
+    expect(await post(refundFor(order, session, { shippingMinor: 0, totalMinor: paid })))
+      .toMatchObject({ status: 'applied', refund: { totalMinor: paid } });
+  });
+
+  it('a legacy one-line discounted order refunds its line in parts for what was paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellDiscounted([{ variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200, quantity: 2 }]);
+    await unlink(order);
+    const line = order.lines[0];
+    const first = Math.round(paid / 2);
+    expect(await post(partOf(order, line, session, 1, first))).toMatchObject({ status: 'applied', refund: { totalMinor: first } });
+    expect(await post(partOf(order, line, session, 1, paid - first))).toMatchObject({ status: 'applied', refund: { totalMinor: paid - first } });
+  });
+
+  it('a legacy two-line order with no discount refunds one line at its line total', async () => {
+    const session = await openSession();
+    const { order } = await sellDiscounted([
+      { variantId: variantIds.mug[0], unitPriceMinor: 1000 },
+      { variantId: variantIds.beans[0], unitPriceMinor: 500 },
+    ]);
+    await unlink(order);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    expect(await post(wholeLine(order, a, session, a.proratedLinePriceWithTax)))
+      .toMatchObject({ status: 'applied', refund: { totalMinor: a.proratedLinePriceWithTax } });
   });
 
   it('refusals are unstored and name the contract code', async () => {
