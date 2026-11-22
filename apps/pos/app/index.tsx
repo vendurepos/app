@@ -756,7 +756,7 @@ function Sale({
           onSelect={add}
           cartLines={sale.order.lineItems}
           statusText={error ?? (lastSyncedAt ? undefined : 'Syncing catalogue…')}
-          statusAccessory={<IconButton testID="product-settings-open" variant="ghost" size="sm" accessibilityLabel="Product settings" onPress={() => onSettingsCard('products')}><SlidersIcon size={18} /></IconButton>}
+          searchAccessory={<IconButton testID="product-settings-open" variant="ghost" size="sm" accessibilityLabel="Product settings" onPress={() => onSettingsCard('products')}><SlidersIcon size={18} /></IconButton>}
         />
       </View>
       {wide && stage.kind === 'tender' ? (

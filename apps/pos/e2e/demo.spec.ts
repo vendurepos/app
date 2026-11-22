@@ -3993,6 +3993,12 @@ test("the product pane's settings button opens Settings › General at the Produ
   await expectSignedIn(page);
   await openRegister(page);
   await expect(page.getByTestId('product-settings-open')).toHaveAttribute('aria-label', 'Product settings');
+  // v2's search-row placement (CHECKLIST 1.xs): the button's centre sits within the search field's height.
+  const settingsBox = (await page.getByTestId('product-settings-open').boundingBox())!;
+  const searchBox = (await page.getByTestId('catalogue-search').boundingBox())!;
+  expect(settingsBox.y + settingsBox.height / 2).toBeGreaterThanOrEqual(searchBox.y);
+  expect(settingsBox.y + settingsBox.height / 2).toBeLessThanOrEqual(searchBox.y + searchBox.height);
+  await page.screenshot({ path: test.info().outputPath('02f-product-settings-entry-vendurepos.png') });
   await page.getByTestId('product-settings-open').click();
   await expect(page.getByTestId('settings-section-general')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('tile-size')).toBeInViewport();
