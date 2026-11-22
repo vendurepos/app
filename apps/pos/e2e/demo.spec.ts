@@ -1813,6 +1813,69 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("Reports › a card's head opens its panel as v2: Payments, Products and Taxes with Close and Export CSV; Orders and Refunds open the Orders screen", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expectBalanceAsEntry(page, '€9.52');
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+  await expect.poll(async () => (await demoState(page))?.orders.length).toBe(4);
+  await page.getByTestId('reports-open').click();
+  await expect(page.getByTestId('reports-panel')).toBeVisible();
+
+  const panel = page.getByTestId('detail-panel');
+  await page.getByTestId('card-payments-open').click();
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Sales by payment method');
+  // The store's figures: the period only, no till-only marker (8.1n).
+  await expect(page.getByTestId('detail-panel-scope')).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
+  await expect(page.getByTestId('detail-panel-total')).toContainText('Total');
+  await expect(page.getByTestId('detail-panel-status')).toHaveText(/^\d+ orders · /);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('detail-panel-export').click()]);
+  expect(download.suggestedFilename()).toMatch(/^sales-payments-(\d{4}-\d{2}-\d{2})-\1\.csv$/);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  expect(csv.split('\r\n')[0]).toBe('"Method","Orders","Amount","Share"');
+  await expect(page.getByTestId('reports-export-error')).toHaveCount(0);
+  await page.getByTestId('detail-panel-close').click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId('reports-panel')).toBeVisible();
+
+  await page.getByTestId('card-products-open').click();
+  await expect(panel).toContainText('Top products');
+  await expect(page.getByTestId('detail-panel-table')).toContainText('€9.52');
+  await page.getByTestId('detail-panel-close').click();
+  await expect(panel).toHaveCount(0);
+
+  // The demo-pairs size, as 10d/10e, set before the sheet opens so it lays out at that width;
+  // the PNG is made docs/v2-parity/demo-pairs/10h-reports-card-panel-vendurepos.webp (cwebp -q 80).
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.getByTestId('card-taxes-open').click();
+  await expect(panel).toContainText('Taxes collected');
+  // Let the sheet's slide-in settle before the shot.
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: test.info().outputPath('10h-reports-card-panel-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await page.getByTestId('detail-panel-close').click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+
+  // No panel for Orders or Refunds in TallyUI 4.2.0: both open the Orders screen (stand-in until TallyUI/tallyui#1215).
+  await page.getByTestId('card-orders-open').click();
+  await expect(page.getByTestId('reports-panel')).toHaveCount(0);
+  await expect(page.getByTestId('orders-panel')).toBeVisible();
+  await page.getByTestId('reports-open').click();
+  await page.getByTestId('card-refunds-open').click();
+  await expect(page.getByTestId('reports-panel')).toHaveCount(0);
+  await expect(page.getByTestId('orders-panel')).toBeVisible();
+});
+
 test("Reports shows the store's figures online, and this till's only when offline", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -1882,6 +1945,14 @@ test("Reports shows this till's figures only when the store refuses the report",
   expect(csv.split('\r\n')[1]).toBe('"Scope","This till only","",""');
   await expect(page.getByTestId('reports-print-error')).toHaveCount(0);
   await expect(page.getByTestId('reports-export-error')).toHaveCount(0);
+  // A till-only panel says so on screen and in its file name (8.1n).
+  await page.getByTestId('card-categories-open').click();
+  await expect(page.getByTestId('detail-panel')).toContainText('Sales by category');
+  await expect(page.getByTestId('detail-panel-scope')).toHaveText(/^(\d{4}-\d{2}-\d{2}) · This till only$/);
+  const [panelDownload] = await Promise.all([page.waitForEvent('download'), page.getByTestId('detail-panel-export').click()]);
+  expect(panelDownload.suggestedFilename()).toMatch(/^sales-categories-this-till-(\d{4}-\d{2}-\d{2})-\1\.csv$/);
+  await page.getByTestId('detail-panel-close').click();
+  await expect(page.getByTestId('detail-panel')).toHaveCount(0);
 });
 
 test('Reports opens on the drawer card: since, float + cash sales = expected, Print X-report and the register panel', async ({ page }) => {

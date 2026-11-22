@@ -1,9 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Platform, ScrollView, View } from 'react-native';
-import { Button, SalesCards, SalesFiltersBar, Tabs, TabsList, TabsTrigger, Text, VStack } from '@tallyui/components';
+import { Button, SalesCardPanel, SalesCards, SalesFiltersBar, Tabs, TabsList, TabsTrigger, Text, VStack, type SalesPanelId } from '@tallyui/components';
 import type { PosOrder, PosRefundCollection } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { printLines } from './print-lines';
+import { cardPanel, panelCsvFileName, panelScope } from './reports-card-panels';
 import { salesCsv, salesCsvFileName } from './sales-csv';
 import { salesSummaryLines } from './sales-summary-lines';
 import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
@@ -13,10 +14,12 @@ import { TillSalesHero } from './till-sales-hero';
 import { useFreshList } from './use-fresh-list';
 import { useStoreSales } from './use-store-sales';
 
-export function ReportsPanel({ session, orders, refunds, currency, timezone, drawer, closures }: {
+export function ReportsPanel({ session, orders, refunds, currency, timezone, drawer, closures, onOpenOrders }: {
   session: Session | null; orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode; closures?: ReactNode;
+  onOpenOrders: () => void;
 }) {
   const [tab, setTab] = useState('sales');
+  const [openCard, setOpenCard] = useState<SalesPanelId | null>(null);
   const orderList = useFreshList(orders);
   const refundList = useFreshList(refunds);
   const [filters, setFilters] = useState(() => initialSalesFilters(new Date(), timezone));
@@ -32,18 +35,21 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
     spread: tillOrderSpread({ orders: orderList, filters, timezone }),
   }), REPORT_STATUS_OPTIONS), [store, orderList, refundList, filters, timezone]);
   // The web downloads the period's figures as the closures sheet does: a Blob URL on an <a download>.
-  const exportCsv = () => {
-    setExportFailed(false);
+  const downloadCsv = (csv: string, filename: string) => {
     try {
-      const url = URL.createObjectURL(new Blob([salesCsv(view.figures, currency, view.tillOnly)], { type: 'text/csv;charset=utf-8' }));
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = salesCsvFileName(view.figures, view.tillOnly);
+      anchor.download = filename;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch {
       setExportFailed(true);
     }
+  };
+  const exportCsv = () => {
+    setExportFailed(false);
+    downloadCsv(salesCsv(view.figures, currency, view.tillOnly), salesCsvFileName(view.figures, view.tillOnly));
   };
   return (
     <VStack testID="reports-panel" className="flex-1">
@@ -81,9 +87,21 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
             {printFailed ? <Text testID="reports-print-error" className="text-sm text-destructive">Printing failed. Try again.</Text> : null}
             {exportFailed ? <Text testID="reports-export-error" className="text-sm text-destructive">Export failed. Try again.</Text> : null}
           </View>
-          <SalesCards figures={view.figures} currency={currency} hide={view.hide} />
+          <SalesCards figures={view.figures} currency={currency} hide={view.hide} onOpenCard={(card) => {
+            const panel = cardPanel(card);
+            if (panel) setOpenCard(panel);
+            else onOpenOrders();
+          }} />
         </View>
       </ScrollView>
+      {/* v2's card panels; a card the view hides closes its panel, so the store's figures never show under a till-only one. */}
+      <SalesCardPanel card={openCard !== null && !view.hide.includes(openCard) ? openCard : null}
+        figures={view.figures} currency={currency} scope={panelScope(view.figures, view.tillOnly)}
+        onClose={() => setOpenCard(null)}
+        onExportCsv={Platform.OS === 'web' ? (csv, filename) => {
+          setExportFailed(false);
+          downloadCsv(csv, panelCsvFileName(openCard!, filename, view.tillOnly));
+        } : undefined} />
     </VStack>
   );
 }
