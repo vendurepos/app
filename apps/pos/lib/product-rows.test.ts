@@ -16,7 +16,7 @@ describe('productRows', () => {
     expect(rows.map(row => row.id)).toEqual(['11', '21', '22', '31']);
     expect(rows[0]).toEqual({ id: '11', productId: '1', productName: 'Tally Fixture Mug', name: 'Tally Fixture Mug', sku: 'TALLY-MUG', price: expect.stringContaining('8.00'), stock: '50',
       imageUrl: null, stockStatus: 'in_stock', categories: '—', categoryIds: [], facetValueIds: [],
-      priceText: '8.00', stockText: '50', managed: true, stockTarget: null });
+      priceText: '8.00', stockText: '50', managed: true, stockTarget: null, optionSummary: [] });
     expect([rows[3].managed, rows[3].stockText]).toEqual([false, '']);
     expect(rows[1].name).toBe('Espresso Beans · 250 g');
     expect(rows[1].stock).toBe('20');
@@ -90,6 +90,40 @@ describe('productRows', () => {
   });
 });
 
+describe('productRows option summary (10.2m)', () => {
+  const group = (id: string, name: string, values: string[]) =>
+    ({ id, code: name.toLowerCase(), name, options: values.map(value => ({ id: `${id}-${value}`, code: value.toLowerCase(), name: value })) });
+  const options = (...pairs: [string, string][]) => pairs.map(([groupId, name]) => ({ id: `${groupId}-${name}`, code: name.toLowerCase(), name, groupId }));
+  const tee = { id: '4', name: 'Tally Tee', optionGroups: [group('size', 'Size', ['S', 'M', 'L']), group('colour', 'Colour', ['Black', 'White'])],
+    variants: [
+      { ...variant('41', 'TEE-S-BLK', 1999, 'Tally Tee S Black'), options: options(['size', 'S'], ['colour', 'Black']) },
+      { ...variant('42', 'TEE-M-BLK', 1999, 'Tally Tee M Black'), options: options(['size', 'M'], ['colour', 'Black']) },
+      { ...variant('43', 'TEE-S-WHT', 1999, 'Tally Tee S White'), options: options(['size', 'S'], ['colour', 'White']) },
+    ] };
+  const summary = [{ name: 'Size', values: ['S', 'M'] }, { name: 'Colour', values: ['Black', 'White'] }];
+
+  it("gives every row its product's groups in order, each kept to the values a live variant carries", () => {
+    const rows = productRows([tee], '', vendureProductTraits, 'EUR', 0);
+    expect(rows.map(row => row.optionSummary)).toEqual([summary, summary, summary]);
+  });
+
+  it('drops a group whose values no live variant carries', () => {
+    const withFit = { ...tee, optionGroups: [...tee.optionGroups, group('fit', 'Fit', ['Slim'])],
+      variants: [...tee.variants, { ...variant('44', 'TEE-SLIM', 1999, 'Tally Tee Slim'), enabled: false, options: options(['size', 'L'], ['fit', 'Slim']) }] };
+    expect(productRows([withFit], '', vendureProductTraits, 'EUR', 0)[0].optionSummary).toEqual(summary);
+  });
+
+  it('is empty for traits without getVariantOptions', () => {
+    const { getVariantOptions: _, ...traits } = vendureProductTraits;
+    expect(productRows([tee], '', traits, 'EUR', 0).map(row => row.optionSummary)).toEqual([[], [], []]);
+  });
+
+  it("keeps the whole product's summary on a row a search leaves alone", () => {
+    const rows = productRows([tee], 'TEE-M-BLK', vendureProductTraits, 'EUR', 0);
+    expect(rows.map(row => ({ id: row.id, optionSummary: row.optionSummary }))).toEqual([{ id: '42', optionSummary: summary }]);
+  });
+});
+
 describe('filterProductRows', () => {
   const base = productRows(products, '', vendureProductTraits, 'EUR', 0);
   const rows: ProductRow[] = [
@@ -127,7 +161,7 @@ describe('Products panel header sorting', () => {
   const row = (values: Partial<ProductRow> = {}): ProductRow => ({
     id: '1', productId: '1', productName: 'Mug', name: 'Mug', sku: '—', price: '—', stock: '—', imageUrl: null,
     stockStatus: 'unknown', categories: '—', categoryIds: [], facetValueIds: [], priceText: '', stockText: '',
-    managed: false, stockTarget: null, ...values,
+    managed: false, stockTarget: null, optionSummary: [], ...values,
   });
 
   it('extracts header values, leaving missing and unsortable values undefined', () => {
@@ -166,7 +200,7 @@ describe('groupProductRows', () => {
   const row = (id: string, productId: string, values: Partial<ProductRow> = {}): ProductRow => ({
     id, productId, productName: `Product ${productId}`, name: `Product ${productId} · ${id}`, sku: `SKU-${id}`, price: '—', stock: '5', imageUrl: null,
     stockStatus: 'in_stock', categories: 'Coffee', categoryIds: ['c'], facetValueIds: [], priceText: '', stockText: '5',
-    managed: true, stockTarget: null, ...values,
+    managed: true, stockTarget: null, optionSummary: [], ...values,
   });
   const ids = (rows: { id: string }[]) => rows.map(r => r.id);
 

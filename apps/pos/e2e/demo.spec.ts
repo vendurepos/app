@@ -1186,6 +1186,28 @@ test("the Products panel groups a multi-variant product under one 'N variations'
   await expect(panel.getByTestId('products-count')).toHaveText(`Showing ${Math.min(25, CATALOGUE.length)} of ${CATALOGUE.length} products`);
 });
 
+test("the Products panel shows a grouped product's option summary under its name, as v2's products table", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('products-open').click();
+  const panel = page.getByTestId('products-panel');
+  // lib/demo/store.ts: a product's id is its CATALOGUE index + 1. One line per option group, in the group order.
+  const lines = (name: string) => panel.getByTestId(`product-options-${CATALOGUE.findIndex(p => p.name === name) + 1}`).locator(':scope > *');
+  await page.getByTestId('products-search').fill('Tally T-Shirt');
+  await expect(lines('Tally T-Shirt')).toHaveText(['Size: S, M, L', 'Colour: Black, White']);
+  await page.getByTestId('products-search').fill('Espresso Beans');
+  await expect(lines('Espresso Beans')).toHaveText(['Size: 250 g, 1 kg']);
+  // A plain row has no summary: a single-variant product, or a T-shirt variant an exact SKU search leaves alone (it still carries the product's summary).
+  for (const term of ['TALLY-MUG', 'TEE-S-BLK']) {
+    await page.getByTestId('products-search').fill(term);
+    await expect(panel.locator('[data-testid^="product-row-"]')).toHaveCount(1);
+    await expect(panel.locator('[data-testid^="product-row-group-"]')).toHaveCount(0);
+    await expect(panel.locator('[data-testid^="product-options-"]')).toHaveCount(0);
+  }
+});
+
 test("Store health shows Ready to sell, nothing waiting, the products on this device and the store's totals, and a scan closes it and adds", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

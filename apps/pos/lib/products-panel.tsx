@@ -64,6 +64,10 @@ export function ProductsPanel({ products, traits, currency, session }: { product
         resizeMode="cover" className="h-10 w-10 rounded" /> : <View testID={`product-image-${row.id}`} className="h-10 w-10 rounded bg-muted" /> },
     { id: 'name', header: 'Name', flex: 2.5, sortValue: row => productRowSortValue(row, 'name'), render: row => row.group ? <VStack className="items-start gap-0.5">
       <Text>{row.name}</Text>
+      {/* v2's per-attribute lines (10.2m); v2's values are filter links, ours are plain text since they do nothing. */}
+      {row.optionSummary.length ? <VStack testID={`product-options-${row.group.productId}`}>
+        {row.optionSummary.map(option => <Text key={option.name} className="text-xs text-muted-foreground">{`${option.name}: ${option.values.join(', ')}`}</Text>)}
+      </VStack> : null}
       <Pressable testID={`product-variations-${row.group.productId}`} accessibilityRole="button" aria-expanded={row.group.open}
         accessibilityLabel={`Show variations of ${row.name}`} onPress={() => toggle(row.group!.productId)}>
         <Text className="text-sm text-primary">{`${row.group.count} variations ${row.group.open ? '⌄' : '›'}`}</Text>
