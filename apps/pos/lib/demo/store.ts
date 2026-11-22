@@ -15,6 +15,7 @@ export const DEMO_INFO = {
   maxShippingLines: 1,
   lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
+  receiptEmail: { v: 1 }, // the demo answers the receipt-email route (lib/receipt-email.ts), sending and storing nothing
 };
 // e2e only: the demo's /info without the order.refund contract, as a store on an older plugin answers.
 export const DEMO_INFO_NO_REFUND_KEY = 'vendurepos.demo.info_no_refund';
