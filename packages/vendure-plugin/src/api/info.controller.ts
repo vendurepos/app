@@ -6,6 +6,8 @@ import type { ReceiptEmailCaps } from './receipt-email.controller';
 import { DisplaySignallingService } from '../service/display-signalling.service';
 import type { IceServer } from '../service/display-signalling.service';
 import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
+import { PaymentMethodsService } from '../service/payment-methods.service';
+import type { TenderMethod } from '../service/payment-methods.service';
 import { TALLY_PLUGIN_OPTIONS } from '../service/register.service';
 import type { RegisterApprovalOptions } from '../service/register.service';
 import { taxRoundingFor } from '../service/tax-rounding';
@@ -14,7 +16,9 @@ import type { TaxRounding } from '../service/tax-rounding';
 export type TallyInfo = { contracts: { 'order.create': number[]; register: number[]; 'order.refund': number[] }; taxRounding: TaxRounding;
   maxShippingLines: number; lineTax: { none: boolean; classes: boolean }; device?: { name: string };
   /** TallyUI ADR-085 d7, d8: the signalling routes exist; `iceServers` only when the plugin's init option sets it. */
-  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] }; receiptEmail?: { v: 1 };
+  customerDisplay: { v: 1; snapshot: 1; iceServers?: IceServer[] };
+  /** 3.2a: the channel's listed Tally methods, id ascending; [] keeps the till's default tiles. */
+  paymentMethods: TenderMethod[]; receiptEmail?: { v: 1 };
   /** #332: only when the plugin's `registerApproval` option is set. */
   registerApproval?: { thresholdMinor: number } };
 
@@ -28,6 +32,7 @@ export class TallyInfoController {
     configService: ConfigService, private readonly connection: TransactionalConnection, private readonly displays: DisplaySignallingService,
     @Inject(TALLY_RECEIPT_EMAIL) private readonly receiptEmail: ReceiptEmailCaps, // 12.1a: init({ receiptEmail })
     @Inject(TALLY_PLUGIN_OPTIONS) private readonly options: RegisterApprovalOptions,
+    private readonly paymentMethods: PaymentMethodsService,
   ) {
     const { taxOptions, entityOptions } = configService;
     this.taxRounding = taxRoundingFor({
@@ -44,7 +49,7 @@ export class TallyInfoController {
       'order.refund': [...ORDER_REFUND_VERSIONS] }, taxRounding: this.taxRounding,
       maxShippingLines: MAX_SHIPPING_LINES, // ADR 0005 ruling (b): one shipping charge per order.
       lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
-      customerDisplay: this.displays.advertisement(),
+      customerDisplay: this.displays.advertisement(), paymentMethods: await this.paymentMethods.listed(ctx),
     };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };

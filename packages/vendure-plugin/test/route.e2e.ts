@@ -282,7 +282,7 @@ describe('POST /tally/v1/commands', () => {
   it('item 2: another plugin\'s REST controller (apiType custom) cannot settle a tally-pos payment', async () => {
     const response = await fetch(`${base}/vp2-dummy/pay`, { method: 'POST', headers: headers() });
     expect(await response.json()).toEqual({
-      apiType: 'custom', state: 'Declined', errorMessage: 'tally-pos is only available to the POS route',
+      apiType: 'custom', state: 'Declined', errorMessage: 'Tally POS tender is only available to the POS route',
     });
   });
 

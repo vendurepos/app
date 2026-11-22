@@ -4,7 +4,7 @@ import {
 } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { tallyPosRefund } from '../config/permissions';
-import { TALLY_PAYMENT_METHOD_CODE, withTallyRefund } from '../config/strategies';
+import { withTallyRefund } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/commands';
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
@@ -15,6 +15,7 @@ import {
 import { ORDER_REFUND_VERSIONS } from './constants';
 import { ErrorResultThrown, unwrap } from './errors';
 import { OrderCreateService } from './order-create.service';
+import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
@@ -27,6 +28,7 @@ export class RefundService {
     private stock: StockMovementService,
     private registers: RegisterService,
     private orders: OrderCreateService,
+    private tenderMethods: PaymentMethodsService,
   ) {}
 
   async apply(ctx: RequestContext, command: OrderRefundEnvelope<Record<string, unknown>>, options: { requestTimeMs?: number } = {}): Promise<CommandResult> {
@@ -111,7 +113,9 @@ export class RefundService {
         const refundableShipping = order.shippingWithTax - previous.reduce((sum, refund) => sum + refund.shipping, 0);
         const remainderOf = (payment: Payment) => Math.max(0, payment.amount - payment.refunds
           .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0));
-        const tenders = payments.filter(payment => payment.method === TALLY_PAYMENT_METHOD_CODE && payment.state === 'Settled');
+        // 3.2a: a tender is a Settled payment the Tally handler created (metadata.tender), whatever its method is now.
+        const methods = await this.tenderMethods.tallyMethods(tx);
+        const tenders = payments.filter(payment => payment.metadata?.tender && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
         const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
@@ -127,6 +131,15 @@ export class RefundService {
         for (const payment of tenders) {
           const share = Math.min(left, remainderOf(payment));
           if (share === 0) continue;
+          // 3.2a-2 review: Vendure refunds under the one enabled method with that code, picks either of two, and without
+          // one saves a Pending refund with no handler call. Refused unstored, so the refunds already made roll back with it.
+          const refusal = (code: 'payment_method_disabled' | 'payment_method_unavailable', message: string) =>
+            new Unstored(refuse(id, code, message, { paymentId: this.orders.encodeId(payment.id), method: payment.method }));
+          const unusable = this.tenderMethods.unusable(methods, payment.method);
+          if (unusable) throw refusal(unusable === 'disabled' ? 'payment_method_disabled' : 'payment_method_unavailable', `Payment method ${payment.method} ${{
+            disabled: 'is disabled; enable it in the store, then refund again',
+            duplicate_code: 'shares its code with another payment method in this channel; give one a unique code, then refund again',
+            unknown: `no longer exists in this channel; add a Tally POS payment method with code ${payment.method}, then refund again` }[unusable]}`);
           withTallyRefund(tx, { ...tallyRefund,
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: String(line.id), quantity: input.quantity })),
           });
@@ -135,6 +148,8 @@ export class RefundService {
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: line.id, quantity: input.quantity })),
             shipping: refunds.length ? 0 : shippingMinor, adjustment: 0,
           }));
+          // The Tally handler always settles, so any other state means Vendure never reached it.
+          if (refund.state !== 'Settled') throw refusal('payment_method_unavailable', `Vendure did not settle the refund under payment method ${payment.method}; nothing was refunded`);
           refunds.push({ id: this.orders.encodeId(refund.id), paymentId: this.orders.encodeId(payment.id), totalMinor: refund.total, state: refund.state });
           const method = refund.metadata.tallyMethod;
           byMethod[method] = (byMethod[method] ?? 0) + refund.total;

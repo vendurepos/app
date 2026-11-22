@@ -30,6 +30,8 @@ import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
   transientKind, unwrap,
 } from './errors';
+import { PaymentMethodsService } from './payment-methods.service';
+import type { MethodFallback } from './payment-methods.service';
 import { StoreSetupService } from './store-setup.service';
 import { roundHalfAwayFromZero } from './rounding';
 import { strictShapeErrors } from './strict-shape';
@@ -52,7 +54,7 @@ export type FiguresMismatch = Extract<CommandWarning, { code: 'figures_mismatch'
 type SessionUnknown = Extract<CommandWarning, { code: 'register_session_unknown' }>;
 
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
-  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown>; totalWarnings?: TotalWarning[] };
+  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown | MethodFallback>; totalWarnings?: TotalWarning[] };
 
 /** Where a sale's stock top-up was made, kept on the ledger row for an admin's take-back. */
 export type TopUp = { variantId: string; stockLocationId: string; quantity: number };
@@ -109,6 +111,7 @@ export class OrderCreateService {
     private storeSetup: StoreSetupService,
     private taxRateService: TaxRateService,
     private zoneService: ZoneService,
+    private tenderMethods: PaymentMethodsService,
   ) {}
 
   private get taxRounding(): TaxRounding {
@@ -162,14 +165,15 @@ export class OrderCreateService {
         // The recorded sale vanished meanwhile (an admin rejection released it): start again as a new sale.
         if (recorded) throw new Rerun();
         // 6. The stored and unstored checks: nothing of the sale is written, no event fires.
-        const refusal = await this.deterministicRefusal(txCtx, command);
+        const codes: string[] = []; // 3.2a: each payment's resolved method code, filled by the checks.
+        const refusal = await this.deterministicRefusal(txCtx, command, codes);
         if (refusal) {
           await this.runTestHook('beforeStoringRejection', command.id);
           await this.connection.getRepository(txCtx, TallyCommand).update(command.id, { status: 'rejected', result: { ...refusal } });
           return { result: refusal };
         }
         // 7. The recipe.
-        return await this.runSale(txCtx, command);
+        return await this.runSale(txCtx, command, codes);
       });
     } catch (error) {
       // A collision after the recipe's first event: everything rolled back (its events with it), so start again.
@@ -205,10 +209,10 @@ export class OrderCreateService {
    * then dropped), a clientOrderId collision starts the command again, and a plugin bug with part of
    * the sale written is kept for an admin (needs_admin).
    */
-  private async runSale(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): Promise<SaleOutcome> {
+  private async runSale(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, codes: string[]): Promise<SaleOutcome> {
     const progress: SaleProgress = { topUps: [] };
     try {
-      return await this.recipe(ctx, command, progress);
+      return await this.recipe(ctx, command, progress, codes);
     } catch (error) {
       if (error instanceof TransientCommandError || error instanceof RepairStoreSetup) throw error;
       const verdict = classify(error, this.clientOrderIdIndex());
@@ -269,8 +273,16 @@ export class OrderCreateService {
           }
           pluginBug(`Order ${orderId} of ${commandId} is missing`);
         }
+        // 3.2a: every Settled payment the Tally handler created (it always writes metadata.tender), whatever its method is now.
+        const tally = await this.tenderMethods.tallyMethods(txCtx);
         for (const payment of await this.orders.getOrderPayments(txCtx, orderId)) {
-          if (payment.method !== TALLY_PAYMENT_METHOD_CODE || payment.state !== 'Settled') continue;
+          if (!payment.metadata?.tender || payment.state !== 'Settled') continue;
+          // 3.2a-2 review: Vendure cancels a Payment only under the one enabled method with its code.
+          const unusable = this.tenderMethods.unusable(tally, payment.method);
+          if (unusable) throw refuse(`payment ${payment.id} cannot be cancelled: its method ${payment.method} ${{
+            disabled: 'is disabled; enable it and reject again',
+            duplicate_code: 'shares its code with another payment method; give one a unique code and reject again',
+            unknown: `no longer exists in this channel; add a Tally POS payment method with code ${payment.method}, then reject again` }[unusable]}`);
           const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
           if (isGraphQlErrorResult(cancelledPayment) || cancelledPayment.state !== 'Cancelled') {
             throw refuse(`payment ${payment.id} cannot be cancelled`);
@@ -387,7 +399,7 @@ export class OrderCreateService {
    * (currency, configuration, order limits) rolls the claim back unstored; the state-dependent per-sale
    * facts (unknown_variant, underpaid) are stored on the claim. The recipe keeps the checks for races.
    */
-  private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>) {
+  private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, codes: string[]) {
     const { lines, payments, totalMinor, currency } = command.payload;
     // TallyUI #219: store-wide setup is never stored; the caller rolls the claim back (SetupRefusal).
     if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
@@ -396,6 +408,10 @@ export class OrderCreateService {
     const setup = await this.setupState(ctx);
     if (setup === 'repairable') throw new RepairStoreSetup();
     if (setup === 'refuse') throw new SetupRefusal(storeConfiguration(command.id));
+    // 3.2a R4: Vendure would pick either of two enabled methods coded tally-pos, as misconfigured as tally-pos disabled.
+    const resolved = await this.tenderMethods.resolve(ctx, payments);
+    if (resolved.shared.has(TALLY_PAYMENT_METHOD_CODE)) throw new SetupRefusal(storeConfiguration(command.id));
+    codes.push(...resolved.codes);
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines. The limits are store-wide
@@ -536,7 +552,7 @@ export class OrderCreateService {
 
   // The S1 recipe (docs/spikes/s1-order-recipe.md). Its money and tax logic is unchanged; VP1 adds
   // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
-  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress): Promise<SaleOutcome> {
+  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress, codes: string[]): Promise<SaleOutcome> {
     const payload = command.payload;
     // ADR 0002 "Customer": a customerId unknown here is treated as absent, with a warning.
     // #43: one over CUSTOMER_ID_MAX never gets here; step 4 refuses it as invalid_payload.
@@ -789,11 +805,17 @@ export class OrderCreateService {
 
     // ADR-039: tenders above the total are allowed; the covering tender's payment is capped.
     let remaining = payload.totalMinor;
-    for (const tender of payload.payments) {
+    // 3.2a R3: a method disabled or ineligible since the till listed it falls back to tally-pos, decided before createPayment.
+    const fallbacks: MethodFallback[] = [];
+    const reasons = await this.tenderMethods.fallbacks(ctx, order, codes);
+    for (const [index, tender] of payload.payments.entries()) {
       if (remaining === 0) break;
       const amount = Math.min(tender.amountMinor, remaining);
-      const payment = unwrap(await this.payments.createPayment(ctx, order, amount, TALLY_PAYMENT_METHOD_CODE, { tender }));
-      // N1: the payload covers the total (pre-claim), so any tally-pos payment not Settled is the store's
+      const reason = reasons.get(codes[index]);
+      if (reason) fallbacks.push({ code: 'payment_method_fallback', clientPaymentId: tender.clientPaymentId, methodId: codes[index], reason });
+      const method = reason ? TALLY_PAYMENT_METHOD_CODE : codes[index];
+      const payment = unwrap(await this.payments.createPayment(ctx, order, amount, method, { tender }));
+      // N1: the payload covers the total (pre-claim), so any Tally payment not Settled is the store's
       // configuration (a replaced handler, a missing route mark), never underpaid.
       if (payment.state !== 'Settled') throw new StoreConfigurationRefusal();
       remaining -= amount;
@@ -852,8 +874,8 @@ export class OrderCreateService {
         compensation = { error };
       }
     }
-    const warnings: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown> = [
-      ...stockWarnings, ...ignored, ...figureWarnings,
+    const warnings: NonNullable<OrderCreateResult['warnings']> = [
+      ...stockWarnings, ...ignored, ...figureWarnings, ...fallbacks,
     ];
     if (command.version >= 3 && payload.sessionId !== undefined) {
       const where = { channelId: String(ctx.channelId), id: payload.sessionId };

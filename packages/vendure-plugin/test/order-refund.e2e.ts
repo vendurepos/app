@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { Order, Refund, TransactionalConnection } from '@vendure/core';
+import { Order, Payment, PaymentService, Refund, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { In } from 'typeorm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TallyCommand } from '../src';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -18,7 +19,8 @@ type ReadOrder = {
 type RefundCommand = Omit<OrderRefundEnvelope, 'version'> & { version: number };
 
 describe('order.refund v1', () => {
-  const environment = createPluginTestEnvironment();
+  // A non-Tally handler beside the plugin's, for (w)'s method that shares a Tally method's code.
+  const environment = createPluginTestEnvironment({ paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler] } });
   const { server, adminClient, variantIds } = environment;
   let connection: TransactionalConnection;
   let base: string;
@@ -471,5 +473,148 @@ describe('order.refund v1', () => {
       expect(result).toMatchObject({ status: 'applied' });
       expect(result.register!.session!.expected).toEqual({ cash: countedFloatMinor + sale.payload.totalMinor });
     });
+  });
+
+  // 3.2a-2 (p): last in the file, since the methods it creates change where later cash sales are recorded.
+  it('(p) a split sale under card-terminal and cash refunds to both, each by its tender method', async () => {
+    for (const [code, name, tender] of [['card-terminal', 'Card terminal', 'card'], ['cash', 'Cash', 'cash']]) {
+      await adminClient.query(parse(`mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: {
+        code, enabled: true, handler: { code: 'tally-pos', arguments: [{ name: 'tender', value: tender }] },
+        checker: { code: 'tally-pos', arguments: [] }, translations: [{ languageCode: 'en', name, description: '' }] } });
+    }
+    const session = await openSession();
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 }]), version: 10 };
+    // The vendored OrderCreatePayment type has no methodId yet.
+    (command.payload as { payments: unknown[] }).payments = [
+      { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', methodId: 'card-terminal', amountMinor: command.payload.totalMinor - 500 },
+      { clientPaymentId: randomUUID(), method: 'cash', amountMinor: 500 },
+    ];
+    const sold = await post(command);
+    expect(sold).toMatchObject({ status: 'applied' });
+    const order = await readOrder(sold.serverRefs!.orderId);
+    const payments = [...order.payments].sort((a, b) => Number(environment.decode(a.id)) - Number(environment.decode(b.id)));
+    expect(payments.map(payment => payment.method)).toEqual(['card-terminal', 'cash']);
+    const refund = refundFor(order, session);
+    const result = await post(refund);
+    expect(result).toEqual({ id: refund.id, status: 'applied', refund: {
+      totalMinor: refund.payload.totalMinor, byMethod: { external: refund.payload.totalMinor - 500, cash: 500 },
+      refunds: [
+        { id: expect.any(String), paymentId: payments[0].id, totalMinor: refund.payload.totalMinor - 500, state: 'Settled' },
+        { id: expect.any(String), paymentId: payments[1].id, totalMinor: 500, state: 'Settled' },
+      ],
+    } });
+    const after = await readOrder(order.id);
+    expect(payments.map(({ id }) => after.payments.find(payment => payment.id === id)!.refunds.map(item => item.metadata.tallyMethod)))
+      .toEqual([['external'], ['cash']]);
+  });
+
+  // 3.2a-2 review (s): Vendure refunds only under an enabled method, so a disabled one is refused before any refund.
+  it('(s) a refund reaching a disabled Tally method is payment_method_disabled with nothing written, and applies once enabled', async () => {
+    const { createPaymentMethod } = await adminClient.query<{ createPaymentMethod: { id: string } }>(parse(`
+      mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: {
+      code: 'voucher-card', enabled: true, handler: { code: 'tally-pos', arguments: [{ name: 'tender', value: 'card' }] },
+      checker: { code: 'tally-pos', arguments: [] }, translations: [{ languageCode: 'en', name: 'Voucher card', description: '' }] } });
+    const enable = (enabled: boolean) => adminClient.query(parse(`mutation Update($input: UpdatePaymentMethodInput!) {
+      updatePaymentMethod(input: $input) { id } }`), { input: { id: createPaymentMethod.id, enabled } });
+    const session = await openSession();
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 }]), version: 10 };
+    // Tenders are refunded in payment id order, so voucher-card's comes second and cash's refund must roll back with it.
+    (command.payload as { payments: unknown[] }).payments = [
+      { clientPaymentId: randomUUID(), method: 'cash', amountMinor: 500 },
+      { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', methodId: 'voucher-card', amountMinor: command.payload.totalMinor - 500 },
+    ];
+    const sold = await post(command);
+    expect(sold).toMatchObject({ status: 'applied' });
+    const order = await readOrder(sold.serverRefs!.orderId);
+    const payments = [...order.payments].sort((a, b) => Number(environment.decode(a.id)) - Number(environment.decode(b.id)));
+    expect(payments.map(payment => payment.method)).toEqual(['cash', 'voucher-card']);
+    await enable(false);
+    const createRefund = vi.spyOn(server.app.get(PaymentService), 'createRefund');
+    try {
+      const refund = refundFor(order, session);
+      await refused(refund, order.id, 'payment_method_disabled',
+        'Payment method voucher-card is disabled; enable it in the store, then refund again', { paymentId: payments[1].id, method: 'voucher-card' });
+      expect(await connection.rawConnection.getRepository(Refund).countBy({ paymentId: In(payments.map(({ id }) => environment.decode(id))) })).toBe(0);
+      // Refused before Vendure is asked: it would save a Pending refund under the disabled method.
+      expect(createRefund.mock.calls.map(call => String(call[3].id))).toEqual([environment.decode(payments[0].id)]);
+    } finally {
+      createRefund.mockRestore();
+      await enable(true);
+    }
+    const retry = refundFor(order, session);
+    expect(await post(retry)).toEqual({ id: retry.id, status: 'applied', refund: {
+      totalMinor: retry.payload.totalMinor, byMethod: { cash: 500, external: retry.payload.totalMinor - 500 },
+      refunds: [
+        { id: expect.any(String), paymentId: payments[0].id, totalMinor: 500, state: 'Settled' },
+        { id: expect.any(String), paymentId: payments[1].id, totalMinor: retry.payload.totalMinor - 500, state: 'Settled' },
+      ],
+    } });
+  });
+
+  // 3.2a-2 fix 2: Vendure resolves a code to an arbitrary one of two enabled methods, and a deleted method leaves no row.
+  const createMethod = async (code: string, handler: string) => (await adminClient.query<{ createPaymentMethod: { id: string } }>(parse(`
+    mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: { code, enabled: true,
+    handler: handler === 'tally-pos' ? { code: handler, arguments: [{ name: 'tender', value: 'card' }] } : { code: handler, arguments: [{ name: 'automaticSettle', value: 'true' }] },
+    ...(handler === 'tally-pos' ? { checker: { code: 'tally-pos', arguments: [] } } : {}), translations: [{ languageCode: 'en', name: code, description: '' }] } })).createPaymentMethod.id;
+  const removeMethod = (id: string) => adminClient.query(parse('mutation Delete($id: ID!) { deletePaymentMethod(id: $id, force: true) { result } }'), { id });
+  async function sellUnder(methodId: string) {
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 10 };
+    const tender = { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', methodId, amountMinor: command.payload.totalMinor };
+    (command.payload as { payments: unknown[] }).payments = [tender];
+    const result = await post(command);
+    expect(result).toMatchObject({ status: 'applied' });
+    const order = await readOrder(result.serverRefs!.orderId);
+    const payment = await connection.rawConnection.getRepository(Payment).findOneByOrFail({ id: environment.decode(order.payments[0].id) });
+    return { result, order, payment, fallback: (reason: string) => ({ code: 'payment_method_fallback', clientPaymentId: tender.clientPaymentId, methodId, reason }) };
+  }
+  const refundRows = (order: ReadOrder) => connection.rawConnection.getRepository(Refund)
+    .countBy({ paymentId: In(order.payments.map(({ id }) => environment.decode(id))) });
+
+  it('(w) a code a Tally and a non-Tally method share is never listed or charged, and its earlier sale\'s refund is refused', async () => {
+    const tally = await createMethod('dup', 'tally-pos');
+    const session = await openSession();
+    const first = await sellUnder('dup');
+    expect(first.payment.method).toBe('dup');
+    const other = await createMethod('dup', 'dummy-payment-handler');
+    try {
+      const info = await (await fetch(`${base}/tally/v1/info`, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } })).json();
+      expect(info.paymentMethods.map((method: { code: string }) => method.code)).toEqual(['card-terminal', 'cash', 'voucher-card']);
+      const second = await sellUnder('dup');
+      expect(second.result.warnings).toEqual([second.fallback('duplicate_code')]);
+      // The dummy handler always sets a transactionId; the Tally handler never does.
+      expect([second.payment.method, second.payment.transactionId, second.payment.metadata.tender.methodId]).toEqual(['tally-pos', null, 'dup']);
+      await refused(refundFor(first.order, session), first.order.id, 'payment_method_unavailable',
+        'Payment method dup shares its code with another payment method in this channel; give one a unique code, then refund again',
+        { paymentId: first.order.payments[0].id, method: 'dup' });
+      expect(await refundRows(first.order)).toBe(0);
+    } finally {
+      await removeMethod(other);
+      await removeMethod(tally);
+    }
+  });
+
+  it('(x) once its Tally method is deleted, a sale naming it falls back unknown and an earlier sale\'s refund is refused by name', async () => {
+    const gone = await createMethod('gone', 'tally-pos');
+    const session = await openSession();
+    const sold = await sellUnder('gone');
+    expect(sold.payment.method).toBe('gone');
+    await removeMethod(gone);
+    const later = await sellUnder('gone');
+    expect(later.result.warnings).toEqual([later.fallback('unknown')]);
+    expect([later.payment.method, later.payment.metadata.tender.methodId]).toEqual(['tally-pos', 'gone']);
+    await refused(refundFor(sold.order, session), sold.order.id, 'payment_method_unavailable',
+      'Payment method gone no longer exists in this channel; add a Tally POS payment method with code gone, then refund again',
+      { paymentId: sold.order.payments[0].id, method: 'gone' });
+    expect(await refundRows(sold.order)).toBe(0);
+    // 3.2a-2 fix 3: the advice works; a recreated method with that code takes the refund.
+    const recreated = await createMethod('gone', 'tally-pos');
+    try {
+      expect(await post(refundFor(sold.order, session))).toMatchObject({ status: 'applied' });
+      const rows = await connection.rawConnection.getRepository(Refund)
+        .findBy({ paymentId: In(sold.order.payments.map(({ id }) => environment.decode(id))) });
+      expect(rows.map(row => row.state)).toEqual(['Settled']);
+    } finally {
+      await removeMethod(recreated);
+    }
   });
 });

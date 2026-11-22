@@ -2,7 +2,7 @@ import {
   LanguageCode, Logger, PaymentMethodEligibilityChecker, PaymentMethodHandler,
   OrderLine, ShippingCalculator, ShippingEligibilityChecker, StockLevel, StockLocationService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
-import type { Injector, Order, OrderItemPriceCalculationStrategy, Payment, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
+import type { Injector, Order, OrderItemPriceCalculationStrategy, Payment, PaymentMethod, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
 import { loggerCtx } from '../service/errors';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
@@ -158,10 +158,16 @@ export function tallyRefundMethod(destination: TallyRefundContext['destination']
 export const tallyPaymentHandler = new PaymentMethodHandler({
   code: TALLY_PAYMENT_METHOD_CODE,
   description: [{ languageCode: LanguageCode.en, value: 'Tally POS tender' }],
-  args: {},
+  // 3.2a Q3: the till tile's kind. A method stored before this arg existed has no value, read as `other` (tenderKind).
+  args: { tender: { type: 'string', required: false, defaultValue: 'other', ui: { component: 'select-form-input', options: [
+    { value: 'cash', label: [{ languageCode: LanguageCode.en, value: 'Cash' }] },
+    { value: 'card', label: [{ languageCode: LanguageCode.en, value: 'Card' }] },
+    { value: 'other', label: [{ languageCode: LanguageCode.en, value: 'Other' }] },
+  ] } } },
+  // 3.2a: the handler serves every Tally method, so the decline names none.
   createPayment: (ctx, order, amount, args, metadata) => ctx.apiType === 'custom' && isTallyRoute(ctx)
     ? { amount, state: 'Settled', metadata }
-    : { amount, state: 'Declined', errorMessage: 'tally-pos is only available to the POS route', metadata },
+    : { amount, state: 'Declined', errorMessage: 'Tally POS tender is only available to the POS route', metadata },
   settlePayment: () => ({ success: true }),
   // ADR 0007 decision 6: Vendure refuses a Pending result; the till records the money itself.
   createRefund: (ctx, input, amount, order, payment) => {
@@ -178,6 +184,17 @@ export const tallyPaymentHandler = new PaymentMethodHandler({
     return { state: 'Settled' };
   },
 });
+
+/** 3.2a: a Tally method is any PaymentMethod on the plugin's handler, enabled or not. */
+export function isTallyMethod(paymentMethod: Pick<PaymentMethod, 'handler'>): boolean {
+  return paymentMethod.handler.code === TALLY_PAYMENT_METHOD_CODE;
+}
+
+/** 3.2a Q3: the method's `tender` arg; absent or unknown is `other`. */
+export function tenderKind(paymentMethod: Pick<PaymentMethod, 'handler'>): 'cash' | 'card' | 'other' {
+  const value = paymentMethod.handler.args.find(arg => arg.name === 'tender')?.value;
+  return value === 'cash' || value === 'card' ? value : 'other';
+}
 
 export const tallyPaymentChecker = new PaymentMethodEligibilityChecker({
   code: TALLY_PAYMENT_METHOD_CODE,

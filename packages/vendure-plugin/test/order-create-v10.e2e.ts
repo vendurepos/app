@@ -6,7 +6,8 @@ import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/comman
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
-// 3.2a-1: versions 8, 9 and 10 are accepted for their shape only; their new fields are refused as not supported.
+// 3.2a-1: versions 8, 9 and 10 are accepted for their shape only; their new fields are refused as not supported,
+// except v10's payments[].methodId, honoured since 3.2a-2 (tender-methods.e2e.ts).
 describe('order.create v8, v9 and v10: shape only', () => {
   const environment = createPluginTestEnvironment({}, [TallyPosPlugin, DefaultSearchPlugin.init({})]);
   const { server, adminClient, variantIds, run } = environment;
@@ -65,10 +66,14 @@ describe('order.create v8, v9 and v10: shape only', () => {
     expect(result.error!.message).toBe('coupons: not supported by this server');
   });
 
-  it('(c) a v10 sale with payments[0].methodId is refused, unstored, naming payments[0].methodId', async () => {
+  it('(c) 3.2a-2: a v10 sale with payments[0].methodId tally-pos is applied under tally-pos', async () => {
     const command = sale(10);
-    payloadOf(command).payments[0].methodId = 'card-terminal';
-    await expectRefused(command, 'payments[0].methodId: not supported by this server');
+    payloadOf(command).payments[0].methodId = 'tally-pos';
+    const result = await send(command);
+    expect(result.status).toBe('applied');
+    const { order } = await adminClient.query<{ order: { payments: { method: string }[] } }>(
+      parse('query Payments($id: ID!) { order(id: $id) { payments { method } } }'), { id: result.serverRefs!.orderId });
+    expect(order.payments).toEqual([{ method: 'tally-pos' }]);
   });
 
   it('(d) a v7 sale with payments[0].methodId is refused, naming the version it requires', async () => {
