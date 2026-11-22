@@ -1,13 +1,17 @@
 import { minorUnitDigits } from '@tallyui/core';
 import { csvFromCells, minorToDecimal, type SalesFigures } from '@tallyui/pos';
 
-/** The Sales room's figures as CSV rows (Section, Name, Quantity, Amount), amounts as plain decimals. */
-export function salesCsv(figures: SalesFigures, currency: string): string {
+/**
+ * The Sales room's figures as CSV rows (Section, Name, Quantity, Amount), amounts as plain decimals;
+ * a `scope` row after the header marks figures as this till's own, not the store's (8.1n).
+ */
+export function salesCsv(figures: SalesFigures, currency: string, scope: string | null = null): string {
   const digits = minorUnitDigits(currency);
   const amount = (minor: number) => minorToDecimal(minor, digits);
   const { totals, refunds } = figures;
   return csvFromCells([
     ['Section', 'Name', 'Quantity', 'Amount'],
+    ...(scope ? [['Scope', scope, '', '']] : []),
     ['Summary', 'Total', '', amount(totals.grossMinor)],
     ['Summary', 'Net sales', '', amount(totals.netMinor)],
     ['Summary', 'Orders', totals.orderCount, ''],
@@ -23,7 +27,10 @@ export function salesCsv(figures: SalesFigures, currency: string): string {
   ]);
 }
 
-/** v2's `sales-<report>-<from>-<to>.csv`; the till's report is the summary. */
-export function salesCsvFileName(figures: SalesFigures): string {
-  return `sales-summary-${figures.range.from}-${figures.range.to}.csv`;
+/**
+ * v2's `sales-<report>-<from>-<to>.csv`; the till's report is the summary.
+ * With a `scope`, `-this-till` marks figures as this till's own, not the store's (8.1n).
+ */
+export function salesCsvFileName(figures: SalesFigures, scope: string | null = null): string {
+  return `sales-summary-${scope ? 'this-till-' : ''}${figures.range.from}-${figures.range.to}.csv`;
 }

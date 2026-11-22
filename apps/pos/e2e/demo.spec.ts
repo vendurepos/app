@@ -1697,6 +1697,9 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   expect(csv).toContain('"Summary","Total","","9.52"');
   expect(csv).toContain('"Products","Tally Fixture Mug","1",');
   await expect(page.getByTestId('reports-export-error')).toHaveCount(0);
+  // The store's figures carry no till-only marker (8.1n).
+  expect(summary[1]).not.toMatch(/^This till only/);
+  expect(csv).not.toContain('"Scope"');
   // The demo-pairs size, as 10d; the PNG is made docs/v2-parity/demo-pairs/10e-reports-export-vendurepos.webp (cwebp -q 80).
   await page.setViewportSize({ width: 960, height: 600 });
   await page.getByTestId('reports-export-csv').scrollIntoViewIfNeeded();
@@ -1789,6 +1792,16 @@ test("Reports shows this till's figures only when the store refuses the report",
   await expect(page.getByTestId('reports-till-only')).toHaveAttribute('data-status', 'forbidden');
   await expect(page.getByTestId('card-categories')).toBeVisible();
   await expect(page.getByTestId('hero-median')).toBeVisible();
+  // The print and the CSV say so too, so a till-only export cannot pass for the store's (8.1n).
+  await page.getByTestId('reports-print-summary').click();
+  const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
+  expect(summary.slice(0, 2)).toEqual(['Sales summary', 'This till only']);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('reports-export-csv').click()]);
+  expect(download.suggestedFilename()).toMatch(/^sales-summary-this-till-(\d{4}-\d{2}-\d{2})-\1\.csv$/);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  expect(csv.split('\r\n')[1]).toBe('"Scope","This till only","",""');
+  await expect(page.getByTestId('reports-print-error')).toHaveCount(0);
+  await expect(page.getByTestId('reports-export-error')).toHaveCount(0);
 });
 
 test('Reports opens on the drawer card: since, float + cash sales = expected, Print X-report and the register panel', async ({ page }) => {
