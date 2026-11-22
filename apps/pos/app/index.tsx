@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 import {
   AppShell, Button, Catalogue, ClosureSheet, HStack, OpenRegisterCard, OpenSaleTabs, ParkedSales, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, Tabs, TabsList,
   SyncStatus, TabsTrigger, TenderPane, Text, VStack, type OrderHistoryRow,
-  IconButton,
+  IconButton, useTender,
 } from '@tallyui/components';
 import { ConnectorProvider, useStockOverlaid, type ServerCapabilities } from '@tallyui/core';
 import {
@@ -79,13 +79,12 @@ import { StoreHealthPanel } from '../lib/store-health-panel';
 import { attentionRows, changesWaiting, readyToSell } from '../lib/store-health';
 import { syncNow } from '../lib/sync-now';
 import { SyncNowControl } from '../lib/sync-now-control';
-import { TenderSplit } from '../lib/tender-split';
 import { CashierSheet, CashierShift, SupportSheet, tillNavItems } from '../lib/till-frame';
 import { activeTillNav, tillNavEntries } from '../lib/till-nav';
 import { NotificationsSheet } from '../lib/notifications-sheet';
 import { tillNotices } from '../lib/notices';
 import { boundRegisterId as mintBoundRegisterId, deviceId, rebindRegister } from '../lib/till-ids';
-import { tenderTyped, useTillTender } from '../lib/till-tender';
+import { tenderTyped } from '../lib/till-tender';
 import { useCatalogue } from '../lib/use-catalogue';
 import { useCatalogueView } from '../lib/use-catalogue-view';
 import { useCatalogueFilters } from '../lib/use-catalogue-filters';
@@ -575,7 +574,8 @@ function Sale({
   // Before the tender the cart follows the binding: a pin whose tender never started (startTender returns silently on a
   // locked sale, an empty cart or unpriced coupons) is dropped, so a later rebind is never stamped with the old drawer.
   useEffect(() => { if (stage.kind === 'cart' && tenderDrawer !== null) setTenderDrawer(null); }, [stage.kind, tenderDrawer]);
-  const tender = useTillTender(sale);
+  // TallyUI's one tender reducer, read by the scanner too; its `picker` puts the per-unit steppers in the locked cart.
+  const tender = useTender(sale);
   const currency = session.settings.currency;
   const configuredFloatMinor = loadOpeningFloatMinor(boundRegisterId);
   // The register refuses to count or close under a tender.
@@ -639,12 +639,15 @@ function Sale({
     highlightTimer.current = setTimeout(() => setHighlight(null), CART_HIGHLIGHT_MS);
   }
   const highlightSku = typeof highlight === 'object' ? highlight?.sku : undefined;
-  // v2's Split chip (CHECKLIST 3.1): TenderPane has no slot for it, so it sits above the pane.
+  // v2's Split (CHECKLIST 3.1) is TenderPane's own chip: its even ways in the pane, its pay-by-item steppers in the locked cart.
   const tenderPane = (
     <ScrollView>
-      <TenderSplit sale={sale} state={tender.state} dispatch={tender.dispatch} />
       <TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} />
     </ScrollView>
+  );
+  const lockedCart = (
+    <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
+      highlightSku={highlightSku} picker={tender.picker} />
   );
   // v2 cart/tabs.tsx: every open sale is a tab at the foot (or, by Settings, the top) of the cart; switching parks the current one (CHECKLIST 2.1, 9.10).
   const openSaleTabs = drafts ? (
@@ -778,10 +781,14 @@ function Sale({
         </View>
       ) : null}
       <View testID="till-cart" dataSet={sale.stage.kind === 'receipt' ? undefined : { print: 'hide' }} className={wide ? (cartSide === 'left' ? 'w-96 border-r border-border' : 'w-96 border-l border-border') : 'flex-1'} style={onProducts ? { display: 'none' } : undefined}>
-        {stage.kind === 'tender' ? (wide ? (
-          <SaleCart locked sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payError={payError}
-            highlightSku={highlightSku} />
-        ) : tenderPane) : stage.kind === 'receipt' ? (
+        {/* A narrow tender shows the pane alone, but for pay-by-item: then the locked cart, steppers and all, sits above it.
+            The pane keeps its place in the tree, since a remount records the tender afresh and so closes the Split. */}
+        {stage.kind === 'tender' ? (wide ? lockedCart : (
+          <View className="flex-1">
+            {tender.picker ? lockedCart : null}
+            <View className={tender.picker ? 'flex-1 border-t border-border' : 'flex-1'}>{tenderPane}</View>
+          </View>
+        )) : stage.kind === 'receipt' ? (
           <ScrollView>
             <SaleReceipt sale={sale} store={storeLabel(session)} cashier={identity} till={session.kind === 'api-key'} registerId={saleRegisterId}
               onPrintFailedAfterClose={onPrintFailedAfterClose} />
