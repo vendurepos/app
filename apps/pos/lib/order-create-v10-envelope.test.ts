@@ -1,14 +1,17 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createVendureConnector } from '@tallyui/connector-vendure';
-import { defaultPaymentMethods, wireMethodOf, type Customer, type StoreSettings } from '@tallyui/core';
+import { defaultPaymentMethods, wireMethodOf, type Customer, type PaymentMethodDescriptor, type StoreSettings } from '@tallyui/core';
 import { addEntryToCart, catalogueEntries, createOrderBuilder, finalizeOrder, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useTax, type TaxContext, type TaxProviderProps } from '@tallyui/pos';
 import { createElement } from 'react';
 // @ts-expect-error The app has react-dom (for the web build) but not @types/react-dom.
 import { renderToString } from 'react-dom/server';
 import { expect, it } from 'vitest';
+import { DEMO_INFO } from './demo/store';
 import { loadDefaultCustomer, saveDefaultCustomer } from './default-customer';
 import type { KeyValueStore } from './session';
+import { parseTenderMethods } from './tender-methods';
 
 // 3.2a-1 (desk addendum, condition 2): the plugin refuses v8 taxAddress and customer addresses and v9 coupon lines, so
 // the app must never send them. The real builder, finalizeOrder and envelope at the plugin's cap of 10; the app's own
@@ -28,8 +31,12 @@ function saleTaxContext(): TaxContext {
   return context!;
 }
 
-/** A cash and a card leg from the default tiles, as TenderPane's tenderOf builds them (not exported by @tallyui/components). */
-function envelope() {
+/**
+ * A cash leg and one other leg from two tiles (the default Cash and Card unless given), as TenderPane's tenderOf builds
+ * them (not exported by @tallyui/components). The customer comes from the stored default customer, or straight from
+ * `builder.setCustomer` with `direct`.
+ */
+function envelope({ tiles = defaultPaymentMethods(), direct = false }: { tiles?: PaymentMethodDescriptor[]; direct?: boolean } = {}) {
   const items = new Map<string, string>();
   const store: KeyValueStore = { getItem: (key) => items.get(key) ?? null, setItem: (key, value) => { items.set(key, value); }, removeItem: (key) => { items.delete(key); } };
   const session = { url: 'https://store.example', channelToken: 'default' };
@@ -37,8 +44,8 @@ function envelope() {
   const traits = createVendureConnector({ pricesIncludeTax: false }).traits.product;
   const builder = createOrderBuilder({ currency: 'EUR', taxContext: saleTaxContext() });
   addEntryToCart(builder, catalogueEntries(products, traits)[0], traits, 'EUR');
-  builder.setCustomer(loadDefaultCustomer(session, store));
-  const [cash, card] = defaultPaymentMethods();
+  builder.setCustomer(direct ? customer : loadDefaultCustomer(session, store));
+  const [cash, card] = tiles;
   const total = builder.getSnapshot().totalMinor;
   for (const [tile, amountMinor] of [[cash, 500], [card, total - 500]] as const) {
     const method = wireMethodOf(tile);
@@ -49,16 +56,43 @@ function envelope() {
   return toOrderCreateEnvelope(order, 'device-1', 1, { maxVersion: 10 });
 }
 
-it('at order.create cap 10 a sale with an addressed customer sends no taxAddress, billing, shipping or coupons', () => {
-  const sent = envelope();
-  expect(sent.version).toBeLessThanOrEqual(7);
+/** Every non-test .ts/.tsx file under `dir`, recursively. */
+function sources(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? sources(join(dir, entry.name))
+    : /\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name) ? [join(dir, entry.name)] : []);
+}
+
+function expectNoAddressFields(sent: ReturnType<typeof envelope>) {
   expect(sent.payload).not.toHaveProperty('taxAddress');
   expect(sent.payload.customer).toMatchObject({ customerId: 'C1' });
   expect(sent.payload.customer).not.toHaveProperty('billing');
   expect(sent.payload.customer).not.toHaveProperty('shipping');
   expect(sent.payload.coupons ?? []).toEqual([]);
-  // The useSale options are inline in app/index.tsx: no tax-by-address hook and no sale addresses.
-  expect(readFileSync(fileURLToPath(new URL('../app/index.tsx', import.meta.url).href), 'utf8')).not.toMatch(/taxContextFor|setAddresses/);
+}
+
+it.each([['the stored default customer', false], ['builder.setCustomer directly', true]])(
+  'at order.create cap 10 a sale with an addressed customer from %s sends no taxAddress, billing, shipping or coupons', (_, direct) => {
+    const sent = envelope({ direct });
+    expect(sent.version).toBeLessThanOrEqual(7);
+    expectNoAddressFields(sent);
+  });
+
+it('no app or lib source sets a tax-by-address hook or sale addresses', () => {
+  // A source check: useSale's options are inline in app/index.tsx, and a spread-in from any other file is caught too.
+  const files = ['../app', '.'].flatMap((dir) => sources(fileURLToPath(new URL(dir, import.meta.url).href)));
+  expect(files.some((file) => file.endsWith(join('app', 'index.tsx')))).toBe(true);
+  expect(files.filter((file) => /taxContextFor|setAddresses/.test(readFileSync(file, 'utf8')))).toEqual([]);
+});
+
+it("the merchant's tiles at cap 10 send v10 with the voucher's methodId, and still no addresses or coupons", () => {
+  const tiles = parseTenderMethods(DEMO_INFO, 10)!;
+  const sent = envelope({ tiles: [tiles.find((tile) => tile.id === 'cash')!, tiles.find((tile) => tile.id === 'voucher')!] });
+  expect(sent.version).toBe(10);
+  const [cash, voucher] = sent.payload.payments;
+  expect(voucher).toMatchObject({ method: 'external', methodId: 'voucher' });
+  expect(cash.method).toBe('cash');
+  expect(cash).not.toHaveProperty('methodId');
+  expectNoAddressFields(sent);
 });
 
 it('the default Cash and Card tiles send no payments[].methodId', () => {

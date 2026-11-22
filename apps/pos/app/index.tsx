@@ -89,6 +89,7 @@ import { useCatalogue } from '../lib/use-catalogue';
 import { useCatalogueView } from '../lib/use-catalogue-view';
 import { useCatalogueFilters } from '../lib/use-catalogue-filters';
 import { MIN_ORDER_CREATE, MIN_REGISTER, readCapabilities, useSaleSettings } from '../lib/use-sale-settings';
+import { useTenderMethods } from '../lib/use-tender-methods';
 import { useWedgeScanner } from '../lib/use-wedge-scanner';
 import { createScanDedupe } from '../lib/device-scanner';
 import { useDeviceScans } from '../lib/use-device-scans';
@@ -577,7 +578,8 @@ function Sale({
   // locked sale, an empty cart or unpriced coupons) is dropped, so a later rebind is never stamped with the old drawer.
   useEffect(() => { if (stage.kind === 'cart' && tenderDrawer !== null) setTenderDrawer(null); }, [stage.kind, tenderDrawer]);
   // TallyUI's one tender reducer, read by the scanner too; its `picker` puts the per-unit steppers in the locked cart.
-  const tender = useTender(sale);
+  const tenderMethods = useTenderMethods(session, capabilities);
+  const tender = useTender(sale, tenderMethods);
   const currency = session.settings.currency;
   const configuredFloatMinor = loadOpeningFloatMinor(boundRegisterId);
   // The register refuses to count or close under a tender.
@@ -644,7 +646,7 @@ function Sale({
   // v2's Split (CHECKLIST 3.1) is TenderPane's own chip: its even ways in the pane, its pay-by-item steppers in the locked cart.
   const tenderPane = (
     <ScrollView>
-      <TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} />
+      <TenderPane sale={sale} state={tender.state} dispatch={tender.dispatch} methods={tenderMethods} />
     </ScrollView>
   );
   const lockedCart = (
