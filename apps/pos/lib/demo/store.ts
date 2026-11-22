@@ -3,7 +3,7 @@ import type {
 } from '@tallyui/core';
 import { barcodeOf, CATALOGUE, type CatalogueProduct } from './catalogue';
 import { demoFacetValues } from './facets';
-import { demoProductImage } from './product-images';
+import { demoCategoryImage, demoProductImage } from './product-images';
 import type { TallyClosureRead } from '../closure-history';
 import type { SalesReportV2 } from '../sales-report';
 import type { ListedRegister } from '../register-choice';
@@ -36,6 +36,9 @@ export const DEMO_CATEGORIES = [{ id: '1', name: 'Standard', isDefault: true }, 
 // Stable product collection ids, separate from tax categories.
 const DEMO_COLLECTIONS = ['Coffee', 'Drinkware', 'Apparel', 'Stationery', 'Gifts']
   .map((name, index) => ({ id: `cat${index + 1}`, name }));
+/** The collections as the Admin API lists them, each featuring its category's picture (CHECKLIST 1.5b). */
+export const DEMO_COLLECTION_IMAGES = DEMO_COLLECTIONS.map(collection => ({ ...collection,
+  featuredAsset: { id: `demo-collection-asset-${collection.id}`, preview: demoCategoryImage(collection.name as CatalogueProduct['category']) } }));
 // The four rates in dev/vendure-store/src/seed.ts, before filtering to the channel's zone.
 export const DEMO_RATES = [
   { name: 'Standard DE', value: 19, category: { id: '1' }, zoneId: 'DE' },
