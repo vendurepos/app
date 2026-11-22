@@ -27,6 +27,7 @@
  * POST /tally/v1/commands (register.movement.void) — apps/pos/app/index.tsx via order-transport.ts.
  * POST /tally/v1/commands (register.closure.submit) — apps/pos/lib/closure-hold.ts via order-transport.ts.
  * POST /tally/v1/commands (order.refund) — apps/pos/lib/refund-sheet.tsx via till-refund.ts and order-transport.ts.
+ * POST /tally/v1/orders/:code/receipt-email — apps/pos/lib/receipt-email.ts.
  */
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
@@ -58,6 +59,10 @@ const ADMIN_PATH = '/admin-api';
 const INFO_PATH = '/tally/v1/info';
 // The plugin's register list (CHECKLIST 6.6).
 const REGISTERS_PATH = '/tally/v1/registers';
+// The plugin's receipt-email route (CHECKLIST 12.1), with the order code as its one captured segment.
+const RECEIPT_EMAIL_ROUTE = /^\/tally\/v1\/orders\/([^/]+)\/receipt-email$/;
+// One plain address: no list, space, quote or angle bracket (spec 12.1b-1).
+const PLAIN_EMAIL = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
 // Unrecognised REST routes return the server's not-found status.
 const NOT_FOUND = 404;
 // Memory storage is shared across installations when localStorage is absent.
@@ -138,6 +143,16 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
     if (route === COMMANDS_PATH) {
       const { commands } = await request.json();
       return reply({ results: commands.map((command: Parameters<DemoStore['apply']>[0]) => store.apply(command)) });
+    }
+    const receipt = request.method === 'POST' ? RECEIPT_EMAIL_ROUTE.exec(route) : null;
+    if (receipt) {
+      // The demo sends nothing and keeps no address, not even in demo storage.
+      const code = decodeURIComponent(receipt[1]);
+      if (!store.orderSummaries().some(order => order.code === code)) return reply({ code: 'order_not_found', message: `No order ${code} in this channel` }, undefined, 404);
+      const given = (await request.json().catch(() => null))?.emailAddress;
+      const emailAddress = typeof given === 'string' ? given.trim() : '';
+      if (!PLAIN_EMAIL.test(emailAddress)) return reply({ code: 'invalid_payload', message: 'Expected a body of { emailAddress }, one email address' }, undefined, 400);
+      return reply({ queued: true, emailAddress }, undefined, 202);
     }
     if (route !== ADMIN_PATH) return reply({ statusCode: NOT_FOUND, message: `Cannot ${request.method} ${route}`, error: 'Not Found' }, undefined, NOT_FOUND);
     const { query, variables = {}, operationName } = await request.json();
