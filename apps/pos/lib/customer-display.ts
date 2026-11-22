@@ -45,7 +45,12 @@ export function customerDisplayAdvertisement(session: Session, capabilities?: Se
   return capabilities?.customerDisplay ?? null;
 }
 
-export interface TillCustomerDisplay { service: TillDisplayService; pairing: TillPairing; close(): void }
+export interface TillCustomerDisplay {
+  service: TillDisplayService; pairing: TillPairing;
+  /** The id this till sends as `X-Tally-Device-Id`, shown in Settings so an administrator can find this till in `tallyDisplayDevices`. */
+  deviceId: string;
+  close(): void;
+}
 
 const logError = (error: unknown) => customerDisplayLogger.warn('A customer display call failed', { error });
 
@@ -56,15 +61,16 @@ const logError = (error: unknown) => customerDisplayLogger.warn('A customer disp
 export function createTillCustomerDisplay({ session, advertisement, signalling = createDisplaySignalling(), storage = defaultStore() }: {
   session: () => Session; advertisement: DisplayAdvertisement; signalling?: DisplaySignalling; storage?: KeyValueStore;
 }): TillCustomerDisplay {
+  const deviceId = displayDeviceId(storage);
   const device = createTillDevice({
-    signalling, deviceId: displayDeviceId(storage), keys: displayDeviceKeys(storage, displayStoreId(session())), onError: logError,
+    signalling, deviceId, keys: displayDeviceKeys(storage, displayStoreId(session())), onError: logError,
   });
   const context = () => sessionContext(session());
   const service = createTillDisplayService({
     signalling, context, device, advertisement, configFor: (display) => displayConfig(session(), display), onError: logError,
   });
   const pairing = createTillPairing({ signalling, context, device, service, onError: logError });
-  return { service, pairing, close() { pairing.close(); service.close(); } };
+  return { service, pairing, deviceId, close() { pairing.close(); service.close(); } };
 }
 
 /** The handles while the store advertises a display; null otherwise. A new store or channel starts them again. */

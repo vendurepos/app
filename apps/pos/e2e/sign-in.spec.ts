@@ -970,6 +970,10 @@ test('Settings › Customer display mints a pairing code on the dev store', asyn
   const displayUrl = `${new URL(page.url()).origin}/display?store=${encodeURIComponent(STORE_URL)}`;
   await expect(page.getByTestId('display-url')).toHaveText(displayUrl);
   await expect(page.getByTestId('pairing-code')).toHaveCount(0);
+  // The display device id (never the register id) the till sends as X-Tally-Device-Id, for the admin reset.
+  const deviceId = await page.evaluate(() => localStorage.getItem('vendurepos.display_device_id'));
+  expect(deviceId).toMatch(/^[0-9a-f-]{36}$/i);
+  await expect(page.getByTestId('display-device-id')).toHaveText(deviceId!);
   await page.screenshot({ path: test.info().outputPath('11-settings-customer-display-vendurepos.png') });
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.getByTestId('display-url-copy').click();
@@ -982,9 +986,17 @@ test('Settings › Customer display mints a pairing code on the dev store', asyn
   await popup.close();
   const mint = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/tally/v1/displays/codes'));
   await page.getByTestId('pairing-start').click();
-  expect((await mint).ok()).toBe(true);
+  const minted = await mint;
+  expect(minted.ok()).toBe(true);
+  expect(minted.request().headers()['x-tally-device-id']).toBe(deviceId);
   // The plugin's code is 6 random digits (packages/vendure-plugin/src/service/display-signalling.service.ts).
   await expect(page.getByTestId('pairing-code')).toHaveText(/^\d{6}$/);
+  // The device key is a credential: it exists by now and is not on the page. Only a boolean leaves the page.
+  expect(await page.evaluate(() => {
+    const entry = Object.keys(localStorage).find((k) => k.startsWith('vendurepos.display_device_key:'));
+    const value = entry === undefined ? null : localStorage.getItem(entry);
+    return !!value && !document.body.innerText.includes(value);
+  })).toBe(true);
   // Closing Settings cancels the pairing, so the code is not showing when the section opens again.
   await page.getByTestId('settings-back').click();
   await expect(page.getByTestId('pairing-code')).toHaveCount(0);

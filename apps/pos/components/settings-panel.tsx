@@ -33,6 +33,8 @@ import { useCatalogueConnector } from '../lib/use-catalogue';
 
 /** Help under the display page URL: the second screen opens that page, then shows the code the till confirms. */
 export const DISPLAY_URL_HELP = 'Open this page on the second screen, then enter the pairing code it shows.';
+/** Help under the display device id: an administrator finds this till by it in `tallyDisplayDevices` before a reset. */
+export const DISPLAY_DEVICE_ID_HELP = 'An administrator who resets this till\'s customer display finds it by this id.';
 
 /** Web only: the display page's URL for this store, to copy or open (native has no hosted origin). */
 function DisplayUrlRow({ storeUrl }: { storeUrl: string }) {
@@ -71,6 +73,15 @@ function CustomerDisplaySection({ handles, storeUrl }: { handles: TillCustomerDi
       <CustomerDisplaySettings className="w-full max-w-[420px]" pairing={useTillPairing(pairing)} displays={useTillDisplays(service)}
         onStartPairing={() => void pairing.start()} onConfirm={(id) => void pairing.confirm(id)} onDecline={(id) => void pairing.decline(id)}
         onCancelPairing={() => pairing.cancel()} onForget={(id) => void pairing.forget(id)} />
+      <Card testID="display-device-id-row" className="w-full max-w-[420px]">
+        <CardContent className="pt-6">
+          <VStack space="sm">
+            <Text className="font-medium">{"This till's display device id"}</Text>
+            <Text testID="display-device-id" selectable className="text-sm">{handles.deviceId}</Text>
+            <Text className="text-sm text-muted-foreground">{DISPLAY_DEVICE_ID_HELP}</Text>
+          </VStack>
+        </CardContent>
+      </Card>
     </>
   );
 }
