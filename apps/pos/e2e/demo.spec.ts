@@ -776,7 +776,7 @@ test('The sale\'s customer picker shows v2\'s avatars and a Guest row, and Guest
   await page.getByLabel('Search customers').fill('ada');
   const picker = page.getByTestId('customer-picker');
   await expect(picker.getByTestId('customer-picker-option-guest')).toBeVisible();
-  // avatarInitials('Ada Lovelace') in TallyUI 4.1.0 is 'AL'.
+  // avatarInitials('Ada Lovelace') in TallyUI 4.2.0 is 'AL'.
   await expect(picker.getByText('AL', { exact: true })).toBeVisible();
   await picker.getByText('Ada Lovelace', { exact: true }).click();
   await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
@@ -3781,7 +3781,8 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await page.getByTestId('tender-method-external').click();
   // The pane pre-types the remaining balance after the cash payment is taken.
   await page.getByTestId('tender-take').click();
-  await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"])')).toHaveCount(2);
+  await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"]):not([data-testid$="-time"])')).toHaveCount(2);
+  await expect(page.locator('[data-testid^="tender-leg-"][data-testid$="-time"]').first()).toBeVisible();
   await expect(page.getByTestId('tender-complete')).toBeEnabled();
   await page.getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');

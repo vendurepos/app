@@ -2038,7 +2038,7 @@ test('a split sale, part cash and part card, is applied by the plugin with both 
   await page.getByTestId('tender-method-external').click();
   // The pane pre-types the remaining balance after the cash payment is taken.
   await page.getByTestId('tender-take').click();
-  await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"])')).toHaveCount(2);
+  await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"]):not([data-testid$="-time"])')).toHaveCount(2);
   await expect(page.getByTestId('tender-complete')).toBeEnabled();
   await page.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
