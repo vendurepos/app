@@ -1,16 +1,20 @@
 import { useRef, useState, type JSX } from 'react';
 import { Platform } from 'react-native';
 import { Button, HStack, Input, InputField, Label, Text, ToggleGroup, ToggleGroupItem, VStack } from '@tallyui/components';
-import { mintUuid, networkSinkFor, PAPER_COLUMNS, type PrinterProfile, type ReceiptPaper } from '@tallyui/pos';
+import { mintUuid, networkSinkFor, PAPER_COLUMNS, SYSTEM_PRINTER_ID, type PrinterProfile, type ReceiptPaper } from '@tallyui/pos';
 import {
-  DEFAULT_PRINTER_PORT, loadPrinterProfiles, PRINTER_CONNECTIONS, PRINTER_VENDORS, printerPaper, printerSummary,
-  removePrinterProfile, savePrinterProfile, type SavedPrinterConnection, type SavedPrinterVendor,
+  DEFAULT_PRINTER_PORT, loadPrinterProfiles, loadTemplatePrinters, PRINTER_CONNECTIONS, PRINTER_VENDORS, printerPaper,
+  printerSummary, removePrinterProfile, savePrinterProfile, saveTemplatePrinter, type SavedPrinterConnection,
+  type SavedPrinterVendor,
 } from './printer-profiles';
 import { printedOn, printTestTo } from './receipt-printer';
+import { RECEIPT_TEMPLATES, templatePrinterLabel } from './receipt-templates';
 
-/** Settings › Printing: the printers set up on this device (TallyUI's PrinterProfile, kept in the device store), with a Test print for an Epson or Star network printer. */
+/** Settings › Printing: the printers set up on this device (TallyUI's PrinterProfile, kept in the device store), with a Test print for an Epson or Star network printer, and the printer each receipt template prints to. */
 export function PrinterSettings(): JSX.Element {
   const [printers, setPrinters] = useState(() => loadPrinterProfiles());
+  // Each receipt template's printer on this device (template id to printer id); a template with no entry is Auto.
+  const [routing, setRouting] = useState(() => loadTemplatePrinters());
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PrinterProfile | null>(null);
   const [name, setName] = useState('');
@@ -121,6 +125,35 @@ export function PrinterSettings(): JSX.Element {
         {connection === 'network' && vendor === 'generic' && <Text testID="printer-vendor-help">
           Receipts go to Epson and Star network printers directly. Other printers print through the print dialog.</Text>}
       </VStack>}
-    <Text>Receipts print on the first Epson or Star network printer in this list. Without one, they print through the print dialog.</Text>
+    <VStack testID="receipt-templates" space="sm">
+      <Label>Receipt templates</Label>
+      <Text>Choose which printer each template prints to.</Text>
+      {RECEIPT_TEMPLATES.map((template) => {
+        const { id } = template;
+        // Auto, each printer the app reaches directly, then the dialog. Standard always prints through the dialog.
+        const items = [{ value: 'auto', label: 'Auto' },
+          ...printers.filter((profile) => networkSinkFor(profile) !== null).map((profile) => ({ value: profile.id, label: profile.name })),
+          { value: SYSTEM_PRINTER_ID, label: 'Print dialog' }];
+        // A choice for a removed printer reads as Auto, as its label does.
+        const selected = items.some((item) => item.value === routing[id]) ? routing[id] : 'auto';
+        return <HStack key={id} testID={`template-row-${id}`} space="sm" className="flex-wrap items-center">
+          <Text testID={`template-row-${id}-title`} className="flex-1">{template.title}</Text>
+          <Text testID={`template-row-${id}-type`}>{template.engine === 'html' ? 'HTML' : template.paper === '58mm' ? 'Thermal 58 mm' : 'Thermal 80 mm'}</Text>
+          <Text testID={`template-row-${id}-printer`}>{templatePrinterLabel(template, printers, routing)}</Text>
+          {template.engine === 'thermal' &&
+            <ToggleGroup testID={`template-printer-${id}`} type="single" accessibilityLabel={`${template.title} printer`} value={selected}
+              onValueChange={(value) => {
+                if (value === '') return;
+                saveTemplatePrinter(id, value === 'auto' ? null : value);
+                setRouting(loadTemplatePrinters());
+              }}>
+              {items.map((item) => <ToggleGroupItem key={item.value} value={item.value}
+                testID={`template-printer-${id}-${item.value}`} accessibilityLabel={item.label}
+                className={selected === item.value ? 'bg-secondary' : undefined}><Text>{item.label}</Text></ToggleGroupItem>)}
+            </ToggleGroup>}
+        </HStack>;
+      })}
+    </VStack>
+    <Text>Receipts print on the printer their template goes to. Without an Epson or Star network printer, they print through the print dialog.</Text>
   </>;
 }

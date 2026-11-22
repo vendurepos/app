@@ -1,7 +1,10 @@
 import { beforeEach, expect, it } from 'vitest';
 import type { PrinterProfile } from '@tallyui/pos';
 import type { KeyValueStore } from './session';
-import { loadPrinterProfiles, PRINTER_PROFILES_KEY, printerPaper, printerSummary, removePrinterProfile, savePrinterProfile } from './printer-profiles';
+import {
+  loadPrinterProfiles, loadTemplatePrinters, PRINTER_PROFILES_KEY, printerPaper, printerSummary, removePrinterProfile,
+  savePrinterProfile, saveTemplatePrinter, TEMPLATE_PRINTERS_KEY,
+} from './printer-profiles';
 
 let store: KeyValueStore;
 const printer: PrinterProfile = { id: 'front', name: 'Front counter', connectionType: 'network', address: '192.168.1.50', port: 9100, columns: 42, vendor: 'epson' };
@@ -89,4 +92,20 @@ it('summarizes a network address with its make, port and paper width', () => {
 
 it('summarizes USB without an address', () => {
   expect(printerSummary({ id: 'usb', name: 'USB printer', connectionType: 'usb', columns: 32 })).toBe('USB · 58 mm');
+});
+
+it("round-trips each template's printer and Auto clears it", () => {
+  saveTemplatePrinter('thermal-80mm', 'front', store);
+  saveTemplatePrinter('thermal-58mm', 'system', store);
+  expect(loadTemplatePrinters(store)).toEqual({ 'thermal-80mm': 'front', 'thermal-58mm': 'system' });
+  saveTemplatePrinter('thermal-80mm', null, store);
+  expect(loadTemplatePrinters(store)).toEqual({ 'thermal-58mm': 'system' });
+  expect(JSON.parse(store.getItem(TEMPLATE_PRINTERS_KEY)!)).toEqual({ 'thermal-58mm': 'system' });
+});
+
+it('loads unreadable template routing as Auto for every template', () => {
+  for (const [saved, routing] of [['not json', {}], ['[]', {}], [JSON.stringify({ a: 1, b: 'p' }), { b: 'p' }]] as const) {
+    store.setItem(TEMPLATE_PRINTERS_KEY, saved);
+    expect(loadTemplatePrinters(store)).toEqual(routing);
+  }
 });

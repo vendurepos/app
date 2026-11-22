@@ -50,6 +50,10 @@ it('takes the Epson network printer, and a default Star printer ahead of it', ()
   expect(directPrinter([epson, defaultStar])).toBe(defaultStar);
 });
 
+it('prints through the dialog when the thermal templates are routed there', () => {
+  expect(directPrinter([epson], { 'thermal-80mm': 'system' })).toBeNull();
+});
+
 it('posts a receipt to the Epson printer over ePOS-Print', async () => {
   expect(await printReceiptTo(epson, receipt)).toBeNull();
   const { url, init } = onlyRequest();
