@@ -17,9 +17,16 @@ export const DEMO_INFO = {
   lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
   receiptEmail: { v: 1 }, // the demo answers the receipt-email route (lib/receipt-email.ts), sending and storing nothing
+  // The channel's Tally POS tender methods (3.2a-2, payment-methods.service.ts): the till's tender tiles.
+  paymentMethods: [
+    { code: 'cash', name: 'Cash', kind: 'cash' }, { code: 'card-terminal', name: 'Card terminal', kind: 'card' },
+    { code: 'voucher', name: 'Gift voucher', kind: 'other' },
+  ],
 };
 // e2e only: the demo's /info without the order.refund contract, as a store on an older plugin answers.
 export const DEMO_INFO_NO_REFUND_KEY = 'vendurepos.demo.info_no_refund';
+// e2e only: the demo's /info without paymentMethods, as a store on a plugin before 3.2a answers.
+export const DEMO_INFO_NO_METHODS_KEY = 'vendurepos.demo.info_no_methods';
 /** The demo's second register (CHECKLIST 6.6), listed by GET /tally/v1/registers so the register picker has another to choose. */
 export const DEMO_FRONT_COUNTER = { id: 'demo-front-counter', name: 'Front counter' } as const;
 // The demo exposes the seed's tax-exclusive EUR shop-floor channel.
@@ -247,9 +254,11 @@ export class DemoStore {
   }
 
   info() {
-    if (this.storage?.getItem(DEMO_INFO_NO_REFUND_KEY) !== '1') return DEMO_INFO;
+    const noRefund = this.storage?.getItem(DEMO_INFO_NO_REFUND_KEY) === '1', noMethods = this.storage?.getItem(DEMO_INFO_NO_METHODS_KEY) === '1';
+    if (!noRefund && !noMethods) return DEMO_INFO;
     const { 'order.refund': _refund, ...contracts } = DEMO_INFO.contracts;
-    return { ...DEMO_INFO, contracts };
+    const { paymentMethods: _methods, ...withoutMethods } = DEMO_INFO;
+    return { ...(noMethods ? withoutMethods : DEMO_INFO), contracts: noRefund ? contracts : DEMO_INFO.contracts };
   }
 
   reset(): void {
@@ -417,6 +426,8 @@ export class DemoStore {
     const payload = this.state.orders[Number(id) - 1];
     if (!payload) return null;
     const summary = this.orderSummaries()[Number(id) - 1];
+    const info = this.info();
+    const listedCodes: string[] = 'paymentMethods' in info ? info.paymentMethods.map(listed => listed.code) : [];
     const surcharges = (payload.fees ?? []).map(fee => {
       const gross = payload.pricesIncludeTax ? fee.amountMinor : fee.amountMinor + fee.taxMinor;
       return { description: fee.name, sku: '', price: gross - fee.taxMinor, priceWithTax: gross };
@@ -473,7 +484,9 @@ export class DemoStore {
       taxSummary: payload.taxByRate?.map(rate => ({ description: rate.code ?? `${rate.ratePpm / PPM_PER_PERCENT}%`,
         taxRate: rate.ratePpm / PPM_PER_PERCENT, taxBase: rate.netMinor, taxTotal: rate.taxMinor }))
         ?? [{ description: 'Tax', taxRate: 0, taxBase: payload.totalMinor - payload.taxMinor, taxTotal: payload.taxMinor }],
-      payments: payload.payments.map((payment, index) => ({ id: `${id}-p${index + 1}`, method: DEMO_PAYMENT_METHOD,
+      // The plugin's R2: a leg's methodId, else its till method when /info lists that code, else tally-pos.
+      payments: payload.payments.map((payment, index) => ({ id: `${id}-p${index + 1}`,
+        method: payment.methodId ?? (listedCodes.includes(payment.method) ? payment.method : DEMO_PAYMENT_METHOD),
         amount: payment.amountMinor, state: 'Settled', transactionId: payment.clientPaymentId, createdAt: payload.createdAt,
         metadata: { tender: payment },
         refunds: this.state.refunds.filter(refund => refund.orderId === id && refund.paymentIndex === index).map(refund => ({

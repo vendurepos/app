@@ -296,7 +296,7 @@ it('reads a seeded order detail through sign-in and the real connector', async (
   expect(order!.lines).toHaveLength(1);
   expect(order!.lines[0]).toMatchObject({ productVariant: { sku: 'TALLY-MUG' }, quantity: 1,
     proratedLinePriceWithTax: 952, taxRate: 19 });
-  expect(order!.payments![0]).toMatchObject({ amount: 952, state: 'Settled', method: 'tally-pos', metadata: { tender: { method: 'cash' } } });
+  expect(order!.payments![0]).toMatchObject({ amount: 952, state: 'Settled', method: 'cash', metadata: { tender: { method: 'cash' } } });
   const view = orderDetailView(order!);
   expect(view.total).toBe('€9.52');
   expect(view.lineItems[0].total).toBe('€9.52');

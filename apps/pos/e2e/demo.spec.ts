@@ -5,7 +5,7 @@ import { DEMO_CAPTURE_URL } from '../lib/demo/analytics';
 import { CATALOGUE } from '../lib/demo/catalogue';
 import { DEMO_FACETS, demoBrand } from '../lib/demo/facets';
 import { DEMO_PUBLIC_NOTE, DEMO_STAFF_NOTE } from '../lib/demo/order-notes';
-import { DEMO_CUSTOMER_NOTE, DEMO_FRONT_COUNTER, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
+import { DEMO_CUSTOMER_NOTE, DEMO_FRONT_COUNTER, DEMO_INFO_NO_METHODS_KEY, DEMO_STORAGE_KEY, DemoStore } from '../lib/demo/store';
 import { lineAction } from './cart-line';
 import { checkout, expectBalanceAsEntry, takePayment, typeAmount } from './checkout';
 import { expectClosureCash, openAllProducts, openRegister } from './register';
@@ -1419,7 +1419,7 @@ test("the order sheet lists the sale's fee and shipping under Items, the fee ins
     await expect(form).toHaveCount(0);
   }
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
@@ -2709,7 +2709,7 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   // One mug by card, €8.00 + 19 % = €9.52.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   await page.getByTestId('new-sale').click();
@@ -3836,7 +3836,7 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(page.getByTestId('tender-complete')).toBeDisabled();
   await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
   await expect(cart.getByTestId('cart-remaining')).toHaveText('€4.52');
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   // The pane pre-types the remaining balance after the cash payment is taken.
   await page.getByTestId('tender-take').click();
   await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"]):not([data-testid$="-time"])')).toHaveCount(2);
@@ -3880,6 +3880,62 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   await expect(tender.getByTestId('tender-plan')).toHaveText('2 of 2');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€4.76');
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
+});
+
+/** The Payment methods the simulated store records on its newest order (lib/demo/store.ts order(), the plugin's R2). */
+async function newestOrderPaymentMethods(page: Page) {
+  const keys = [DEMO_STORAGE_KEY, DEMO_INFO_NO_METHODS_KEY];
+  const values = await page.evaluate((names) => names.map((name) => localStorage.getItem(name)), keys);
+  const store = new DemoStore({ getItem: (key) => values[keys.indexOf(key)] ?? null, setItem: () => {}, removeItem: () => {} });
+  const count = (await demoState(page))?.orders.length ?? 0;
+  return (store.order(String(count))?.payments as { method: string }[] | undefined)?.map((payment) => payment.method);
+}
+
+test("a demo cashier pays with the channel's Gift voucher tender tile, and the store records it under voucher", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  // One tile per Tally POS method the channel lists (DEMO_INFO.paymentMethods), none of the defaults' Card.
+  for (const [id, title] of [['cash', 'Cash'], ['card-terminal', 'Card terminal'], ['voucher', 'Gift voucher']]) {
+    await expect(tender.getByTestId(`tender-method-${id}`)).toHaveText(title);
+  }
+  await expect(tender.getByTestId('tender-method-external')).toHaveCount(0);
+  await tender.getByTestId('tender-method-voucher').click();
+  await typeAmount(page, '5.00');
+  // The store's /info read has completed and stored its list; the typed entry is still there.
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith('vendurepos.tender_methods:')))).toBe(true);
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€5.00');
+  await takePayment(page);
+  await expect(page.getByTestId('cart').getByTestId('cart-remaining')).toHaveText('€4.52');
+  await tender.getByTestId('tender-method-cash').click();
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  // The voucher leg names its method (v10 methodId); the cash leg sends none and lands on the listed `cash`.
+  await expect.poll(() => newestOrderPaymentMethods(page)).toEqual(['voucher', 'cash']);
+});
+
+test('a store that lists no payment methods shows the two default tender tiles, recorded under tally-pos', async ({ page }) => {
+  await page.addInitScript((key) => localStorage.setItem(key, '1'), DEMO_INFO_NO_METHODS_KEY);
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expect(tender.getByTestId('tender-method-cash')).toHaveText('Cash');
+  await expect(tender.getByTestId('tender-method-external')).toHaveText('Card terminal');
+  await expect(tender.getByTestId('tender-methods').getByRole('button')).toHaveCount(2);
+  await tender.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await expect.poll(() => newestOrderPaymentMethods(page)).toEqual(['tally-pos']);
 });
 
 test('a demo cashier pays part of a sale by typing an amount, and the rest is left to pay', async ({ page }) => {
@@ -4078,7 +4134,7 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await expect(cart.getByTestId('cart-tax-Reduced DE 7%')).toHaveText('€0.14');
   await expect(cart.getByTestId('cart-total')).toHaveText('€11.66');
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
@@ -4119,7 +4175,7 @@ test('A demo cashier adds a 10% fee, and a tax-exclusive store offers no Amount 
     await expect(cart.getByTestId(`cart-${id}`)).toHaveText(text);
   }
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
