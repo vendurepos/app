@@ -12,14 +12,20 @@ export function receiptEmailDefault(customer: { email?: string | null; emailAddr
   return address && !isWalkIn(customer) ? address : undefined;
 }
 
-/** The store's order code (the plugin's `serverRefs.displayId`, Vendure's `order.code`) once the till's stored order is applied, else null. Read only. */
+/** The store's order code (the plugin's `serverRefs.displayId`, Vendure's `order.code`) of an applied stored order, else null. */
+export function storedOrderCode(doc: Readonly<Pick<PosOrder, 'syncStatus' | 'serverRefs'>> | null | undefined): string | null {
+  const code = doc?.syncStatus === 'applied' ? doc.serverRefs?.displayId : undefined;
+  return typeof code === 'string' && code !== '' ? code : null;
+}
+
+/** `storedOrderCode` of the till's stored order `orderId`, kept current as the outbox updates it. Read only. */
 export function useStoredOrderCode(orders: RxCollection<PosOrder> | null, orderId: string | null): string | null {
   const [stored, setStored] = useState<{ id: string; code: string } | null>(null);
   useEffect(() => {
     if (orders === null || orderId === null) return;
     const subscription = orders.findOne(orderId).$.subscribe((doc) => {
-      const code = doc?.syncStatus === 'applied' ? doc.serverRefs?.displayId : undefined;
-      setStored(code ? { id: orderId, code } : null);
+      const code = storedOrderCode(doc);
+      setStored(code !== null ? { id: orderId, code } : null);
     });
     return () => subscription.unsubscribe();
   }, [orders, orderId]);
