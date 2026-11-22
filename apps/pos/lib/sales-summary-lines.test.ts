@@ -34,3 +34,8 @@ it('leaves out Payments with no rows, and prints the method for an empty label',
   const lines = salesSummaryLines({ ...figures, payments: { rows: [unlabelled], takenMinor: 952 } }, 'EUR');
   expect(lines.slice(-2)).toEqual(['Payments', 'card €9.52']);
 });
+
+it('marks a till-only summary on the line after the title', () => {
+  const lines = salesSummaryLines(figures, 'EUR', 'This till only, offline');
+  expect(lines.slice(0, 3)).toEqual(['Sales summary', 'This till only, offline', '2026-11-17']);
+});

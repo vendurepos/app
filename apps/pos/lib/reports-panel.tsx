@@ -35,10 +35,10 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
   const exportCsv = () => {
     setExportFailed(false);
     try {
-      const url = URL.createObjectURL(new Blob([salesCsv(view.figures, currency)], { type: 'text/csv;charset=utf-8' }));
+      const url = URL.createObjectURL(new Blob([salesCsv(view.figures, currency, view.tillOnly)], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = salesCsvFileName(view.figures);
+      anchor.download = salesCsvFileName(view.figures, view.tillOnly);
       anchor.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -72,7 +72,7 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
             <View className="flex-row gap-2">
               <Button testID="reports-print-summary" variant="secondary" onPress={() => {
                 setPrintFailed(false);
-                printLines('Sales summary', salesSummaryLines(view.figures, currency)).catch(() => setPrintFailed(true));
+                printLines('Sales summary', salesSummaryLines(view.figures, currency, view.tillOnly)).catch(() => setPrintFailed(true));
               }}><Text>Print summary</Text></Button>
               {Platform.OS === 'web' ? (
                 <Button testID="reports-export-csv" variant="secondary" onPress={exportCsv}><Text>Export CSV</Text></Button>

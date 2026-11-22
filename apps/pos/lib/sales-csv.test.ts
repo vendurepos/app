@@ -43,3 +43,13 @@ it('writes a zero-decimal currency without a fraction', () => {
   const yen = { ...figures, totals: { ...figures.totals, grossMinor: 1200 } };
   expect(salesCsv(yen, 'JPY').split('\r\n')[1]).toBe('"Summary","Total","","1200"');
 });
+
+it('marks a till-only export with a Scope row after the header', () => {
+  const marked = salesCsv(figures, 'EUR', 'This till only').split('\r\n');
+  expect(marked[1]).toBe('"Scope","This till only","",""');
+  expect(marked.filter((_, i) => i !== 1)).toEqual(salesCsv(figures, 'EUR').split('\r\n'));
+});
+
+it('names a till-only file sales-summary-this-till-<from>-<to>.csv', () => {
+  expect(salesCsvFileName(figures, 'This till only')).toBe('sales-summary-this-till-2026-11-18-2026-11-19.csv');
+});
