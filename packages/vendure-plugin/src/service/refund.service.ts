@@ -113,11 +113,9 @@ export class RefundService {
         const refundableShipping = order.shippingWithTax - previous.reduce((sum, refund) => sum + refund.shipping, 0);
         const remainderOf = (payment: Payment) => Math.max(0, payment.amount - payment.refunds
           .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0));
-        // 3.2a: a tender is a Settled payment under any Tally method, read once per refund.
+        // 3.2a: a tender is a Settled payment the Tally handler created (metadata.tender), whatever its method is now.
         const methods = await this.tenderMethods.tallyMethods(tx);
-        const tally = new Set(methods.map(method => method.code));
-        const enabled = new Set(methods.filter(method => method.enabled).map(method => method.code));
-        const tenders = payments.filter(payment => tally.has(payment.method) && payment.state === 'Settled');
+        const tenders = payments.filter(payment => payment.metadata?.tender && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
         const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
@@ -133,12 +131,15 @@ export class RefundService {
         for (const payment of tenders) {
           const share = Math.min(left, remainderOf(payment));
           if (share === 0) continue;
-          // 3.2a-2 review: Vendure finds a method only while it is enabled, and otherwise saves a Pending refund with
-          // no handler call. Refused unstored, so the refunds already made in this loop roll back with it.
-          const disabled = () => new Unstored(refuse(id, 'payment_method_disabled',
-            `Payment method ${payment.method} is disabled; enable it in the store, then refund again`,
-            { paymentId: this.orders.encodeId(payment.id), method: payment.method }));
-          if (!enabled.has(payment.method)) throw disabled();
+          // 3.2a-2 review: Vendure refunds under the one enabled method with that code, picks either of two, and without
+          // one saves a Pending refund with no handler call. Refused unstored, so the refunds already made roll back with it.
+          const refusal = (code: 'payment_method_disabled' | 'payment_method_unavailable', message: string) =>
+            new Unstored(refuse(id, code, message, { paymentId: this.orders.encodeId(payment.id), method: payment.method }));
+          const unusable = this.tenderMethods.unusable(methods, payment.method);
+          if (unusable) throw refusal(unusable === 'disabled' ? 'payment_method_disabled' : 'payment_method_unavailable', `Payment method ${payment.method} ${{
+            disabled: 'is disabled; enable it in the store, then refund again',
+            duplicate_code: 'shares its code with another payment method in this channel; give one a unique code, then refund again',
+            unknown: 'no longer exists in this channel; refund this payment in the Vendure Dashboard' }[unusable]}`);
           withTallyRefund(tx, { ...tallyRefund,
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: String(line.id), quantity: input.quantity })),
           });
@@ -148,7 +149,7 @@ export class RefundService {
             shipping: refunds.length ? 0 : shippingMinor, adjustment: 0,
           }));
           // The Tally handler always settles, so any other state means Vendure never reached it.
-          if (refund.state !== 'Settled') throw disabled();
+          if (refund.state !== 'Settled') throw refusal('payment_method_unavailable', `Vendure did not settle the refund under payment method ${payment.method}; nothing was refunded`);
           refunds.push({ id: this.orders.encodeId(refund.id), paymentId: this.orders.encodeId(payment.id), totalMinor: refund.total, state: refund.state });
           const method = refund.metadata.tallyMethod;
           byMethod[method] = (byMethod[method] ?? 0) + refund.total;

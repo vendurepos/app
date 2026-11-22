@@ -273,14 +273,16 @@ export class OrderCreateService {
           }
           pluginBug(`Order ${orderId} of ${commandId} is missing`);
         }
-        // 3.2a: every Settled payment under a Tally method, not only tally-pos.
-        const tally = new Map((await this.tenderMethods.tallyMethods(txCtx)).map(method => [method.code, method]));
+        // 3.2a: every Settled payment the Tally handler created (it always writes metadata.tender), whatever its method is now.
+        const tally = await this.tenderMethods.tallyMethods(txCtx);
         for (const payment of await this.orders.getOrderPayments(txCtx, orderId)) {
-          if (!tally.has(payment.method) || payment.state !== 'Settled') continue;
-          // 3.2a-2 review: Vendure cancels a Payment only while its method is enabled.
-          if (!tally.get(payment.method)!.enabled) {
-            throw refuse(`payment ${payment.id} cannot be cancelled: its method ${payment.method} is disabled; enable it and reject again`);
-          }
+          if (!payment.metadata?.tender || payment.state !== 'Settled') continue;
+          // 3.2a-2 review: Vendure cancels a Payment only under the one enabled method with its code.
+          const unusable = this.tenderMethods.unusable(tally, payment.method);
+          if (unusable) throw refuse(`payment ${payment.id} cannot be cancelled: its method ${payment.method} ${{
+            disabled: 'is disabled; enable it and reject again',
+            duplicate_code: 'shares its code with another payment method; give one a unique code and reject again',
+            unknown: 'no longer exists in this channel; cancel the payment in the Vendure Dashboard' }[unusable]}`);
           const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
           if (isGraphQlErrorResult(cancelledPayment) || cancelledPayment.state !== 'Cancelled') {
             throw refuse(`payment ${payment.id} cannot be cancelled`);
@@ -406,13 +408,9 @@ export class OrderCreateService {
     const setup = await this.setupState(ctx);
     if (setup === 'repairable') throw new RepairStoreSetup();
     if (setup === 'refuse') throw new SetupRefusal(storeConfiguration(command.id));
-    // 3.2a R1/R6: a methodId naming no Tally method in the channel is unstored, so a resend applies once the method exists.
+    // 3.2a R4: Vendure would pick either of two enabled methods coded tally-pos, as misconfigured as tally-pos disabled.
     const resolved = await this.tenderMethods.resolve(ctx, payments);
-    if ('invalid' in resolved) {
-      const { index, clientPaymentId, methodId } = resolved.invalid;
-      throw new SetupRefusal(refuse(command.id, 'payment_method_invalid',
-        `payments[${index}].methodId names no Tally POS payment method in this channel`, { clientPaymentId, methodId }));
-    }
+    if (resolved.shared.has(TALLY_PAYMENT_METHOD_CODE)) throw new SetupRefusal(storeConfiguration(command.id));
     codes.push(...resolved.codes);
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);

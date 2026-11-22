@@ -1,8 +1,8 @@
 import {
-  Channel, LanguageCode, Order, PaymentMethod, PaymentMethodEligibilityChecker, RequestContextService, TransactionalConnection, dummyPaymentHandler,
+  Channel, LanguageCode, Logger, Order, PaymentMethod, PaymentMethodEligibilityChecker, RequestContextService, TransactionalConnection, dummyPaymentHandler,
 } from '@vendure/core';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, TallyCommand } from '../src';
 import { PluginBugError } from '../src/service/errors';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
@@ -13,12 +13,16 @@ import { orderCommand } from './payloads';
 const neverEligible = new PaymentMethodEligibilityChecker({
   code: 'never-eligible', description: [{ languageCode: LanguageCode.en, value: 'Never eligible' }], args: {}, check: () => false,
 });
+// A checker that throws, for (v): on a non-Tally method it must never run, on a Tally method it is ineligible.
+const throwingChecker = new PaymentMethodEligibilityChecker({
+  code: 'throwing-checker', description: [{ languageCode: LanguageCode.en, value: 'Throws' }], args: {}, check: () => { throw new Error('checker exploded'); },
+});
 type Tender = { clientPaymentId: string; method: 'cash' | 'external'; amountMinor: number; reference?: string; methodId?: string };
 
 // 3.2a-2: /info lists the channel's Tally POS methods, and a v10 methodId chooses the Payment's method (R1–R6).
 describe('tender methods', () => {
   const environment = createPluginTestEnvironment({
-    paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler], paymentMethodEligibilityCheckers: [neverEligible] },
+    paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler], paymentMethodEligibilityCheckers: [neverEligible, throwingChecker] },
   });
   const { server, adminClient, variantIds, decode, run } = environment;
   let connection: TransactionalConnection;
@@ -87,13 +91,16 @@ describe('tender methods', () => {
     return { order, payments: order.payments.sort((a, b) => Number(a.id) - Number(b.id)) };
   }
   const methodsOf = async (orderId: string) => (await orderOf(orderId)).payments.map(payment => payment.method);
-  async function expectInvalid(command: ReturnType<typeof sale>, index: number) {
+  const remove = (code: string) => adminClient.query(parse('mutation Delete($id: ID!) { deletePaymentMethod(id: $id, force: true) { result } }'), { id: ids[code] });
+  // 3.2a-2 fix 2: a methodId naming no Tally method in the channel is applied under tally-pos, code kept, reason unknown.
+  async function expectUnknown(command: ReturnType<typeof sale>, index: number) {
     const { clientPaymentId, methodId } = (command.payload.payments as Tender[])[index];
-    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: { code: 'payment_method_invalid',
-      message: `payments[${index}].methodId names no Tally POS payment method in this channel`, data: { clientPaymentId, methodId } } });
-    expect(await connection.rawConnection.getRepository(TallyCommand).countBy({ id: command.id })).toBe(0);
-    expect(await connection.rawConnection.getRepository(Order)
-      .countBy({ customFields: { tallyClientOrderId: command.payload.clientOrderId } })).toBe(0);
+    const result = await send(command);
+    expect(result).toMatchObject({ id: command.id, status: 'applied' });
+    expect(result.warnings).toEqual([{ code: 'payment_method_fallback', clientPaymentId, methodId, reason: 'unknown' }]);
+    const { payments } = await orderOf(result.serverRefs!.orderId);
+    expect(payments[index]).toMatchObject({ method: 'tally-pos', metadata: { tender: { methodId } } });
+    return payments.map(payment => payment.method);
   }
   const fallback = (command: ReturnType<typeof sale>, methodId: string, reason: string) =>
     ({ code: 'payment_method_fallback', clientPaymentId: command.payload.payments[0].clientPaymentId, methodId, reason });
@@ -120,18 +127,15 @@ describe('tender methods', () => {
     expect(command.payload.payments[0]).toMatchObject({ methodId: 'card-terminal' });
   });
 
-  it('(h) a methodId on a non-Tally handler is payment_method_invalid, unstored; a new id applies once it is a Tally method', async () => {
-    const command = sale(10, [{ method: 'external', methodId: 'stripe-like' }]);
-    await expectInvalid(command, 0);
-    await update('stripe-like', { handler: { code: 'tally-pos', arguments: [] } });
-    const retry = { ...command, id: orderCommand([]).id };
-    const result = await send(retry);
-    expect(result.status).toBe('applied');
-    expect(await methodsOf(result.serverRefs!.orderId)).toEqual(['stripe-like']);
+  // The old resend after switching stripe-like to the Tally handler is dropped: the first send now applies, so there is
+  // nothing left to resend, and stripe-like stays a non-Tally method for the cases below.
+  it('(h) a methodId on a non-Tally handler is applied under tally-pos with the code kept, reason unknown', async () => {
+    expect(await expectUnknown(sale(10, [{ method: 'external', methodId: 'stripe-like' }]), 0)).toEqual(['tally-pos']);
   });
 
-  it('(i) a methodId of another channel\'s Tally method is payment_method_invalid', async () => {
-    await expectInvalid(sale(10, [{ method: 'cash', amountMinor: 300, methodId: 'cash' }, { method: 'external', methodId: 'other-channel' }]), 1);
+  it('(i) a methodId of another channel\'s Tally method is applied under tally-pos with the code kept, reason unknown', async () => {
+    expect(await expectUnknown(sale(10, [{ method: 'cash', amountMinor: 300, methodId: 'cash' }, { method: 'external', methodId: 'other-channel' }]), 1))
+      .toEqual(['cash', 'tally-pos']);
   });
 
   it('(j) a disabled method falls back to tally-pos with the code kept and a disabled warning', async () => {
@@ -237,6 +241,62 @@ describe('tender methods', () => {
     const command = sale(10, [{ method: 'external', methodId: 5 as unknown as string }]);
     expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: { code: 'invalid_payload',
       message: 'payments[0].methodId: expected 1 to 64 characters' } });
+  });
+
+  // 3.2a-2 fix 2: Vendure's getEligiblePaymentMethods runs every enabled method's checker in the channel, and one that
+  // throws throws out of it; the plugin runs only the checker of a method a payment resolved to.
+  describe('a checker that throws', () => {
+    beforeAll(async () => {
+      await createMethod('boom', 'Boom', { handler: { code: 'dummy-payment-handler', arguments: [{ name: 'automaticSettle', value: 'true' }] } });
+      await createMethod('fragile', 'Fragile', { tender: 'card' });
+      for (const code of ['boom', 'fragile']) await update(code, { checker: { code: 'throwing-checker', arguments: [] } });
+    });
+    afterAll(async () => {
+      for (const code of ['boom', 'fragile']) await remove(code);
+    });
+
+    it('(v) a non-Tally method whose checker throws changes nothing for a card-terminal or a v7 cash sale', async () => {
+      for (const [command, method] of [[sale(10, [{ method: 'external', methodId: 'card-terminal' }]), 'card-terminal'], [sale(7, [{ method: 'cash' }]), 'cash']] as const) {
+        const result = await send(command);
+        expect(result).toEqual({ id: command.id, status: 'applied', serverRefs: expect.any(Object) });
+        expect(await methodsOf(result.serverRefs!.orderId)).toEqual([method]);
+      }
+    });
+
+    it('(v2) a Tally method whose checker throws falls back to tally-pos, ineligible, logged once by code and message', async () => {
+      const warn = vi.spyOn(Logger, 'warn');
+      try {
+        const command = sale(10, [{ method: 'external', methodId: 'fragile' }]);
+        const result = await send(command);
+        expect(result).toMatchObject({ status: 'applied', warnings: [fallback(command, 'fragile', 'ineligible')] });
+        expect(await methodsOf(result.serverRefs!.orderId)).toEqual(['tally-pos']);
+        expect(warn.mock.calls.filter(([message]) => String(message).includes('fragile')).map(([message]) => message))
+          .toEqual(['Payment method fragile: its eligibility checker threw (checker exploded)']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
+  it('(x2) an admin\'s rejection is refused once the payment\'s Tally method is deleted, and the payment stays Settled', async () => {
+    await createMethod('held-gone', 'Held gone', { tender: 'card', checker: true });
+    const recipe = server.app.get(OrderCreateService);
+    const command = sale(10, [{ method: 'external', methodId: 'held-gone' }]);
+    recipe.testObserver = async (stage, _ctx, order) => {
+      if (stage === 'payments' && order.customFields.tallyClientOrderId === command.payload.clientOrderId) throw new PluginBugError('after payments');
+    };
+    try {
+      await expect(send(command)).rejects.toMatchObject({ kind: 'needs_admin' });
+    } finally {
+      recipe.testObserver = undefined;
+    }
+    await remove('held-gone');
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    await expect(recipe.resolveNeedsAdmin(ctx, command.id, 'rejected', 'card sale discarded')).rejects.toThrow('its method held-gone no longer exists in this channel');
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneByOrFail({ id: command.id })).toMatchObject({ status: 'needs_admin' });
+    const [order] = await connection.rawConnection.getRepository(Order).find({
+      where: { customFields: { tallyClientOrderId: command.payload.clientOrderId } }, relations: ['payments'] });
+    expect(order.payments.map(payment => [payment.method, payment.state])).toEqual([['held-gone', 'Settled']]);
   });
 
   describe('older tills with no cash method on the channel', () => {

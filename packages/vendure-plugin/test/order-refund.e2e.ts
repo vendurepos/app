@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Order, PaymentService, Refund, TransactionalConnection } from '@vendure/core';
+import { Order, Payment, PaymentService, Refund, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
 import { parse } from 'graphql';
 import { In } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -19,7 +19,8 @@ type ReadOrder = {
 type RefundCommand = Omit<OrderRefundEnvelope, 'version'> & { version: number };
 
 describe('order.refund v1', () => {
-  const environment = createPluginTestEnvironment();
+  // A non-Tally handler beside the plugin's, for (w)'s method that shares a Tally method's code.
+  const environment = createPluginTestEnvironment({ paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler] } });
   const { server, adminClient, variantIds } = environment;
   let connection: TransactionalConnection;
   let base: string;
@@ -548,5 +549,61 @@ describe('order.refund v1', () => {
         { id: expect.any(String), paymentId: payments[1].id, totalMinor: retry.payload.totalMinor - 500, state: 'Settled' },
       ],
     } });
+  });
+
+  // 3.2a-2 fix 2: Vendure resolves a code to an arbitrary one of two enabled methods, and a deleted method leaves no row.
+  const createMethod = async (code: string, handler: string) => (await adminClient.query<{ createPaymentMethod: { id: string } }>(parse(`
+    mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: { code, enabled: true,
+    handler: handler === 'tally-pos' ? { code: handler, arguments: [{ name: 'tender', value: 'card' }] } : { code: handler, arguments: [{ name: 'automaticSettle', value: 'true' }] },
+    ...(handler === 'tally-pos' ? { checker: { code: 'tally-pos', arguments: [] } } : {}), translations: [{ languageCode: 'en', name: code, description: '' }] } })).createPaymentMethod.id;
+  const removeMethod = (id: string) => adminClient.query(parse('mutation Delete($id: ID!) { deletePaymentMethod(id: $id, force: true) { result } }'), { id });
+  async function sellUnder(methodId: string) {
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 10 };
+    const tender = { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', methodId, amountMinor: command.payload.totalMinor };
+    (command.payload as { payments: unknown[] }).payments = [tender];
+    const result = await post(command);
+    expect(result).toMatchObject({ status: 'applied' });
+    const order = await readOrder(result.serverRefs!.orderId);
+    const payment = await connection.rawConnection.getRepository(Payment).findOneByOrFail({ id: environment.decode(order.payments[0].id) });
+    return { result, order, payment, fallback: (reason: string) => ({ code: 'payment_method_fallback', clientPaymentId: tender.clientPaymentId, methodId, reason }) };
+  }
+  const refundRows = (order: ReadOrder) => connection.rawConnection.getRepository(Refund)
+    .countBy({ paymentId: In(order.payments.map(({ id }) => environment.decode(id))) });
+
+  it('(w) a code a Tally and a non-Tally method share is never listed or charged, and its earlier sale\'s refund is refused', async () => {
+    const tally = await createMethod('dup', 'tally-pos');
+    const session = await openSession();
+    const first = await sellUnder('dup');
+    expect(first.payment.method).toBe('dup');
+    const other = await createMethod('dup', 'dummy-payment-handler');
+    try {
+      const info = await (await fetch(`${base}/tally/v1/info`, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } })).json();
+      expect(info.paymentMethods.map((method: { code: string }) => method.code)).toEqual(['card-terminal', 'cash', 'voucher-card']);
+      const second = await sellUnder('dup');
+      expect(second.result.warnings).toEqual([second.fallback('duplicate_code')]);
+      // The dummy handler always sets a transactionId; the Tally handler never does.
+      expect([second.payment.method, second.payment.transactionId, second.payment.metadata.tender.methodId]).toEqual(['tally-pos', null, 'dup']);
+      await refused(refundFor(first.order, session), first.order.id, 'payment_method_unavailable',
+        'Payment method dup shares its code with another payment method in this channel; give one a unique code, then refund again',
+        { paymentId: first.order.payments[0].id, method: 'dup' });
+      expect(await refundRows(first.order)).toBe(0);
+    } finally {
+      await removeMethod(other);
+      await removeMethod(tally);
+    }
+  });
+
+  it('(x) once its Tally method is deleted, a sale naming it falls back unknown and an earlier sale\'s refund is refused by name', async () => {
+    const gone = await createMethod('gone', 'tally-pos');
+    const session = await openSession();
+    const sold = await sellUnder('gone');
+    expect(sold.payment.method).toBe('gone');
+    await removeMethod(gone);
+    const later = await sellUnder('gone');
+    expect(later.result.warnings).toEqual([later.fallback('unknown')]);
+    expect([later.payment.method, later.payment.metadata.tender.methodId]).toEqual(['tally-pos', 'gone']);
+    await refused(refundFor(sold.order, session), sold.order.id, 'payment_method_unavailable',
+      'Payment method gone no longer exists in this channel; refund this payment in the Vendure Dashboard', { paymentId: sold.order.payments[0].id, method: 'gone' });
+    expect(await refundRows(sold.order)).toBe(0);
   });
 });
