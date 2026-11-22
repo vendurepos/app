@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform, ScrollView, View } from 'react-native';
 import { Button, SalesCardPanel, SalesCards, SalesFiltersBar, Tabs, TabsList, TabsTrigger, Text, VStack, type SalesPanelId } from '@tallyui/components';
 import type { PosOrder, PosRefundCollection } from '@tallyui/pos';
@@ -34,6 +34,7 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
     hourly: tillHourly({ orders: orderList, filters, timezone }),
     spread: tillOrderSpread({ orders: orderList, filters, timezone }),
   }), REPORT_STATUS_OPTIONS), [store, orderList, refundList, filters, timezone]);
+  useEffect(() => { if (openCard && view.hide.includes(openCard)) setOpenCard(null); }, [openCard, view.hide]);
   // The web downloads the period's figures as the closures sheet does: a Blob URL on an <a download>.
   const downloadCsv = (csv: string, filename: string) => {
     try {
@@ -94,7 +95,7 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
           }} />
         </View>
       </ScrollView>
-      {/* v2's card panels; a card the view hides closes its panel, so the store's figures never show under a till-only one. */}
+      {/* v2's card panels; a card the view hides closes its panel, and it stays closed, so the store's figures never show under a till-only one. */}
       <SalesCardPanel card={openCard !== null && !view.hide.includes(openCard) ? openCard : null}
         figures={view.figures} currency={currency} scope={panelScope(view.figures, view.tillOnly)}
         onClose={() => setOpenCard(null)}

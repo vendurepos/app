@@ -1915,11 +1915,23 @@ test("Reports shows the store's figures online, and this till's only when offlin
   await page.getByTestId('sales-filter-status').click();
   await expect(page.getByTestId('sales-filter-status-option-applied')).toBeVisible();
   await page.getByTestId('sales-filter-status-option-all').click();
+  // A till-only Categories panel, open when the store's figures come back (8.1p fix 1).
+  await page.getByTestId('card-categories-open').click();
+  await expect(page.getByTestId('detail-panel')).toContainText('Sales by category');
 
   // Back online: the store's figures again.
   await page.context().setOffline(false);
   await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
+  // The view hides Categories, so its panel closes.
+  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('detail-panel')).toHaveCount(0);
+
+  // Offline again: Categories is shown again, and its panel stays closed.
+  await page.context().setOffline(true);
+  await expect(page.getByTestId('reports-till-only')).toHaveText('This till only, offline');
+  await expect(page.getByTestId('card-categories')).toBeVisible();
+  await expect(page.getByTestId('detail-panel')).toHaveCount(0);
 });
 
 test("Reports shows this till's figures only when the store refuses the report", async ({ page }) => {
