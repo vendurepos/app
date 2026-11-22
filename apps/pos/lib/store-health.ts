@@ -85,11 +85,16 @@ export const canSendAgain = (order: PosOrder): boolean => order.syncStatus === '
 
 const FIELD_PATH = /^[A-Za-z_]\w*(\[\d+\])?(\.[A-Za-z_]\w*(\[\d+\])?)*$/;
 
-/** An `invalid_payload` refusal's field paths (its message is `; `-joined `<path>: <reason>` items), deduped, at most 3.
+const refusedHead = (part: string): string | undefined => part.includes(': ') ? part.slice(0, part.indexOf(': '))
+  : part.includes(' must ') ? part.slice(0, part.indexOf(' must ')) : undefined;
+
+/** An `invalid_payload` refusal's field paths, deduped, at most 3. Its message is `; `-joined items, each
+ * `<path>: <reason>` or `<path> must …` (the clock refusals); nulPath's dotted indexes (`lines.0`) read as `lines[0]`.
  * Only the path is ever returned: the reason after it is the server's text. */
 export function refusedFields(error: { code?: string; message?: string } | undefined): string[] {
   if (error?.code !== 'invalid_payload' || !error.message) return [];
-  const paths = error.message.split('; ').filter(part => part.includes(': ')).map(part => part.slice(0, part.indexOf(': ')));
+  const paths = error.message.split('; ').map(refusedHead).filter((head): head is string => head !== undefined)
+    .map(head => head.replace(/\.(\d+)(?=\.|$)/g, '[$1]'));
   return [...new Set(paths.filter(path => FIELD_PATH.test(path)))].slice(0, 3);
 }
 

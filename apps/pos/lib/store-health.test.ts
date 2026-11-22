@@ -146,6 +146,9 @@ describe('attentionRows', () => {
   });
 });
 
+// The plugin's clock refusal (command-ledger.ts clientTimeErrors), exactly as it sends it.
+const CLOCK = 'createdAt must be an RFC 3339 time with Z or an offset; payload.createdAt must be a time from 2020-01-01T00:00:00Z to 2026-11-23T10:00:00Z';
+
 describe('attentionReason and canSendAgain', () => {
   const sale = { id: 'sale', saleId: 'sale', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-sale' } as PosOrder;
   it.each([
@@ -159,6 +162,7 @@ describe('attentionReason and canSendAgain', () => {
 
   it.each([
     [{ code: 'invalid_payload', message: 'payments[0].methodId: must be a string' }, 'Refused by the store — invalid_payload: payments[0].methodId'],
+    [{ code: 'invalid_payload', message: CLOCK }, 'Refused by the store — invalid_payload: createdAt, payload.createdAt'],
     [{ code: 'insufficient_stock', message: 'lines[0].quantity: short' }, 'Refused by the store — insufficient_stock'],
     [undefined, 'Refused by the store'],
   ])('names a refused sale %o by its code and refused fields', (error, reason) => {
@@ -173,6 +177,14 @@ describe('refusedFields', () => {
     expect(fields).toEqual(['payments[0].methodId', 'taxAddress']);
     expect(fields.join(' ')).not.toMatch(/must|supported|:/);
     expect(refused('customer.billing: x; coupons[0].lines: y')).toEqual(['customer.billing', 'coupons[0].lines']);
+  });
+  it.each([
+    [CLOCK, ['createdAt', 'payload.createdAt']],
+    ['payload.lines.0.custom.name: must not contain U+0000', ['payload.lines[0].custom.name']],
+    ['payload.note: must not contain U+0000', ['payload.note']],
+    ['Invalid id; Invalid version', []],
+  ])('names the clock and NUL refusal shapes too: %s', (message, fields) => {
+    expect(refused(message)).toEqual(fields);
   });
   it('is empty for another code, no message or nothing that is a path', () => {
     expect(refused('taxAddress: not supported', 'insufficient_stock')).toEqual([]);
