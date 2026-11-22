@@ -1419,7 +1419,7 @@ test("the order sheet lists the sale's fee and shipping under Items, the fee ins
     await expect(form).toHaveCount(0);
   }
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
@@ -2709,7 +2709,7 @@ test("the register panel is v2's side sheet: store and session age, the drawer h
   // One mug by card, €8.00 + 19 % = €9.52.
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   await page.getByTestId('new-sale').click();
@@ -3836,7 +3836,7 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(page.getByTestId('tender-complete')).toBeDisabled();
   await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
   await expect(cart.getByTestId('cart-remaining')).toHaveText('€4.52');
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   // The pane pre-types the remaining balance after the cash payment is taken.
   await page.getByTestId('tender-take').click();
   await expect(page.locator('[data-testid^="tender-leg-"]:not([data-testid$="-status"]):not([data-testid$="-void"]):not([data-testid$="-time"])')).toHaveCount(2);
@@ -4134,7 +4134,7 @@ test('a demo cashier adds a fee, removes one and sells with a Reduced-class fee'
   await expect(cart.getByTestId('cart-tax-Reduced DE 7%')).toHaveText('€0.14');
   await expect(cart.getByTestId('cart-total')).toHaveText('€11.66');
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
@@ -4175,7 +4175,7 @@ test('A demo cashier adds a 10% fee, and a tax-exclusive store offers no Amount 
     await expect(cart.getByTestId(`cart-${id}`)).toHaveText(text);
   }
   await checkout(page);
-  await page.getByTestId('tender-method-external').click();
+  await page.getByTestId('tender-method-card-terminal').click();
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
