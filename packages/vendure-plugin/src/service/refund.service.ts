@@ -114,7 +114,9 @@ export class RefundService {
         const remainderOf = (payment: Payment) => Math.max(0, payment.amount - payment.refunds
           .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0));
         // 3.2a: a tender is a Settled payment under any Tally method, read once per refund.
-        const tally = new Set((await this.tenderMethods.tallyMethods(tx)).map(method => method.code));
+        const methods = await this.tenderMethods.tallyMethods(tx);
+        const tally = new Set(methods.map(method => method.code));
+        const enabled = new Set(methods.filter(method => method.enabled).map(method => method.code));
         const tenders = payments.filter(payment => tally.has(payment.method) && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
         const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
@@ -131,6 +133,12 @@ export class RefundService {
         for (const payment of tenders) {
           const share = Math.min(left, remainderOf(payment));
           if (share === 0) continue;
+          // 3.2a-2 review: Vendure finds a method only while it is enabled, and otherwise saves a Pending refund with
+          // no handler call. Refused unstored, so the refunds already made in this loop roll back with it.
+          const disabled = () => new Unstored(refuse(id, 'payment_method_disabled',
+            `Payment method ${payment.method} is disabled; enable it in the store, then refund again`,
+            { paymentId: this.orders.encodeId(payment.id), method: payment.method }));
+          if (!enabled.has(payment.method)) throw disabled();
           withTallyRefund(tx, { ...tallyRefund,
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: String(line.id), quantity: input.quantity })),
           });
@@ -139,6 +147,8 @@ export class RefundService {
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: line.id, quantity: input.quantity })),
             shipping: refunds.length ? 0 : shippingMinor, adjustment: 0,
           }));
+          // The Tally handler always settles, so any other state means Vendure never reached it.
+          if (refund.state !== 'Settled') throw disabled();
           refunds.push({ id: this.orders.encodeId(refund.id), paymentId: this.orders.encodeId(payment.id), totalMinor: refund.total, state: refund.state });
           const method = refund.metadata.tallyMethod;
           byMethod[method] = (byMethod[method] ?? 0) + refund.total;

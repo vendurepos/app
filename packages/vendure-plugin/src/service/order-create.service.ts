@@ -274,9 +274,13 @@ export class OrderCreateService {
           pluginBug(`Order ${orderId} of ${commandId} is missing`);
         }
         // 3.2a: every Settled payment under a Tally method, not only tally-pos.
-        const tally = new Set((await this.tenderMethods.tallyMethods(txCtx)).map(method => method.code));
+        const tally = new Map((await this.tenderMethods.tallyMethods(txCtx)).map(method => [method.code, method]));
         for (const payment of await this.orders.getOrderPayments(txCtx, orderId)) {
           if (!tally.has(payment.method) || payment.state !== 'Settled') continue;
+          // 3.2a-2 review: Vendure cancels a Payment only while its method is enabled.
+          if (!tally.get(payment.method)!.enabled) {
+            throw refuse(`payment ${payment.id} cannot be cancelled: its method ${payment.method} is disabled; enable it and reject again`);
+          }
           const cancelledPayment = await this.payments.cancelPayment(txCtx, payment.id);
           if (isGraphQlErrorResult(cancelledPayment) || cancelledPayment.state !== 'Cancelled') {
             throw refuse(`payment ${payment.id} cannot be cancelled`);

@@ -207,6 +207,38 @@ describe('tender methods', () => {
     expect(order.payments.map(payment => [payment.method, payment.state])).toEqual([['card-terminal', 'Cancelled']]);
   });
 
+  // 3.2a-2 review: Vendure cancels a Payment only while its method is enabled.
+  it('(t) an admin\'s rejection is refused while the payment\'s method is disabled, and cancels it once enabled again', async () => {
+    const recipe = server.app.get(OrderCreateService);
+    const command = sale(10, [{ method: 'external', methodId: 'card-terminal' }]);
+    recipe.testObserver = async (stage, _ctx, order) => {
+      if (stage === 'payments' && order.customFields.tallyClientOrderId === command.payload.clientOrderId) throw new PluginBugError('after payments');
+    };
+    try {
+      await expect(send(command)).rejects.toMatchObject({ kind: 'needs_admin' });
+    } finally {
+      recipe.testObserver = undefined;
+    }
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    await update('card-terminal', { enabled: false });
+    try {
+      await expect(recipe.resolveNeedsAdmin(ctx, command.id, 'rejected', 'card sale discarded')).rejects.toThrow('its method card-terminal is disabled');
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneByOrFail({ id: command.id })).toMatchObject({ status: 'needs_admin' });
+    } finally {
+      await update('card-terminal', { enabled: true });
+    }
+    await recipe.resolveNeedsAdmin(ctx, command.id, 'rejected', 'card sale discarded');
+    const [order] = await connection.rawConnection.getRepository(Order).find({
+      where: { customFields: { tallyRejectedClientOrderId: command.payload.clientOrderId } }, relations: ['payments'] });
+    expect(order.payments.map(payment => [payment.method, payment.state])).toEqual([['card-terminal', 'Cancelled']]);
+  });
+
+  it('(u) a v10 methodId that is not a string is invalid_payload, before any method is looked up', async () => {
+    const command = sale(10, [{ method: 'external', methodId: 5 as unknown as string }]);
+    expect(await send(command)).toEqual({ id: command.id, status: 'rejected', error: { code: 'invalid_payload',
+      message: 'payments[0].methodId: expected 1 to 64 characters' } });
+  });
+
   describe('older tills with no cash method on the channel', () => {
     beforeAll(async () => {
       await adminClient.query(parse('mutation Delete($id: ID!) { deletePaymentMethod(id: $id, force: true) { result } }'), { id: ids.cash });

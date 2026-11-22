@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { Order, Refund, TransactionalConnection } from '@vendure/core';
+import { Order, PaymentService, Refund, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { In } from 'typeorm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TallyCommand } from '../src';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -504,5 +505,48 @@ describe('order.refund v1', () => {
     const after = await readOrder(order.id);
     expect(payments.map(({ id }) => after.payments.find(payment => payment.id === id)!.refunds.map(item => item.metadata.tallyMethod)))
       .toEqual([['external'], ['cash']]);
+  });
+
+  // 3.2a-2 review (s): Vendure refunds only under an enabled method, so a disabled one is refused before any refund.
+  it('(s) a refund reaching a disabled Tally method is payment_method_disabled with nothing written, and applies once enabled', async () => {
+    const { createPaymentMethod } = await adminClient.query<{ createPaymentMethod: { id: string } }>(parse(`
+      mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: {
+      code: 'voucher-card', enabled: true, handler: { code: 'tally-pos', arguments: [{ name: 'tender', value: 'card' }] },
+      checker: { code: 'tally-pos', arguments: [] }, translations: [{ languageCode: 'en', name: 'Voucher card', description: '' }] } });
+    const enable = (enabled: boolean) => adminClient.query(parse(`mutation Update($input: UpdatePaymentMethodInput!) {
+      updatePaymentMethod(input: $input) { id } }`), { input: { id: createPaymentMethod.id, enabled } });
+    const session = await openSession();
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 }]), version: 10 };
+    // Tenders are refunded in payment id order, so voucher-card's comes second and cash's refund must roll back with it.
+    (command.payload as { payments: unknown[] }).payments = [
+      { clientPaymentId: randomUUID(), method: 'cash', amountMinor: 500 },
+      { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', methodId: 'voucher-card', amountMinor: command.payload.totalMinor - 500 },
+    ];
+    const sold = await post(command);
+    expect(sold).toMatchObject({ status: 'applied' });
+    const order = await readOrder(sold.serverRefs!.orderId);
+    const payments = [...order.payments].sort((a, b) => Number(environment.decode(a.id)) - Number(environment.decode(b.id)));
+    expect(payments.map(payment => payment.method)).toEqual(['cash', 'voucher-card']);
+    await enable(false);
+    const createRefund = vi.spyOn(server.app.get(PaymentService), 'createRefund');
+    try {
+      const refund = refundFor(order, session);
+      await refused(refund, order.id, 'payment_method_disabled',
+        'Payment method voucher-card is disabled; enable it in the store, then refund again', { paymentId: payments[1].id, method: 'voucher-card' });
+      expect(await connection.rawConnection.getRepository(Refund).countBy({ paymentId: In(payments.map(({ id }) => environment.decode(id))) })).toBe(0);
+      // Refused before Vendure is asked: it would save a Pending refund under the disabled method.
+      expect(createRefund.mock.calls.map(call => String(call[3].id))).toEqual([environment.decode(payments[0].id)]);
+    } finally {
+      createRefund.mockRestore();
+      await enable(true);
+    }
+    const retry = refundFor(order, session);
+    expect(await post(retry)).toEqual({ id: retry.id, status: 'applied', refund: {
+      totalMinor: retry.payload.totalMinor, byMethod: { cash: 500, external: retry.payload.totalMinor - 500 },
+      refunds: [
+        { id: expect.any(String), paymentId: payments[0].id, totalMinor: 500, state: 'Settled' },
+        { id: expect.any(String), paymentId: payments[1].id, totalMinor: retry.payload.totalMinor - 500, state: 'Settled' },
+      ],
+    } });
   });
 });
