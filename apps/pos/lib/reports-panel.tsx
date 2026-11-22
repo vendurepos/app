@@ -23,7 +23,7 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
   const [printFailed, setPrintFailed] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A sale or refund reaching the store changes the key, so the store's figures are fetched again.
-  const refreshKey = `${orderList.filter((order) => order.syncStatus === 'applied').length}:${refundList.length}`;
+  const refreshKey = `${orderList.filter((order) => order.syncStatus === 'applied').length}:${refundList.filter((refund) => refund.status === 'applied').length}`;
   const store = useStoreSales({ session, filters, timezone, refreshKey });
   // The store's figures when they came (8.1f), else this till's own: never a mix of the two.
   const view = useMemo(() => reportsView(store, () => ({
@@ -61,7 +61,12 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
           {drawer}
           <SalesFiltersBar filters={view.storeWide ? { ...filters, status: 'all' } : filters} onFiltersChange={setFilters} timezone={timezone}
             statusOptions={view.statusOptions} {...reportOptions(orderList)} />
-          {view.tillOnly ? <Text testID="reports-till-only" className="text-sm text-muted-foreground">{view.tillOnly}</Text> : null}
+          {/* data-status tells loading from a refusal, which read the same line; TallyUI's Text takes no dataSet. */}
+          {view.tillOnly ? (
+            <View testID="reports-till-only" dataSet={{ status: store.status }}>
+              <Text className="text-sm text-muted-foreground">{view.tillOnly}</Text>
+            </View>
+          ) : null}
           <TillSalesHero figures={view.figures} filters={filters} onFiltersChange={setFilters} currency={currency} hourly={view.hourly} spread={view.spread} />
           <View dataSet={{ print: 'hide' }} className="gap-1">
             <View className="flex-row gap-2">

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SalesFilters } from '@tallyui/components';
 import { comparisonRange, orderFiltersQuery, type DayRange } from '@tallyui/pos';
-import { fetchSalesReportV2, type SalesReportOutcome } from './sales-report';
+import { fetchSalesReportV2 } from './sales-report';
 import type { Session } from './session';
-import { storeHourly, storeSalesFigures, whileFetching, type StoreSales } from './store-sales';
+import { shownStore, storeAnswer, type StoreSales } from './store-sales';
 import { isOneDay } from './till-reports';
 
 // The browser's online signal, as app/index.tsx reads it; a platform without navigator counts as online.
@@ -18,7 +18,9 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
   session: Session | null; filters: SalesFilters; timezone: string; refreshKey: string;
 }): StoreSales {
   const [online, setOnline] = useState(isOnline);
-  const [store, setStore] = useState<StoreSales>({ status: 'loading' });
+  // The state with the query (null unless ok) and the session it answered, so a stale answer is never shown.
+  const [store, setStore] = useState<{ value: StoreSales; key: string | null; session: Session | null }>(
+    () => ({ value: { status: 'loading' }, key: null, session }));
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
     const update = () => setOnline(isOnline());
@@ -26,18 +28,17 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
     window.addEventListener('offline', update);
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
   }, []);
-  // The query the shown `ok` figures answered (null when none is shown), and the session they were fetched under.
-  const okKey = useRef<string | null>(null);
-  const lastSession = useRef(session);
   const { range, preset, compare: mode, registerId, cashierId } = filters;
+  const key = JSON.stringify([range.from, range.to, preset, mode, registerId, cashierId, timezone]);
+  // The stored answer's query, unless it came under another session: then it answered nothing asked now.
+  const okKeyNow = (current: typeof store) => (current.session === session ? current.key : null);
   useEffect(() => {
-    if (lastSession.current !== session) { lastSession.current = session; okKey.current = null; }
-    const key = JSON.stringify([range.from, range.to, preset, mode, registerId, cashierId, timezone]);
-    const settle = (next: StoreSales) => { okKey.current = next.status === 'ok' ? key : null; setStore(next); };
+    const settle = (value: StoreSales) => setStore({ value, key: value.status === 'ok' ? key : null, session });
     if (!online) { settle({ status: 'offline' }); return; }
     if (!session) { settle({ status: 'unsupported' }); return; }
     // A refresh of the same query (only refreshKey moved) keeps the store's figures until the new ones come.
-    setStore((current) => whileFetching(current, okKey.current, key));
+    setStore((current) => (shownStore(current.value, okKeyNow(current), key).status === 'ok'
+      ? current : { value: { status: 'loading' }, key: null, session }));
     const day: DayRange = { from: range.from, to: range.to };
     const compare = comparisonRange(day, mode, preset === 'custom' ? undefined : preset);
     const controller = new AbortController();
@@ -48,13 +49,7 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
     };
     Promise.all([fetchRange(day), fetchRange(compare)]).then(([a, b]) => {
       if (controller.signal.aborted) return; // answered after the filters moved on
-      if (a.status === 'ok' && b.status === 'ok') {
-        settle({ status: 'ok', figures: storeSalesFigures(a.report, b.report, day, compare),
-          hourly: storeHourly(a.report, b.report, day, compare, isOneDay(filters)) });
-        return;
-      }
-      const failed = (status: SalesReportOutcome['status']) => a.status === status || b.status === status;
-      settle({ status: failed('forbidden') ? 'forbidden' : failed('unsupported') ? 'unsupported' : 'error' });
+      settle(storeAnswer(a, b, day, compare, isOneDay(filters)));
     }, (error: unknown) => {
       if ((error as { name?: unknown })?.name !== 'AbortError') settle({ status: 'error' });
     });
@@ -62,5 +57,6 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
     // filters is read only through the fields listed, so a new object with the same fields does not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, online, range.from, range.to, preset, mode, registerId, cashierId, timezone, refreshKey]);
-  return store;
+  // On the render where the filters or the session change, before the effect runs, the old figures are not shown.
+  return shownStore(store.value, okKeyNow(store), key);
 }

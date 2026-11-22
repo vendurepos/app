@@ -1,6 +1,6 @@
 import type { SalesCardId, SalesOption } from '@tallyui/components';
 import { daysOf, type DayRange, type SalesFigures } from '@tallyui/pos';
-import type { SalesReportV2 } from './sales-report';
+import type { SalesReportOutcome, SalesReportV2 } from './sales-report';
 import type { OrderSpread } from './till-reports';
 
 export type Hourly = { hours: number[]; compareHours: number[] };
@@ -105,8 +105,22 @@ export function reportsView(
   };
 }
 
-/** The state while the query `key` is fetching: the last store figures if they answered this same query, else loading. */
-export function whileFetching(current: StoreSales, okKey: string | null, key: string): StoreSales {
-  // Only a refresh of the same query keeps them: figures for another period, register or cashier never stay on screen.
-  return current.status === 'ok' && okKey === key ? current : { status: 'loading' };
+/** What Reports may show for the query `key`: store figures only if they answered this same query, else loading. */
+export function shownStore(current: StoreSales, okKey: string | null, key: string): StoreSales {
+  // Figures for another period, register or cashier never stay on screen; every other state passes through.
+  return current.status === 'ok' && okKey !== key ? { status: 'loading' } : current;
+}
+
+/** The two v2 answers (the period's and its comparison's) as the Reports state; a report it cannot read is an error. */
+export function storeAnswer(a: SalesReportOutcome, b: SalesReportOutcome, range: DayRange, compare: DayRange, oneDay: boolean): StoreSales {
+  if (a.status === 'ok' && b.status === 'ok') {
+    // fetchSalesReportV2 accepts any JSON object, so a report missing a field throws here: that is a failed answer.
+    try {
+      return { status: 'ok', figures: storeSalesFigures(a.report, b.report, range, compare), hourly: storeHourly(a.report, b.report, range, compare, oneDay) };
+    } catch {
+      return { status: 'error' };
+    }
+  }
+  const failed = (status: SalesReportOutcome['status']) => a.status === status || b.status === status;
+  return { status: failed('forbidden') ? 'forbidden' : failed('unsupported') ? 'unsupported' : 'error' };
 }

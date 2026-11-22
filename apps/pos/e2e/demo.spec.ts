@@ -1785,6 +1785,8 @@ test("Reports shows this till's figures only when the store refuses the report",
   await page.getByTestId('reports-open').click();
   await expect(page.getByTestId('reports-panel')).toBeVisible();
   await expect(page.getByTestId('reports-till-only')).toHaveText('This till only');
+  // Loading reads the same line, so the store's answer is checked too.
+  await expect(page.getByTestId('reports-till-only')).toHaveAttribute('data-status', 'forbidden');
   await expect(page.getByTestId('card-categories')).toBeVisible();
   await expect(page.getByTestId('hero-median')).toBeVisible();
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SalesFigures } from '@tallyui/pos';
-import type { SalesReportV2 } from './sales-report';
-import { NO_MARGIN, reportsView, storeHourly, storeSalesFigures, whileFetching, type Spread, type StoreSales } from './store-sales';
+import type { SalesReportOutcome, SalesReportV2 } from './sales-report';
+import { NO_MARGIN, reportsView, shownStore, storeAnswer, storeHourly, storeSalesFigures, type Spread, type StoreSales } from './store-sales';
 
 const DAY = { from: '2026-11-20', to: '2026-11-20' };
 const BEFORE = { from: '2026-11-19', to: '2026-11-19' };
@@ -158,16 +158,33 @@ describe('reportsView', () => {
   });
 });
 
-describe('whileFetching', () => {
+describe('shownStore', () => {
   const ok: StoreSales = { status: 'ok', figures: storeSalesFigures(REPORT, COMPARE, DAY, BEFORE), hourly: null };
 
-  it('keeps the store figures while the same query refreshes', () => {
-    expect(whileFetching(ok, 'k', 'k')).toBe(ok);
+  it('shows store figures only for the query they answered', () => {
+    expect(shownStore(ok, 'k', 'k')).toBe(ok);
+    expect(shownStore(ok, 'k', 'other')).toEqual({ status: 'loading' });
+    expect(shownStore(ok, null, 'k')).toEqual({ status: 'loading' });
+    expect(shownStore({ status: 'offline' }, null, 'k')).toEqual({ status: 'offline' });
+  });
+});
+
+describe('storeAnswer', () => {
+  const okReport = { status: 'ok' as const, report: REPORT };
+  const okCompare = { status: 'ok' as const, report: COMPARE };
+  const failed = { status: 'error' as const, message: 'HTTP 500' };
+  const answer = (a: SalesReportOutcome, b: SalesReportOutcome) => storeAnswer(a, b, DAY, BEFORE, true);
+
+  it('turns two ok answers into the store figures, and a refusal wins over a failure', () => {
+    const ok = answer(okReport, okCompare);
+    expect(ok.status).toBe('ok');
+    expect(ok.status === 'ok' && ok.figures.totals.grossMinor).toBe(4521);
+    expect(answer({ status: 'forbidden' }, failed)).toEqual({ status: 'forbidden' });
+    expect(answer({ status: 'unsupported' }, failed)).toEqual({ status: 'unsupported' });
+    expect(answer(okReport, failed)).toEqual({ status: 'error' });
   });
 
-  it('drops the store figures when the query changes or never answered', () => {
-    expect(whileFetching(ok, 'k', 'other')).toEqual({ status: 'loading' });
-    expect(whileFetching(ok, null, 'k')).toEqual({ status: 'loading' });
-    expect(whileFetching({ status: 'error' }, 'k', 'k')).toEqual({ status: 'loading' });
+  it('a report it cannot read is an error, not a crash', () => {
+    expect(answer({ status: 'ok', report: {} as SalesReportV2 }, okCompare)).toEqual({ status: 'error' });
   });
 });
