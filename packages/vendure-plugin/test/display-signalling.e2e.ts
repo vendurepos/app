@@ -483,16 +483,20 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     await signalling.sendSignal(ctx, oldDevice, displayId, { type: 'offer', payload: 'o1' });
     await signalling.mint(ctx, oldDevice);
     await signalling.claim(display('192.0.2.121'), { code: (await signalling.mint(ctx, oldDevice)).code, displayName: 'Waiting' });
-    await paired(ctx, await register(ctx, 'till-o2'), display('192.0.2.122'));
+    const otherDevice = await register(ctx, 'till-o2');
+    await paired(ctx, otherDevice, display('192.0.2.122'));
+    await signalling.claim(display('192.0.2.123'), { code: (await signalling.mint(ctx, otherDevice)).code, displayName: 'Other waiting' });
     const owned = (deviceId: string) => Promise.all(['tally_display_device', 'tally_display', 'tally_display_code', 'tally_display_pending']
       .map(table => count(table, `"deviceId" = '${deviceId}'`)));
     const inboxes = () => Promise.all(['tally_display_snapshot', 'tally_display_signal'].map(table => count(table, `"displayId" = '${displayId}'`)));
     // Before: the paired code and the claimed one are spent, one is live.
     expect([await owned('till-o'), await inboxes()]).toEqual([[1, 1, 3, 1], [1, 1]]);
+    const other = await owned('till-o2');
+    other.forEach(n => expect(n).toBeGreaterThanOrEqual(1));
 
     expect(await gql(admin, RESET, { deviceId: 'till-o' })).toEqual({ data: { tallyResetDisplayDevice: { result: 'DELETED', message: null } } });
     expect([await owned('till-o'), await inboxes()]).toEqual([[0, 0, 0, 0], [0, 0]]);
-    expect((await owned('till-o2')).slice(0, 2)).toEqual([1, 1]);
+    expect(await owned('till-o2')).toEqual(other);
     expect(await refused(signalling.mint(ctx, oldDevice))).toBe('device_refused');
     expect(await refused(signalling.readSnapshot(d, token))).toBe('token_refused');
     const renewed = await register(ctx, 'till-o');
@@ -507,10 +511,14 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     const onA = await register(inA, 'till-p'), onB = await register(inB, 'till-p');
     await paired(inA, onA, display('192.0.2.130'));
     await paired(inB, onB, display('192.0.2.131'));
-    expect((await gql(await resetter(), RESET, { deviceId: 'till-p' })).data.tallyResetDisplayDevice.result).toBe('DELETED');
-    const rows = (channel: 'a' | 'b') => Promise.all(['tally_display_device', 'tally_display'].map(table =>
+    await signalling.claim(display('192.0.2.132'), { code: (await signalling.mint(inA, onA)).code, displayName: 'Waiting a' });
+    await signalling.claim(display('192.0.2.133'), { code: (await signalling.mint(inB, onB)).code, displayName: 'Waiting b' });
+    const rows = (channel: 'a' | 'b') => Promise.all(['tally_display_device', 'tally_display', 'tally_display_code', 'tally_display_pending'].map(table =>
       count(table, `"channelId" = '${environment.decode(channels[channel].id)}' AND "deviceId" = 'till-p'`)));
-    expect([await rows('a'), await rows('b')]).toEqual([[0, 0], [1, 1]]);
+    const before = await rows('b');
+    before.forEach(n => expect(n).toBeGreaterThanOrEqual(1));
+    expect((await gql(await resetter(), RESET, { deviceId: 'till-p' })).data.tallyResetDisplayDevice.result).toBe('DELETED');
+    expect([await rows('a'), await rows('b')]).toEqual([[0, 0, 0, 0], before]);
     expect(await signalling.mint(inB, onB)).toMatchObject({ code: expect.any(String) });
   });
 

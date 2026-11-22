@@ -342,12 +342,13 @@ export class DisplaySignallingService {
     await this.prune();
     const till = this.till(ctx, deviceId);
     const params = [till.channelId, till.deviceId];
-    const [devices, displays, codes, pending] = await this.transaction(async query => [
+    const [devices, pending, displays, codes] = await this.transaction(async query => [
       (await query('DELETE FROM "tally_display_device" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
+      // Pending before display, the order `confirm` takes them in, so a racing confirm cannot deadlock the reset.
+      (await query('DELETE FROM "tally_display_pending" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
       // A display's snapshot and both inboxes go with it by ON DELETE CASCADE.
       (await query('DELETE FROM "tally_display" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
       (await query('DELETE FROM "tally_display_code" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
-      (await query('DELETE FROM "tally_display_pending" WHERE "channelId" = $1 AND "deviceId" = $2 RETURNING 1', params)).length,
     ]);
     const deleted = devices + displays + codes + pending;
     if (deleted === 0) return { result: 'NOT_DELETED', message: 'No customer display device with this id in this channel' };
