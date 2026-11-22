@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { useWindowDimensions, View } from 'react-native';
 import {
-  Button, CartColumnHeads, CartLine, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, LinePopover, PriceForm, Text, VStack,
+  Button, CartColumnHeads, CartLine, CartPanel, ChargeForm, DiscountChips, DiscountForm, HStack, LinePopover, PickStepper, PriceForm, Text, VStack,
+  type TenderPicker,
 } from '@tallyui/components';
 import { capturedMinor, useCurrencyFormatter, type useSale } from '@tallyui/pos';
 import { lineActionIds } from './cart-line-actions';
@@ -53,10 +54,12 @@ export function TaxRows({ label, amount, testID, rates }: {
  * replaces Checkout, and `payError` says why checkout was refused. `locked` shows the cart beside a tender without edits or checkout.
  * `highlightSku` lights up that line, as an add confirms in place.
  */
-export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, canEditPrice, taxClasses, locked, store }: {
+export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, canEditPrice, taxClasses, locked, store, picker: pickerProp }: {
   sale: ReturnType<typeof useSale>; onCheckout(): void; payGate?: ReactNode; payError?: string; locked?: boolean;
   highlightSku?: string; canEditPrice: boolean; store?: string;
   taxClasses: { id: string; label: string }[];
+  /** useTender's per-unit picker: a locked cart draws TallyUI's PickStepper in each pickable line, as TallyUI's Cart does. */
+  picker?: TenderPicker;
 }) {
   const format = useCurrencyFormatter();
   const { order } = sale;
@@ -78,6 +81,11 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const display = (lineId: string) => order.display.lines.find((line) => line.lineId === lineId)!;
+  // TallyUI's own Cart rules for its picker: whole, unpaid units of a line that is not a refund.
+  const picker = locked ? pickerProp : undefined;
+  type Line = (typeof order.lineItems)[number];
+  const unpaid = (line: Line) => line.quantity - (picker?.paid[line.id] ?? 0);
+  const pickable = (line: Line) => Number.isInteger(line.quantity) && line.quantity > 0 && display(line.id).amountMinor >= 0 && unpaid(line) > 0;
   // As TallyUI's own Cart: the open discount form, a line's or the order's (lineId null); useSale applies it or says
   // why not. The order discounts are one display figure, so only a single one's chip carries an amount.
   const [form, setForm] = useState<{ lineId: string | null; kind?: 'price' | 'charge' } | null>(null);
@@ -88,7 +96,7 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
     ? [{ discountId: order.discounts[0].id, amountMinor: order.display.orderDiscountMinor }] : [];
   return (
     <View className="flex-1 min-h-0" onLayout={(event) => setCartWidth(event.nativeEvent.layout.width)}>
-    <CartColumnHeads showPrice={showPrice} columns={columns} />
+    <CartColumnHeads showPrice={showPrice} columns={columns} picking={picker !== undefined} />
     <CartPanel testID="cart" items={sortCartLines(order.lineItems, sort)}
       emptyState={<Text className="p-3 text-sm text-muted-foreground">Tap a product to add it to the sale.</Text>}
       afterItems={empty && !chargesOffered ? undefined : (
@@ -150,8 +158,9 @@ export function SaleCart({ sale, onCheckout, payGate, payError, highlightSku, ca
             regularUnitPrice={line.regularUnitPriceMinor === undefined ? undefined : amount(line.regularUnitPriceMinor)}
             lineTotal={amount(display(line.id).amountMinor)} showPrice={showPrice}
             columns={columns} sku={line.sku || undefined} imageUrl={line.imageUrl}
-            onSplit={locked ? undefined : () => setRemoveError(sale.splitLine(line.id))}
-            quantitySlot={locked ? undefined : <LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
+            onSplit={locked ? undefined : () => setRemoveError(sale.splitLine(line.id))} picking={picker !== undefined}
+            quantitySlot={picker ? (pickable(line) ? <PickStepper picker={picker} id={line.id} name={line.name} unpaid={unpaid(line)}
+              currency={order.currency} /> : undefined) : locked ? undefined : <LinePopover kind="quantity" lineName={line.name} currency={order.currency} value={line.quantity}
               commit="close" onRemove={() => sale.remove(line.id)}
               onApply={(quantity) => { sale.setQuantity(line.id, quantity); return null; }}
               actions={lineActionIds({ canEditPrice, priceShown: showPrice }).map((id) => {

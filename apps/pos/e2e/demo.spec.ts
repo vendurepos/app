@@ -3791,6 +3791,9 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.00');
 });
 
+/** A cart line's TallyUI PickStepper part (`cart-line-<line id>-pick-*`), found inside the app's `cart-line-<sku>` wrapper. */
+const pick = (line: Locator, part: 'plus' | 'minus' | 'units' | 'amount') => line.locator(`[data-testid$="-pick-${part}"]`);
+
 test('a demo cashier splits a sale evenly two ways and pays one part in cash', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -3801,12 +3804,15 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   const cart = page.getByTestId('cart');
   const tender = page.getByTestId('tender-pane');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.52');
+  // One Split control on the tender: TallyUI's TenderPane chip.
   await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
-  await page.getByTestId('tender-split-open').click();
-  // The app's own split (lib/tender-split.tsx); TallyUI 4.0.0's TenderPane draws its own even ways too, under the same testID.
-  await expect(page.getByTestId('tender-split').getByTestId('tender-split-ways')).toBeVisible();
-  await page.getByTestId('tender-split-ways-2').click();
+  await expect(page.getByRole('button', { name: 'Split', exact: true })).toHaveCount(1);
+  await expect(page.getByTestId('tender-split-chip')).toHaveCount(1);
+  await tender.getByTestId('tender-split-chip').click();
+  await expect(tender.getByTestId('tender-split-ways')).toBeVisible();
+  await tender.getByTestId('tender-split-even-2').click();
   await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
+  await expect(cart.locator('[data-testid$="-pick-plus"]')).toHaveCount(0);
   await expect(tender.getByTestId('tender-plan')).toHaveText('1 of 2');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€4.76');
   await takePayment(page);
@@ -3818,7 +3824,7 @@ test('a demo cashier splits a sale evenly two ways and pays one part in cash', a
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
 
-test('a demo cashier pays a fixed amount first and the rest after', async ({ page }) => {
+test('a demo cashier pays part of a sale by typing an amount, then the rest', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
   await expectSignedIn(page);
@@ -3827,19 +3833,10 @@ test('a demo cashier pays a fixed amount first and the rest after', async ({ pag
   await checkout(page);
   const cart = page.getByTestId('cart');
   const tender = page.getByTestId('tender-pane');
-  await page.getByTestId('tender-split-open').click();
-  await page.getByTestId('tender-split-amount').fill('9.52');
-  await expect(page.getByTestId('tender-split-amount-set')).toBeDisabled();
-  await page.getByTestId('tender-split-amount').fill('5.00');
-  await expect(page.getByTestId('tender-split-amount-set')).toBeEnabled();
-  await page.getByTestId('tender-split-amount-set').click();
-  await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
-  await expect(tender.getByTestId('tender-plan')).toHaveText('1 of 2');
-  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€5.00');
+  await typeAmount(page, '5.00');
   await takePayment(page);
   await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
   await expect(cart.getByTestId('cart-remaining')).toHaveText('€4.52');
-  await expect(tender.getByTestId('tender-plan')).toHaveText('2 of 2');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€4.52');
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
@@ -3854,31 +3851,23 @@ test('a demo cashier pays for one item first and the rest after', async ({ page 
   await checkout(page);
   const cart = page.getByTestId('cart');
   const tender = page.getByTestId('tender-pane');
-  await page.getByTestId('tender-split-open').click();
-  const lines = page.getByTestId('tender-split-line');
-  const mug = lines.filter({ hasText: 'Tally Fixture Mug' });
-  const apron = lines.filter({ hasText: 'Canvas Apron' });
-  await expect(lines).toHaveCount(2);
-  await expect(mug).toContainText('€9.52');
-  await expect(apron).toContainText('€41.64');
-  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
-  await mug.click();
-  await expect(page.getByTestId('tender-split-items-set')).toBeEnabled();
-  await apron.click();
-  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
-  await apron.click();
-  await page.getByTestId('tender-split-items-set').click();
-  await expect(page.getByTestId('tender-split-ways')).toHaveCount(0);
+  const mug = cart.getByTestId('cart-line-TALLY-MUG');
+  const apron = cart.getByTestId('cart-line-APP-APRON');
+  await tender.getByTestId('tender-split-chip').click();
+  await expect(pick(mug, 'units')).toHaveText('0 of 1');
+  await expect(pick(apron, 'units')).toHaveText('0 of 1');
+  await pick(mug, 'plus').click();
+  await expect(pick(mug, 'amount')).toHaveText('€9.52');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.52');
+  await expect(tender.getByTestId('tender-entry-hint')).toContainText('€9.52');
   await takePayment(page);
   await expect(cart.getByTestId('cart-paid')).toHaveText('€9.52');
   await expect(cart.getByTestId('cart-remaining')).toHaveText('€41.64');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€41.64');
   await expect(tender.getByTestId('tender-complete')).toBeDisabled();
-  await page.getByTestId('tender-split-open').click();
-  await expect(mug).toContainText('Paid');
-  await expect(mug).toBeDisabled();
-  await expect(page.getByTestId('tender-split-items-note')).toHaveCount(0);
+  await tender.getByTestId('tender-split-chip').click();
+  await expect(pick(apron, 'plus')).toHaveCount(1);
+  await expect(pick(mug, 'plus')).toHaveCount(0);
 });
 
 test('a demo cashier pays for one item first under an order discount', async ({ page }) => {
@@ -3898,28 +3887,60 @@ test('a demo cashier pays for one item first under an order discount', async ({ 
   await form.getByRole('button', { name: 'Apply' }).click();
   await expect(form).toHaveCount(0);
   await checkout(page);
-  await page.getByTestId('tender-split-open').click();
-  // Shares 19 / 81 of the €1.00: nets 781 / 3418, tax 148 / 649 per line, the order's tax 797.81 -> 798, so €49.97.
-  await expect(page.getByTestId('tender-split-items-note')).toHaveText("Each item's share includes its part of the order discount.");
-  const lines = page.getByTestId('tender-split-line');
-  const mug = lines.filter({ hasText: 'Tally Fixture Mug' });
-  const apron = lines.filter({ hasText: 'Canvas Apron' });
-  await expect(mug).toContainText('€9.29');
-  await expect(apron).toContainText('€40.67');
-  await mug.click();
-  await apron.click();
-  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
-  await apron.click();
-  await page.getByTestId('tender-split-items-set').click();
+  await expect(cart.getByTestId('cart-total')).toHaveText('€49.97');
+  const mug = cart.getByTestId('cart-line-TALLY-MUG');
+  const apron = cart.getByTestId('cart-line-APP-APRON');
+  await tender.getByTestId('tender-split-chip').click();
+  // TallyUI's per-unit figure: each line's net after its share of the €1.00 (781 / 3418) plus the order's tax rounded
+  // cumulatively in line order (splitUnitLines): the mug's tax rounds to 148, and the apron takes 798 − 148 = 650 of the
+  // order's 797.81 → 798, so €9.29 + €40.68 = €49.97 (the old split showed the apron at €40.67).
+  await pick(mug, 'plus').click();
+  await expect(pick(mug, 'amount')).toHaveText('€9.29');
   await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.29');
   await takePayment(page);
   await expect(cart.getByTestId('cart-paid')).toHaveText('€9.29');
   await expect(cart.getByTestId('cart-remaining')).toHaveText('€40.68');
-  await page.getByTestId('tender-split-open').click();
-  await expect(mug).toContainText('Paid');
-  await expect(mug).toBeDisabled();
-  await apron.click();
-  await expect(page.getByTestId('tender-split-items-set')).toBeDisabled();
+  await tender.getByTestId('tender-split-chip').click();
+  await expect(pick(mug, 'plus')).toHaveCount(0);
+  await pick(apron, 'plus').click();
+  await expect(pick(apron, 'amount')).toHaveText('€40.68');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€40.68');
+});
+
+test('a demo cashier on a phone picks items to pay from the cart above the tender', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('tab-cart').click();
+  await openRegister(page);
+  await page.getByTestId('tab-products').click();
+  await page.getByRole('searchbox').fill('Mug');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByRole('searchbox').fill('Apron');
+  await page.getByTestId('product-tile-Canvas Apron').click();
+  await page.getByTestId('tab-cart').click();
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  const cart = page.getByTestId('cart');
+  // The narrow tender is the pane alone until the cashier splits.
+  await expect(tender).toBeVisible();
+  await expect(page.locator('[data-testid^="cart-line-"]')).toHaveCount(0);
+  await tender.getByTestId('tender-split-chip').click();
+  const mug = cart.getByTestId('cart-line-TALLY-MUG');
+  await expect(mug).toBeVisible();
+  await expect(cart.getByTestId('cart-line-APP-APRON')).toBeVisible();
+  // The cart sits above the pane, in one column.
+  const cartBox = (await cart.boundingBox())!;
+  const tenderBox = (await page.getByTestId('tender-pane').boundingBox())!;
+  expect(cartBox.y + cartBox.height).toBeLessThanOrEqual(tenderBox.y + 1);
+  await pick(mug, 'plus').click();
+  await expect(pick(mug, 'amount')).toHaveText('€9.52');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€9.52');
+  await takePayment(page);
+  await expect(tender.getByTestId('tender-paid')).toContainText('€9.52');
+  await expect(tender.getByTestId('tender-entry-amount')).toHaveText('€41.64');
+  await expect(tender.getByTestId('tender-complete')).toBeDisabled();
 });
 
 test('a demo cashier pays cash with a quick amount: the cart is locked beside the checkout', async ({ page }) => {
