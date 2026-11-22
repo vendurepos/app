@@ -1768,6 +1768,7 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
   await expect(page.getByTestId('card-categories')).toContainText('Drinkware');
   await expect(page.getByTestId('card-categories')).toContainText('€9.52');
+  await expect(page.getByTestId('reports-categories-help')).toHaveText('Categories: a product in several collections counts in each.');
   await expect(page.getByTestId('card-products')).toContainText('€9.52');
   await page.getByTestId('reports-print-summary').click();
   const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();

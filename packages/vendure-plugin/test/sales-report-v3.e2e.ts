@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Collection, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TallySalesReportV3 } from '../src/service/report.service';
@@ -19,7 +20,7 @@ const HOUR = 3_600_000;
 
 describe('GET /tally/v1/reports/sales/v3', () => {
   const environment = createPluginTestEnvironment();
-  const { server, adminClient, variantIds } = environment;
+  const { server, adminClient, variantIds, decode } = environment;
   let base: string;
   let till: Record<string, string>;
   let reporter: Record<string, string>;
@@ -29,7 +30,7 @@ describe('GET /tally/v1/reports/sales/v3', () => {
   const [cashier1, cashier2] = ['cashier-1', 'cashier-2'];
   let range: { from: string; to: string };
   let raw: RawOrder[];
-  const collections: Record<'kitchen' | 'gifts', string> = { kitchen: '', gifts: '' };
+  const collections: Record<'kitchen' | 'gifts' | 'elsewhere', string> = { kitchen: '', gifts: '', elsewhere: '' };
   let membership: Map<string, string[]>;
 
   beforeAll(async () => {
@@ -41,6 +42,18 @@ describe('GET /tally/v1/reports/sales/v3', () => {
     collections.kitchen = await collection('Kitchen', [variantIds.mug[0], variantIds.beans[0]], false);
     collections.gifts = await collection('Gifts', [variantIds.mug[0]], true);
     membership = new Map([[variantIds.mug[0], [collections.kitchen, collections.gifts]], [variantIds.beans[0], [collections.kitchen]]]);
+    // Elsewhere holds the mug in a second channel only. Vendure keeps every collection in the default channel too, so
+    // once the filter job has filled it, its channel link is moved in the database.
+    collections.elsewhere = await collection('Elsewhere', [variantIds.mug[0]], false);
+    const { zones, activeChannel } = await adminClient.query<{ zones: { items: Array<{ id: string; name: string }> }; activeChannel: { id: string } }>(
+      parse('query { zones { items { id name } } activeChannel { id } }'));
+    const denmark = zones.items.find(zone => zone.name === 'Denmark')!.id;
+    const { createChannel } = await adminClient.query<{ createChannel: { id: string } }>(parse(`mutation Channel($input: CreateChannelInput!) {
+      createChannel(input: $input) { ... on Channel { id } ... on ErrorResult { message } }
+    }`), { input: { code: 'v3-second', token: 'v3-second-token', defaultLanguageCode: 'en', pricesIncludeTax: false,
+      defaultCurrencyCode: 'EUR', availableCurrencyCodes: ['EUR'], defaultTaxZoneId: denmark, defaultShippingZoneId: denmark } });
+    await server.app.get(TransactionalConnection).rawConnection.createQueryBuilder().relation(Collection, 'channels')
+      .of(decode(collections.elsewhere)).addAndRemove(decode(createChannel.id), decode(activeChannel.id));
     base = await server.app.getUrl();
     till = await tokenWith(['TallyPosSell']);
     reporter = await tokenWith(['TallyPosSell', 'ReadOrder']);
@@ -191,6 +204,23 @@ describe('GET /tally/v1/reports/sales/v3', () => {
     expect((await v3({ registerId: registerB })).categories).toEqual([
       { collectionId: collections.kitchen, name: 'Kitchen', quantity: 1, salesMinor: 550 },
     ]);
+  });
+
+  it('leaves out a collection of another channel, and no other figure changes', async () => {
+    // The fixture: Elsewhere holds the mug, and is in the second channel only.
+    const elsewhere = await server.app.get(TransactionalConnection).rawConnection.getRepository(Collection).findOneOrFail({
+      where: { id: decode(collections.elsewhere) }, relations: { channels: true, productVariants: true } });
+    expect(elsewhere.channels.map(channel => channel.code)).toEqual(['v3-second']);
+    expect(elsewhere.productVariants.map(variant => String(variant.id))).toEqual([decode(variantIds.mug[0])]);
+    // The medians and largest orders the odd and even count test reads, unchanged.
+    const cases: Array<[Filter, number, number]> = [[{}, 938, 1540], [{ registerId: registerA }, 875, 1000], [{ cashierId: cashier1 }, 775, 1000]];
+    for (const [filter, median, largest] of cases) {
+      const { version, orders: { medianMinor, largestMinor, ...orders }, categories: rows, ...rest } = await v3(filter);
+      expect(rows.map(row => row.collectionId)).not.toContain(collections.elsewhere);
+      expect(rows, JSON.stringify(filter)).toEqual(categories(filter));
+      expect((await report('reports/sales/v2', { ...range, ...filter })).body).toEqual({ ...rest, version: 2, orders });
+      expect([version, medianMinor, largestMinor]).toEqual([3, median, largest]);
+    }
   });
 
   it('has v2\'s permission and query answers', async () => {
