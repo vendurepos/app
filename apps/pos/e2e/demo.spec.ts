@@ -3197,7 +3197,7 @@ test('Settings › Printing adds, edits and removes a printer kept on this devic
   await page.getByTestId('printer-save').click();
   await expect(page.getByTestId('printer-row')).toHaveCount(1);
   await expect(page.getByTestId('printer-name-text')).toHaveText('Front counter');
-  await expect(page.getByTestId('printer-summary')).toHaveText('Network · 192.168.1.50:9100 · 80 mm');
+  await expect(page.getByTestId('printer-summary')).toHaveText('Network · Epson · 192.168.1.50:9100 · 80 mm');
   await expect(page.getByTestId('printers-empty')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('11-settings-printing-vendurepos.png') });
   await page.getByTestId('printer-edit').click();
@@ -3218,6 +3218,96 @@ test('Settings › Printing adds, edits and removes a printer kept on this devic
   await page.getByTestId('printer-remove').click();
   await expect(page.getByTestId('printer-row')).toHaveCount(0);
   await expect(page.getByTestId('printers-empty')).toBeVisible();
+});
+
+// TEST-NET-1, never a real printer: page.route answers it as an Epson ePOS-Print printer.
+const PRINTER_HOST = '192.0.2.10';
+const PRINTER_FAILED = "Can't print on Front counter. Check that it is on and on this network, then try again, or print with the dialog.";
+
+/** The Epson printer at PRINTER_HOST: answers ePOS-Print's success while reachable, aborts every request when not. */
+async function epsonPrinter(page: Page) {
+  const printer = { posts: 0, reachable: true };
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'POST' };
+  await page.route((url) => url.hostname === PRINTER_HOST, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    printer.posts++;
+    if (!printer.reachable) return route.abort('connectionrefused');
+    // What the ePOS sink checks: a <response> element with success="true".
+    await route.fulfill({ status: 200, headers: { ...cors, 'Content-Type': 'text/xml' }, body: '<response success="true" code="" status="251658262" />' });
+  });
+  return printer;
+}
+
+async function addEpsonPrinter(page: Page) {
+  await openSettings(page, 'printing');
+  await page.getByTestId('printer-add').click();
+  await page.getByTestId('printer-name').fill('Front counter');
+  // Epson is a new network printer's make.
+  await page.getByTestId('printer-address').fill(PRINTER_HOST);
+  await page.getByTestId('printer-save').click();
+  await expect(page.getByTestId('printer-summary')).toHaveText(`Network · Epson · ${PRINTER_HOST}:9100 · 80 mm`);
+}
+
+test.describe('with a network printer', () => {
+  // The demo's CSP lets the page reach https: and loopback only; a till that prints to a LAN printer over plain http is
+  // the VENDUREPOS_WEB_ALLOW_LAN_HTTP build (connect-src http:). These tests lift the CSP in place of that build.
+  test.use({ bypassCSP: true });
+
+  test("Settings › Printing sends a test page to an Epson network printer, and says so when it can't reach it", async ({ page }) => {
+    const printer = await epsonPrinter(page);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('printer-test').click();
+    await expect(page.getByTestId('printer-test-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    printer.reachable = false;
+    await page.getByTestId('printer-test').click();
+    await expect(page.getByTestId('printer-test-status')).toHaveText(PRINTER_FAILED);
+    expect(printer.posts).toBe(2);
+    // Other: through the print dialog, so no Test print.
+    await page.getByTestId('printer-edit').click();
+    await page.getByTestId('printer-vendor-generic').click();
+    await expect(page.getByTestId('printer-vendor-help')).toHaveText(
+      'Receipts go to Epson and Star network printers directly. Other printers print through the print dialog.');
+    await page.getByTestId('printer-save').click();
+    await expect(page.getByTestId('printer-summary')).toHaveText(`Network · Other · ${PRINTER_HOST}:9100 · 80 mm`);
+    await expect(page.getByTestId('printer-test')).toHaveCount(0);
+    await expect(page.getByTestId('printer-test-status')).toHaveCount(0);
+  });
+
+  test("with an Epson network printer, Print receipt sends the sale's receipt to it, not the dialog", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.printCalls = 0;
+      window.print = () => { window.printCalls++; };
+    });
+    const printer = await epsonPrinter(page);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await page.getByTestId('product-tile-Tally Fixture Mug').click();
+    await checkout(page);
+    await typeAmount(page, '9.52');
+    await takePayment(page);
+    await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+    const receipt = page.getByTestId('receipt');
+    await expect(receipt).toBeVisible();
+    await receipt.getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    await expect(page.getByTestId('receipt-print-dialog')).toHaveCount(0);
+    printer.reachable = false;
+    await receipt.getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-print-status')).toHaveText(PRINTER_FAILED);
+    expect(printer.posts).toBe(2);
+    await page.getByTestId('receipt-print-dialog').click();
+    await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  });
 });
 
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
