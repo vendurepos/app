@@ -776,7 +776,7 @@ test('The sale\'s customer picker shows v2\'s avatars and a Guest row, and Guest
   await page.getByLabel('Search customers').fill('ada');
   const picker = page.getByTestId('customer-picker');
   await expect(picker.getByTestId('customer-picker-option-guest')).toBeVisible();
-  // avatarInitials('Ada Lovelace') in TallyUI 4.1.0 is 'AL'.
+  // avatarInitials('Ada Lovelace') in TallyUI 4.2.0 is 'AL'.
   await expect(picker.getByText('AL', { exact: true })).toBeVisible();
   await picker.getByText('Ada Lovelace', { exact: true }).click();
   await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
