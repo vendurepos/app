@@ -162,6 +162,15 @@ it('(g) a device_refused clears the stored key and registers exactly once more',
   expect(keys.slice(0, 2)).toEqual(['stale-key', ISSUED_KEY]);
 });
 
+it('(h) carries the display device id it sends, never the register id', async () => {
+  const { handles, signalling, storage } = start();
+  expect(handles.deviceId).toBe(displayDeviceId(storage));
+  expect(handles.deviceId).not.toBe(deviceId(storage));
+  await handles.pairing.start();
+  const [, sent] = signalling.mint.mock.calls[0] as unknown as MintArgs;
+  expect(sent.deviceId).toBe(handles.deviceId);
+});
+
 it("(d) configFor reads the session getter's current session", () => {
   let current = session;
   start(() => current);
