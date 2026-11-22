@@ -31,6 +31,7 @@ it.each([
   [202, { queued: true }, null],
   [200, { queued: true }, RECEIPT_EMAIL_FAILED_TEXT],
   [202, {}, RECEIPT_EMAIL_FAILED_TEXT],
+  [202, '<html>Proxy page</html>', RECEIPT_EMAIL_FAILED_TEXT],
   [404, { code: 'receipt_email_disabled' }, RECEIPT_EMAIL_DISABLED_TEXT],
   [404, {}, RECEIPT_EMAIL_DISABLED_TEXT],
   [403, { code: 'forbidden' }, RECEIPT_EMAIL_FORBIDDEN_TEXT],
@@ -86,6 +87,19 @@ it('ends a send that never answers when the timeout fires, as may or may not hav
   await vi.advanceTimersByTimeAsync(RECEIPT_EMAIL_TIMEOUT_MS - 1);
   expect(fetch.mock.calls[0][1].signal!.aborted).toBe(false);
   await vi.advanceTimersByTimeAsync(1);
+  expect(await sent).toBe(RECEIPT_EMAIL_UNKNOWN_TEXT);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('reads a 202 whose body never arrives before the timeout as may or may not have been sent, never as try again', async () => {
+  vi.useFakeTimers();
+  // The store accepted; its body read rejects only when the signal aborts, as a real stalled stream does.
+  const fetch = vi.fn(async (_url: string, init: RequestInit) => Object.assign(new Response(null, { status: 202 }), {
+    json: () => new Promise((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))),
+  }));
+  vi.stubGlobal('fetch', fetch);
+  const sent = sendReceiptEmail(context, 'DEMO-000001', 'a@b.co');
+  await vi.advanceTimersByTimeAsync(RECEIPT_EMAIL_TIMEOUT_MS);
   expect(await sent).toBe(RECEIPT_EMAIL_UNKNOWN_TEXT);
   expect(fetch).toHaveBeenCalledTimes(1);
 });

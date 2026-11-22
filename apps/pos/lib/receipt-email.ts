@@ -48,7 +48,8 @@ export function canEmailReceipt(capabilities: ServerCapabilities | undefined): b
  * The route is not idempotent (each accepted call sends one email), so this never retries; it never logs the address or the body.
  */
 export async function sendReceiptEmail(context: SyncContext, orderCode: string, address: string): Promise<string | null> {
-  // One timer covers the request and the body read; an abort rejects either, as a network failure would.
+  // One timer covers the request and the body read; an abort rejects either, as a network failure would. A body read
+  // cut off by it is unknown whatever the status (a 202 may have sent); a body read in full that isn't the route's stays FAILED.
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), RECEIPT_EMAIL_TIMEOUT_MS);
   let response: Response;
@@ -61,6 +62,7 @@ export async function sendReceiptEmail(context: SyncContext, orderCode: string, 
     } catch { return RECEIPT_EMAIL_UNKNOWN_TEXT; }
     body = await response.json().catch(() => null);
   } finally { clearTimeout(timer); }
+  if (abort.signal.aborted) return RECEIPT_EMAIL_UNKNOWN_TEXT;
   // Queued only on the route's own answer: a 2xx from anything else (a proxy's page) sent nothing.
   if (response.status === 202 && body?.queued === true) return null;
   if (UNKNOWN_STATUSES.has(response.status)) return RECEIPT_EMAIL_UNKNOWN_TEXT;
