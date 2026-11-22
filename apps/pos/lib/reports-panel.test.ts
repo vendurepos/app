@@ -23,7 +23,7 @@ const V3: SalesReportV3 = {
   categories: [{ collectionId: '2', name: 'Drinkware', quantity: 1, salesMinor: 952 }],
 };
 const viewOf = (store: StoreSales) => {
-  const spread: Spread = { current: { medianMinor: 0, largestMinor: null }, comparison: undefined };
+  const spread: Spread = { current: { medianMinor: 0, largestMinor: 0 }, comparison: undefined };
   return reportsView(store, () => ({ figures: {} as SalesFigures, hourly: null, spread }), []);
 };
 const answer = (report: SalesReportV2 | SalesReportV3) =>
