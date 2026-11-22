@@ -157,6 +157,15 @@ describe('ruling 17: order.create is validated strictly per version', () => {
     }
   });
 
+  it('3.2a-1: customer.billing is not supported at v8 and requires version 8 at v7, unstored', async () => {
+    for (const [version, message] of [[8, 'customer.billing: not supported by this server'],
+      [7, 'customer.billing: requires order.create version 8, command is version 7']] as const) {
+      const input = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: 'v8@example.com' }), version };
+      Object.assign(input.payload.customer!, { billing: { firstName: 'Ada', city: 'Berlin', country: 'DE' } });
+      await expectRefused(input as unknown as Envelope, [message]);
+    }
+  });
+
   it('replay is unaffected: an applied command resent unchanged is a duplicate', async () => {
     const input = tillEnvelope();
     const applied = await run(input);

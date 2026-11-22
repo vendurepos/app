@@ -9,8 +9,10 @@ export const TALLY_NO_TAX_CATEGORY = 'POS no tax';
 
 // The order.create versions the server accepts (the plugin's own list; nothing is vendored for it). 6 (ADR-077) is
 // accepted with coupons and Any picks refused and regular prices and line attributes display only; 7 (ADR-083) adds
-// the sale note, kept as a public Vendure order note (P2.11a).
-export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7];
+// the sale note, kept as a public Vendure order note (P2.11a). 8, 9 and 10 are accepted for their shape only (3.2a-1):
+// their new fields (v8 taxAddress and customer addresses, v9 coupon lines, v10 payments[].methodId) are refused as not
+// supported (strict-shape.ts), so a sale that does not send them is taken as a version 7 sale.
+export const ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 // Fees, shipping and custom lines are honoured (ADR 0005), so /tally/v1/info advertises every accepted version.
 export const ADVERTISED_ORDER_CREATE_VERSIONS: readonly number[] = ORDER_CREATE_VERSIONS;
 

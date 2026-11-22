@@ -22,7 +22,7 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], 'order.refund': [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
+      contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], register: [1, 2, 3], 'order.refund': [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
       maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 },
     });
   });
@@ -44,21 +44,21 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     expect([response.status, (await response.json()).code]).toEqual([404, 'receipt_email_disabled']);
   });
 
-  it('a version 8 order.create is rejected as unsupported_version and writes no order', async () => {
+  it('a version 11 order.create is rejected as unsupported_version and writes no order', async () => {
     const counts = async () => ({
       orders: await connection.rawConnection.getRepository(Order).count(),
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),
     });
     const before = await counts();
-    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 8 };
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]), version: 11 };
     const result = await run(command as unknown as CommandEnvelope<OrderCreatePayload>);
     expect(result.status).toBe('rejected');
     expect(result.error?.code).toBe('unsupported_version');
-    expect(result.error?.data).toEqual({ orderCreate: 7 });
+    expect(result.error?.data).toEqual({ orderCreate: 10 });
     expect(await counts()).toEqual(before);
   });
 
-  it('ORDER_CREATE_VERSIONS is [1, 2, 3, 4, 5, 6, 7]', () => {
-    expect(ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it('ORDER_CREATE_VERSIONS is [1..10]', () => {
+    expect(ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 });

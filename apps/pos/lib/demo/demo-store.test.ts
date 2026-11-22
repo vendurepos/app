@@ -173,9 +173,9 @@ it('filters the v2 report by register and cashier, and answers 403 under the rep
 });
 
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
-  expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], 'order.refund': [1] }, maxShippingLines: 1, lineTax: { none: true, classes: true }, receiptEmail: { v: 1 } });
+  expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'order.refund': [1] }, maxShippingLines: 1, lineTax: { none: true, classes: true }, receiptEmail: { v: 1 } });
   expect(await readCapabilities(await signedIn(), createVendureConnector())).toEqual({
-    orderCreate: 7, orderRefund: 1, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
+    orderCreate: 10, orderRefund: 1, register: 1, taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
     lineTax: { none: true, classes: true }, receiptEmail: 1,
   });
 });
@@ -510,8 +510,8 @@ it('applies register commands in array order, enforces one open session and clos
 
 it('supports all order versions and refuses unsupported versions without claiming their ids', async () => {
   const session = await signedIn();
-  const unsupported = { ...ORDER, version: 8 } as unknown as AnyCommandEnvelope;
-  expect((await send(session, unsupported))[0].error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 7 } });
+  const unsupported = { ...ORDER, version: 11 } as unknown as AnyCommandEnvelope;
+  expect((await send(session, unsupported))[0].error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 10 } });
   expect((await send(session, ORDER))[0].status).toBe('applied');
   for (const version of [1, 2, 3] as const) {
     const payload = { ...ORDER.payload, clientOrderId: `order-${version}` };
