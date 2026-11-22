@@ -7,11 +7,14 @@ import { printLines } from './print-lines';
 import { salesCsv, salesCsvFileName } from './sales-csv';
 import { salesSummaryLines } from './sales-summary-lines';
 import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
+import type { Session } from './session';
+import { reportsView } from './store-sales';
 import { TillSalesHero } from './till-sales-hero';
 import { useFreshList } from './use-fresh-list';
+import { useStoreSales } from './use-store-sales';
 
-export function ReportsPanel({ orders, refunds, currency, timezone, drawer, closures }: {
-  orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode; closures?: ReactNode;
+export function ReportsPanel({ session, orders, refunds, currency, timezone, drawer, closures }: {
+  session: Session | null; orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode; closures?: ReactNode;
 }) {
   const [tab, setTab] = useState('sales');
   const orderList = useFreshList(orders);
@@ -19,17 +22,23 @@ export function ReportsPanel({ orders, refunds, currency, timezone, drawer, clos
   const [filters, setFilters] = useState(() => initialSalesFilters(new Date(), timezone));
   const [printFailed, setPrintFailed] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
-  const figures = useMemo(() => tillSalesFigures({ orders: orderList, refunds: refundList, filters, timezone }), [orderList, refundList, filters, timezone]);
-  const hourly = useMemo(() => tillHourly({ orders: orderList, filters, timezone }), [orderList, filters, timezone]);
-  const spread = useMemo(() => tillOrderSpread({ orders: orderList, filters, timezone }), [orderList, filters, timezone]);
+  // A sale or refund reaching the store changes the key, so the store's figures are fetched again.
+  const refreshKey = `${orderList.filter((order) => order.syncStatus === 'applied').length}:${refundList.filter((refund) => refund.status === 'applied').length}`;
+  const store = useStoreSales({ session, filters, timezone, refreshKey });
+  // The store's figures when they came (8.1f), else this till's own: never a mix of the two.
+  const view = useMemo(() => reportsView(store, () => ({
+    figures: tillSalesFigures({ orders: orderList, refunds: refundList, filters, timezone }),
+    hourly: tillHourly({ orders: orderList, filters, timezone }),
+    spread: tillOrderSpread({ orders: orderList, filters, timezone }),
+  }), REPORT_STATUS_OPTIONS), [store, orderList, refundList, filters, timezone]);
   // The web downloads the period's figures as the closures sheet does: a Blob URL on an <a download>.
   const exportCsv = () => {
     setExportFailed(false);
     try {
-      const url = URL.createObjectURL(new Blob([salesCsv(figures, currency)], { type: 'text/csv;charset=utf-8' }));
+      const url = URL.createObjectURL(new Blob([salesCsv(view.figures, currency)], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = salesCsvFileName(figures);
+      anchor.download = salesCsvFileName(view.figures);
       anchor.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -50,14 +59,20 @@ export function ReportsPanel({ orders, refunds, currency, timezone, drawer, clos
       <ScrollView contentContainerClassName="p-4" style={closures && tab === 'closures' ? { display: 'none' } : undefined}>
         <View testID="sales-room" className="gap-4">
           {drawer}
-          <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone={timezone}
-            statusOptions={REPORT_STATUS_OPTIONS} {...reportOptions(orderList)} />
-          <TillSalesHero figures={figures} filters={filters} onFiltersChange={setFilters} currency={currency} hourly={hourly} spread={spread} />
+          <SalesFiltersBar filters={view.storeWide ? { ...filters, status: 'all' } : filters} onFiltersChange={setFilters} timezone={timezone}
+            statusOptions={view.statusOptions} {...reportOptions(orderList)} />
+          {/* data-status tells loading from a refusal, which read the same line; TallyUI's Text takes no dataSet. */}
+          {view.tillOnly ? (
+            <View testID="reports-till-only" dataSet={{ status: store.status }}>
+              <Text className="text-sm text-muted-foreground">{view.tillOnly}</Text>
+            </View>
+          ) : null}
+          <TillSalesHero figures={view.figures} filters={filters} onFiltersChange={setFilters} currency={currency} hourly={view.hourly} spread={view.spread} />
           <View dataSet={{ print: 'hide' }} className="gap-1">
             <View className="flex-row gap-2">
               <Button testID="reports-print-summary" variant="secondary" onPress={() => {
                 setPrintFailed(false);
-                printLines('Sales summary', salesSummaryLines(figures, currency)).catch(() => setPrintFailed(true));
+                printLines('Sales summary', salesSummaryLines(view.figures, currency)).catch(() => setPrintFailed(true));
               }}><Text>Print summary</Text></Button>
               {Platform.OS === 'web' ? (
                 <Button testID="reports-export-csv" variant="secondary" onPress={exportCsv}><Text>Export CSV</Text></Button>
@@ -66,7 +81,7 @@ export function ReportsPanel({ orders, refunds, currency, timezone, drawer, clos
             {printFailed ? <Text testID="reports-print-error" className="text-sm text-destructive">Printing failed. Try again.</Text> : null}
             {exportFailed ? <Text testID="reports-export-error" className="text-sm text-destructive">Export failed. Try again.</Text> : null}
           </View>
-          <SalesCards figures={figures} currency={currency} />
+          <SalesCards figures={view.figures} currency={currency} hide={view.hide} />
         </View>
       </ScrollView>
     </VStack>

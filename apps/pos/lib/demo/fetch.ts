@@ -28,6 +28,7 @@
  * POST /tally/v1/commands (register.closure.submit) — apps/pos/lib/closure-hold.ts via order-transport.ts.
  * POST /tally/v1/commands (order.refund) — apps/pos/lib/refund-sheet.tsx via till-refund.ts and order-transport.ts.
  * POST /tally/v1/orders/:code/receipt-email — apps/pos/lib/receipt-email.ts.
+ * GET /tally/v1/reports/sales/v2 — apps/pos/lib/sales-report.ts via lib/use-store-sales.ts.
  */
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
@@ -53,6 +54,10 @@ const DEMO_CHANNEL_ID = '1';
 const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
 // e2e only: a till without the approve permission, which counts blind.
 export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
+// e2e only: an account without TallyPosSell or ReadOrder, which the sales report v2 refuses with 403.
+export const DEMO_REPORT_FORBIDDEN_KEY = 'vendurepos.demo.report_forbidden';
+// The plugin's v2 sales report route (reports.controller.ts).
+const SALES_REPORT_V2_PATH = '/tally/v1/reports/sales/v2';
 // Vendure's Admin GraphQL route.
 const ADMIN_PATH = '/admin-api';
 // The plugin's capability discovery route.
@@ -156,6 +161,13 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       if (!order) return reply({ code: 'order_not_found', message: `No order ${code} in this channel` }, undefined, 404);
       if (!order.customFields.tallyClientOrderId) return reply({ code: 'not_till_order', message: 'Not a till sale' }, undefined, 409);
       return reply({ queued: true, emailAddress }, undefined, 202);
+    }
+    if (route === SALES_REPORT_V2_PATH) {
+      if (storage.getItem(DEMO_REPORT_FORBIDDEN_KEY) === '1') return reply({ code: 'forbidden', message: 'Requires TallyPosSell and ReadOrder' }, undefined, 403);
+      const from = search.get('from'), to = search.get('to');
+      if (!from || !to) return reply({ code: 'invalid_query', message: 'Expected from and to' }, undefined, 400);
+      return reply(store.salesReport({ from, to, timezone: search.get('timezone') ?? 'UTC',
+        registerId: search.get('registerId') ?? undefined, cashierId: search.get('cashierId') ?? undefined }));
     }
     if (route !== ADMIN_PATH) return reply({ statusCode: NOT_FOUND, message: `Cannot ${request.method} ${route}`, error: 'Not Found' }, undefined, NOT_FOUND);
     const { query, variables = {}, operationName } = await request.json();

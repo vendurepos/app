@@ -3,7 +3,8 @@ import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { Card, ToggleGroup, ToggleGroupItem, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import type { SalesFigures } from '@tallyui/pos';
-import { compareLabel, isOneDay, runningTotal, type OrderSpread } from './till-reports';
+import type { Spread } from './store-sales';
+import { compareLabel, isOneDay, runningTotal } from './till-reports';
 
 const signed = (diff: number, format: (n: number) => string) =>
   diff === 0 ? '±0' : `${diff > 0 ? '+' : '−'}${format(Math.abs(diff))}`;
@@ -11,7 +12,8 @@ const signed = (diff: number, format: (n: number) => string) =>
 export function TillSalesHero({ figures, filters, onFiltersChange, currency, hourly, spread }: {
   figures: SalesFigures; filters: SalesFilters; onFiltersChange(next: SalesFilters): void; currency: string;
   hourly: { hours: number[]; compareHours: number[] } | null;
-  spread: { current: OrderSpread; comparison: OrderSpread | undefined };
+  // null in store mode (8.1f): the route has no per-order totals, so the median and largest tiles are not shown.
+  spread: Spread | null;
 }) {
   const [shape, setShape] = useState<'bars' | 'running'>('bars');
   const wide = useWindowDimensions().width >= 640;
@@ -24,8 +26,10 @@ export function TillSalesHero({ figures, filters, onFiltersChange, currency, hou
   const companions = [
     { id: 'orders', name: 'Orders', value: totals.orderCount, prev: before?.orderCount, format: String },
     { id: 'average', name: 'Average order', value: totals.averageMinor, prev: before?.averageMinor, format: money },
-    { id: 'median', name: 'Median order', value: spread.current.medianMinor, prev: before ? spread.comparison?.medianMinor : undefined, format: money },
-    { id: 'largest', name: 'Largest order', value: spread.current.largestMinor, prev: before ? spread.comparison?.largestMinor : undefined, format: money },
+    ...(spread ? [
+      { id: 'median', name: 'Median order', value: spread.current.medianMinor, prev: before ? spread.comparison?.medianMinor : undefined, format: money },
+      { id: 'largest', name: 'Largest order', value: spread.current.largestMinor, prev: before ? spread.comparison?.largestMinor : undefined, format: money },
+    ] : []),
     { id: 'items', name: 'Items', value: totals.items, prev: before?.items, format: String },
   ];
   const barValues = hourly ? hourly.hours : series.map((point) => point.grossMinor);
