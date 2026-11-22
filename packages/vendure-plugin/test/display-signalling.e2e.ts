@@ -411,20 +411,36 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     const before = [await count('tally_display_code'), await count('tally_display_device')];
     const spies = [vi.spyOn(Logger, 'error'), vi.spyOn(Logger, 'warn')];
     const logged: unknown[] = [];
-    // Prune never reads keyHash, so only the key check and the register meet the fault, as a raw Postgres error.
-    await connection.rawConnection.query('ALTER TABLE "tally_display_device" RENAME COLUMN "keyHash" TO "keyHashOff"');
     try {
+      // Prune never reads keyHash, so only the key check and the register meet the fault, as a raw Postgres error.
+      await connection.rawConnection.query('ALTER TABLE "tally_display_device" RENAME COLUMN "keyHash" TO "keyHashOff"');
       expect(await refused(signalling.mint(ctx, device))).toBe('server');
       expect(await refused(signalling.list(ctx, device))).toBe('server');
       expect(await refused(signalling.registerDevice(ctx, 'till-m2'))).toBe('server');
-      const [status, body] = await answer('displays', { headers: { ...ctx.headers, 'X-Tally-Device-Id': 'till-m', 'X-Tally-Device-Key': device.deviceKey } });
-      expect([status, body.code]).toEqual([500, undefined]);
-      expect(JSON.stringify(body)).not.toContain(device.deviceKey);
+      // Every till route, raw, with ids that pass pathId and bodies that pass the controller's checks.
+      const headers = { ...ctx.headers, 'X-Tally-Device-Id': 'till-m', 'X-Tally-Device-Key': device.deviceKey };
+      const id = 'f'.repeat(32);
+      const routes: Array<[string, string, Record<string, string>, unknown?]> = [
+        ['POST', 'displays/codes', headers], ['GET', 'displays/pending', headers],
+        ['POST', `displays/pending/${id}/confirm`, headers], ['POST', `displays/pending/${id}/decline`, headers],
+        ['GET', 'displays', headers], ['GET', 'displays/signals', headers], ['DELETE', `displays/${id}`, headers],
+        ['POST', `displays/${id}/signals`, headers, { type: 'offer', payload: 'o1' }],
+        ['PUT', `displays/${id}/snapshot`, headers, { snapshot: { seq: 1 } }],
+        ['POST', 'displays/device', { ...ctx.headers, 'X-Tally-Device-Id': 'till-m2' }],
+      ];
+      for (const [method, path, h, json] of routes) {
+        const [status, body] = await answer(path, json === undefined ? { method, headers: h }
+          : { method, headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify(json) });
+        expect([`${method} ${path}`, status, body.code]).toEqual([`${method} ${path}`, 500, undefined]);
+        expect(JSON.stringify(body)).not.toContain(device.deviceKey);
+      }
     } finally {
       await connection.rawConnection.query('ALTER TABLE "tally_display_device" RENAME COLUMN "keyHashOff" TO "keyHash"');
       logged.push(...spies.flatMap(spy => spy.mock.calls));
       spies.forEach(spy => spy.mockRestore());
     }
+    // Vendure logged the raw Postgres error (`column "keyHash" does not exist`), so the spies did see the fault.
+    expect(logged.some(call => JSON.stringify(call).includes('keyHash'))).toBe(true);
     for (const call of logged) expect(JSON.stringify(call)).not.toContain(device.deviceKey);
     expect([await count('tally_display_code'), await count('tally_display_device')]).toEqual(before);
     // The till's key was kept and is still accepted, and the failed register left no row.
