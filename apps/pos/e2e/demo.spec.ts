@@ -1757,7 +1757,7 @@ test("Reports shows the store's figures online, and this till's only when offlin
   await expect(page.getByTestId('sales-filter-status-option-all')).toBeVisible();
   await expect(page.getByTestId('sales-filter-status-option-applied')).toHaveCount(0);
   await expect(page.getByTestId('sales-filter-status-option-pending')).toHaveCount(0);
-  await page.keyboard.press('Escape');
+  await page.getByTestId('sales-filter-status-option-all').click();
 
   // Offline: this till's own figures, under the line that says so.
   await page.context().setOffline(true);
@@ -1768,7 +1768,7 @@ test("Reports shows the store's figures online, and this till's only when offlin
   await expect(page.getByTestId('card-products')).not.toContainText('€9.52');
   await page.getByTestId('sales-filter-status').click();
   await expect(page.getByTestId('sales-filter-status-option-applied')).toBeVisible();
-  await page.keyboard.press('Escape');
+  await page.getByTestId('sales-filter-status-option-all').click();
 
   // Back online: the store's figures again.
   await page.context().setOffline(false);
