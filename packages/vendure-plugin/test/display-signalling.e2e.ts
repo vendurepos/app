@@ -1,12 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Global } from '@nestjs/common';
-import { PluginCommonModule, TransactionalConnection, VendurePlugin } from '@vendure/core';
+import { Logger, PluginCommonModule, TransactionalConnection, VendurePlugin } from '@vendure/core';
 import { DisplaySignallingError } from '@tallyui/core';
 import type { DisplaySignalling, DisplaySignallingContext, DisplaySignallingErrorCode, SyncContext, TillDevice } from '@tallyui/core';
 import { displaySignallingContract } from '@tallyui/core/server';
 import type { DisplaySignallingHarness } from '@tallyui/core/server';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { POS_TILL_PERMISSIONS, TallyPosPlugin } from '../src';
 import { TALLY_DISPLAY_CLOCK } from '../src/service/display-signalling.service';
 import { bootstrapSecondInstance, createPluginTestEnvironment } from './env';
@@ -402,5 +402,67 @@ describe('customer display signalling (TallyUI ADR-085 U7)', () => {
     expect((await signalling.claim(d, { code, displayName: 'Counter' })).checkCode).toMatch(/^\d{4}$/);
     const other = await mintAs(await pairTill('pending-cap', 'b'), 'till-l-b');
     expect((await signalling.claim(display('192.0.2.101'), { code: other.code, displayName: 'Counter' })).checkCode).toMatch(/^\d{4}$/);
+  });
+
+  it('(m) a database fault on the key check answers server, never device_refused, and changes nothing', async () => {
+    await fresh();
+    const ctx = await pairTill('cashier-m');
+    const device = await register(ctx, 'till-m');
+    const before = [await count('tally_display_code'), await count('tally_display_device')];
+    const spies = [vi.spyOn(Logger, 'error'), vi.spyOn(Logger, 'warn')];
+    const logged: unknown[] = [];
+    try {
+      // Prune never reads keyHash, so only the key check and the register meet the fault, as a raw Postgres error.
+      await connection.rawConnection.query('ALTER TABLE "tally_display_device" RENAME COLUMN "keyHash" TO "keyHashOff"');
+      expect(await refused(signalling.mint(ctx, device))).toBe('server');
+      expect(await refused(signalling.list(ctx, device))).toBe('server');
+      expect(await refused(signalling.registerDevice(ctx, 'till-m2'))).toBe('server');
+      // Every till route, raw, with ids that pass pathId and bodies that pass the controller's checks.
+      const headers = { ...ctx.headers, 'X-Tally-Device-Id': 'till-m', 'X-Tally-Device-Key': device.deviceKey };
+      const id = 'f'.repeat(32);
+      const routes: Array<[string, string, Record<string, string>, unknown?]> = [
+        ['POST', 'displays/codes', headers], ['GET', 'displays/pending', headers],
+        ['POST', `displays/pending/${id}/confirm`, headers], ['POST', `displays/pending/${id}/decline`, headers],
+        ['GET', 'displays', headers], ['GET', 'displays/signals', headers], ['DELETE', `displays/${id}`, headers],
+        ['POST', `displays/${id}/signals`, headers, { type: 'offer', payload: 'o1' }],
+        ['PUT', `displays/${id}/snapshot`, headers, { snapshot: { seq: 1 } }],
+        ['POST', 'displays/device', { ...ctx.headers, 'X-Tally-Device-Id': 'till-m2' }],
+      ];
+      for (const [method, path, h, json] of routes) {
+        const [status, body] = await answer(path, json === undefined ? { method, headers: h }
+          : { method, headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify(json) });
+        expect([`${method} ${path}`, status, body.code]).toEqual([`${method} ${path}`, 500, undefined]);
+        expect(JSON.stringify(body)).not.toContain(device.deviceKey);
+      }
+    } finally {
+      await connection.rawConnection.query('ALTER TABLE "tally_display_device" RENAME COLUMN "keyHashOff" TO "keyHash"');
+      logged.push(...spies.flatMap(spy => spy.mock.calls));
+      spies.forEach(spy => spy.mockRestore());
+    }
+    // Vendure logged the raw Postgres error (`column "keyHash" does not exist`), so the spies did see the fault.
+    expect(logged.some(call => JSON.stringify(call).includes('keyHash'))).toBe(true);
+    for (const call of logged) expect(JSON.stringify(call)).not.toContain(device.deviceKey);
+    expect([await count('tally_display_code'), await count('tally_display_device')]).toEqual(before);
+    // The till's key was kept and is still accepted, and the failed register left no row.
+    expect(await signalling.list(ctx, device)).toEqual([]);
+    expect(await count('tally_display_device', `"deviceId" = 'till-m2'`)).toBe(0);
+  });
+
+  it('(n) an adoption logs the device id and the cashier, and no log or later response carries the key', async () => {
+    await (await make()).seedLegacyDevice('till-n');
+    const spies = (['info', 'warn', 'error', 'debug', 'verbose'] as const).map(level => vi.spyOn(Logger, level));
+    try {
+      const ctx = await pairTill('cashier-n');
+      const { deviceKey } = await signalling.registerDevice(ctx, 'till-n');
+      const device = { deviceId: 'till-n', deviceKey };
+      await signalling.mint(ctx, device);
+      const headers = { ...ctx.headers, 'X-Tally-Device-Id': 'till-n', 'X-Tally-Device-Key': deviceKey };
+      for (const path of ['displays', 'displays/pending']) expect(JSON.stringify((await answer(path, { headers }))[1])).not.toContain(deviceKey);
+      const adoptions = spies[0].mock.calls.filter(([message]) => String(message).includes('"till-n"') && String(message).includes('"cashier-n"'));
+      expect(adoptions).toHaveLength(1);
+      for (const call of spies.flatMap(spy => spy.mock.calls)) expect(JSON.stringify(call)).not.toContain(deviceKey);
+    } finally {
+      spies.forEach(spy => spy.mockRestore());
+    }
   });
 });
