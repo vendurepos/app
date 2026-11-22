@@ -2630,9 +2630,12 @@ test('the cashier sheet shows the register and since in its header, your sales t
   const movement = page.getByTestId('movement-sheet');
   // v2's paid-in reason chips, in v2's order (CHECKLIST 6.3); the shot is v2's 09c, amount still empty.
   await expect(movement.getByTestId('movement-reason-chips').locator('> *')).toHaveText(['Float', 'Change', 'Bank', 'Other…']);
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.mouse.move(480, 0);
   // Let the dialog's fade-in settle before the shot.
   await page.waitForTimeout(500);
   await page.screenshot({ path: test.info().outputPath('09c-register-paid-in-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await movement.getByTestId('movement-amount').fill('5.00');
   await movement.getByTestId('movement-reason-change').click();
   await expect(movement.getByTestId('movement-reason')).toHaveValue('Change');
