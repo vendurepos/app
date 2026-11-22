@@ -217,7 +217,12 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
       case 'PublicFacets': case 'facets': data = { facets: page(DEMO_FACETS, variables.options) }; break;
       case 'CollectionImages': case 'collections':
-        if (storage.getItem(DEMO_COLLECTIONS_REFUSED_KEY) === '1') return reply({ errors: [{ message: 'Forbidden' }] }, undefined, 403);
+        if (storage.getItem(DEMO_COLLECTIONS_REFUSED_KEY) === '1') {
+          // e2e only: counts the refusals, so a test can tell the refused read ran.
+          const counter = globalThis as { __demoCollectionsRefused?: number };
+          counter.__demoCollectionsRefused = (counter.__demoCollectionsRefused ?? 0) + 1;
+          return reply({ errors: [{ message: 'Forbidden' }] }, undefined, 403);
+        }
         data = { collections: page(DEMO_COLLECTION_IMAGES, variables.options) }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
       case 'GlobalStockSettings': case 'globalSettings': data = { globalSettings: {

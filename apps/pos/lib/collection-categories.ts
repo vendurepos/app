@@ -56,7 +56,8 @@ export function useCollectionCategories(session: Session, products: readonly unk
     let cancelled = false;
     listCollectionImages(sessionContext(session)).then(
       items => { if (!cancelled) setCollections(items); },
-      () => { if (!cancelled) setCollections(null); });
+      // A failed re-read keeps the last images; only a session change (above) clears them.
+      () => {});
     return () => { cancelled = true; };
   }, [session, generation]);
   return useMemo(() => withCollectionImages(listCategories(products, traits), collections), [products, traits, collections]);
