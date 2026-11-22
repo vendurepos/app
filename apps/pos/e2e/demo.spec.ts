@@ -2326,10 +2326,29 @@ test('Settings shows one section at a time, General first, and stacks behind Men
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId('variance-limit')).toBeVisible();
   await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  // A pick from Menu shows its section, and the list goes with no Done (9.1b).
   await page.getByText('Menu', { exact: true }).click();
   await page.getByTestId('settings-section-barcode').click();
-  await page.getByText('Done', { exact: true }).click();
   await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  await page.getByText('Menu', { exact: true }).click();
+  await page.getByTestId('settings-section-register').click();
+  await expect(page.getByTestId('variance-limit')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+});
+
+test('at split width, Settings keeps its list beside each picked section, the same list throughout (9.1b)', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await openSettings(page, 'register');
+  await expect(page.getByTestId('variance-limit')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toBeVisible();
+  await page.getByTestId('settings-section-barcode').click();
+  await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toBeVisible();
+  // The picked item keeps focus: a remounted layout would replace the list, and focus would fall back to the page.
+  await expect(page.getByTestId('settings-section-barcode')).toBeFocused();
 });
 
 test('Settings keeps the tile size for this till, and the grid takes it at once', async ({ page }) => {
