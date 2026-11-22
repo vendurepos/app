@@ -659,6 +659,7 @@ function Sale({
     <>
       {switchError ? <Text testID="open-sale-tabs-error" className="px-4 py-2 text-sm text-destructive">{switchError}</Text> : null}
       <OpenSaleTabs sales={openSales(sale.order, parked)} currency={session.settings.currency}
+        className={openOrdersPosition === 'top' ? 'border-t-0 border-b' : undefined}
         onSelect={(id) => void switchTo(id)} onNew={() => void switchTo(null)} />
     </>
   ) : null;

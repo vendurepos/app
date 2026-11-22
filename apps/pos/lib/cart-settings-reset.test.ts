@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from 'vitest';
 import { loadAutoPrint, saveAutoPrint } from './auto-print-setting';
 import { loadAutoShowReceipt, saveAutoShowReceipt } from './auto-show-receipt-setting';
-import { loadCartColumns, saveCartColumns } from './cart-columns-setting';
+import { CART_COLUMN_ORDER, loadCartColumns, moveCartColumn, saveCartColumns } from './cart-columns-setting';
 import { resetCartSettings } from './cart-settings-reset';
 import { loadCartSide, saveCartSide } from './cart-side-setting';
 import { loadCartSort, saveCartSort } from './cart-sort-setting';
@@ -18,7 +18,7 @@ beforeEach(() => {
 it('restores all seven cart settings to the defaults read from an empty store', () => {
   const data = new Map<string, string>();
   const empty: KeyValueStore = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { data.set(key, value); }, removeItem: (key) => { data.delete(key); } };
-  const columns = { image: { show: true } };
+  const columns = { image: { show: true }, order: ['total', 'quantity', 'image', 'name', 'sku', 'price'] as const };
   const position = loadOpenOrdersPosition(empty) === 'top' ? 'bottom' : 'top';
   const showReceipt = !loadAutoShowReceipt(empty);
   saveCartSide('left', store);
@@ -45,6 +45,13 @@ it('restores all seven cart settings to the defaults read from an empty store', 
   expect(loadQuickDiscounts(store)).toEqual(loadQuickDiscounts(empty));
   expect(loadAutoShowReceipt(store)).toEqual(loadAutoShowReceipt(empty));
   expect(loadAutoPrint(store)).toEqual(loadAutoPrint(empty));
+});
+
+it('puts a moved column order back to the default order (9.10b)', () => {
+  saveCartColumns(moveCartColumn(loadCartColumns(store), 'total', -1), store);
+  expect(loadCartColumns(store).order).toEqual(['quantity', 'image', 'name', 'sku', 'total', 'price']);
+  resetCartSettings(store);
+  expect(loadCartColumns(store).order).toEqual(CART_COLUMN_ORDER);
 });
 
 it('keeps a setting outside the cart settings', () => {
