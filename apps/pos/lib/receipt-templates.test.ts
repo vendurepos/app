@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest';
 import { SYSTEM_PRINTER_ID, type PrinterProfile } from '@tallyui/pos';
-import { PRINT_DIALOG, RECEIPT_TEMPLATES, receiptPrinter, routablePrinters, templatePrinter, templatePrinterLabel } from './receipt-templates';
+import {
+  PRINT_DIALOG, RECEIPT_TEMPLATES, receiptPrinter, routablePrinters, sheetPrinter, sheetTemplateId, templatePrinter, templatePrinterLabel,
+} from './receipt-templates';
 
 // TEST-NET-1 addresses: never a real printer.
 const epson80: PrinterProfile = { id: 'front', name: 'Front counter', connectionType: 'network', vendor: 'epson', address: '192.0.2.10', port: 9100, columns: 48 };
@@ -53,4 +55,21 @@ it('labels each row as v2 does', () => {
   expect(templatePrinterLabel(thermal80, [epson80], { 'thermal-80mm': SYSTEM_PRINTER_ID })).toBe('Print dialog');
   expect(templatePrinterLabel(thermal80, [epson80], { 'thermal-80mm': epson80.id })).toBe('Front counter');
   expect(templatePrinterLabel(standard, [epson80], {})).toBe('Print dialog');
+});
+
+it("opens the print sheet on the template today's Print receipt follows, the default printer first", () => {
+  expect(sheetTemplateId([], {})).toBe('standard');
+  expect(sheetTemplateId([epson80], {})).toBe('thermal-80mm');
+  expect(sheetTemplateId([star58], {})).toBe('thermal-58mm');
+  expect(sheetTemplateId([epson80, { ...star58, isDefault: true }], {})).toBe('thermal-58mm');
+  expect(sheetTemplateId([epson80], { 'thermal-80mm': SYSTEM_PRINTER_ID })).toBe('standard');
+});
+
+it("prints the sheet's template on the pick for this print, else on its route", () => {
+  expect(sheetPrinter(standard, [epson80], {}, null)).toBeNull();
+  expect(sheetPrinter(standard, [epson80], {}, epson80.id)).toBeNull();
+  expect(sheetPrinter(thermal80, [epson80, star58], {}, null)).toBe(epson80);
+  expect(sheetPrinter(thermal80, [epson80, star58], {}, SYSTEM_PRINTER_ID)).toBeNull();
+  expect(sheetPrinter(thermal80, [epson80, star58], {}, star58.id)).toBe(star58);
+  expect(sheetPrinter(thermal80, [epson80, star58], {}, 'gone')).toBeNull();
 });

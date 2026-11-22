@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { Button, discountLabel, orderReference, Text, VStack } from '@tallyui/components';
 import type { ServerCapabilities, SyncContext } from '@tallyui/core';
@@ -7,6 +7,7 @@ import type { RxCollection } from 'rxdb';
 import { loadAutoPrint } from './auto-print-setting';
 import { canEmailReceipt } from './receipt-email';
 import { EmailReceiptAction, ReceiptEmailPanel, receiptEmailDefault, useReceiptEmailToggle, useStoredOrderCode } from './receipt-email-action';
+import { ReceiptPrintSheet } from './receipt-print-sheet';
 import { printFailedAfterClose, useReceiptPrinter } from './receipt-printer';
 import { ReceiptView } from './receipt-view';
 
@@ -35,9 +36,10 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
     ? buildReceiptData(stage.order, { storeName: store, cashier, register: registerId }) : null, [stage, store, cashier, registerId]);
   const { printer, busy, status, print: printDirect } = useReceiptPrinter();
   // Only a direct print fails; the till's notice offers Orders, not the dialog button that went with the receipt.
-  const afterPrint = useCallback((failure: string | null) => {
-    if (failure !== null && !mounted.current && printer !== null) onPrintFailedAfterClose?.(printFailedAfterClose(printer.name));
-  }, [onPrintFailedAfterClose, printer]);
+  const afterPrint = useCallback((failure: string | null, name: string) => {
+    if (failure !== null && !mounted.current) onPrintFailedAfterClose?.(printFailedAfterClose(name));
+  }, [onPrintFailedAfterClose]);
+  const [sheetOpen, setSheetOpen] = useState(false);
   // A direct printer takes the receipt (resolving to its failure line, or null); without one, the browser's print dialog does.
   const print = useMemo(() => {
     if (Platform.OS !== 'web' || receipt === null) return undefined;
@@ -47,22 +49,25 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
   useEffect(() => {
     if (receiptOrderId === null || receiptOrderId === printedFor.current) return;
     printedFor.current = receiptOrderId;
-    if (loadAutoPrint()) void print?.().then(afterPrint);
-  }, [receiptOrderId, print, afterPrint]);
+    if (loadAutoPrint()) void print?.().then((failure) => { if (printer) afterPrint(failure, printer.name); });
+  }, [receiptOrderId, print, afterPrint, printer]);
   if (stage.kind !== 'receipt' || receipt === null) return null;
   const { order, posOrder } = stage;
   const emailTo = canEmailReceipt(capabilities) && code !== null && context !== undefined ? { code, context } : null;
+  const view = {
+    receipt,
+    orderLine: `Order ${orderReference(posOrder)} · ${till ? `Till: ${receipt.header.cashier}` : receipt.header.cashier}`,
+    customer: order.customer?.name,
+    lineDiscountLabel: (i: number, j: number) => `${discountLabel(order.lineItems[i].discounts[j], receipt.currency)} off`,
+  };
   return (
     <>
-      <ReceiptView receipt={receipt} testID="receipt"
-        orderLine={`Order ${orderReference(posOrder)} · ${till ? `Till: ${receipt.header.cashier}` : receipt.header.cashier}`}
-        customer={order.customer?.name}
-        lineDiscountLabel={(i, j) => `${discountLabel(order.lineItems[i].discounts[j], receipt.currency)} off`}
+      <ReceiptView {...view} testID="receipt"
         actions={(
           <>
-            {/* The direct printer or the browser's print dialog; native has no print path yet, so no button there. */}
+            {/* The print sheet (a direct printer or the browser's print dialog); native has no print path yet, so no button there. */}
             {print ? (
-              <Button testID="receipt-print" variant="secondary" disabled={busy} onPress={() => void print().then(afterPrint)}>
+              <Button testID="receipt-print" variant="secondary" disabled={busy} onPress={() => setSheetOpen(true)}>
                 <Text>Print receipt</Text>
               </Button>
             ) : null}
@@ -86,6 +91,15 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
         <ReceiptEmailPanel testID="receipt-email-panel" context={emailTo.context} orderCode={emailTo.code}
           defaultAddress={receiptEmailDefault(order.customer)} sendKey={email.sendKey} />
       ) : null}
+      <ReceiptPrintSheet open={sheetOpen} onOpenChange={setSheetOpen} onPrint={(target) => {
+        if (target === null) window.print();
+        else void printDirect(receipt, target).then((failure) => afterPrint(failure, target.name));
+      }}>
+        {/* The sheet draws through the root PortalHost, outside the sale's CurrencyProvider. */}
+        <CurrencyProvider currencyCode={receipt.currency}>
+          <ReceiptView {...view} testID="receipt-preview" />
+        </CurrencyProvider>
+      </ReceiptPrintSheet>
     </>
   );
 }

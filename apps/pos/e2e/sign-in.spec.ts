@@ -5,7 +5,7 @@ import { expectClosureCash, openAllProducts, openRegister } from './register';
 import { wedgeScan } from './wedge';
 
 declare global {
-  interface Window { cspViolations: string[]; printCalls: number }
+  interface Window { cspViolations: string[]; printCalls: number; printsWithSheet: number }
 }
 
 let cspConsole: string[] = [];
@@ -628,16 +628,25 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
   await tender.getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
   await expect(receipt.getByTestId('receipt-total')).toHaveText('€9.52');
-  // Playwright can't drive the OS print dialog: window.print becomes a recorder.
+  // Playwright can't drive the OS print dialog: window.print becomes a recorder. printsWithSheet counts the calls made
+  // while the print sheet is still in the document.
   await page.evaluate(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
   await receipt.getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   await page.getByTestId('register-bar-cashier').click();
   // What the dialog would print: the receipt's lines and figures, and none of the till around them.
   await page.emulateMedia({ media: 'print' });
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   await expect(receipt.getByText('1 × Tally Fixture Mug')).toBeVisible();
   for (const id of ['receipt-subtotal', 'receipt-total', 'receipt-payment-cash', 'receipt-change']) {
     await expect(receipt.getByTestId(id)).toBeVisible();
