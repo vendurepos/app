@@ -17,15 +17,17 @@ export function refundEnvelopeStrictErrors(command: Record<string, unknown>, ver
 
 const PAYLOAD = {
   ...since(1, 'clientOrderId createdAt currency pricesIncludeTax lines subtotalMinor taxMinor totalMinor payments customer registerId cashierRef locationId'),
-  discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'), ...since(6, 'coupons'), note: 7,
+  discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'), ...since(6, 'coupons'), note: 7, taxAddress: 8,
 };
 const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5,
   ...since(6, 'regularUnitPriceMinor attributes anyAttributes') };
 const FEE = since(1, 'clientFeeId name amountMinor taxStatus taxClass taxMinor');
 const SHIPPING = since(1, 'clientShippingId name methodId amountMinor taxStatus taxClass taxMinor');
 const LINE_CUSTOM = since(1, 'name sku taxClass taxStatus');
-const PAYMENT = since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference');
-const CUSTOMER = { email: 1, customerId: 3 };
+const PAYMENT = { ...since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference'), methodId: 10 };
+const CUSTOMER = { email: 1, customerId: 3, billing: 8, shipping: 8 };
+// Coupons are refused below; the table names v9's `lines`, so it reads "not supported", never "unknown field".
+const COUPON = { ...since(6, 'code couponId discountMinor discountTaxMinor'), lines: 9 };
 // Inside v3's `display` and `taxByRate` (their parents carry the version).
 const DISPLAY = { ...since(1, 'currency exponent taxInclusive subtotalMinor discountMinor taxMinor totalMinor orderDiscountMinor lines'), fees: 5, shipping: 5, coupons: 6 };
 const DISPLAY_FEE = since(1, 'clientFeeId amountMinor');
@@ -70,9 +72,19 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
     if (isObject(line) && Object.hasOwn(line, 'anyAttributes')) unsupported(`lines[${index}].anyAttributes`);
   });
+  // 3.2a-1: v8's tax address and customer addresses are refused until this server honours them.
+  if (Object.hasOwn(payload, 'taxAddress')) unsupported('taxAddress');
+  for (const field of ['billing', 'shipping']) {
+    if (isObject(payload.customer) && Object.hasOwn(payload.customer, field)) unsupported(`customer.${field}`);
+  }
+  // 3.2a-1 only: v10's methodId is refused until Part 2 honours it (Part 2 removes this refusal).
+  (Array.isArray(payload.payments) ? payload.payments : []).forEach((payment, index) => {
+    if (isObject(payment) && Object.hasOwn(payment, 'methodId')) unsupported(`payments[${index}].methodId`);
+  });
   each(payload.lines, LINE, 'lines', (line, at) => check(line.custom, LINE_CUSTOM, `${at}.custom`));
   each(payload.fees, FEE, 'fees');
   each(payload.shipping, SHIPPING, 'shipping');
+  each(payload.coupons, COUPON, 'coupons');
   each(payload.payments, PAYMENT, 'payments');
   check(payload.customer, CUSTOMER, 'customer');
   if (check(payload.display, DISPLAY, 'display')) {

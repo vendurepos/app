@@ -10,9 +10,9 @@ import type { ListedRegister } from '../register-choice';
 
 // All mutable demo data is saved together, including the command ledger.
 export const DEMO_STORAGE_KEY = 'vendurepos.demo-store.v1';
-// Matches the plugin's /tally/v1/info (order.create 1–7 since P2.11a) with the dev store's OrderLevelTaxCalculationStrategy.
+// Matches the plugin's /tally/v1/info (order.create 1–10 since 3.2a-1) with the dev store's OrderLevelTaxCalculationStrategy.
 export const DEMO_INFO = {
-  contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1], 'order.refund': [1] },
+  contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], register: [1], 'order.refund': [1] },
   maxShippingLines: 1,
   lineTax: { none: true, classes: true },
   taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },

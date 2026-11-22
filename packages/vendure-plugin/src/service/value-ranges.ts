@@ -87,6 +87,11 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
     // Stored only in the tallyPayments text.
     for (const field of ['tenderedMinor', 'changeMinor'] as const) minor(payment[field], `${path}.${field}`, Number.MAX_SAFE_INTEGER);
     for (const field of ['clientPaymentId', 'reference'] as const) text(payment[field], `${path}.${field}`);
+    // v10 (3.2a-1): the store's payment method id, 1 to 64 characters.
+    const { methodId } = payment as unknown as { methodId?: unknown };
+    if (methodId !== undefined && (typeof methodId !== 'string' || methodId.length < 1 || methodId.length > 64)) {
+      errors.push(`${path}.methodId: expected 1 to 64 characters`);
+    }
   });
   return errors;
 }
