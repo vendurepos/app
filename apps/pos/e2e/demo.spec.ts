@@ -19,7 +19,7 @@ async function openSettings(page: Page, section: string) {
 
 declare global {
   interface Window {
-    printCalls: number; scanTones: number[];
+    printCalls: number; printsWithSheet: number; scanTones: number[];
     cameraStreams: MediaStream[];
     cameraSees: { code: string; format: string } | null;
     chooserCalls: { kind: string; options: unknown }[];
@@ -1657,15 +1657,24 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await expect(reprint.getByTestId('order-receipt-order')).toContainText('DEMO-');
 
   // Playwright can't drive the OS print dialog: window.print becomes a recorder.
+  // printsWithSheet counts the calls made while the print sheet is still in the document.
   await page.evaluate(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
   await reprint.getByTestId('order-receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   // What the dialog would print: the receipt alone, none of the orders panel or sheet around it.
   await page.emulateMedia({ media: 'print' });
   await expect(reprint).toBeVisible();
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   for (const id of ['order-sheet-close', 'order-receipt-print', 'order-receipt-back']) {
     await expect(page.getByTestId(id)).toBeHidden();
   }
@@ -3502,7 +3511,11 @@ test("Settings › Tax shows the channel's tax, read-only: prices without tax an
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
   await page.addInitScript(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -3521,8 +3534,13 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  // The auto print opens no sheet.
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   await page.getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(2);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   await page.getByTestId('new-sale').click();
   await openSettings(page, 'printing');
   await page.getByTestId('auto-print-toggle').click();
@@ -3535,7 +3553,10 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await page.getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
 });
 
 test('Settings › Printing adds, edits and removes a printer kept on this device', async ({ page }) => {
@@ -3606,11 +3627,18 @@ async function addEpsonPrinter(page: Page) {
   await expect(page.getByTestId('printer-summary')).toHaveText(`Network · Epson · ${PRINTER_HOST}:9100 · 80 mm`);
 }
 
-/** Playwright can't drive the OS print dialog: window.print becomes a recorder, from the first page load. */
+/**
+ * Playwright can't drive the OS print dialog: window.print becomes a recorder, from the first page load.
+ * printsWithSheet counts the calls made while the print sheet is still in the document.
+ */
 async function recordPrintDialog(page: Page) {
   await page.addInitScript(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
 }
 
@@ -3674,13 +3702,18 @@ test.describe('with a network printer', () => {
     const receipt = page.getByTestId('receipt');
     await expect(receipt).toBeVisible();
     // A double tap prints one receipt: the posts below count every request.
-    await doubleTap(receipt.getByTestId('receipt-print'));
+    await receipt.getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await doubleTap(page.getByTestId('receipt-print-button'));
     await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
     await expect(page.getByTestId('receipt-print-dialog')).toHaveCount(0);
     printer.reachable = false;
     await receipt.getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('receipt-print-status')).toHaveText(PRINTER_FAILED);
     expect(printer.posts).toBe(2);
     // The receipt still shows, so its own line says it: no till notice too. Counted now, not waited for: the notice
@@ -3688,6 +3721,7 @@ test.describe('with a network printer', () => {
     expect(await page.getByTestId('print-failed-toast').count()).toBe(0);
     await page.getByTestId('receipt-print-dialog').click();
     await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   });
 
   test('with an Epson network printer and Print after each sale on, the receipt goes to the printer by itself, once', async ({ page }) => {
@@ -3707,6 +3741,9 @@ test.describe('with a network printer', () => {
     await page.waitForTimeout(1000);
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
+    // The auto print opens no sheet.
+    await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   });
 
   test("with Auto-show receipt off and the Epson printer unreachable, the till says the receipt didn't print", async ({ page }) => {
@@ -3780,16 +3817,21 @@ test.describe('with a network printer', () => {
     await page.getByTestId('order-sheet-receipt').click();
     const reprint = page.getByTestId('order-receipt');
     await reprint.getByTestId('order-receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('order-receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     await expect(page.getByTestId('order-receipt-print-dialog')).toHaveCount(0);
     printer.reachable = false;
     await reprint.getByTestId('order-receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('order-receipt-print-status')).toHaveText(PRINTER_FAILED);
     expect(printer.posts).toBe(2);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
     await page.getByTestId('order-receipt-print-dialog').click();
     await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   });
 
   test('Settings › Printing routes each receipt template to a printer, kept on this device, and Print receipt follows it', async ({ page }) => {
@@ -3823,7 +3865,10 @@ test.describe('with a network printer', () => {
     await openRegister(page);
     await sellMug(page);
     await page.getByTestId('receipt').getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect.poll(printCalls).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
     expect(printer.posts).toBe(0);
     await expect(page.getByTestId('receipt-print-status')).toHaveCount(0);
     // Back to Auto: the next receipt goes to the printer again.
@@ -3834,10 +3879,120 @@ test.describe('with a network printer', () => {
     await page.getByTestId('settings-back').click();
     await sellMug(page);
     await page.getByTestId('receipt').getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     expect(await printCalls()).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   });
+
+  test('Print receipt opens the receipt sheet: template, printer for this print and preview, and the pick is not kept', async ({ page }) => {
+    await recordPrintDialog(page);
+    const printer = await epsonPrinter(page);
+    const printCalls = () => page.evaluate(() => window.printCalls);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await sellMug(page);
+    const receipt = page.getByTestId('receipt');
+    const sheet = page.getByTestId('receipt-dialog');
+    const printerSelect = page.getByTestId('receipt-printer-select');
+    // Opening prints nothing: the sheet opens on the template and printer today's Print receipt follows.
+    await receipt.getByTestId('receipt-print').click();
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId('receipt-template-select')).toHaveText('Thermal receipt (80 mm)');
+    await expect(printerSelect).toHaveText('Auto — Front counter');
+    await expect(page.getByTestId('receipt-preview-total')).toHaveText('€9.52');
+    await expect(page.getByTestId('receipt-email-button')).toHaveCount(0);
+    await expect(page.getByTestId('receipt-download-pdf-button')).toHaveCount(0);
+    expect(printer.posts).toBe(0);
+    expect(await printCalls()).toBe(0);
+    // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/12c-receipt-print-sheet-vendurepos.webp (cwebp -q 80).
+    await page.setViewportSize({ width: 960, height: 600 });
+    await page.mouse.move(480, 0);
+    await page.screenshot({ path: test.info().outputPath('12c-receipt-print-sheet-vendurepos.png') });
+    await page.setViewportSize(devices['Desktop Chrome'].viewport);
+    // The print dialog for this print only.
+    await printerSelect.click();
+    await page.getByTestId('receipt-printer-system').click();
+    await expect(printerSelect).toHaveText('Print dialog');
+    await page.getByTestId('receipt-print-button').click();
+    await expect.poll(printCalls).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
+    await expect(sheet).toHaveCount(0);
+    expect(printer.posts).toBe(0);
+    // The pick is not kept: the sheet opens on Auto again, and Close prints nothing.
+    await receipt.getByTestId('receipt-print').click();
+    await expect(printerSelect).toHaveText('Auto — Front counter');
+    await page.getByTestId('receipt-close-button').click();
+    await expect(sheet).toHaveCount(0);
+    expect(printer.posts).toBe(0);
+    expect(await printCalls()).toBe(1);
+    // A template change puts the pick back to Auto, as v2.
+    await receipt.getByTestId('receipt-print').click();
+    await printerSelect.click();
+    await page.getByTestId('receipt-printer-system').click();
+    await page.getByTestId('receipt-template-select').click();
+    await page.getByTestId('receipt-template-standard').click();
+    await expect(printerSelect).toHaveCount(0);
+    await expect(page.getByTestId('print-sheet-printer')).toContainText('Print dialog');
+    await page.getByTestId('receipt-template-select').click();
+    await page.getByTestId('receipt-template-thermal-80mm').click();
+    await expect(printerSelect).toHaveText('Auto — Front counter');
+    await page.getByTestId('receipt-print-button').click();
+    await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    expect(await printCalls()).toBe(1);
+    // Nothing was saved to Settings › Printing.
+    await openSettings(page, 'printing');
+    await expect(page.getByTestId('template-row-thermal-80mm-printer')).toHaveText('Auto — Front counter');
+  });
+});
+
+/** A sale's receipt sheet, open, with no printer: Print goes to the print dialog once the sheet has slid out. */
+async function openPrintSheet(page: Page) {
+  await recordPrintDialog(page);
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await sellMug(page);
+  await page.getByTestId('receipt').getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+}
+
+/** The sheet's Print, then `second`, in one task (as `doubleTap`): the second click always lands in the slide-out. */
+async function printThen(page: Page, second: string) {
+  await page.evaluate((id) => {
+    for (const each of ['receipt-print-button', id]) document.querySelector<HTMLElement>(`[data-testid="${each}"]`)!.click();
+  }, second);
+}
+
+test('New sale while the receipt sheet slides out drops its print dialog, so the next till is not printed', async ({ page }) => {
+  await openPrintSheet(page);
+  await printThen(page, 'new-sale');
+  await expect(page.getByTestId('receipt')).toHaveCount(0);
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  // The dropped print would come with the sheet's unmount, already passed: a moment more, then count.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.printCalls)).toBe(0);
+});
+
+test('Orders opened while the receipt sheet slides out drops its print dialog, so the panel is not printed', async ({ page }) => {
+  await openPrintSheet(page);
+  await printThen(page, 'orders-open');
+  await expect(page.getByTestId('orders-panel')).toBeVisible();
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+  // The till, and its receipt, is hidden behind the panel, not unmounted.
+  await expect(page.getByTestId('receipt')).toBeHidden();
+  await expect(page.getByTestId('receipt')).toHaveCount(1);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.printCalls)).toBe(0);
 });
 
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {

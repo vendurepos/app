@@ -44,3 +44,21 @@ export function templatePrinterLabel(template: AppReceiptTemplate, profiles: rea
   const chosen = template.engine === 'html' || routablePrinters(profiles).some((printer) => printer.id === overrides[template.id]);
   return chosen ? name : `Auto — ${name}`;
 }
+
+/** The template the sheet opens on: the thermal template today's Print receipt follows (receiptPrinter), else Standard. */
+export function sheetTemplateId(profiles: readonly PrinterProfile[], overrides: Readonly<Record<string, string>>): string {
+  const printer = receiptPrinter(profiles, overrides);
+  return RECEIPT_TEMPLATES.find((template) => printer !== null && template.engine === 'thermal'
+    && templatePrinter(template, profiles, overrides) === printer)?.id ?? 'standard';
+}
+
+/**
+ * Where this print goes: a direct printer, or null for the print dialog. Standard always goes to the dialog. A thermal
+ * template goes to the cashier's pick for this print when there is one, else to its route (templatePrinter).
+ */
+export function sheetPrinter(template: AppReceiptTemplate, profiles: readonly PrinterProfile[],
+  overrides: Readonly<Record<string, string>>, manualPrinterId: string | null): PrinterProfile | null {
+  if (template.engine === 'html') return null;
+  const printer = resolvePrinter({ template, profiles: routablePrinters(profiles), overrides, manualPrinterId: manualPrinterId ?? undefined });
+  return printer === PRINT_DIALOG ? null : printer;
+}
