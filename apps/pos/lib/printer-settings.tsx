@@ -1,4 +1,5 @@
-import { useState, type JSX } from 'react';
+import { useRef, useState, type JSX } from 'react';
+import { Platform } from 'react-native';
 import { Button, HStack, Input, InputField, Label, Text, ToggleGroup, ToggleGroupItem, VStack } from '@tallyui/components';
 import { mintUuid, networkSinkFor, PAPER_COLUMNS, type PrinterProfile, type ReceiptPaper } from '@tallyui/pos';
 import {
@@ -17,6 +18,7 @@ export function PrinterSettings(): JSX.Element {
   const [vendor, setVendor] = useState<SavedPrinterVendor>('epson');
   // Each printer's Test print: busy while it runs, then its status line.
   const [tests, setTests] = useState<Record<string, { busy: boolean; text?: string }>>({});
+  const testing = useRef(new Set<string>());
   const [address, setAddress] = useState('');
   const [port, setPort] = useState(String(DEFAULT_PRINTER_PORT));
   const [paper, setPaper] = useState<ReceiptPaper>('80mm');
@@ -31,8 +33,12 @@ export function PrinterSettings(): JSX.Element {
     setFormOpen(true);
   }
   async function testPrint(profile: PrinterProfile) {
+    // `busy` disables the button only from the next render: a double tap lands before it.
+    if (testing.current.has(profile.id)) return;
+    testing.current.add(profile.id);
     setTests((all) => ({ ...all, [profile.id]: { busy: true } }));
     const failure = await printTestTo(profile);
+    testing.current.delete(profile.id);
     setTests((all) => ({ ...all, [profile.id]: { busy: false, text: failure ?? printedOn(profile.name) } }));
   }
   function save() {
@@ -67,7 +73,8 @@ export function PrinterSettings(): JSX.Element {
           removePrinterProfile(profile.id);
           setPrinters(loadPrinterProfiles());
         }}><Text>Remove</Text></Button>
-        {networkSinkFor(profile) !== null &&
+        {/* Native has no print path yet, as with the receipts' Print button. */}
+        {Platform.OS === 'web' && networkSinkFor(profile) !== null &&
           <Button testID="printer-test" variant="outline" disabled={tests[profile.id]?.busy === true}
             onPress={() => void testPrint(profile)}><Text>Test print</Text></Button>}
       </HStack>
@@ -114,6 +121,6 @@ export function PrinterSettings(): JSX.Element {
         {connection === 'network' && vendor === 'generic' && <Text testID="printer-vendor-help">
           Receipts go to Epson and Star network printers directly. Other printers print through the print dialog.</Text>}
       </VStack>}
-    <Text>Receipts print on the first Epson or Star network printer, the default one first; without one, through the print dialog.</Text>
+    <Text>Receipts print on the first Epson or Star network printer in this list. Without one, they print through the print dialog.</Text>
   </>;
 }

@@ -12,8 +12,6 @@ export function OrderReceipt({ order, store, pricesIncludeTax, onBack }: {
   order: VendureOrder; store: string; pricesIncludeTax: boolean; onBack(): void;
 }): JSX.Element {
   const receipt = storedReceiptData(order, { storeName: store, pricesIncludeTax });
-  // No money format for the printer: the CurrencyProvider below sets no locale or format, so its formatter and the
-  // transport's default (formatMoney for the receipt's currency) print the same figures.
   const direct = useReceiptPrinter();
   // The orders panel sits outside the sale's CurrencyProvider; the order's own currency formats its money, as the live receipt's does.
   return (

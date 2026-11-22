@@ -25,6 +25,9 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
+// ePOS-Print carries the ESC/POS bytes as hex in <command>.
+const hex = (text: string) => Buffer.from(text, 'latin1').toString('hex');
+
 function onlyRequest(): { url: URL; init: RequestInit } {
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -76,13 +79,19 @@ it('says it cannot print on an error answer', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+it('prints euro amounts the printer can show, not "?"', async () => {
+  // The transport's default folds € to the default code page (cp437 has no €) and falls back to the currency code.
+  expect(await printReceiptTo(epson, receipt)).toBeNull();
+  const body = String(onlyRequest().init.body);
+  expect(body).toContain(hex('9.52'));
+  expect(body).not.toContain(hex('?9.52'));
+});
+
 it('posts a test page to the Epson printer', async () => {
   expect(await printTestTo(epson)).toBeNull();
   const { url, init } = onlyRequest();
   expect(url.hostname).toBe('192.0.2.10');
   expect(init.method).toBe('POST');
-  // ePOS-Print carries the ESC/POS bytes as hex in <command>.
-  const hex = (text: string) => Buffer.from(text, 'latin1').toString('hex');
   for (const line of ['VendurePOS test print', 'Front counter', '80 mm paper']) expect(String(init.body)).toContain(hex(line));
 });
 

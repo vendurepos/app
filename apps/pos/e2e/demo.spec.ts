@@ -3248,6 +3248,31 @@ async function addEpsonPrinter(page: Page) {
   await expect(page.getByTestId('printer-summary')).toHaveText(`Network · Epson · ${PRINTER_HOST}:9100 · 80 mm`);
 }
 
+/** Playwright can't drive the OS print dialog: window.print becomes a recorder, from the first page load. */
+async function recordPrintDialog(page: Page) {
+  await page.addInitScript(() => {
+    window.printCalls = 0;
+    window.print = () => { window.printCalls++; };
+  });
+}
+
+/**
+ * Two clicks in one task, before React re-renders: the case `busy` can't stop (a real double click lets React disable
+ * the button in between, so it would pass without the print's own guard).
+ */
+async function doubleTap(button: Locator) {
+  await button.evaluate((element: HTMLElement) => { element.click(); element.click(); });
+}
+
+/** One mug, paid exactly in cash. */
+async function sellMug(page: Page) {
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+}
+
 test.describe('with a network printer', () => {
   // The demo's CSP lets the page reach https: and loopback only; a till that prints to a LAN printer over plain http is
   // the VENDUREPOS_WEB_ALLOW_LAN_HTTP build (connect-src http:). These tests lift the CSP in place of that build.
@@ -3259,7 +3284,8 @@ test.describe('with a network printer', () => {
     await page.getByTestId('demo-enter').click();
     await expectSignedIn(page);
     await addEpsonPrinter(page);
-    await page.getByTestId('printer-test').click();
+    // A double tap prints one page: the posts below count every request.
+    await doubleTap(page.getByTestId('printer-test'));
     await expect(page.getByTestId('printer-test-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     printer.reachable = false;
@@ -3278,10 +3304,7 @@ test.describe('with a network printer', () => {
   });
 
   test("with an Epson network printer, Print receipt sends the sale's receipt to it, not the dialog", async ({ page }) => {
-    await page.addInitScript(() => {
-      window.printCalls = 0;
-      window.print = () => { window.printCalls++; };
-    });
+    await recordPrintDialog(page);
     const printer = await epsonPrinter(page);
     await page.goto('/demo');
     await page.getByTestId('demo-enter').click();
@@ -3289,14 +3312,11 @@ test.describe('with a network printer', () => {
     await addEpsonPrinter(page);
     await page.getByTestId('settings-back').click();
     await openRegister(page);
-    await page.getByTestId('product-tile-Tally Fixture Mug').click();
-    await checkout(page);
-    await typeAmount(page, '9.52');
-    await takePayment(page);
-    await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+    await sellMug(page);
     const receipt = page.getByTestId('receipt');
     await expect(receipt).toBeVisible();
-    await receipt.getByTestId('receipt-print').click();
+    // A double tap prints one receipt: the posts below count every request.
+    await doubleTap(receipt.getByTestId('receipt-print'));
     await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
@@ -3306,6 +3326,79 @@ test.describe('with a network printer', () => {
     await expect(page.getByTestId('receipt-print-status')).toHaveText(PRINTER_FAILED);
     expect(printer.posts).toBe(2);
     await page.getByTestId('receipt-print-dialog').click();
+    await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  });
+
+  test('with an Epson network printer and Print after each sale on, the receipt goes to the printer by itself, once', async ({ page }) => {
+    await recordPrintDialog(page);
+    const printer = await epsonPrinter(page);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('auto-print-toggle').click();
+    await expect(page.getByTestId('auto-print-toggle')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await sellMug(page);
+    await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    expect(await page.evaluate(() => window.printCalls)).toBe(0);
+  });
+
+  test("with Auto-show receipt off and the Epson printer unreachable, the till says the receipt didn't print", async ({ page }) => {
+    await recordPrintDialog(page);
+    const printer = await epsonPrinter(page);
+    printer.reachable = false;
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('auto-print-toggle').click();
+    await expect(page.getByTestId('auto-print-toggle')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('auto-show-receipt-toggle').click();
+    await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'false');
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await sellMug(page);
+    await expect(page.getByTestId('print-failed-toast')).toHaveText(`${PRINTER_FAILED} Reprint it from Orders.`);
+    // It stands for Sale complete, never on top of it.
+    await expect(page.getByTestId('sale-complete-toast')).toHaveCount(0);
+    await expect(page.getByTestId('receipt')).toHaveCount(0);
+    await expect(page.getByTestId('cart').getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+    expect(printer.posts).toBe(1);
+    expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    // The next add takes it away.
+    await page.getByTestId('product-tile-Tally Fixture Mug').click();
+    await expect(page.getByTestId('print-failed-toast')).toHaveCount(0);
+  });
+
+  test("with an Epson network printer, a reprint from the order sheet goes to it, and the dialog when it can't", async ({ page }) => {
+    await recordPrintDialog(page);
+    const printer = await epsonPrinter(page);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await sellMug(page);
+    await page.getByTestId('new-sale').click();
+    await page.getByTestId('orders-open').click();
+    await page.getByTestId('orders-scope-till').click();
+    await page.getByTestId('orders-panel').getByTestId(/^order-open-/).click();
+    await page.getByTestId('order-sheet-receipt').click();
+    const reprint = page.getByTestId('order-receipt');
+    await reprint.getByTestId('order-receipt-print').click();
+    await expect(page.getByTestId('order-receipt-print-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    await expect(page.getByTestId('order-receipt-print-dialog')).toHaveCount(0);
+    printer.reachable = false;
+    await reprint.getByTestId('order-receipt-print').click();
+    await expect(page.getByTestId('order-receipt-print-status')).toHaveText(PRINTER_FAILED);
+    expect(printer.posts).toBe(2);
+    expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    await page.getByTestId('order-receipt-print-dialog').click();
     await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
   });
 });

@@ -1,34 +1,36 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import { Button, discountLabel, orderReference, Text, VStack } from '@tallyui/components';
-import { buildReceiptData, CurrencyProvider, useCurrencyFormatter, type useSale } from '@tallyui/pos';
+import { buildReceiptData, CurrencyProvider, type useSale } from '@tallyui/pos';
 import { loadAutoPrint } from './auto-print-setting';
 import { useReceiptPrinter } from './receipt-printer';
 import { ReceiptView } from './receipt-view';
 
-/** The completed sale's receipt, from the order as finalized and stored; New sale starts the next one. */
-export function SaleReceipt({ sale, store, cashier, registerId, till }: {
+/**
+ * The completed sale's receipt, from the order as finalized and stored; New sale starts the next one.
+ * `onAutoPrintFailed` hears of a failed auto-print to the direct printer, after this receipt may have gone.
+ */
+export function SaleReceipt({ sale, store, cashier, registerId, till, onAutoPrintFailed }: {
   sale: ReturnType<typeof useSale>; store: string; cashier: string; registerId: string; till?: boolean;
+  onAutoPrintFailed?(text: string): void;
 }) {
   const printedFor = useRef<string | null>(null);
   const { stage } = sale;
   const receiptOrderId = stage.kind === 'receipt' ? stage.order.id : null;
   const receipt = useMemo(() => stage.kind === 'receipt'
     ? buildReceiptData(stage.order, { storeName: store, cashier, register: registerId }) : null, [stage, store, cashier, registerId]);
-  // The printer lays out the receipt in the same money format as the screen's.
-  const formatter = useCurrencyFormatter();
   const { printer, busy, status, print: printDirect } = useReceiptPrinter();
-  // A direct printer takes the receipt; without one, the browser's print dialog does.
+  // A direct printer takes the receipt (resolving to its failure line, or null); without one, the browser's print dialog does.
   const print = useMemo(() => {
     if (Platform.OS !== 'web' || receipt === null) return undefined;
-    if (printer === null) return () => window.print();
-    return () => void printDirect(receipt, { formatMoney: (amount, currency) => formatter({ amount, currency }) });
-  }, [receipt, printer, printDirect, formatter]);
+    if (printer === null) return () => { window.print(); return Promise.resolve(null); };
+    return () => printDirect(receipt);
+  }, [receipt, printer, printDirect]);
   useEffect(() => {
     if (receiptOrderId === null || receiptOrderId === printedFor.current) return;
     printedFor.current = receiptOrderId;
-    if (loadAutoPrint()) print?.();
-  }, [receiptOrderId, print]);
+    if (loadAutoPrint()) void print?.().then((failure) => { if (failure !== null) onAutoPrintFailed?.(failure); });
+  }, [receiptOrderId, print, onAutoPrintFailed]);
   if (stage.kind !== 'receipt' || receipt === null) return null;
   const { order, posOrder } = stage;
   return (
@@ -41,7 +43,7 @@ export function SaleReceipt({ sale, store, cashier, registerId, till }: {
           <>
             {/* The direct printer or the browser's print dialog; native has no print path yet, so no button there. */}
             {print ? (
-              <Button testID="receipt-print" variant="secondary" disabled={busy} onPress={print}>
+              <Button testID="receipt-print" variant="secondary" disabled={busy} onPress={() => void print()}>
                 <Text>Print receipt</Text>
               </Button>
             ) : null}
