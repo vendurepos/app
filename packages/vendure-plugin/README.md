@@ -131,6 +131,24 @@ A channel without either method answers every new sale with `store_configuration
 claim and without storing anything. The next server start creates or assigns the missing method
 again, and the same commands then apply.
 
+### Tender methods
+
+A till can show the store's own tender tiles (cash, a card terminal, a gift voucher). For each one, create a
+payment method in Settings → Payment methods with the **"Tally POS tender"** handler, choose its `tender` kind
+(`cash`, `card` or `other`), add the **"Tally POS orders"** checker so the storefront never lists it, and assign it
+to the channel. `GET /tally/v1/info` lists the channel's enabled ones as `paymentMethods` (`code`, `name`, `kind`);
+`tally-pos` itself is never listed. A method with no `tender` value, such as one created before the arg existed,
+is listed as `other`.
+
+An `order.create` 10 payment's `methodId` records the Payment under that method. A `methodId` naming no Tally POS
+method in the channel is refused `payment_method_invalid`, unstored. A method disabled or failing its checker since
+the till listed it is recorded under `tally-pos` instead, with a `payment_method_fallback` warning; the tender in
+the Payment's metadata is unchanged. Vendure refunds or cancels a Payment only while its method is enabled.
+
+Once a Tally method with code `cash` (or `external`) is enabled on the channel, new tender with that `method` is
+recorded under it, even from older tills. Orders taken before then stay under `tally-pos`. Nothing is rewritten.
+Reports count both.
+
 ### Merchant code inside the recipe
 
 Each command runs in one database transaction. A refusal found inside it (`underpaid`,

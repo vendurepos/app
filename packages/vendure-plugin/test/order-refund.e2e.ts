@@ -472,4 +472,37 @@ describe('order.refund v1', () => {
       expect(result.register!.session!.expected).toEqual({ cash: countedFloatMinor + sale.payload.totalMinor });
     });
   });
+
+  // 3.2a-2 (p): last in the file, since the methods it creates change where later cash sales are recorded.
+  it('(p) a split sale under card-terminal and cash refunds to both, each by its tender method', async () => {
+    for (const [code, name, tender] of [['card-terminal', 'Card terminal', 'card'], ['cash', 'Cash', 'cash']]) {
+      await adminClient.query(parse(`mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: {
+        code, enabled: true, handler: { code: 'tally-pos', arguments: [{ name: 'tender', value: tender }] },
+        checker: { code: 'tally-pos', arguments: [] }, translations: [{ languageCode: 'en', name, description: '' }] } });
+    }
+    const session = await openSession();
+    const command = { ...orderCommand([{ variantId: variantIds.mug[0], quantity: 2, unitPriceMinor: 800 }]), version: 10 };
+    // The vendored OrderCreatePayment type has no methodId yet.
+    (command.payload as { payments: unknown[] }).payments = [
+      { clientPaymentId: randomUUID(), method: 'external', reference: 'card-1', methodId: 'card-terminal', amountMinor: command.payload.totalMinor - 500 },
+      { clientPaymentId: randomUUID(), method: 'cash', amountMinor: 500 },
+    ];
+    const sold = await post(command);
+    expect(sold).toMatchObject({ status: 'applied' });
+    const order = await readOrder(sold.serverRefs!.orderId);
+    const payments = [...order.payments].sort((a, b) => Number(environment.decode(a.id)) - Number(environment.decode(b.id)));
+    expect(payments.map(payment => payment.method)).toEqual(['card-terminal', 'cash']);
+    const refund = refundFor(order, session);
+    const result = await post(refund);
+    expect(result).toEqual({ id: refund.id, status: 'applied', refund: {
+      totalMinor: refund.payload.totalMinor, byMethod: { external: refund.payload.totalMinor - 500, cash: 500 },
+      refunds: [
+        { id: expect.any(String), paymentId: payments[0].id, totalMinor: refund.payload.totalMinor - 500, state: 'Settled' },
+        { id: expect.any(String), paymentId: payments[1].id, totalMinor: 500, state: 'Settled' },
+      ],
+    } });
+    const after = await readOrder(order.id);
+    expect(payments.map(({ id }) => after.payments.find(payment => payment.id === id)!.refunds.map(item => item.metadata.tallyMethod)))
+      .toEqual([['external'], ['cash']]);
+  });
 });

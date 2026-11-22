@@ -77,10 +77,6 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   for (const field of ['billing', 'shipping']) {
     if (isObject(payload.customer) && Object.hasOwn(payload.customer, field)) unsupported(`customer.${field}`);
   }
-  // 3.2a-1 only: v10's methodId is refused until Part 2 honours it (Part 2 removes this refusal).
-  (Array.isArray(payload.payments) ? payload.payments : []).forEach((payment, index) => {
-    if (isObject(payment) && Object.hasOwn(payment, 'methodId')) unsupported(`payments[${index}].methodId`);
-  });
   each(payload.lines, LINE, 'lines', (line, at) => check(line.custom, LINE_CUSTOM, `${at}.custom`));
   each(payload.fees, FEE, 'fees');
   each(payload.shipping, SHIPPING, 'shipping');

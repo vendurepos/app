@@ -4,7 +4,7 @@ import {
 } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { tallyPosRefund } from '../config/permissions';
-import { TALLY_PAYMENT_METHOD_CODE, withTallyRefund } from '../config/strategies';
+import { withTallyRefund } from '../config/strategies';
 import { TallyCommand } from '../entities/tally-command.entity';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefundResult } from '../vendored/commands';
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
@@ -15,6 +15,7 @@ import {
 import { ORDER_REFUND_VERSIONS } from './constants';
 import { ErrorResultThrown, unwrap } from './errors';
 import { OrderCreateService } from './order-create.service';
+import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
@@ -27,6 +28,7 @@ export class RefundService {
     private stock: StockMovementService,
     private registers: RegisterService,
     private orders: OrderCreateService,
+    private tenderMethods: PaymentMethodsService,
   ) {}
 
   async apply(ctx: RequestContext, command: OrderRefundEnvelope<Record<string, unknown>>, options: { requestTimeMs?: number } = {}): Promise<CommandResult> {
@@ -111,7 +113,9 @@ export class RefundService {
         const refundableShipping = order.shippingWithTax - previous.reduce((sum, refund) => sum + refund.shipping, 0);
         const remainderOf = (payment: Payment) => Math.max(0, payment.amount - payment.refunds
           .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0));
-        const tenders = payments.filter(payment => payment.method === TALLY_PAYMENT_METHOD_CODE && payment.state === 'Settled');
+        // 3.2a: a tender is a Settled payment under any Tally method, read once per refund.
+        const tally = new Set((await this.tenderMethods.tallyMethods(tx)).map(method => method.code));
+        const tenders = payments.filter(payment => tally.has(payment.method) && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
         const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
