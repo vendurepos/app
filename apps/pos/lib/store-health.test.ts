@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, formatCollectionSize, formatStorageUsed, readServerTotals, readStorageUsed, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary } from './store-health';
+import { attentionReason, attentionRows, canSendAgain, changesWaiting, confirmRedownload, coveragePercent, formatCollectionSize, formatStorageUsed, readServerTotals, readStorageUsed, readyToSell, recordsOnDevice, redownloadBlocked, redownloadSummary, refusedFields } from './store-health';
 
 it('words storage used in B, KB, MB and GB, in steps of 1024', () => {
   expect(formatStorageUsed(512)).toBe('512 B');
@@ -146,6 +146,9 @@ describe('attentionRows', () => {
   });
 });
 
+// The plugin's clock refusal (command-ledger.ts clientTimeErrors), exactly as it sends it.
+const CLOCK = 'createdAt must be an RFC 3339 time with Z or an offset; payload.createdAt must be a time from 2020-01-01T00:00:00Z to 2026-11-23T10:00:00Z';
+
 describe('attentionReason and canSendAgain', () => {
   const sale = { id: 'sale', saleId: 'sale', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-sale' } as PosOrder;
   it.each([
@@ -155,6 +158,42 @@ describe('attentionReason and canSendAgain', () => {
   ] as const)('words %o as attentionRows did', (fields, reason, retry) => {
     const order = { ...sale, ...fields } as PosOrder;
     expect([attentionReason(order), canSendAgain(order)]).toEqual([reason, retry]);
+  });
+
+  it.each([
+    [{ code: 'invalid_payload', message: 'payments[0].methodId: must be a string' }, 'Refused by the store — invalid_payload: payments[0].methodId'],
+    [{ code: 'invalid_payload', message: CLOCK }, 'Refused by the store — invalid_payload: createdAt, payload.createdAt'],
+    [{ code: 'insufficient_stock', message: 'lines[0].quantity: short' }, 'Refused by the store — insufficient_stock'],
+    [undefined, 'Refused by the store'],
+  ])('names a refused sale %o by its code and refused fields', (error, reason) => {
+    expect(attentionReason({ ...sale, syncStatus: 'rejected', error } as PosOrder)).toBe(reason);
+  });
+});
+
+describe('refusedFields', () => {
+  const refused = (message?: string, code = 'invalid_payload') => refusedFields({ code, message });
+  it('names the paths of an invalid_payload refusal, never its reasons', () => {
+    const fields = refused('payments[0].methodId: must be a string; taxAddress: not supported by this server');
+    expect(fields).toEqual(['payments[0].methodId', 'taxAddress']);
+    expect(fields.join(' ')).not.toMatch(/must|supported|:/);
+    expect(refused('customer.billing: x; coupons[0].lines: y')).toEqual(['customer.billing', 'coupons[0].lines']);
+  });
+  it.each([
+    [CLOCK, ['createdAt', 'payload.createdAt']],
+    ['payload.lines.0.custom.name: must not contain U+0000', ['payload.lines[0].custom.name']],
+    ['payload.note: must not contain U+0000', ['payload.note']],
+    ['Invalid id; Invalid version', []],
+  ])('names the clock and NUL refusal shapes too: %s', (message, fields) => {
+    expect(refused(message)).toEqual(fields);
+  });
+  it('is empty for another code, no message or nothing that is a path', () => {
+    expect(refused('taxAddress: not supported', 'insufficient_stock')).toEqual([]);
+    expect(refused(undefined)).toEqual([]);
+    expect(refusedFields(undefined)).toEqual([]);
+    expect(refused('Expected command object; Invalid id; type of thing: bad; taxAddress: x')).toEqual(['taxAddress']);
+  });
+  it('collapses duplicates and keeps at most 3', () => {
+    expect(refused('a: 1; a: 2; b: 3; c: 4; d: 5')).toEqual(['a', 'b', 'c']);
   });
 });
 

@@ -411,7 +411,7 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
     // The register's commands are rejected too, but only the orders are followed here.
     sent.push(...commands.filter(({ type }) => type === 'order.create'));
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
-      id, status: 'rejected', error: { code: 'invalid_payload', message: 'test refusal' },
+      id, status: 'rejected', error: { code: 'invalid_payload', message: 'payments[0].methodId: must be a string' },
     })) }) });
   });
   await page.goto('/');
@@ -466,9 +466,11 @@ test('a rejected sale needs attention, is retried from the Orders panel and appl
   await expect(page.getByTestId('store-health-panel')).toHaveCount(0);
   const syncLog = page.getByTestId('sync-log');
   await expect(syncLog).toBeVisible();
-  // The outbox's refusal, kept with the order's id (lib/log-buffer.ts keeps orderId, not the store's message).
-  await expect(syncLog.getByTestId('sync-log-entry').filter({ hasText: `Order refused by the store orderId=${first.orderId}` }).first())
-    .toBeVisible();
+  // The outbox's refusal, kept with the order's id, the refusal's code and its message (lib/log-buffer.ts): the till's
+  // refusal sentence sends the owner to this log.
+  const refusal = syncLog.getByTestId('sync-log-entry').filter({ hasText: `Order refused by the store orderId=${first.orderId}` }).first();
+  await expect(refusal).toBeVisible();
+  await expect(refusal).toContainText(`orderId=${first.orderId} errorCode=invalid_payload error=payments[0].methodId: must be a string`);
   await page.getByTestId('settings-back').click();
   await page.getByTestId('new-sale').click();
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
@@ -564,7 +566,7 @@ test("Store health's Fix record opens a refused sale whose Retry sends it again"
     const commands: typeof sent = route.request().postDataJSON().commands;
     sent.push(...commands.filter(({ type }) => type === 'order.create'));
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: commands.map(({ id }) => ({
-      id, status: 'rejected', error: { code: 'invalid_payload', message: 'test refusal' },
+      id, status: 'rejected', error: { code: 'invalid_payload', message: 'payments[0].methodId: must be a string' },
     })) }) });
   });
   await signIn(page);
@@ -588,7 +590,7 @@ test("Store health's Fix record opens a refused sale whose Retry sends it again"
   await page.screenshot({ path: test.info().outputPath('13g-store-health-fix-record-vendurepos.png') });
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await fix.click();
-  await expect(page.getByTestId('order-sheet-refused')).toHaveText('Refused by the store — invalid_payload');
+  await expect(page.getByTestId('order-sheet-refused')).toHaveText('Refused by the store — invalid_payload: payments[0].methodId');
   await expect(page.getByTestId('order-sheet-send-again')).toBeEnabled();
   // The store takes it now: the sheet's Retry requeues it under a new command id, and the cashier is back on the list.
   await page.unroute('**/tally/v1/commands');
