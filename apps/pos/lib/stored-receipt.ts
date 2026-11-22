@@ -24,7 +24,7 @@ function storedTenders(raw: string | null | undefined): Tender[] | null {
 export function storedReceiptData(order: VendureOrder, config: ReceiptConfig & { pricesIncludeTax: boolean }): ReceiptData {
   const { pricesIncludeTax, ...rest } = config;
   const receipt = buildReceiptDataFromStoreOrder(toVendureStoreOrder(order, pricesIncludeTax), rest);
-  // The plugin stores every tender as Vendure method 'tally-pos', with the till's own payment in metadata.tender and the whole list in tallyPayments (order-create.service.ts).
+  // The plugin records each tender under its methodId, else the listed code equal to its method, else Vendure method 'tally-pos'; the till's own payment stays in metadata.tender and the whole list in tallyPayments (order-create.service.ts).
   const tenders = storedTenders(order.customFields?.tallyPayments);
   if (tenders) {
     return {
