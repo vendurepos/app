@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Pressable, TextInput } from 'react-native';
+import { Pressable, ScrollView, TextInput } from 'react-native';
 import { Button, CustomerForm, CustomerOrderHistory, Dialog, DialogContent, DialogHeader, DialogTitle, HStack, Text, VStack } from '@tallyui/components';
-import type { OrderHistoryRow } from '@tallyui/components';
+import type { AddressEditorValue, OrderHistoryRow } from '@tallyui/components';
 import { formatMoney, type Customer } from '@tallyui/core';
-import { CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer } from './customer-edit';
+import { addressEditorValue, addressPatch, CUSTOMER_ADDRESS_VENDURE_TEXT, CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer, useCustomerAddresses } from './customer-edit';
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
 import { CUSTOMER_ACCOUNT_LABEL, useCustomerAccount } from './customer-account';
 import { addCustomerNote, useCustomerNotes } from './customer-notes';
@@ -36,6 +36,10 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   const { notes, reload } = useCustomerNotes(session, open && row ? row.id : null);
   const account = useCustomerAccount(session, open && row ? row.id : null);
   const orders = useCustomerOrders(session, open && row ? row.id : null);
+  const source = useCustomerAddresses(session, open, row?.id ?? null);
+  const [addressValue, setAddressValue] = useState<AddressEditorValue>({});
+  useEffect(() => { setAddressValue(source.stored ? addressEditorValue(source.stored) : {}); }, [source.stored]);
+  const addressChange = source.stored ? addressPatch(source.stored, addressValue) : {};
   const [note, setNote] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -58,7 +62,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
     const request = ++counter.current;
     setSaving(true);
     try {
-      const result = await saveCustomer(sessionContext(session), row, values);
+      const result = await saveCustomer(sessionContext(session), row, values, source.stored ? { stored: source.stored, edited: addressValue } : undefined);
       if (request !== counter.current) return;
       if ('customer' in result) onSaved(result.customer);
       else setError(result.error);
@@ -66,11 +70,15 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   };
   return <Dialog open={open} onOpenChange={next => { if (!next) close(); }}>
     <DialogContent testID="customer-sheet" dataSet={{ print: 'hide' }}
-      className="right-0 left-auto top-0 h-full max-w-md translate-x-0 translate-y-0 rounded-none border-0 border-l">
+      className="right-0 left-auto top-0 h-full max-w-md flex-col translate-x-0 translate-y-0 rounded-none border-0 border-l">
       <DialogHeader className="text-left">
         <DialogTitle>{row ? `Edit ${`${row.firstName} ${row.lastName}`.trim() || row.email}` : 'New customer'}</DialogTitle>
       </DialogHeader>
-      <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false} />
+      {/* The body scrolls so the Save and Close footer stays on screen when the address editor makes the sheet taller than the window. */}
+      <ScrollView testID="customer-sheet-body" className="flex-1" contentContainerClassName="gap-4">
+      <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false}
+        addresses={source.stored ? addressValue : undefined} onChangeAddresses={next => { setAddressValue(next); setError(null); }} countries={source.countries} />
+      {source.inVendure && <Text testID="customer-sheet-address-vendure" className="px-4 text-sm text-muted-foreground">{CUSTOMER_ADDRESS_VENDURE_TEXT}</Text>}
       {groupsText !== null && <HStack testID="customer-sheet-groups" className="items-center justify-between px-4">
         <Text className="w-20 text-sm text-muted-foreground">{CUSTOMER_GROUPS_LABEL}</Text>
         <Text testID="customer-sheet-groups-value" className="flex-1 px-3 text-sm">{groupsText}</Text>
@@ -101,9 +109,10 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
             formatMoney({ amount: order.totalMinor, currency: order.currency })].map((text, index) => <Text key={index} className="text-sm">{text}</Text>)}
         </HStack></Pressable>} />}
       {!online && <Text testID="customer-sheet-offline">{CUSTOMER_OFFLINE_TEXT}</Text>}
+      </ScrollView>
       {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       <HStack space="sm" className="mt-auto justify-between">
-        <Button testID="customer-sheet-save" disabled={saving || !online || (row !== null && Object.keys(customerPatch(row, values)).length === 0)} onPress={save}>
+        <Button testID="customer-sheet-save" disabled={saving || !online || (row !== null && Object.keys(customerPatch(row, values)).length + Object.keys(addressChange).length === 0)} onPress={save}>
           <Text>Save</Text>
         </Button>
         <Button testID="customer-sheet-close" variant="outline" disabled={saving} onPress={close}><Text>Close</Text></Button>

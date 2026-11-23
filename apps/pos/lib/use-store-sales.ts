@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SalesFilters } from '@tallyui/components';
 import { comparisonRange, orderFiltersQuery, type DayRange } from '@tallyui/pos';
-import { fetchSalesReportV2 } from './sales-report';
+import { fetchSalesReport } from './sales-report';
 import type { Session } from './session';
 import { shownStore, storeAnswer, type StoreSales } from './store-sales';
 import { isOneDay } from './till-reports';
@@ -10,7 +10,7 @@ import { isOneDay } from './till-reports';
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 
 /**
- * The store's figures for the Reports filters (8.1f): GET /tally/v1/reports/sales/v2 for the range and again for its
+ * The store's figures for the Reports filters (8.1f): the sales report (v3, else v2) for the range and again for its
  * comparison range. The route has no sync status, so the status filter is not sent. `refreshKey` refetches when it
  * changes (a sale or refund reaching the store).
  */
@@ -44,7 +44,7 @@ export function useStoreSales({ session, filters, timezone, refreshKey }: {
     const controller = new AbortController();
     const fetchRange = (r: DayRange) => {
       const { after, before } = orderFiltersQuery({ dateRange: r }, timezone).dateRange ?? {};
-      return fetchSalesReportV2(session, { from: after ?? '', to: before ?? '', timezone,
+      return fetchSalesReport(session, { from: after ?? '', to: before ?? '', timezone,
         registerId: registerId || undefined, cashierId: cashierId || undefined }, { signal: controller.signal });
     };
     Promise.all([fetchRange(day), fetchRange(compare)]).then(([a, b]) => {

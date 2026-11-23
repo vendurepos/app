@@ -134,8 +134,10 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       expect(Math.abs(bound.bridge), JSON.stringify(bound)).toBeLessThanOrEqual(bound.B);
       expect(order.state).toBe('Delivered');
       expect(order.totalWithTax).toBe(command.payload.totalMinor);
-      expect(order.surcharges.find(row => row.sku === 'TALLY-DISCOUNT')?.listPrice).toBe(-50);
-      expect(order.customFields.tallySnapshot).toBeNull();
+      const discount = order.surcharges.find(row => row.sku === 'TALLY-DISCOUNT');
+      expect(discount?.listPrice).toBe(-50);
+      // #460: a v2 sale stores no v3 snapshot, only the link from its discounted line to that line's surcharge.
+      expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({ lineDiscounts: { [String(order.lines[0].id)]: String(discount!.id) } });
     });
 
     it('negative control: a POS total off by B + 5 is applied, bridged in full, and exceeds the bound', async () => {

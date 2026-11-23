@@ -66,9 +66,11 @@ describe('order.create version 4: net discounts', () => {
         expect(surcharges[index].priceWithTax, `${name} ${line.title}`).toBe(-till.grossDiscountMinor);
         expect(surcharges[index].taxLines.map(tax => tax.taxRate)).toEqual([25]);
       });
-      // v4 carries v3's fields: the receipt snapshot is stored.
+      // v4 carries v3's fields: the receipt snapshot is stored, with each discounted line's link to its surcharge (#460).
+      const lineDiscounts = Object.fromEntries(command.payload.lines.map((line, index) => [
+        String(order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId)!.id), String(surcharges[index].id)]));
       expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({
-        display: command.payload.display, taxByRate: command.payload.taxByRate,
+        display: command.payload.display, taxByRate: command.payload.taxByRate, lineDiscounts,
       });
     });
   }

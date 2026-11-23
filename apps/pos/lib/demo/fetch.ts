@@ -5,6 +5,7 @@
  * StoreSettingsTaxRates — store-settings.ts; apps/pos/lib/sign-in.ts.
  * GlobalStockSettings — global-settings.ts; apps/pos/lib/sign-in.ts.
  * globalSettings (unnamed barcode schema) — apps/pos/lib/barcode-field.ts.
+ * AddressCustomFields (none, so the demo keeps the address editor) — apps/pos/lib/customer-edit.ts.
  * logout (unnamed) — apps/pos/lib/logout.ts.
  * GetProducts — replication/products.ts, replication/variant-feed.ts, reconcile/ids.ts, sync/products.ts.
  * GetProductsMark — replication/products.ts.
@@ -29,7 +30,7 @@
  * POST /tally/v1/commands (register.closure.submit) — apps/pos/lib/closure-hold.ts via order-transport.ts.
  * POST /tally/v1/commands (order.refund) — apps/pos/lib/refund-sheet.tsx via till-refund.ts and order-transport.ts.
  * POST /tally/v1/orders/:code/receipt-email — apps/pos/lib/receipt-email.ts.
- * GET /tally/v1/reports/sales/v2 — apps/pos/lib/sales-report.ts via lib/use-store-sales.ts.
+ * GET /tally/v1/reports/sales/v3 — apps/pos/lib/sales-report.ts via lib/use-store-sales.ts.
  */
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
@@ -53,14 +54,16 @@ const DEMO_CHANNEL_ID = '1';
 // The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
 // The demo's till role also approves register variances, so its count shows every figure (ApproveTallyPosVariance unblinds it, lib/register-blind.ts).
 const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
+// The countries the demo store ships to, for the customer address editor's country picker (Admin `countries`).
+const DEMO_COUNTRIES = [{ code: 'DE', name: 'Germany' }, { code: 'GB', name: 'United Kingdom' }, { code: 'US', name: 'United States' }];
 // e2e only: a till without the approve permission, which counts blind.
 export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
-// e2e only: an account without TallyPosSell or ReadOrder, which the sales report v2 refuses with 403.
+// e2e only: an account without TallyPosSell or ReadOrder, which the sales report refuses with 403.
 export const DEMO_REPORT_FORBIDDEN_KEY = 'vendurepos.demo.report_forbidden';
 // e2e only: the collections read refused with 403, so the category tiles keep no image (CHECKLIST 1.5b).
 export const DEMO_COLLECTIONS_REFUSED_KEY = 'vendurepos.demo.collections_refused';
-// The plugin's v2 sales report route (reports.controller.ts).
-const SALES_REPORT_V2_PATH = '/tally/v1/reports/sales/v2';
+// The plugin's v3 sales report route (reports.controller.ts).
+const SALES_REPORT_PATH = '/tally/v1/reports/sales/v3';
 // Vendure's Admin GraphQL route.
 const ADMIN_PATH = '/admin-api';
 // The plugin's capability discovery route.
@@ -165,7 +168,7 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       if (!order.customFields.tallyClientOrderId) return reply({ code: 'not_till_order', message: 'Not a till sale' }, undefined, 409);
       return reply({ queued: true, emailAddress }, undefined, 202);
     }
-    if (route === SALES_REPORT_V2_PATH) {
+    if (route === SALES_REPORT_PATH) {
       if (storage.getItem(DEMO_REPORT_FORBIDDEN_KEY) === '1') return reply({ code: 'forbidden', message: 'Requires TallyPosSell and ReadOrder' }, undefined, 403);
       const from = search.get('from'), to = search.get('to');
       if (!from || !to) return reply({ code: 'invalid_query', message: 'Expected from and to' }, undefined, 400);
@@ -189,7 +192,10 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'activeAdministrator': data = { activeAdministrator: request.headers.get('Authorization') === `Bearer ${DEMO_AUTH_TOKEN}` ? { id: ADMINISTRATOR_ID } : null }; break;
       case 'logout': data = { logout: { success: true } }; break;
       case 'Search': case 'customers': data = { customers: store.customers(variables) }; break;
-      case 'CustomerList': data = { customers: page(store.customerList(), variables.options) }; break;
+      case 'CustomerList': case 'List': data = { customers: page(store.customerList(), variables.options) }; break;
+      case 'Countries': data = { countries: { items: DEMO_COUNTRIES } }; break;
+      case 'CreateAddress': data = { createCustomerAddress: store.saveAddress(variables.input, String(variables.customerId)) }; break;
+      case 'UpdateAddress': data = { updateCustomerAddress: store.saveAddress(variables.input) }; break;
       case 'Orders': case 'orders':
         // Detail list queries select lines and payments as well as the summary fields.
         data = { orders: page(store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) })), variables.options) }; break;
@@ -225,9 +231,9 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         }
         data = { collections: page(DEMO_COLLECTION_IMAGES, variables.options) }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
-      case 'GlobalStockSettings': case 'globalSettings': data = { globalSettings: {
+      case 'GlobalStockSettings': case 'globalSettings': case 'AddressCustomFields': data = { globalSettings: {
         trackInventory: true, outOfStockThreshold: 0,
-        serverConfig: { entityCustomFields: [{ entityName: 'ProductVariant', customFields: [{ name: 'barcode', type: 'string', list: false }] }] },
+        serverConfig: { customFieldConfig: { Address: [] }, entityCustomFields: [{ entityName: 'ProductVariant', customFields: [{ name: 'barcode', type: 'string', list: false }] }] },
       } }; break;
       case 'GetProduct': case 'product': data = { product: store.products().find(product => product.id === variables.id) ?? null }; break;
       case 'GetProducts': case 'GetProductsMark': case 'GetProductIds': case 'products':

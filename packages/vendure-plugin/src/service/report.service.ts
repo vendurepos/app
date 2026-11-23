@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Order, ProductVariant, RequestContext, TransactionalConnection, translateEntity } from '@vendure/core';
+import { Collection, Order, ProductVariant, RequestContext, TransactionalConnection, translateEntity } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { In } from 'typeorm';
 import { channelRefunds } from './channel-refunds';
@@ -37,6 +37,17 @@ export type TallySalesReportV2 = Omit<TallySalesReport, 'version' | 'orders' | '
   taxes: Array<{ description: string; ratePercent: number; baseMinor: number; taxMinor: number }>;
 };
 export type SalesQueryV2 = SalesQuery & { cashierId?: string };
+
+/** GET /tally/v1/reports/sales/v3: v2's figures plus the median and largest order and sales by collection. */
+export type TallySalesReportV3 = Omit<TallySalesReportV2, 'version' | 'orders'> & {
+  version: 3;
+  // Over the same per-order totals orders.salesMinor sums (subTotalWithTax + shippingWithTax). medianMinor: the middle
+  // total, the mean of the two middles for an even count, rounded half up; 0 with no orders. largestMinor: null with none.
+  orders: TallySalesReportV2['orders'] & { medianMinor: number; largestMinor: number | null };
+  // Products' line basis, added to every collection of the variant in the channel (a variant in several counts in each,
+  // one in none in none). salesMinor descending, then name.
+  categories: Array<{ collectionId: string; name: string; quantity: number; salesMinor: number }>;
+};
 const hourKey = (instant: string) => `to_char(${instant} AT TIME ZONE :timezone, 'YYYY-MM-DD"T"HH24')`;
 const MAX_PRODUCTS = 100;
 // Orders are loaded for products and taxes (OrderLine prices and Order.taxSummary are getters, not columns) this many at a time.
@@ -150,6 +161,52 @@ export class ReportService {
 
   /** GET /tally/v1/reports/sales/v2. Every figure is built on posOrdersV2/posRefundsV2, so every filter applies to all of them. */
   async salesV2(ctx: RequestContext, query: SalesQueryV2): Promise<TallySalesReportV2> {
+    return (await this.loadV2(ctx, query)).report;
+  }
+
+  /** GET /tally/v1/reports/sales/v3: v2's report from the same loader, so the two cannot drift. */
+  async salesV3(ctx: RequestContext, query: SalesQueryV2): Promise<TallySalesReportV3> {
+    const { report, orderTotals, sold } = await this.loadV2(ctx, query);
+    const totals = [...orderTotals].sort((a, b) => a - b);
+    const mid = totals.length >> 1;
+    const medianMinor = !totals.length ? 0 : totals.length % 2 ? totals[mid] : Math.round((totals[mid - 1] + totals[mid]) / 2);
+    const largestMinor = totals.length ? totals[totals.length - 1] : null;
+    return {
+      ...report, version: 3, orders: { ...report.orders, medianMinor, largestMinor },
+      categories: await this.categories(ctx, sold),
+    };
+  }
+
+  /** Sold lines by collection: each variant's quantity and amount added to every collection of it in the channel. */
+  private async categories(ctx: RequestContext, sold: Array<{ id: ID; quantity: number; salesMinor: number }>) {
+    const pairs = sold.length ? await this.connection.getRepository(ctx, Collection).createQueryBuilder('c')
+      .innerJoin('c.channels', 'ch', 'ch.id = :channelId', { channelId: ctx.channelId })
+      .innerJoin('c.productVariants', 'v')
+      .where('v.id = ANY(:variantIds)', { variantIds: sold.map(row => row.id) })
+      .select('c.id', 'collectionId').addSelect('v.id', 'variantId')
+      .getRawMany<{ collectionId: ID; variantId: ID }>() : [];
+    const byVariant = new Map(sold.map(row => [String(row.id), row]));
+    const rows = new Map<string, TallySalesReportV3['categories'][number] & { id: ID }>();
+    for (const { collectionId, variantId } of pairs) {
+      const line = byVariant.get(String(variantId))!;
+      const row = rows.get(String(collectionId)) ?? rows.set(String(collectionId), {
+        id: collectionId, collectionId: this.ids.encodeId(collectionId), name: '', quantity: 0, salesMinor: 0,
+      }).get(String(collectionId))!;
+      row.quantity += line.quantity;
+      row.salesMinor += line.salesMinor;
+    }
+    const collections = rows.size ? await this.connection.getRepository(ctx, Collection).find({
+      where: { id: In([...rows.values()].map(row => row.id)) }, relations: { translations: true },
+    }) : [];
+    const names = new Map(collections.map(collection => [String(collection.id),
+      translateEntity(collection, [ctx.languageCode, ctx.channel.defaultLanguageCode]).name]));
+    const ascending = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    return [...rows.values()].map(({ id, ...row }) => ({ ...row, name: names.get(String(id)) ?? '' }))
+      .sort((a, b) => b.salesMinor - a.salesMinor || ascending(a.name, b.name) || ascending(a.collectionId, b.collectionId));
+  }
+
+  /** v2's report, plus each counted order's total and every sold variant (unsliced) for v3. */
+  private async loadV2(ctx: RequestContext, query: SalesQueryV2) {
     const params = { timezone: query.timezone };
     const hours = await this.posOrdersV2(ctx, query)
       .select(hourKey(SALE_AT), 'hour')
@@ -218,8 +275,8 @@ export class ReportService {
       day.refundsMinor += hour.refundsMinor;
     }
     const ascending = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-    const { products, productsTruncated, taxes } = await this.linesAndTaxes(ctx, query, ascending);
-    return {
+    const { products, productsTruncated, taxes, orderTotals, sold } = await this.linesAndTaxes(ctx, query, ascending);
+    const report: TallySalesReportV2 = {
       version: 2, from: query.from, to: query.to, timezone: query.timezone, currencyCode: ctx.channel.defaultCurrencyCode,
       registerId: query.registerId ?? null, cashierId: query.cashierId ?? null, orders, refunds: refundTotals,
       byMethod: [...byMethod.values()].sort((a, b) => ascending(a.method, b.method)),
@@ -227,12 +284,14 @@ export class ReportService {
       byHour: [...byHour.values()].sort((a, b) => ascending(a.hour, b.hour)),
       products, productsTruncated, taxes,
     };
+    return { report, orderTotals, sold };
   }
 
   /** Products and tax rows from the matching orders, loaded ORDER_PAGE at a time by id. */
   private async linesAndTaxes(ctx: RequestContext, query: SalesQueryV2, ascending: (a: string, b: string) => number) {
     const products = new Map<string, TallySalesReportV2['products'][number] & { id: ID }>();
     const taxes = new Map<string, TallySalesReportV2['taxes'][number]>();
+    const orderTotals: number[] = [];
     let after: ID | undefined;
     for (;;) {
       const page = this.posOrdersV2(ctx, query).select('o.id', 'id').orderBy('o.id', 'ASC').limit(ORDER_PAGE);
@@ -243,6 +302,7 @@ export class ReportService {
         where: { id: In(ids) }, relations: { lines: { productVariant: true }, surcharges: true, shippingLines: true },
       });
       for (const order of loaded) {
+        orderTotals.push(order.subTotalWithTax + order.shippingWithTax);
         for (const line of order.lines) {
           const product = products.get(String(line.productVariantId)) ?? products.set(String(line.productVariantId), {
             id: line.productVariantId, productVariantId: this.ids.encodeId(line.productVariantId), sku: line.productVariant.sku,
@@ -274,6 +334,7 @@ export class ReportService {
       products: kept.map(({ id, ...row }) => ({ ...row, name: names.get(String(id)) ?? '' })),
       productsTruncated: sorted.length > MAX_PRODUCTS,
       taxes: [...taxes.values()].sort((a, b) => a.ratePercent - b.ratePercent || ascending(a.description, b.description)),
+      orderTotals, sold: sorted,
     };
   }
 

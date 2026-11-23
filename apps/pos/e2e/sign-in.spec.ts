@@ -1782,6 +1782,68 @@ test('signing in again in place keeps the cart and sells with the new session', 
   expect(cspConsole).toEqual([]);
 });
 
+test('the customer sheet edits a billing field on the dev store and keeps every other address field', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const admin = async (query: string, variables: Record<string, unknown>) => {
+    const response = await page.request.post(`${STORE_URL}/admin-api`, { headers, data: { query, variables } });
+    expect(response.ok()).toBe(true);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    return body.data;
+  };
+  const email = `till-address-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
+  const billing = { fullName: 'Till Address', company: 'Till Works', streetLine1: '1 Havnegade', streetLine2: 'Floor 2', city: 'Copenhagen',
+    province: 'Hovedstaden', postalCode: '1058', countryCode: 'DK', phoneNumber: '+45 11 22 33 44' };
+  const shipping = { fullName: 'Till Dock', company: 'Dock Works', streetLine1: '9 Hafenstrasse', streetLine2: 'Gate 4', city: 'Hamburg',
+    province: 'Hamburg', postalCode: '20457', countryCode: 'DE', phoneNumber: '+49 40 123456' };
+  const { createCustomer: { id } } = await admin('mutation ($input: CreateCustomerInput!) { createCustomer(input: $input) { ... on Customer { id } } }',
+    { input: { emailAddress: email, firstName: 'Till', lastName: 'Address' } });
+  try {
+    for (const [input, flag] of [[billing, 'defaultBillingAddress'], [shipping, 'defaultShippingAddress']] as const) {
+      await admin('mutation ($id: ID!, $input: CreateAddressInput!) { createCustomerAddress(customerId: $id, input: $input) { id } }', { id, input: { ...input, [flag]: true } });
+    }
+    await page.getByTestId('customers-open').click();
+    await page.getByTestId('customers-search').fill(email);
+    const sheet = page.getByTestId('customer-sheet');
+    const field = (kind: string, part: string) => sheet.getByTestId(`customer-form-addresses-${kind}-${part}`);
+    await page.getByTestId(`customers-edit-${id}`).click();
+    await field('billing', 'edit').click();
+    // The country is a picker of the store's enabled countries, so the read answered.
+    await expect(field('billing', 'country')).toHaveText('Denmark');
+    await field('billing', 'city').fill('Aarhus');
+    await page.getByTestId('customer-sheet-save').click();
+    await expect(sheet).toHaveCount(0);
+    await page.getByTestId(`customers-edit-${id}`).click();
+    await field('billing', 'edit').click();
+    await expect(field('billing', 'city')).toHaveValue('Aarhus');
+    await expect(field('billing', 'address2')).toHaveValue('Floor 2');
+    await expect(field('billing', 'company')).toHaveValue('Till Works');
+    await expect(field('shipping-fields', 'city')).toHaveValue('Hamburg');
+    await expect(field('shipping-fields', 'address2')).toHaveValue('Gate 4');
+    await page.getByTestId('customer-sheet-close').click();
+    const { customer } = await admin(`query ($id: ID!) { customer(id: $id) { addresses { fullName company streetLine1 streetLine2 city province postalCode
+      country { code } phoneNumber defaultBillingAddress defaultShippingAddress } } }`, { id });
+    const stored = (input: typeof billing, flag: string) => {
+      const { countryCode, ...rest } = input;
+      return { ...rest, country: { code: countryCode }, defaultBillingAddress: flag === 'billing', defaultShippingAddress: flag === 'shipping' };
+    };
+    expect(customer.addresses).toHaveLength(2);
+    expect(customer.addresses).toEqual(expect.arrayContaining([stored({ ...billing, city: 'Aarhus' }, 'billing'), stored(shipping, 'shipping')]));
+  } finally {
+    const { deleteCustomer } = await admin('mutation ($id: ID!) { deleteCustomer(id: $id) { result } }', { id });
+    expect(deleteCustomer.result).toBe('DELETED');
+  }
+});
+
 test('the Customers panel adds and edits a customer on the dev store, and a refused email changes nothing on the store', async ({ page }) => {
   test.setTimeout(4 * 60_000);
   await page.goto('/');

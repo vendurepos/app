@@ -652,6 +652,32 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
 });
 
+test('the customer sheet body scrolls on a short screen; Save and Close stay on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  // c3 (Alan Turing) has a seeded address, so the address editor makes the sheet taller than the window.
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-save')).toBeInViewport();
+  await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  const orders = sheet.getByTestId('customer-sheet-orders');
+  await orders.scrollIntoViewIfNeeded();
+  await expect(orders).toBeInViewport();
+  await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  // An empty address line 1 is refused before any request; the refusal shows on screen, not below the order history.
+  await sheet.getByTestId('customer-form-addresses-billing-edit').click();
+  await sheet.getByTestId('customer-form-addresses-billing-address1').fill('');
+  await sheet.getByTestId('customer-sheet-save').click();
+  await expect(sheet.getByTestId('customer-sheet-error')).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-error')).toBeInViewport();
+  await sheet.getByTestId('customer-sheet-close').click();
+  await expect(sheet).toBeHidden();
+});
+
 test("the customer sheet shows the customer's account read-only, as v2's username row: registered and verified, not verified, or a guest", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
@@ -1020,6 +1046,44 @@ test("the Products panel filters by each public facet, one pill per facet, as v2
   await brand.click();
   await expect(brand).toHaveText('Brand');
   await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
+});
+
+test("the sell screen filters by each public facet, as v2's Tag and Brand pills, for this session only (1.6c)", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await openAllProducts(page);
+  const till = page.getByTestId('till-catalogue');
+  const brandId = DEMO_FACETS.find(f => f.code === 'brand')!.id;
+  const brand = till.getByTestId(`filter-chip-group-${brandId}`);
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId(`filter-chip-group-${DEMO_FACETS.find(f => f.isPrivate)!.id}`)).toHaveCount(0);
+  await expect(till.getByTestId(`filter-chip-group-${DEMO_FACETS.find(f => f.code === 'category')!.id}`)).toHaveCount(0);
+  await brand.click();
+  await page.getByTestId(`filter-chip-group-${brandId}-6`).click(); // Tally (lib/demo/facets.ts)
+  await expect(brand).toHaveText('Tally');
+  const tally = CATALOGUE.filter(p => demoBrand(p) === 'Tally').map(p => `product-tile-${p.name}`);
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toHaveCount(0);
+  await expect.poll(() => till.locator('[data-testid^="product-tile-"]').evaluateAll(tiles => tiles.map(tile => tile.dataset.testid)))
+    .toEqual(expect.arrayContaining(tally));
+  expect((await till.locator('[data-testid^="product-tile-"]').evaluateAll(tiles => tiles.map(tile => tile.dataset.testid!)))
+    .every(id => id.startsWith('product-tile-Tally '))).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({ path: test.info().outputPath('1.6c-facet-pills-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await till.getByTestId(`filter-chip-group-${brandId}-remove`).click();
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toBeVisible();
+  await page.getByTestId(`filter-chip-group-${brandId}`).click();
+  await page.getByTestId(`filter-chip-group-${brandId}-6`).click();
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toHaveCount(0);
+  // The pick is the session's alone (10.2i): a reload clears it.
+  await page.reload();
+  await expectSignedIn(page);
+  await openAllProducts(page);
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 });
 
 test("the Products panel sorts by its headers, across every page, as v2's products table", async ({ page }) => {
@@ -1769,11 +1833,16 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('reports-panel')).toBeVisible();
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
-  // The store's report has no per-order totals, so the hero shows no median or largest tile.
+  // The store's report v3 (8.1q): its median and largest order in the Orders card (the hero's tiles are this till's
+  // order spread, so they stay out), and its sales by collection in the Categories card.
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
   await expect(page.getByTestId('hero-largest')).toHaveCount(0);
+  await expect(page.getByTestId('card-orders-median')).toContainText('€9.52');
+  await expect(page.getByTestId('card-orders-largest')).toContainText('€9.52');
   await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toContainText('Drinkware');
+  await expect(page.getByTestId('card-categories')).toContainText('€9.52');
+  await expect(page.getByTestId('reports-categories-help')).toHaveText('Categories: a product in several collections counts in each.');
   await expect(page.getByTestId('card-products')).toContainText('€9.52');
   await page.getByTestId('reports-print-summary').click();
   const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
@@ -1874,7 +1943,7 @@ test("Reports › a card's head opens its panel as v2: Payments, Products and Ta
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await page.getByTestId('detail-panel-close').click();
   await expect(panel).toHaveCount(0);
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toBeVisible();
 
   // No panel for Orders or Refunds in TallyUI 4.2.0: both open the Orders screen (stand-in until TallyUI/tallyui#1215).
   await page.getByTestId('card-orders-open').click();
@@ -1906,7 +1975,9 @@ test("Reports shows the store's figures online, and this till's only when offlin
   // Store mode: the store's gross for the mug (€9.52), never the till's net (€8.00), and no sync statuses.
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-orders-median')).toContainText('€9.52');
+  await expect(page.getByTestId('card-categories')).toContainText('€9.52');
+  await expect(page.getByTestId('card-categories')).not.toContainText('€8.00');
   await expect(page.getByTestId('card-products')).toContainText('€9.52');
   await expect(page.getByTestId('card-products')).not.toContainText('€8.00');
   await page.getByTestId('sales-filter-status').click();
@@ -1925,22 +1996,22 @@ test("Reports shows the store's figures online, and this till's only when offlin
   await page.getByTestId('sales-filter-status').click();
   await expect(page.getByTestId('sales-filter-status-option-applied')).toBeVisible();
   await page.getByTestId('sales-filter-status-option-all').click();
-  // A till-only Categories panel, open when the store's figures come back (8.1p fix 1).
+  // A till-only Categories panel, open when the store's figures come back.
   await page.getByTestId('card-categories-open').click();
   await expect(page.getByTestId('detail-panel')).toContainText('Sales by category');
+  await expect(page.getByTestId('detail-panel-scope')).toHaveText(/ · This till only, offline$/);
+  await expect(page.getByTestId('detail-panel-table')).toContainText('€8.00');
 
-  // Back online: the store's figures again.
+  // Back online: the store's figures again. The report v3 has categories (8.1q), so the card stays and its panel
+  // shows the store's figures, as the Products panel does; never the till's under the store's scope.
   await page.context().setOffline(false);
   await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
-  // The view hides Categories, so its panel closes.
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
-  await expect(page.getByTestId('detail-panel')).toHaveCount(0);
-
-  // Offline again: Categories is shown again, and its panel stays closed.
-  await page.context().setOffline(true);
-  await expect(page.getByTestId('reports-till-only')).toHaveText('This till only, offline');
   await expect(page.getByTestId('card-categories')).toBeVisible();
+  await expect(page.getByTestId('detail-panel-scope')).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
+  await expect(page.getByTestId('detail-panel-table')).toContainText('€9.52');
+  await expect(page.getByTestId('detail-panel-table')).not.toContainText('€8.00');
+  await page.getByTestId('detail-panel-close').click();
   await expect(page.getByTestId('detail-panel')).toHaveCount(0);
 });
 

@@ -45,6 +45,7 @@ import { OrdersPanel, type OrdersScope } from '../lib/orders-panel';
 import { CustomersPanel } from '../lib/customers-panel';
 import { useTillCustomerDisplay } from '../lib/customer-display';
 import { ProductsPanel } from '../lib/products-panel';
+import { useFacetTermPills } from '../lib/product-facets';
 import { useCustomersReadable } from '../lib/customer-list';
 import { OrderReceipt } from '../lib/order-receipt';
 import { OrderSheet } from '../lib/order-sheet';
@@ -111,7 +112,7 @@ const FRAME_WIDE_MIN_HEIGHT = 480;
 const CART_HIGHLIGHT_MS = 600;
 // How long the till says a sale's receipt didn't print, with Auto-show receipt off (9.5b review): long enough to read.
 const PRINT_FAILED_TOAST_MS = 10_000;
-/** The one filter pill the till shows (CHECKLIST 1.6). */
+/** The till's one built-in filter chip; the facet pills follow it (CHECKLIST 1.6). */
 const IN_STOCK_PILL = ['inStock'] as const;
 // Fixed at load (nativeCamera never changes), so the hook order is stable.
 const useNativeCameraPermission = permissionHook(nativeCamera);
@@ -544,6 +545,7 @@ function Sale({
   const catalogueView = useCatalogueView(settingsOpen);
   const catalogueFilters = useCatalogueFilters(settingsOpen);
   const categories = useCollectionCategories(session, products, connector.traits.product);
+  const facetPills = useFacetTermPills(session, connector.traits.product, products);
   const approvalSheet = useApprovalSheet({ session, register, capabilities });
   const identity = tillIdentity(session);
   const receiptContext = useMemo(() => sessionContext(session), [session]);
@@ -764,14 +766,16 @@ function Sale({
             viewfinder: nativeCamera?.Viewfinder, permission: cameraPermission }}
           showCategoryNav
           showViewToggle
-          // v2's filter row with its In Stock pill alone, on by default (TallyUI's default filters); the other pills need TallyUI or a ruling (CHECKLIST 1.6).
+          // v2's filter row: the In Stock pill, on by default (TallyUI's default filters), then one pill per public facet
+          // as v2's Tag and Brand pills (1.6c); On sale and Featured need TallyUI or a ruling (CHECKLIST 1.6).
           showFilterBar
           filterChips={IN_STOCK_PILL}
+          termPills={facetPills.termPills}
           loading={!lastSyncedAt && !error}
           products={products}
           // The derived categories with each Vendure collection's featured image; undefined keeps Catalogue's own (1.5b).
           categories={categories}
-          traits={connector.traits.product}
+          traits={facetPills.traits}
           currency={session.settings.currency}
           lastSyncedAt={lastSyncedAt}
           lastStockCheckAt={stockOverlayAsOf ? new Date(stockOverlayAsOf) : null}

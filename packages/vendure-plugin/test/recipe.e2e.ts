@@ -101,7 +101,7 @@ describe('order.create recipe through OrderCreateService', () => {
     expect(order.orderPlacedAt).toEqual(order.customFields.tallySaleAt);
     expect(JSON.parse(order.customFields.tallyPayments!)).toEqual(command.payload.payments);
     expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({
-      display: command.payload.display, taxByRate: command.payload.taxByRate,
+      display: command.payload.display, taxByRate: command.payload.taxByRate, lineDiscounts: {},
     });
     expect(order.customer!.emailAddress).toBe('walk-in@vendurepos.invalid');
     expect(order.lines).toHaveLength(2);
@@ -265,7 +265,7 @@ describe('order.create recipe through OrderCreateService', () => {
     figures.payload.taxByRate![0].netMinor += 2_147_483_648;
     figures.payload.taxByRate![0].grossMinor += 2_147_483_648;
     const snapshot = (await applied(figures)).order.customFields.tallySnapshot!;
-    expect(JSON.parse(snapshot)).toEqual({ display: figures.payload.display, taxByRate: figures.payload.taxByRate });
+    expect(JSON.parse(snapshot)).toEqual({ display: figures.payload.display, taxByRate: figures.payload.taxByRate, lineDiscounts: {} });
     // A valid ISO date with an offset is a createdAt like any other.
     const offset = orderCommand([mug()]);
     offset.payload.createdAt = '2026-09-28T12:00:00+02:00';
