@@ -17,7 +17,7 @@ import { ErrorResultThrown, unwrap } from './errors';
 import { OrderCreateService } from './order-create.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
-import { REFUND_DISCOUNT_UNLINKED_MESSAGE, lineTotalsForRefund } from './refund-line-totals';
+import { REFUND_DISCOUNT_UNLINKED_MESSAGE, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
 /** ADR 0007: one till refund, with the register lock before the order lock. */
@@ -123,7 +123,9 @@ export class RefundService {
         const methods = await this.tenderMethods.tallyMethods(tx);
         const tenders = payments.filter(payment => payment.metadata?.tender && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
-        const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor;
+        // Money P2 #2: the refund taking everything left on the lines also takes the order's rounding bridge.
+        const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor
+          + roundingForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf);
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
         if (shippingMinor > refundableShipping || raw !== server || server !== totalMinor) {
           throw new Unstored(refuse(id, 'amount_mismatch', `Refund total ${totalMinor} does not match the server's ${server}`,

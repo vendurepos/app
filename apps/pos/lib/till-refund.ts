@@ -28,6 +28,8 @@ export type RefundDiscount = { id: string; priceWithTax: number };
 export type TillOrder = VendureOrder & { tallyDiscounts?: RefundDiscount[] };
 // The plugin's TALLY_DISCOUNT_SKU (packages/vendure-plugin/src/service/constants.ts): the surcharge of a till line discount.
 export const TALLY_DISCOUNT_SKU = 'TALLY-DISCOUNT';
+// The plugin's TALLY_ROUNDING_SKU (packages/vendure-plugin/src/service/constants.ts): the "POS rounding" bridge.
+export const TALLY_ROUNDING_SKU = 'TALLY-ROUNDING';
 
 /** The order's TALLY-DISCOUNT surcharges with their ids; [] for no order. */
 export async function fetchTillDiscounts(context: SyncContext, orderId: string): Promise<RefundDiscount[]> {
@@ -54,8 +56,8 @@ export function refundLineTotals(order: TillOrder, quantities: RefundDraft['quan
   try { links = JSON.parse(order.customFields?.tallySnapshot ?? '').lineDiscounts; } catch { /* unparsable: unlinked */ }
   if (typeof links === 'object' && links !== null && !Array.isArray(links)) {
     const linked = Object.entries(links).map(([lineId, id]) => [lineId, discounts.find(item => item.id === String(id))] as const);
-    // A link to a surcharge the order lacks: the plugin refuses (discount_unlinked), so undiscounted, and the till shows that answer.
-    if (linked.some(([, discount]) => !discount)) return totals;
+    // A missing or unlinked discount: the plugin refuses (discount_unlinked), so undiscounted, and the till shows that answer.
+    if (linked.some(([, discount]) => !discount) || discounts.some(discount => !linked.some(([, item]) => item === discount))) return totals;
     for (const [lineId, discount] of linked) if (Object.hasOwn(totals, lineId)) totals[lineId] += discount!.priceWithTax;
     return totals;
   }
@@ -76,6 +78,10 @@ export function refundTotalMinor(order: TillOrder, quantities: RefundDraft['quan
     // The plugin's own line-share rule, so partial refunds add up to the line and never trip amount_mismatch.
     if (quantity > 0) total += vendureLineRefundWithTax({ ...line, lineTotalWithTax: totals[line.orderLineId] }, quantity);
   }
+  // The plugin's roundingForRefund adds the bridge only when this refund takes everything left on the lines.
+  if (Object.values(quantities).some(quantity => quantity > 0)
+    && vendureRefundable(order).lines.every(line => (quantities[line.orderLineId] ?? 0) === line.refundableQuantity))
+    total += order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU).reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
   return total;
 }
 
