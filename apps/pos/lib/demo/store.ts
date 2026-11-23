@@ -5,7 +5,7 @@ import { barcodeOf, CATALOGUE, type CatalogueProduct } from './catalogue';
 import { demoFacetValues } from './facets';
 import { demoProductImage } from './product-images';
 import type { TallyClosureRead } from '../closure-history';
-import type { SalesReportV2 } from '../sales-report';
+import type { SalesReportV2, SalesReportV3 } from '../sales-report';
 import type { ListedRegister } from '../register-choice';
 
 // All mutable demo data is saved together, including the command ledger.
@@ -513,10 +513,10 @@ export class DemoStore {
   }
 
   /**
-   * GET /tally/v1/reports/sales/v2, aggregated as the plugin's salesV2 (report.service.ts) does: till sales only (not the
+   * GET /tally/v1/reports/sales/v3, aggregated as the plugin's salesV3 (report.service.ts) does: till sales only (not the
    * storefront order), sale time in [from, to), the register and cashier filters, and each order's amounts from order().
    */
-  salesReport(query: { from: string; to: string; timezone: string; registerId?: string; cashierId?: string }): SalesReportV2 {
+  salesReport(query: { from: string; to: string; timezone: string; registerId?: string; cashierId?: string }): SalesReportV3 {
     type Detail = { subTotal: number; subTotalWithTax: number; shipping: number; shippingWithTax: number;
       lines: { quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string; name: string; sku: string } }[];
       taxSummary: { description: string; taxRate: number; taxBase: number; taxTotal: number }[] };
@@ -535,6 +535,9 @@ export class DemoStore {
     const products = new Map<string, SalesReportV2['products'][number]>();
     const taxes = new Map<string, SalesReportV2['taxes'][number]>();
     const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: 0, itemCount: 0 };
+    const totals: number[] = [];
+    const categories = new Map<string, SalesReportV3['categories'][number]>();
+    const collectionsOf = new Map(this.products().flatMap(product => product.variants.map(variant => [variant.id, product.collections])));
     // A till sale the register filter keeps: the refunds' test, before their own cashier filter.
     const tillSale = (payload: OrderCreatePayload) => payload.clientOrderId !== DEMO_WEB_ORDER.clientOrderId
       && (query.registerId === undefined || payload.registerId === query.registerId);
@@ -549,6 +552,7 @@ export class DemoStore {
       hour.salesMinor += sales;
       orders.count++;
       orders.salesMinor += sales;
+      totals.push(sales);
       orders.taxMinor += detail.subTotalWithTax - detail.subTotal + detail.shippingWithTax - detail.shipping;
       orders.discountsMinor += payload.discountMinor ?? 0;
       for (const line of detail.lines) {
@@ -557,6 +561,11 @@ export class DemoStore {
         const product = bucket(products, productVariantId, () => ({ productVariantId, sku, name, quantity: 0, salesMinor: 0 }));
         product.quantity += line.quantity;
         product.salesMinor += line.proratedLinePriceWithTax;
+        for (const { id: collectionId, name: collection } of collectionsOf.get(productVariantId) ?? []) {
+          const row = bucket(categories, collectionId, () => ({ collectionId, name: collection, quantity: 0, salesMinor: 0 }));
+          row.quantity += line.quantity;
+          row.salesMinor += line.proratedLinePriceWithTax;
+        }
       }
       for (const payment of payload.payments) {
         const method = methodOf(payment.method);
@@ -595,9 +604,14 @@ export class DemoStore {
     }
     const ascending = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
     const sortedProducts = [...products.values()].sort((a, b) => b.salesMinor - a.salesMinor || ascending(a.sku, b.sku));
+    totals.sort((a, b) => a - b);
+    const mid = totals.length >> 1;
+    const medianMinor = !totals.length ? 0 : totals.length % 2 ? totals[mid] : Math.round((totals[mid - 1] + totals[mid]) / 2);
     return {
-      version: 2, from: query.from, to: query.to, timezone: query.timezone, currencyCode: 'EUR',
-      registerId: query.registerId ?? null, cashierId: query.cashierId ?? null, orders, refunds,
+      version: 3, from: query.from, to: query.to, timezone: query.timezone, currencyCode: 'EUR',
+      registerId: query.registerId ?? null, cashierId: query.cashierId ?? null,
+      orders: { ...orders, medianMinor, largestMinor: totals.length ? totals[totals.length - 1] : null }, refunds,
+      categories: [...categories.values()].sort((a, b) => b.salesMinor - a.salesMinor || ascending(a.name, b.name)),
       byMethod: [...byMethod.values()].map(({ ids, ...row }) => ({ ...row, orderCount: ids.size })).sort((a, b) => ascending(a.method, b.method)),
       byDay: [...byDay.values()].sort((a, b) => ascending(a.day, b.day)),
       byHour: [...byHour.values()].sort((a, b) => ascending(a.hour, b.hour)),

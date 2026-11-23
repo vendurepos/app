@@ -20,7 +20,7 @@ import { readServerTotals } from '../store-health';
 import { barcodeOf, CATALOGUE } from './catalogue';
 import { CATALOGUE as DEV_CATALOGUE } from '../../../../dev/vendure-store/src/catalogue';
 import { registerBlind } from '../register-blind';
-import { fetchSalesReportV2 } from '../sales-report';
+import { fetchSalesReport } from '../sales-report';
 import { DEMO_CHANNEL_TOKEN, DEMO_CREDENTIALS, DEMO_REPORT_FORBIDDEN_KEY, DEMO_STORE_ORIGIN, DEMO_TILL_ROLE_KEY, installDemoStore } from './fetch';
 import { demoCategoryImage, demoProductImage } from './product-images';
 import { DEMO_CUSTOMER_NOTE, DEMO_INFO, DEMO_INFO_NO_REFUND_KEY, DEMO_STORAGE_KEY, DemoStore, largestRemainder, type DemoStorage } from './store';
@@ -131,14 +131,14 @@ it('answers RegisterPermissions with the approve permission, and without it for 
 // The seeded till sales' days (seeds 2 and 3); the storefront order (seed 1) is on 2025-12-28.
 const SEED_DAYS = { from: '2025-12-28T00:00:00.000Z', to: '2025-12-31T00:00:00.000Z', timezone: 'UTC' };
 
-it('answers the v2 sales report from the seeded till sales in exact cents, without the storefront order', async () => {
-  const outcome = await fetchSalesReportV2(await signedIn(), SEED_DAYS);
+it('answers the v3 sales report from the seeded till sales in exact cents, without the storefront order', async () => {
+  const outcome = await fetchSalesReport(await signedIn(), SEED_DAYS);
   expect(outcome.status).toBe('ok');
   if (outcome.status !== 'ok') throw new Error(outcome.status);
   const { report } = outcome;
-  expect(report).toMatchObject({ version: 2, ...SEED_DAYS, currencyCode: 'EUR', registerId: null, cashierId: null, productsTruncated: false });
+  expect(report).toMatchObject({ version: 3, ...SEED_DAYS, currencyCode: 'EUR', registerId: null, cashierId: null, productsTruncated: false });
   // ESP-250 €8.99 + FIL-500 €12.99 at 7% (tax 154, total 23.52), and TOTE €14.99 at 19% (tax 285, total 17.84).
-  expect(report.orders).toEqual({ count: 2, salesMinor: 4136, taxMinor: 439, discountsMinor: 0, itemCount: 3 });
+  expect(report.orders).toEqual({ count: 2, salesMinor: 4136, taxMinor: 439, discountsMinor: 0, itemCount: 3, medianMinor: 2068, largestMinor: 2352 });
   expect(report.byMethod).toEqual([{ method: 'cash', salesMinor: 4136, refundsMinor: 0, orderCount: 2, refundCount: 0 }]);
   expect(report.byHour.map(row => row.hour)).toEqual(['2025-12-29T11', '2025-12-30T14']);
   expect(report.byHour.map(row => row.salesMinor)).toEqual([2352, 1784]);
@@ -154,10 +154,10 @@ it('answers the v2 sales report from the seeded till sales in exact cents, witho
   expect(original).not.toHaveBeenCalled();
 });
 
-it('filters the v2 report by register and cashier, and answers 403 under the report_forbidden key', async () => {
+it('filters the v3 report by register and cashier, and answers 403 under the report_forbidden key', async () => {
   const session = await signedIn();
   const report = async (filter: { registerId?: string; cashierId?: string }) => {
-    const outcome = await fetchSalesReportV2(session, { ...SEED_DAYS, ...filter });
+    const outcome = await fetchSalesReport(session, { ...SEED_DAYS, ...filter });
     if (outcome.status !== 'ok') throw new Error(outcome.status);
     return outcome.report;
   };
@@ -170,7 +170,7 @@ it('filters the v2 report by register and cashier, and answers 403 under the rep
   expect(front.orders.count).toBe(0);
   expect(front.registerId).toBe('demo-front-counter');
   storage.setItem(DEMO_REPORT_FORBIDDEN_KEY, '1');
-  expect(await fetchSalesReportV2(session, SEED_DAYS)).toEqual({ status: 'forbidden' });
+  expect(await fetchSalesReport(session, SEED_DAYS)).toEqual({ status: 'forbidden' });
 });
 
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
