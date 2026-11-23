@@ -17,6 +17,7 @@
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.
  * CataloguePermissions, VariantStockLevel, UpdateProductVariants — apps/pos/lib/product-edit.ts.
+ * CollectionImages — apps/pos/lib/collection-categories.ts.
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
  * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
  * GET /tally/v1/registers — apps/pos/lib/register-choice.ts.
@@ -34,7 +35,7 @@
 import { COMMANDS_PATH } from '@tallyui/core';
 import { DEMO_FACETS } from './facets';
 import { DEMO_ORDER_HISTORY } from './order-notes';
-import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_RATES, DemoStore, demoCustomerUser, type DemoStorage } from './store';
+import { DEMO_CATEGORIES, DEMO_CHANNEL, DEMO_COLLECTION_IMAGES, DEMO_RATES, DemoStore, demoCustomerUser, type DemoStorage } from './store';
 
 // Reserved, non-resolving origin: a request missed by the wrapper cannot reach a live store.
 export const DEMO_STORE_ORIGIN = 'https://demo-store.vendurepos.invalid';
@@ -59,6 +60,8 @@ const DEMO_COUNTRIES = [{ code: 'DE', name: 'Germany' }, { code: 'GB', name: 'Un
 export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
 // e2e only: an account without TallyPosSell or ReadOrder, which the sales report refuses with 403.
 export const DEMO_REPORT_FORBIDDEN_KEY = 'vendurepos.demo.report_forbidden';
+// e2e only: the collections read refused with 403, so the category tiles keep no image (CHECKLIST 1.5b).
+export const DEMO_COLLECTIONS_REFUSED_KEY = 'vendurepos.demo.collections_refused';
 // The plugin's v3 sales report route (reports.controller.ts).
 const SALES_REPORT_PATH = '/tally/v1/reports/sales/v3';
 // Vendure's Admin GraphQL route.
@@ -219,6 +222,14 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'One': case 'customer': data = { customer: store.customer(variables.id) }; break;
       case 'StoreSettingsChannel': data = { activeChannel: DEMO_CHANNEL, taxCategories: { items: DEMO_CATEGORIES } }; break;
       case 'PublicFacets': case 'facets': data = { facets: page(DEMO_FACETS, variables.options) }; break;
+      case 'CollectionImages': case 'collections':
+        if (storage.getItem(DEMO_COLLECTIONS_REFUSED_KEY) === '1') {
+          // e2e only: counts the refusals, so a test can tell the refused read ran.
+          const counter = globalThis as { __demoCollectionsRefused?: number };
+          counter.__demoCollectionsRefused = (counter.__demoCollectionsRefused ?? 0) + 1;
+          return reply({ errors: [{ message: 'Forbidden' }] }, undefined, 403);
+        }
+        data = { collections: page(DEMO_COLLECTION_IMAGES, variables.options) }; break;
       case 'StoreSettingsTaxRates': data = { taxRates: { items: DEMO_RATES.filter(rate => rate.zoneId === variables.zoneId) } }; break;
       case 'GlobalStockSettings': case 'globalSettings': case 'AddressCustomFields': data = { globalSettings: {
         trackInventory: true, outOfStockThreshold: 0,

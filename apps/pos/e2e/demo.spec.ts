@@ -20,6 +20,7 @@ async function openSettings(page: Page, section: string) {
 declare global {
   interface Window {
     printCalls: number; printsWithSheet: number; scanTones: number[];
+    __demoCollectionsRefused?: number;
     cameraStreams: MediaStream[];
     cameraSees: { code: string; format: string } | null;
     chooserCalls: { kind: string; options: unknown }[];
@@ -4750,6 +4751,35 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await gridToggle.click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
+});
+
+test("the category tiles show each Vendure collection's featured image, and stay when the store refuses the read", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  // 1.5b: each demo collection features its category's picture (lib/demo/store.ts DEMO_COLLECTION_IMAGES).
+  const categoryCount = new Set(CATALOGUE.map(p => p.category)).size;
+  const browse = page.getByTestId('category-browse');
+  const images = browse.locator('[data-testid^="category-tile-"][data-testid$="-image"]');
+  await expect(images).toHaveCount(categoryCount);
+  await expect(page.getByTestId('category-tile-cat1-image')).toBeVisible();
+  await expect(page.getByTestId('category-tile-cat1-fallback')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('1.5b-category-tile-images-vendurepos.png') });
+
+  // A refused re-read on Sync now keeps the images the first read gave.
+  await page.evaluate(() => localStorage.setItem('vendurepos.demo.collections_refused', '1'));
+  await page.getByTestId('sync-now').click();
+  await expect.poll(() => page.evaluate(() => window.__demoCollectionsRefused ?? 0)).toBeGreaterThanOrEqual(1);
+  await expect(page.getByTestId('category-tile-cat1-image')).toBeVisible();
+  await expect(images).toHaveCount(categoryCount);
+
+  // A refused read (403) passes no categories, so the tiles stay as 1.5a draws them: every category, each without an image.
+  await page.reload();
+  await expectSignedIn(page);
+  await expect.poll(() => page.evaluate(() => window.__demoCollectionsRefused ?? 0)).toBeGreaterThanOrEqual(1);
+  await expect(browse.getByRole('button')).toHaveCount(categoryCount + 1);
+  await expect(page.getByTestId('category-tile-cat1-fallback')).toBeVisible();
+  await expect(images).toHaveCount(0);
 });
 
 test('The till opens on v2\'s category tiles, with All products first and a search from the root', async ({ page }) => {

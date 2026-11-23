@@ -28,6 +28,7 @@ import { loadCartSide } from '../lib/cart-side-setting';
 import { cartTabLabel, chargeTaxClasses } from '../lib/cart-totals';
 import { refreshCatalogue, removeCatalogueDatabaseWithin } from '../lib/catalogue';
 import { closeWarningLines } from '../lib/close-warnings';
+import { useCollectionCategories } from '../lib/collection-categories';
 import { CloseWarningsCard } from '../lib/close-warnings-card';
 import { ClosureHistory, ClosureList } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
@@ -543,6 +544,7 @@ function Sale({
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const catalogueView = useCatalogueView(settingsOpen);
   const catalogueFilters = useCatalogueFilters(settingsOpen);
+  const categories = useCollectionCategories(session, products, connector.traits.product);
   const facetPills = useFacetTermPills(session, connector.traits.product, products);
   const approvalSheet = useApprovalSheet({ session, register, capabilities });
   const identity = tillIdentity(session);
@@ -771,6 +773,8 @@ function Sale({
           termPills={facetPills.termPills}
           loading={!lastSyncedAt && !error}
           products={products}
+          // The derived categories with each Vendure collection's featured image; undefined keeps Catalogue's own (1.5b).
+          categories={categories}
           traits={facetPills.traits}
           currency={session.settings.currency}
           lastSyncedAt={lastSyncedAt}
