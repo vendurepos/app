@@ -54,8 +54,8 @@ describe('tillSalesFigures', () => {
   it('with a cashier filter, a refund counts for the cashier who made it, as the store report does', () => {
     const orders = [order('a')];
     const refunds = [
-      refund('b-refunds-a', 'a', { envelope: { payload: { createdAt: today, totalMinor: 100, cashierRef: 'cashier-b' } } }),
-      refund('a-refunds-elsewhere', 'not-on-device', { envelope: { payload: { createdAt: today, totalMinor: 200, cashierRef: 'cashier-a' } } }),
+      refund('b-refunds-a', 'a', { envelope: { payload: { createdAt: today, totalMinor: 100, cashierRef: 'cashier-b' } } as PosRefund['envelope'] }),
+      refund('a-refunds-elsewhere', 'not-on-device', { envelope: { payload: { createdAt: today, totalMinor: 200, cashierRef: 'cashier-a' } } as PosRefund['envelope'] }),
       refund('nobody-elsewhere', 'not-on-device'),
     ];
     const cashierB = figures(orders, refunds, { cashierId: 'cashier-b' });
