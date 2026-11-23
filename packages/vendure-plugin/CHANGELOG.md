@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.4.0 (2026-11-23)
+
+**Version pairing:** the VendurePOS app from vendurepos/app#466 on needs plugin 0.4.0 or later. Against 0.3.0, the final refund of a sale with a rounding bridge is refused, and nothing is refunded. Update the plugin before or with the app.
+
+### Upgrading from 0.3.0
+
+Run the migrations (Vendure's `runMigrations`, or the server with `migrationsRun`) before serving 0.4.0. All six are additive: they create tables and add nullable columns, and they change no existing row (the sixth fills its new table from `tally_display`, which the third creates). They run in this order:
+
+1. `TallyPosRegisterV21791000000000`: `deviceId`, `deviceName` and `supersedes` on `tally_register_session`, a unique `(channelId, supersedes)` constraint, and the `tally_register_session_alias` table. Sessions opened before it have no device id and can only be taken over, not resumed.
+2. `TallyPosRegisterOpenVersion1791100000000`: `openVersion` on `tally_register_session`.
+3. `TallyPosDisplay1791200000000`: the six customer-display tables (`tally_display`, `tally_display_code`, `tally_display_pending`, `tally_display_snapshot`, `tally_display_signal`, `tally_display_claim_window`).
+4. `TallyPosRegisterApproval1791300000000`: the `tally_register_approval` table and `approvalId` on `tally_register_closure`.
+5. `TallyPosReceiptEmail1791400000000`: the `tally_receipt_email_window` table.
+6. `TallyPosDisplayDevice1791500000000`: the `tally_display_device` table, with a row for each device already in `tally_display`.
+
+New permissions (none of them opens the `/tally/v1` routes, which still need `TallyPosSell` or `CreateOrder`):
+
+- `TallyPosRefund`: refund a sale at a till. SuperAdmin holds it; the till role preset does not, so add it to a till's role for till refunds.
+- `ApproveTallyPosVariance`: approve a register close over the variance threshold, and see expected figures in a blind close. SuperAdmin holds it.
+- `TallyPosPairDisplay`: pair a customer display. The till role preset holds it; a role made from the preset under 0.3.0 does not gain it until **New POS till key** runs again.
+- `TallyPosResetDisplayDevice`: reset a till's customer-display device. SuperAdmin holds it; the till role preset does not.
+
+**Behaviour change:** the `tally-pos` payment handler now settles every refund at once. An admin refund of a POS order used to stay `Pending` until someone settled it by hand. It is now `Settled` when made, carries no till metadata, and counts in no register session.
+
+### Changes
+
 - Customer display reset (9.8e): a new permission, `TallyPosResetDisplayDevice` (SuperAdmin holds it; the till role preset does not), opens two Admin API operations in the active channel: `tallyDisplayDevices` lists the customer-display devices with their displays and no secrets, and `tallyResetDisplayDevice(deviceId)` deletes a device with every display, code and pending pairing it owns, so the id registers again with a new key (`DeletionResponse`, `NOT_DELETED` for an unknown id). No migration.
 - Blind close (4.3d): `register_approval_required`'s `data` gains `closureId`, and a caller without `ApproveTallyPosVariance` no longer receives its `data.variance` (fresh or replayed; a holder still does, and the ledger keeps it). `POST /tally/v1/register-approvals` takes exactly one of `variance` or `closureId`; with `closureId` it approves the variance stored with that closure's newest refusal for the session in this channel, or answers 404 `approval_request_unknown`. Both or neither answer 400 `invalid_payload`. No migration.
 - Blind close (4.3c): a caller without `ApproveTallyPosVariance` on the active channel (SuperAdmin holds it) no longer receives `GET /tally/v1/registers/:id`'s `session.expected`, `session.paidInMinor` and `session.paidOutMinor`, nor each closure item's `expected`, `variance`, `tillExpected`, `paidInMinor` and `paidOutMinor`, nor a register command reply's `session.expected` or `closure.expected` and `closure.variance` (fresh or replayed). The keys are omitted; movement amounts, floats and `register_approval_required`'s `data.variance` are still sent, and the command ledger still stores every figure. No migration.
