@@ -70,7 +70,7 @@ describe('order.create version 4: net discounts', () => {
       const lineDiscounts = Object.fromEntries(command.payload.lines.map((line, index) => [
         String(order.lines.find(item => item.customFields.tallyClientLineId === line.clientLineId)!.id), String(surcharges[index].id)]));
       expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({
-        display: command.payload.display, taxByRate: command.payload.taxByRate, lineDiscounts,
+        display: command.payload.display, taxByRate: command.payload.taxByRate, lineDiscounts, totalMinor: command.payload.totalMinor,
       });
     });
   }

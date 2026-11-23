@@ -278,8 +278,9 @@ describe('order.refund v1', () => {
     .findOneOrFail({ where: { id: environment.decode(order.id) }, relations: ['surcharges'] });
   // An order sold before #460: its snapshot rewritten to the old {display, taxByRate} shape, with no lineDiscounts.
   async function unlink(order: ReadOrder) {
-    const { lineDiscounts, ...old } = JSON.parse((await storedOrder(order)).customFields.tallySnapshot!);
+    const { lineDiscounts, totalMinor, ...old } = JSON.parse((await storedOrder(order)).customFields.tallySnapshot!);
     expect(lineDiscounts).toBeDefined();
+    expect(totalMinor).toBeDefined();
     expect(Object.keys(old)).toEqual(['display', 'taxByRate']);
     await connection.rawConnection.getRepository(Order).update(environment.decode(order.id), { customFields: { tallySnapshot: JSON.stringify(old) } });
   }

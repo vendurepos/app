@@ -461,15 +461,28 @@ export class RegisterService {
   /**
    * Orders order.create recorded in full in this channel (tallyPayments is written at the recipe's end), with the POS
    * payments it recorded. A tallyRejected order counts as never placed (ADR-068 d13.6 amendment).
+   * The cap mirrors order-create's (ADR-039), so expected figures count what the order's payments and sales report count.
    */
   private async receivedOrders(tx: RequestContext, customFields: FindOptionsWhere<Order['customFields']>) {
     const orders = await this.connection.getRepository(tx, Order).find({
-      select: { id: true, customFields: { tallyPayments: true, tallyRejected: true } },
+      select: { id: true, customFields: { tallyPayments: true, tallyRejected: true, tallySnapshot: true } },
       where: { channels: { id: tx.channelId }, customFields: { ...customFields, tallyPayments: Not(IsNull()) } },
     });
     return orders.filter(order => !order.customFields.tallyRejected).map(order => {
       try {
-        return { payments: JSON.parse(order.customFields.tallyPayments!) };
+        const payments = JSON.parse(order.customFields.tallyPayments!);
+        let totalMinor: number | undefined;
+        try {
+          const snapshot = JSON.parse(order.customFields.tallySnapshot!);
+          if (snapshot && typeof snapshot === 'object' && Number.isSafeInteger(snapshot.totalMinor) && snapshot.totalMinor >= 0) totalMinor = snapshot.totalMinor;
+        } catch { /* An unreadable snapshot keeps the stored payments. */ }
+        let remaining = totalMinor ?? 0;
+        return { payments: totalMinor === undefined || !Array.isArray(payments) ? payments : payments.map(entry => {
+          if (!entry || typeof entry !== 'object' || !Number.isSafeInteger(entry.amountMinor) || entry.amountMinor < 0) return entry;
+          const amountMinor = Math.min(entry.amountMinor, remaining);
+          remaining -= amountMinor;
+          return { ...entry, amountMinor };
+        }) };
       } catch {
         return { payments: [] }; // deriveSessionFigures skips a malformed record too
       }

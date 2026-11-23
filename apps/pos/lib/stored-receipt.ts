@@ -30,10 +30,23 @@ export function storedReceiptData(order: VendureOrder, config: ReceiptConfig & {
   // whole list in tallyPayments.
   const tenders = storedTenders(order.customFields?.tallyPayments);
   if (tenders) {
+    let snapshotTotal: unknown;
+    try { snapshotTotal = JSON.parse(order.customFields?.tallySnapshot ?? '').totalMinor; } catch { /* unreadable: use the order total */ }
+    const total = typeof snapshotTotal === 'number' && Number.isSafeInteger(snapshotTotal) && snapshotTotal >= 0 ? snapshotTotal : order.totalWithTax;
+    const capped = Number.isSafeInteger(total);
+    let remaining = total;
+    let changeDueMinor = 0;
+    const payments = tenders.flatMap(({ method, amountMinor, tenderedMinor, changeMinor, reference }) => {
+      if (capped && remaining === 0) return [];
+      const applied = capped ? Math.min(amountMinor, remaining) : amountMinor;
+      remaining -= applied;
+      changeDueMinor += changeMinor ?? 0;
+      return [{ method, amountMinor: tenderedMinor ?? (capped ? applied + (changeMinor ?? 0) : applied), ...(reference ? { reference } : {}) }];
+    });
     return {
       ...receipt,
-      payments: tenders.map(({ method, amountMinor, tenderedMinor, reference }) => ({ method, amountMinor: tenderedMinor ?? amountMinor, ...(reference ? { reference } : {}) })),
-      changeDueMinor: tenders.reduce((sum, tender) => sum + (tender.changeMinor ?? 0), 0),
+      payments,
+      changeDueMinor,
     };
   }
   const payments = (order.payments ?? []).filter(payment => !UNPAID_PAYMENT_STATES.includes(payment.state)).map((payment) => {
