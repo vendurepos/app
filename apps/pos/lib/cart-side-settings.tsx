@@ -1,7 +1,10 @@
 import { useState, type JSX } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack } from '@tallyui/components';
+import { View } from 'react-native';
+import {
+  Card, CardContent, CardHeader, CardTitle, ChevronDownIcon, HStack, IconButton, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
+} from '@tallyui/components';
 import { loadCartSide, saveCartSide } from './cart-side-setting';
-import { cartColumnShown, loadCartColumns, saveCartColumns } from './cart-columns-setting';
+import { CART_COLUMN_ORDER, cartColumnShown, loadCartColumns, moveCartColumn, saveCartColumns } from './cart-columns-setting';
 import { loadCartSort, saveCartSort } from './cart-sort-setting';
 
 /** Settings › General: v2's Cart settings Panel position, Sort items and Columns (CHECKLIST 9.10). */
@@ -43,7 +46,7 @@ export function CartSideSettings(): JSX.Element {
           <Text className="font-semibold">Columns</Text>
           <Text>Which columns the cart shows on this device. Price still folds on a narrow cart.</Text>
           <VStack space="none">
-            {([
+            {(columns.order ?? CART_COLUMN_ORDER).flatMap((id, at, order) => ([
               ['quantity', 'show', 'Qty', shown.quantity, false],
               ['quantity', 'split', 'Split', shown.quantitySplit, !shown.quantity],
               ['image', 'show', 'Image', shown.image, false],
@@ -52,15 +55,28 @@ export function CartSideSettings(): JSX.Element {
               ['sku', 'show', 'SKU', shown.sku, false],
               ['price', 'show', 'Price', shown.price, false],
               ['total', 'show', 'Total', shown.total, false],
-            ] as const).map(([column, field, label, checked, disabled]) => (
+            ] as const).filter(([column]) => column === id).map(([column, field, label, checked, disabled]) => (
               <SettingsRow key={`${column}-${field}`} label={label} className={field === 'show' ? undefined : 'pl-6'}
-                action={<Switch testID={`cart-column-${column}${field === 'show' ? '' : `-${field}`}`} accessibilityLabel={label}
-                  checked={checked} disabled={disabled} onCheckedChange={(on) => {
-                    const next = { ...columns, [column]: { ...columns[column], [field]: on } };
-                    saveCartColumns(next);
-                    setColumns(next);
-                  }} />} />
-            ))}
+                action={<HStack space="xs" className="items-center">
+                  {field === 'show' && ([[-1, 'up', at === 0], [1, 'down', at === order.length - 1]] as const).map(([by, way, edge]) => (
+                    // v2 04l's Move up / Move down: TallyUI's own CartColumnsForm turns its chevron the same way.
+                    <IconButton key={way} testID={`cart-column-${column}-${way}`} variant="ghost" size="sm" disabled={edge}
+                      accessibilityLabel={`Move ${label} ${way}`} onPress={() => {
+                        const next = moveCartColumn(columns, column, by);
+                        saveCartColumns(next);
+                        setColumns(next);
+                      }}>
+                      <View style={way === 'up' ? { transform: [{ rotate: '180deg' }] } : undefined}><ChevronDownIcon size={18} /></View>
+                    </IconButton>
+                  ))}
+                  <Switch testID={`cart-column-${column}${field === 'show' ? '' : `-${field}`}`} accessibilityLabel={label}
+                    checked={checked} disabled={disabled} onCheckedChange={(on) => {
+                      const next = { ...columns, [column]: { ...columns[column], [field]: on } };
+                      saveCartColumns(next);
+                      setColumns(next);
+                    }} />
+                </HStack>} />
+            )))}
           </VStack>
         </VStack>
       </CardContent>
