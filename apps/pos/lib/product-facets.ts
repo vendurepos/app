@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { SyncContext } from '@tallyui/core';
+import { useEffect, useMemo, useState } from 'react';
+import type { ProductTraits, SyncContext } from '@tallyui/core';
 import { sessionContext, type Session } from './session';
 
 // The collection-mirroring facet: Vendure's CSV import (and the dev store) put each product's collection in a `category`
@@ -31,16 +31,26 @@ export function shownFacetIds(items: { id: string; code: string }[]): ReadonlySe
   return new Set(items.filter(item => !HIDDEN_FACET_CODES.includes(item.code)).map(item => item.id));
 }
 
+/** The product's values in the shown facets; none while `shown` is null. */
+function shownFacetValues(product: unknown, shown: ReadonlySet<string> | null): FacetValueDoc[] {
+  if (!shown) return [];
+  return ((product as { facetValues?: FacetValueDoc[] }).facetValues ?? []).filter(value => shown.has(value.facet.id));
+}
+
+/** The traits with `getTerms`: the product's shown facet values, each in its facet (the sell screen's pills, 1.6c). */
+export function withFacetTerms<Doc>(traits: ProductTraits<Doc>, shown: ReadonlySet<string> | null): ProductTraits<Doc> {
+  return { ...traits, getTerms: doc => shownFacetValues(doc, shown)
+    .map(value => ({ group: value.facet.id, groupName: value.facet.name, id: value.id, name: value.name })) };
+}
+
 /**
  * The shown facets of the listed products, each once, sorted by name. Null (privacy not known yet, or the read failed)
  * shows none, so a private facet never shows.
  */
 export function productFacets(products: readonly unknown[], shown: ReadonlySet<string> | null): ProductFacet[] {
-  if (!shown) return [];
   const facets = new Map<string, ProductFacet>();
   for (const product of products) {
-    for (const value of (product as { facetValues?: FacetValueDoc[] }).facetValues ?? []) {
-      if (!shown.has(value.facet.id)) continue;
+    for (const value of shownFacetValues(product, shown)) {
       const facet = facets.get(value.facet.id) ?? { id: value.facet.id, name: value.facet.name, values: [] };
       if (!facet.values.some(v => v.id === value.id)) facet.values.push({ id: value.id, name: value.name });
       facets.set(facet.id, facet);
@@ -60,4 +70,15 @@ export function usePublicFacetIds(session: Session): ReadonlySet<string> | null 
     return () => { cancelled = true; };
   }, [session]);
   return ids;
+}
+
+/**
+ * The Catalogue's facet pills (1.6c): its traits with `getTerms`, and one pill per shown facet the products carry, in
+ * the Products panel's order. The picks stay in the Catalogue, which never persists them (10.2i: session only).
+ */
+export function useFacetTermPills<Doc>(session: Session, traits: ProductTraits<Doc>, products: readonly Doc[]): { traits: ProductTraits<Doc>; termPills: string[] } {
+  const shown = usePublicFacetIds(session);
+  const wrapped = useMemo(() => withFacetTerms(traits, shown), [traits, shown]);
+  const termPills = useMemo(() => productFacets(products, shown).map(facet => facet.id), [products, shown]);
+  return { traits: wrapped, termPills };
 }

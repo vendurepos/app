@@ -1047,6 +1047,44 @@ test("the Products panel filters by each public facet, one pill per facet, as v2
   await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
 });
 
+test("the sell screen filters by each public facet, as v2's Tag and Brand pills, for this session only (1.6c)", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await openAllProducts(page);
+  const till = page.getByTestId('till-catalogue');
+  const brandId = DEMO_FACETS.find(f => f.code === 'brand')!.id;
+  const brand = till.getByTestId(`filter-chip-group-${brandId}`);
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId(`filter-chip-group-${DEMO_FACETS.find(f => f.isPrivate)!.id}`)).toHaveCount(0);
+  await expect(till.getByTestId(`filter-chip-group-${DEMO_FACETS.find(f => f.code === 'category')!.id}`)).toHaveCount(0);
+  await brand.click();
+  await page.getByTestId(`filter-chip-group-${brandId}-6`).click(); // Tally (lib/demo/facets.ts)
+  await expect(brand).toHaveText('Tally');
+  const tally = CATALOGUE.filter(p => demoBrand(p) === 'Tally').map(p => `product-tile-${p.name}`);
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toHaveCount(0);
+  await expect.poll(() => till.locator('[data-testid^="product-tile-"]').evaluateAll(tiles => tiles.map(tile => tile.dataset.testid)))
+    .toEqual(expect.arrayContaining(tally));
+  expect((await till.locator('[data-testid^="product-tile-"]').evaluateAll(tiles => tiles.map(tile => tile.dataset.testid!)))
+    .every(id => id.startsWith('product-tile-Tally '))).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({ path: test.info().outputPath('1.6c-facet-pills-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await till.getByTestId(`filter-chip-group-${brandId}-remove`).click();
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toBeVisible();
+  await page.getByTestId(`filter-chip-group-${brandId}`).click();
+  await page.getByTestId(`filter-chip-group-${brandId}-6`).click();
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toHaveCount(0);
+  // The pick is the session's alone (10.2i): a reload clears it.
+  await page.reload();
+  await expectSignedIn(page);
+  await openAllProducts(page);
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toBeVisible();
+});
+
 test("the Products panel sorts by its headers, across every page, as v2's products table", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
