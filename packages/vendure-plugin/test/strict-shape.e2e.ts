@@ -4,6 +4,7 @@ import { Order, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TallyCommand } from '../src';
+import * as bridgeBound from '../src/service/bridge-bound';
 import * as strictShape from '../src/service/strict-shape';
 import { strictShapeErrors } from '../src/service/strict-shape';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
@@ -173,17 +174,26 @@ describe('ruling 17: order.create is validated strictly per version', () => {
     expect(await run(structuredClone(input))).toMatchObject({ id: input.id, status: 'duplicate', serverRefs: applied.serverRefs });
   });
 
-  it('#36 review: a stored answer wins; a command stored before the strict check is answered as recorded, never invalid_payload', async () => {
+  it('#36 review: a stored answer wins; a command stored before the strict check and the bridge bound is answered as recorded, never refused', async () => {
     // Stored as it would have been before ruling 17: a v1 command carrying discountMinor, applied.
     const input = tillEnvelope();
     input.payload.lines[0].discountMinor = 50;
     input.payload.discountMinor = 50;
-    const strict = vi.spyOn(strictShape, 'strictShapeErrors').mockReturnValueOnce([]);
+    const strict = vi.spyOn(strictShape, 'strictShapeErrors').mockReturnValue([]);
     let applied;
+    let bound;
     try {
+      const fresh = { ...structuredClone(input), id: uuid() };
+      const rejected = await run(fresh);
+      expect(rejected).toMatchObject({ id: fresh.id, status: 'rejected', error: {
+        code: 'total_mismatch', data: { expectedMinor: 2000, serverMinor: 1938, bridgeMinor: 62, boundMinor: 3 },
+      } });
+      expect(await run(fresh)).toEqual(rejected);
+      bound = vi.spyOn(bridgeBound, 'bridgeBoundMinor').mockReturnValueOnce(1000);
       applied = await run(input);
     } finally {
       strict.mockRestore();
+      bound?.mockRestore();
     }
     expect(applied).toMatchObject({ id: input.id, status: 'applied' });
     expect(strictShapeErrors(input as unknown as Record<string, unknown>, 1)).not.toEqual([]);

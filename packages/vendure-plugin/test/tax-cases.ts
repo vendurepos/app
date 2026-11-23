@@ -140,12 +140,11 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({ lineDiscounts: { [String(order.lines[0].id)]: String(discount!.id) }, totalMinor: command.payload.totalMinor });
     });
 
-    it('negative control: a POS total off by B + 5 is applied, bridged in full, and exceeds the bound', async () => {
+    it('negative control: a POS total off by 6 is over the bound, refused total_mismatch and not stored', async () => {
       await setMode(false);
       // 100 net at 19% is 119 in both POS and Vendure, so the only bridge is the offset.
-      // One line plus the bridge surcharge gives B = ceil(2 / 2) = 1.
-      const expectedB = 1;
-      const offset = expectedB + 5;
+      // One line plus its shipping line: the bound is max(2, 2) = 2.
+      const offset = 6;
       const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 100, ratePpm: 190000 }]);
       expect(command.payload.totalMinor).toBe(119);
       command.payload.totalMinor += offset;
@@ -154,16 +153,9 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       command.payload.display!.subtotalMinor += offset;
       command.payload.display!.lines[0].amountMinor += offset;
       command.payload.payments[0].amountMinor += offset;
-      const { order, result } = await submit(command);
-      const bound = bridgeBound(order, result);
-      expect(order.state).toBe('Delivered');
-      expect(order.totalWithTax).toBe(command.payload.totalMinor);
-      expect(bound.B).toBe(expectedB);
-      expect(bound.bridge).toBe(offset);
-      expect(result.totalWarnings).toEqual([{ code: 'total_mismatch', expectedMinor: 119 + offset, serverMinor: 119, bridgeMinor: offset }]);
-      // The parity cases' bound assertion would catch this bridge.
-      expect(Math.abs(bound.bridge)).toBeGreaterThan(bound.B);
-      expect(() => expect(Math.abs(bound.bridge)).toBeLessThanOrEqual(bound.B)).toThrow();
+      expect(await run(command)).toMatchObject({ id: command.id, status: 'rejected', error: {
+        code: 'total_mismatch', data: { expectedMinor: 125, serverMinor: 119, bridgeMinor: 6, boundMinor: 2 },
+      } });
     });
 
     it('reports an above-bound v3 per-rate discrepancy without refusing the sale', async () => {
