@@ -72,12 +72,14 @@ export function tillSalesFigures({ orders, refunds, filters, timezone }: {
   orders: readonly PosOrder[]; refunds: readonly PosRefund[]; filters: SalesFilters; timezone: string;
 }): SalesFigures {
   const kept = keptTillOrders(orders, filters);
-  const keptIds = new Set(kept.map((order) => order.id));
+  const orderCashiers = new Map(orders.flatMap((order) => (order.serverRefs?.orderId ? [[order.serverRefs.orderId, order.cashierRef] as const] : [])));
   const keptRefunds = refunds.flatMap((refund) => {
     const report = reportRefundFromPosRefund(refund);
     if (!report) return [];
     if (filters.registerId && refund.registerId !== filters.registerId) return [];
-    if ((filters.cashierId || filters.status !== 'all') && !keptIds.has(refund.orderId)) return [];
+    if (filters.status !== 'all' && refund.status !== filters.status) return [];
+    // Use the refund's own cashier, else its sale's, as in report.service.ts posRefundsV2.
+    if (filters.cashierId && (refund.envelope.payload.cashierRef ?? orderCashiers.get(refund.orderId)) !== filters.cashierId) return [];
     return [report];
   });
   const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
