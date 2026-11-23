@@ -23,6 +23,7 @@ import {
   TALLY_NO_TAX_CATEGORY, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
 } from './constants';
 import { classify } from './classification';
+import { bridgeBoundMinor } from './bridge-bound';
 import {
   CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, nulPath, refuse, replayRead,
 } from './command-ledger';
@@ -74,7 +75,7 @@ type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensati
 /** A clientOrderId collision after the recipe's first event: roll everything back and run the command again. */
 class Rerun extends Error {}
 class RepairStoreSetup extends Error {}
-/** An unstored refusal after the claim (store-wide setup, TallyUI #219): the claim rolls back, so the same id applies later. */
+/** An unstored refusal after the claim (store-wide setup, TallyUI #219; a bridge over the bound, money P3 #7): the claim rolls back, so the same id is checked again. */
 class SetupRefusal extends Error {
   constructor(readonly result: OrderCreateResult) {
     super(result.error!.code);
@@ -214,7 +215,7 @@ export class OrderCreateService {
     try {
       return await this.recipe(ctx, command, progress, codes);
     } catch (error) {
-      if (error instanceof TransientCommandError || error instanceof RepairStoreSetup) throw error;
+      if (error instanceof TransientCommandError || error instanceof RepairStoreSetup || error instanceof SetupRefusal) throw error;
       const verdict = classify(error, this.clientOrderIdIndex());
       if (verdict.outcome === 'notStored') throw error;
       if (verdict.outcome === 'collision') throw new Rerun();
@@ -756,6 +757,19 @@ export class OrderCreateService {
     const totalWarnings: TotalWarning[] = [];
     const serverMinor = order.totalWithTax;
     const bridgeMinor = payload.totalMinor - serverMinor;
+    // Money P3 #7 (Front desk ruling, 2026-11-23): a bridge over the bound is not rounding. Refused, not stored: the
+    // sale rolls back with its claim (re-ruling 3: nothing raised after the first write is stored), so a resend checks
+    // again. A command already in the ledger replays its recorded answer before this point.
+    const boundMinor = bridgeBoundMinor(order);
+    if (Math.abs(bridgeMinor) > boundMinor) {
+      const figures = { expectedMinor: payload.totalMinor, serverMinor, bridgeMinor, boundMinor };
+      Logger.warn(`order.create ${command.id} refused total_mismatch: ${JSON.stringify({
+        clientOrderId: payload.clientOrderId, version: command.version, ...figures,
+      })}`, loggerCtx);
+      throw new SetupRefusal(refuse(command.id, 'total_mismatch',
+        `The POS total ${payload.totalMinor} differs from the server's ${serverMinor} by ${bridgeMinor}, `
+        + `more than the ${boundMinor} allowed for rounding`, figures));
+    }
     if (bridgeMinor !== 0) {
       const bridge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
         order, description: 'POS rounding', sku: TALLY_ROUNDING_SKU, listPrice: bridgeMinor,

@@ -1,5 +1,5 @@
 import {
-  Channel, ConfigService, Customer, EventBus, InsufficientStockOnHandError, Order, OrderLine, OrderService,
+  Channel, ConfigService, Customer, EventBus, InsufficientStockOnHandError, Logger, Order, OrderLine, OrderService,
   Payment, PaymentMethod, ShippingMethod,
   ProductVariantService, ShippingLine, StockMovement, Surcharge, TaxRate, TransactionalConnection, defaultOrderProcess,
 } from '@vendure/core';
@@ -7,6 +7,7 @@ import type { OrderProcess, OrderState } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, PLATFORM_ERROR_CODE, TallyCommand, TransientCommandError } from '../src';
+import * as bridgeBound from '../src/service/bridge-bound';
 import { classify } from '../src/service/classification';
 import { ErrorResultThrown, transientKind } from '../src/service/errors';
 import type { CommandEnvelope } from '../src/vendored/commands';
@@ -40,6 +41,18 @@ describe('error classes (ADR 0002 §2)', () => {
   });
 
   const mug = (quantity = 1) => ({ variantId: variantIds.mug[0], quantity, unitPriceMinor: 800 });
+  // Offsets the till's total by `offset` minor units, as order-refund.e2e.ts's sellBridged does.
+  function offsetBy(command: ReturnType<typeof orderCommand>, offset: number) {
+    command.payload.totalMinor += offset;
+    command.payload.subtotalMinor += offset;
+    if (command.payload.display) {
+      command.payload.display.totalMinor += offset;
+      command.payload.display.subtotalMinor += offset;
+      command.payload.display.lines.at(-1)!.amountMinor += offset;
+    }
+    command.payload.payments[0].amountMinor += offset;
+    return command;
+  }
   async function counts() {
     return {
       orders: await connection.rawConnection.getRepository(Order).count(),
@@ -362,6 +375,81 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(eurChannel.updateChannel.defaultCurrencyCode).toBe('EUR');
     const afterApplied = await counts();
     expect(await run(input)).toEqual({ ...result, status: 'duplicate' });
+    expect(await counts()).toEqual(afterApplied);
+  });
+
+  it('money P3 #7: the bound is max(2, product lines + surcharges + shipping lines)', () => {
+    for (const [lines, surcharges, shippingLines, expected] of [
+      [1, 0, 0, 2], [0, 0, 0, 2], [1, 0, 1, 2], [2, 0, 1, 3],
+      [3, 1, 1, 5], [1, 2, 0, 3], [0, 0, 3, 3],
+    ]) {
+      expect(bridgeBound.bridgeBoundMinor({
+        lines: Array(lines), surcharges: Array(surcharges), shippingLines: Array(shippingLines),
+      } as never)).toBe(expected);
+    }
+  });
+
+  it('money P3 #7: a bridge at the bound applies with the total_mismatch warning; one over it is refused, not stored, no event, and the corrected resend applies', async () => {
+    const atBound = offsetBy(orderCommand([mug()]), 2);
+    expect(await run(atBound)).toMatchObject({ status: 'applied', totalWarnings: [
+      { code: 'total_mismatch', expectedMinor: 1002, serverMinor: 1000, bridgeMinor: 2 },
+    ] });
+    const delivered: string[] = [];
+    const subscription = server.app.get(EventBus).filter(() => true).subscribe(event => delivered.push(event.constructor.name));
+    const warn = vi.spyOn(Logger, 'warn');
+    try {
+      const before = await counts();
+      const over = offsetBy(orderCommand([mug()]), 3);
+      expect(await run(over)).toEqual({ id: over.id, status: 'rejected', error: {
+        code: 'total_mismatch',
+        message: "The POS total 1003 differs from the server's 1000 by 3, more than the 2 allowed for rounding",
+        data: { expectedMinor: 1003, serverMinor: 1000, bridgeMinor: 3, boundMinor: 2 },
+      } });
+      expect(await counts()).toEqual(before);
+      expect(await ledgerFor(over)).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      for (const part of [over.id, 'total_mismatch', `"clientOrderId":"${over.payload.clientOrderId}"`,
+        '"version":3', '"expectedMinor":1003', '"serverMinor":1000', '"bridgeMinor":3', '"boundMinor":2']) {
+        expect(warn.mock.calls[0][0]).toContain(part);
+      }
+      const under = offsetBy(orderCommand([mug()]), -3);
+      expect(await run(under)).toMatchObject({ status: 'rejected', error: {
+        code: 'total_mismatch', data: { expectedMinor: 997, serverMinor: 1000, bridgeMinor: -3, boundMinor: 2 },
+      } });
+      expect(await counts()).toEqual(before);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(delivered).toEqual([]);
+      const fixed = structuredClone(over);
+      offsetBy(fixed, -3);
+      const result = await run(fixed);
+      expect(result).toMatchObject({ id: over.id, status: 'applied' });
+      expect(result.totalWarnings?.some(warning => warning.code === 'total_mismatch') ?? false).toBe(false);
+    } finally {
+      warn.mockRestore();
+      subscription.unsubscribe();
+    }
+  });
+
+  it('money P3 #7: every command version is bounded: a version 2 sale one over the bound is refused, not stored', async () => {
+    const input = offsetBy(orderCommand([mug()], undefined, undefined, { version: 2 }), 3);
+    const before = await counts();
+    expect(await run(input)).toMatchObject({ status: 'rejected', error: { code: 'total_mismatch', data: { boundMinor: 2 } } });
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
+  });
+
+  it('money P3 #7: a sale recorded with a bridge over the bound replays its recorded answer', async () => {
+    const input = offsetBy(orderCommand([mug()]), 3);
+    const bound = vi.spyOn(bridgeBound, 'bridgeBoundMinor').mockReturnValueOnce(1000);
+    let applied;
+    try {
+      applied = await run(input);
+      expect(applied).toMatchObject({ status: 'applied', totalWarnings: [{ code: 'total_mismatch', bridgeMinor: 3 }] });
+    } finally {
+      bound.mockRestore();
+    }
+    const afterApplied = await counts();
+    expect(await run(structuredClone(input))).toEqual({ ...applied, status: 'duplicate' });
     expect(await counts()).toEqual(afterApplied);
   });
 

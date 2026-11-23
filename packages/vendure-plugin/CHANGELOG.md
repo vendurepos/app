@@ -5,6 +5,7 @@
 ### Behaviour change
 
 - `order.create` takes the channel's default currency only. A sale in another currency the channel offers is now refused `unsupported_currency` (before, it was accepted and its amounts were added to the register's expected figures as if they were the default currency, while the sales report left it out). Nothing is stored, so the same command applies once its currency is the channel's default; a command already recorded still replays its recorded answer. A sale in another currency still queued on a till is refused on every resend until that currency is the channel's default. A store that sells in several currencies needs one channel per currency.
+- `order.create` refuses a till total that is off by more than rounding. When the till's `totalMinor` differs from Vendure's total by more than max(2, one per order line) minor units (order lines are product lines, surcharges and shipping lines), the sale is refused `total_mismatch` with `expectedMinor`, `serverMinor`, `bridgeMinor` and `boundMinor` in `error.data` (before, any difference was bridged by a `POS rounding` surcharge and only warned). Nothing is stored: the sale rolls back and the same command is checked again on resend, and the server logs one `total_mismatch` warning line per refusal. Every command version is bounded; a command already recorded still replays its recorded answer. A difference within the bound is still bridged with a `total_mismatch` warning, as before.
 
 ## 0.4.0 (2026-11-23)
 
