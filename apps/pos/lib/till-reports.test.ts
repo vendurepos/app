@@ -30,7 +30,7 @@ describe('tillSalesFigures', () => {
     expect(figures(orders, [], { cashierId: '', registerId: '' }).totals.orderCount).toBe(2);
   });
 
-  it('keeps only orders and their refunds matching the applied or pending status', () => {
+  it('keeps orders by their status and refunds by their own sync status', () => {
     const orders = [order('pending', { syncStatus: 'pending', totalMinor: 500 }), order('applied')];
     const refunds = [refund('pending-sale', 'pending'), refund('applied-sale', 'applied'), refund('unknown-sale', 'unknown')];
     const synced = figures(orders, refunds, { status: 'applied' });
@@ -39,8 +39,8 @@ describe('tillSalesFigures', () => {
     expect(synced.totals.grossMinor).toBe(952);
     expect(waiting.totals.orderCount).toBe(1);
     expect(waiting.totals.grossMinor).toBe(500);
-    expect(synced.refunds.count).toBe(1);
-    expect(waiting.refunds.count).toBe(1);
+    expect(synced.refunds.count).toBe(3);
+    expect(waiting.refunds.count).toBe(0);
   });
 
   it('keeps the selected cashier’s orders and excludes refunds of another cashier’s orders', () => {
@@ -49,6 +49,22 @@ describe('tillSalesFigures', () => {
     const result = figures(orders, refunds, { cashierId: 'cashier-a' });
     expect(result.totals.orderCount).toBe(1);
     expect(result.refunds.count).toBe(1);
+  });
+
+  it('with a cashier filter, a refund counts for the cashier who made it, as the store report does', () => {
+    const orders = [order('a')];
+    const refunds = [
+      refund('b-refunds-a', 'a', { envelope: { payload: { createdAt: today, totalMinor: 100, cashierRef: 'cashier-b' } } }),
+      refund('a-refunds-elsewhere', 'not-on-device', { envelope: { payload: { createdAt: today, totalMinor: 200, cashierRef: 'cashier-a' } } }),
+      refund('nobody-elsewhere', 'not-on-device'),
+    ];
+    const cashierB = figures(orders, refunds, { cashierId: 'cashier-b' });
+    const cashierA = figures(orders, refunds, { cashierId: 'cashier-a' });
+    expect(cashierB.refunds.count).toBe(1);
+    expect(cashierB.refunds.amountMinor).toBe(100);
+    expect(cashierA.refunds.count).toBe(1);
+    expect(cashierA.refunds.amountMinor).toBe(200);
+    expect(figures(orders, refunds).refunds.count).toBe(3);
   });
 
   it('keeps only the selected register’s orders and refunds', () => {
