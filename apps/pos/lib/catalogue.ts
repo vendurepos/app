@@ -41,10 +41,18 @@ export async function startCatalogueSync(session: Session, connector: TallyConne
   return enqueue(() => startUnqueued(session, connector));
 }
 
+// Reads that Sync now repeats with the catalogue (the collection images, CHECKLIST 1.5b).
+const refreshListeners = new Set<() => void>();
+export function onCatalogueRefresh(listener: () => void): () => void {
+  refreshListeners.add(listener);
+  return () => { refreshListeners.delete(listener); };
+}
+
 /** Sync now: re-pulls the catalogue and re-reads stock at once, as on focus or coming online; false while no sync runs. */
 export function refreshCatalogue(): boolean {
   if (!sync) return false;
   sync.refresh();
+  refreshListeners.forEach(listener => listener());
   return true;
 }
 

@@ -9,10 +9,19 @@ import { salesCsv, salesCsvFileName } from './sales-csv';
 import { salesSummaryLines } from './sales-summary-lines';
 import { initialSalesFilters, reportOptions, REPORT_STATUS_OPTIONS, tillHourly, tillOrderSpread, tillSalesFigures } from './till-reports';
 import type { Session } from './session';
-import { reportsView } from './store-sales';
+import { reportsView, type ReportsView } from './store-sales';
 import { TillSalesHero } from './till-sales-hero';
 import { useFreshList } from './use-fresh-list';
 import { useStoreSales } from './use-store-sales';
+
+// The desk's 8.1q ruling: the store's Categories card counts a product in every collection it is in, and says so.
+// TallyUI 4.2.0's cards take no help text, so the app shows the line, as it shows the till-only caption.
+export const CATEGORIES_HELP_TEXT = 'Categories: a product in several collections counts in each.';
+
+/** The help line only over the store's Categories card (a v3 answer); the till view and a v2 answer have none. */
+export function categoriesHelp(view: Pick<ReportsView, 'storeWide' | 'hide'>): string | null {
+  return view.storeWide && !view.hide.includes('categories') ? CATEGORIES_HELP_TEXT : null;
+}
 
 export function ReportsPanel({ session, orders, refunds, currency, timezone, drawer, closures, onOpenOrders }: {
   session: Session | null; orders: RxCollection<PosOrder> | null; refunds: PosRefundCollection | null; currency: string; timezone: string; drawer?: ReactNode; closures?: ReactNode;
@@ -34,6 +43,7 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
     hourly: tillHourly({ orders: orderList, filters, timezone }),
     spread: tillOrderSpread({ orders: orderList, filters, timezone }),
   }), REPORT_STATUS_OPTIONS), [store, orderList, refundList, filters, timezone]);
+  const categoriesHelpText = categoriesHelp(view);
   useEffect(() => { if (openCard && view.hide.includes(openCard)) setOpenCard(null); }, [openCard, view.hide]);
   // The web downloads the period's figures as the closures sheet does: a Blob URL on an <a download>.
   const downloadCsv = (csv: string, filename: string) => {
@@ -73,6 +83,9 @@ export function ReportsPanel({ session, orders, refunds, currency, timezone, dra
             <View testID="reports-till-only" dataSet={{ status: store.status }}>
               <Text className="text-sm text-muted-foreground">{view.tillOnly}</Text>
             </View>
+          ) : null}
+          {categoriesHelpText ? (
+            <Text testID="reports-categories-help" className="text-sm text-muted-foreground">{categoriesHelpText}</Text>
           ) : null}
           <TillSalesHero figures={view.figures} filters={filters} onFiltersChange={setFilters} currency={currency} hourly={view.hourly} spread={view.spread} />
           <View dataSet={{ print: 'hide' }} className="gap-1">

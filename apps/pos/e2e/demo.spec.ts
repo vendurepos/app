@@ -19,7 +19,8 @@ async function openSettings(page: Page, section: string) {
 
 declare global {
   interface Window {
-    printCalls: number; scanTones: number[];
+    printCalls: number; printsWithSheet: number; scanTones: number[];
+    __demoCollectionsRefused?: number;
     cameraStreams: MediaStream[];
     cameraSees: { code: string; format: string } | null;
     chooserCalls: { kind: string; options: unknown }[];
@@ -651,6 +652,32 @@ test("the customer sheet shows the customer's groups read-only, as v2's role row
   await expect(sheet.getByTestId('customer-sheet-groups')).toHaveCount(0);
 });
 
+test('the customer sheet body scrolls on a short screen; Save and Close stay on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  // c3 (Alan Turing) has a seeded address, so the address editor makes the sheet taller than the window.
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-save')).toBeInViewport();
+  await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  const orders = sheet.getByTestId('customer-sheet-orders');
+  await orders.scrollIntoViewIfNeeded();
+  await expect(orders).toBeInViewport();
+  await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  // An empty address line 1 is refused before any request; the refusal shows on screen, not below the order history.
+  await sheet.getByTestId('customer-form-addresses-billing-edit').click();
+  await sheet.getByTestId('customer-form-addresses-billing-address1').fill('');
+  await sheet.getByTestId('customer-sheet-save').click();
+  await expect(sheet.getByTestId('customer-sheet-error')).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-error')).toBeInViewport();
+  await sheet.getByTestId('customer-sheet-close').click();
+  await expect(sheet).toBeHidden();
+});
+
 test("the customer sheet shows the customer's account read-only, as v2's username row: registered and verified, not verified, or a guest", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
@@ -1019,6 +1046,44 @@ test("the Products panel filters by each public facet, one pill per facet, as v2
   await brand.click();
   await expect(brand).toHaveText('Brand');
   await expect(panel.getByTestId('products-count')).toHaveText(/^Showing 25 of /);
+});
+
+test("the sell screen filters by each public facet, as v2's Tag and Brand pills, for this session only (1.6c)", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await openAllProducts(page);
+  const till = page.getByTestId('till-catalogue');
+  const brandId = DEMO_FACETS.find(f => f.code === 'brand')!.id;
+  const brand = till.getByTestId(`filter-chip-group-${brandId}`);
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId(`filter-chip-group-${DEMO_FACETS.find(f => f.isPrivate)!.id}`)).toHaveCount(0);
+  await expect(till.getByTestId(`filter-chip-group-${DEMO_FACETS.find(f => f.code === 'category')!.id}`)).toHaveCount(0);
+  await brand.click();
+  await page.getByTestId(`filter-chip-group-${brandId}-6`).click(); // Tally (lib/demo/facets.ts)
+  await expect(brand).toHaveText('Tally');
+  const tally = CATALOGUE.filter(p => demoBrand(p) === 'Tally').map(p => `product-tile-${p.name}`);
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toHaveCount(0);
+  await expect.poll(() => till.locator('[data-testid^="product-tile-"]').evaluateAll(tiles => tiles.map(tile => tile.dataset.testid)))
+    .toEqual(expect.arrayContaining(tally));
+  expect((await till.locator('[data-testid^="product-tile-"]').evaluateAll(tiles => tiles.map(tile => tile.dataset.testid!)))
+    .every(id => id.startsWith('product-tile-Tally '))).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({ path: test.info().outputPath('1.6c-facet-pills-vendurepos.png') });
+  await page.setViewportSize(devices['Desktop Chrome'].viewport);
+  await till.getByTestId(`filter-chip-group-${brandId}-remove`).click();
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toBeVisible();
+  await page.getByTestId(`filter-chip-group-${brandId}`).click();
+  await page.getByTestId(`filter-chip-group-${brandId}-6`).click();
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toHaveCount(0);
+  // The pick is the session's alone (10.2i): a reload clears it.
+  await page.reload();
+  await expectSignedIn(page);
+  await openAllProducts(page);
+  await expect(brand).toHaveText('Brand');
+  await expect(till.getByTestId('product-tile-Canvas Apron')).toBeVisible();
 });
 
 test("the Products panel sorts by its headers, across every page, as v2's products table", async ({ page }) => {
@@ -1657,15 +1722,24 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await expect(reprint.getByTestId('order-receipt-order')).toContainText('DEMO-');
 
   // Playwright can't drive the OS print dialog: window.print becomes a recorder.
+  // printsWithSheet counts the calls made while the print sheet is still in the document.
   await page.evaluate(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
   await reprint.getByTestId('order-receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   // What the dialog would print: the receipt alone, none of the orders panel or sheet around it.
   await page.emulateMedia({ media: 'print' });
   await expect(reprint).toBeVisible();
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   for (const id of ['order-sheet-close', 'order-receipt-print', 'order-receipt-back']) {
     await expect(page.getByTestId(id)).toBeHidden();
   }
@@ -1759,11 +1833,16 @@ test("Reports shows the till's sale for today, and a scan closes it and adds", a
   await expect(page.getByTestId('reports-panel')).toBeVisible();
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('card-orders-figure')).toHaveText('1');
-  // The store's report has no per-order totals, so the hero shows no median or largest tile.
+  // The store's report v3 (8.1q): its median and largest order in the Orders card (the hero's tiles are this till's
+  // order spread, so they stay out), and its sales by collection in the Categories card.
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
   await expect(page.getByTestId('hero-largest')).toHaveCount(0);
+  await expect(page.getByTestId('card-orders-median')).toContainText('€9.52');
+  await expect(page.getByTestId('card-orders-largest')).toContainText('€9.52');
   await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toContainText('Drinkware');
+  await expect(page.getByTestId('card-categories')).toContainText('€9.52');
+  await expect(page.getByTestId('reports-categories-help')).toHaveText('Categories: a product in several collections counts in each.');
   await expect(page.getByTestId('card-products')).toContainText('€9.52');
   await page.getByTestId('reports-print-summary').click();
   const summary = await page.frameLocator('#vendurepos-print').locator('p').allTextContents();
@@ -1864,7 +1943,7 @@ test("Reports › a card's head opens its panel as v2: Payments, Products and Ta
   await page.setViewportSize(devices['Desktop Chrome'].viewport);
   await page.getByTestId('detail-panel-close').click();
   await expect(panel).toHaveCount(0);
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-categories')).toBeVisible();
 
   // No panel for Orders or Refunds in TallyUI 4.2.0: both open the Orders screen (stand-in until TallyUI/tallyui#1215).
   await page.getByTestId('card-orders-open').click();
@@ -1896,7 +1975,9 @@ test("Reports shows the store's figures online, and this till's only when offlin
   // Store mode: the store's gross for the mug (€9.52), never the till's net (€8.00), and no sync statuses.
   await expect(page.getByTestId('hero-total')).toContainText('€9.52');
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
+  await expect(page.getByTestId('card-orders-median')).toContainText('€9.52');
+  await expect(page.getByTestId('card-categories')).toContainText('€9.52');
+  await expect(page.getByTestId('card-categories')).not.toContainText('€8.00');
   await expect(page.getByTestId('card-products')).toContainText('€9.52');
   await expect(page.getByTestId('card-products')).not.toContainText('€8.00');
   await page.getByTestId('sales-filter-status').click();
@@ -1915,22 +1996,22 @@ test("Reports shows the store's figures online, and this till's only when offlin
   await page.getByTestId('sales-filter-status').click();
   await expect(page.getByTestId('sales-filter-status-option-applied')).toBeVisible();
   await page.getByTestId('sales-filter-status-option-all').click();
-  // A till-only Categories panel, open when the store's figures come back (8.1p fix 1).
+  // A till-only Categories panel, open when the store's figures come back.
   await page.getByTestId('card-categories-open').click();
   await expect(page.getByTestId('detail-panel')).toContainText('Sales by category');
+  await expect(page.getByTestId('detail-panel-scope')).toHaveText(/ · This till only, offline$/);
+  await expect(page.getByTestId('detail-panel-table')).toContainText('€8.00');
 
-  // Back online: the store's figures again.
+  // Back online: the store's figures again. The report v3 has categories (8.1q), so the card stays and its panel
+  // shows the store's figures, as the Products panel does; never the till's under the store's scope.
   await page.context().setOffline(false);
   await expect(page.getByTestId('reports-till-only')).toHaveCount(0);
   await expect(page.getByTestId('hero-median')).toHaveCount(0);
-  // The view hides Categories, so its panel closes.
-  await expect(page.getByTestId('card-categories')).toHaveCount(0);
-  await expect(page.getByTestId('detail-panel')).toHaveCount(0);
-
-  // Offline again: Categories is shown again, and its panel stays closed.
-  await page.context().setOffline(true);
-  await expect(page.getByTestId('reports-till-only')).toHaveText('This till only, offline');
   await expect(page.getByTestId('card-categories')).toBeVisible();
+  await expect(page.getByTestId('detail-panel-scope')).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
+  await expect(page.getByTestId('detail-panel-table')).toContainText('€9.52');
+  await expect(page.getByTestId('detail-panel-table')).not.toContainText('€8.00');
+  await page.getByTestId('detail-panel-close').click();
   await expect(page.getByTestId('detail-panel')).toHaveCount(0);
 });
 
@@ -2326,10 +2407,29 @@ test('Settings shows one section at a time, General first, and stacks behind Men
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId('variance-limit')).toBeVisible();
   await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  // A pick from Menu shows its section, and the list goes with no Done (9.1b).
   await page.getByText('Menu', { exact: true }).click();
   await page.getByTestId('settings-section-barcode').click();
-  await page.getByText('Done', { exact: true }).click();
   await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  await page.getByText('Menu', { exact: true }).click();
+  await page.getByTestId('settings-section-register').click();
+  await expect(page.getByTestId('variance-limit')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+});
+
+test('at split width, Settings keeps its list beside each picked section, the same list throughout (9.1b)', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  await openSettings(page, 'register');
+  await expect(page.getByTestId('variance-limit')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toBeVisible();
+  await page.getByTestId('settings-section-barcode').click();
+  await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toBeVisible();
+  // The picked item keeps focus: a remounted layout would replace the list, and focus would fall back to the page.
+  await expect(page.getByTestId('settings-section-barcode')).toBeFocused();
 });
 
 test('Settings keeps the tile size for this till, and the grid takes it at once', async ({ page }) => {
@@ -3528,7 +3628,11 @@ test("Settings › Tax shows the channel's tax, read-only: prices without tax an
 test('with printing after each sale on, the receipt prints once by itself', async ({ page }) => {
   await page.addInitScript(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -3547,8 +3651,13 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  // The auto print opens no sheet.
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   await page.getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(2);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   await page.getByTestId('new-sale').click();
   await openSettings(page, 'printing');
   await page.getByTestId('auto-print-toggle').click();
@@ -3561,7 +3670,10 @@ test('with printing after each sale on, the receipt prints once by itself', asyn
   await tender.getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt')).toBeVisible();
   await page.getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(3);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
 });
 
 test('Settings › Printing adds, edits and removes a printer kept on this device', async ({ page }) => {
@@ -3632,11 +3744,18 @@ async function addEpsonPrinter(page: Page) {
   await expect(page.getByTestId('printer-summary')).toHaveText(`Network · Epson · ${PRINTER_HOST}:9100 · 80 mm`);
 }
 
-/** Playwright can't drive the OS print dialog: window.print becomes a recorder, from the first page load. */
+/**
+ * Playwright can't drive the OS print dialog: window.print becomes a recorder, from the first page load.
+ * printsWithSheet counts the calls made while the print sheet is still in the document.
+ */
 async function recordPrintDialog(page: Page) {
   await page.addInitScript(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
 }
 
@@ -3700,13 +3819,18 @@ test.describe('with a network printer', () => {
     const receipt = page.getByTestId('receipt');
     await expect(receipt).toBeVisible();
     // A double tap prints one receipt: the posts below count every request.
-    await doubleTap(receipt.getByTestId('receipt-print'));
+    await receipt.getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await doubleTap(page.getByTestId('receipt-print-button'));
     await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
     await expect(page.getByTestId('receipt-print-dialog')).toHaveCount(0);
     printer.reachable = false;
     await receipt.getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('receipt-print-status')).toHaveText(PRINTER_FAILED);
     expect(printer.posts).toBe(2);
     // The receipt still shows, so its own line says it: no till notice too. Counted now, not waited for: the notice
@@ -3714,6 +3838,7 @@ test.describe('with a network printer', () => {
     expect(await page.getByTestId('print-failed-toast').count()).toBe(0);
     await page.getByTestId('receipt-print-dialog').click();
     await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   });
 
   test('with an Epson network printer and Print after each sale on, the receipt goes to the printer by itself, once', async ({ page }) => {
@@ -3733,6 +3858,9 @@ test.describe('with a network printer', () => {
     await page.waitForTimeout(1000);
     expect(printer.posts).toBe(1);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
+    // The auto print opens no sheet.
+    await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   });
 
   test("with Auto-show receipt off and the Epson printer unreachable, the till says the receipt didn't print", async ({ page }) => {
@@ -3806,16 +3934,21 @@ test.describe('with a network printer', () => {
     await page.getByTestId('order-sheet-receipt').click();
     const reprint = page.getByTestId('order-receipt');
     await reprint.getByTestId('order-receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('order-receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     await expect(page.getByTestId('order-receipt-print-dialog')).toHaveCount(0);
     printer.reachable = false;
     await reprint.getByTestId('order-receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('order-receipt-print-status')).toHaveText(PRINTER_FAILED);
     expect(printer.posts).toBe(2);
     expect(await page.evaluate(() => window.printCalls)).toBe(0);
     await page.getByTestId('order-receipt-print-dialog').click();
     await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   });
 
   test('Settings › Printing routes each receipt template to a printer, kept on this device, and Print receipt follows it', async ({ page }) => {
@@ -3849,7 +3982,10 @@ test.describe('with a network printer', () => {
     await openRegister(page);
     await sellMug(page);
     await page.getByTestId('receipt').getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect.poll(printCalls).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
     expect(printer.posts).toBe(0);
     await expect(page.getByTestId('receipt-print-status')).toHaveCount(0);
     // Back to Auto: the next receipt goes to the printer again.
@@ -3860,10 +3996,120 @@ test.describe('with a network printer', () => {
     await page.getByTestId('settings-back').click();
     await sellMug(page);
     await page.getByTestId('receipt').getByTestId('receipt-print').click();
+    await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+    await page.getByTestId('receipt-print-button').click();
     await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
     expect(printer.posts).toBe(1);
     expect(await printCalls()).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   });
+
+  test('Print receipt opens the receipt sheet: template, printer for this print and preview, and the pick is not kept', async ({ page }) => {
+    await recordPrintDialog(page);
+    const printer = await epsonPrinter(page);
+    const printCalls = () => page.evaluate(() => window.printCalls);
+    await page.goto('/demo');
+    await page.getByTestId('demo-enter').click();
+    await expectSignedIn(page);
+    await addEpsonPrinter(page);
+    await page.getByTestId('settings-back').click();
+    await openRegister(page);
+    await sellMug(page);
+    const receipt = page.getByTestId('receipt');
+    const sheet = page.getByTestId('receipt-dialog');
+    const printerSelect = page.getByTestId('receipt-printer-select');
+    // Opening prints nothing: the sheet opens on the template and printer today's Print receipt follows.
+    await receipt.getByTestId('receipt-print').click();
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId('receipt-template-select')).toHaveText('Thermal receipt (80 mm)');
+    await expect(printerSelect).toHaveText('Auto — Front counter');
+    await expect(page.getByTestId('receipt-preview-total')).toHaveText('€9.52');
+    await expect(page.getByTestId('receipt-email-button')).toHaveCount(0);
+    await expect(page.getByTestId('receipt-download-pdf-button')).toHaveCount(0);
+    expect(printer.posts).toBe(0);
+    expect(await printCalls()).toBe(0);
+    // The demo-pairs size; the PNG is made docs/v2-parity/demo-pairs/12c-receipt-print-sheet-vendurepos.webp (cwebp -q 80).
+    await page.setViewportSize({ width: 960, height: 600 });
+    await page.mouse.move(480, 0);
+    await page.screenshot({ path: test.info().outputPath('12c-receipt-print-sheet-vendurepos.png') });
+    await page.setViewportSize(devices['Desktop Chrome'].viewport);
+    // The print dialog for this print only.
+    await printerSelect.click();
+    await page.getByTestId('receipt-printer-system').click();
+    await expect(printerSelect).toHaveText('Print dialog');
+    await page.getByTestId('receipt-print-button').click();
+    await expect.poll(printCalls).toBe(1);
+    expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
+    await expect(sheet).toHaveCount(0);
+    expect(printer.posts).toBe(0);
+    // The pick is not kept: the sheet opens on Auto again, and Close prints nothing.
+    await receipt.getByTestId('receipt-print').click();
+    await expect(printerSelect).toHaveText('Auto — Front counter');
+    await page.getByTestId('receipt-close-button').click();
+    await expect(sheet).toHaveCount(0);
+    expect(printer.posts).toBe(0);
+    expect(await printCalls()).toBe(1);
+    // A template change puts the pick back to Auto, as v2.
+    await receipt.getByTestId('receipt-print').click();
+    await printerSelect.click();
+    await page.getByTestId('receipt-printer-system').click();
+    await page.getByTestId('receipt-template-select').click();
+    await page.getByTestId('receipt-template-standard').click();
+    await expect(printerSelect).toHaveCount(0);
+    await expect(page.getByTestId('print-sheet-printer')).toContainText('Print dialog');
+    await page.getByTestId('receipt-template-select').click();
+    await page.getByTestId('receipt-template-thermal-80mm').click();
+    await expect(printerSelect).toHaveText('Auto — Front counter');
+    await page.getByTestId('receipt-print-button').click();
+    await expect(page.getByTestId('receipt-print-status')).toHaveText('Sent to Front counter.');
+    expect(printer.posts).toBe(1);
+    expect(await printCalls()).toBe(1);
+    // Nothing was saved to Settings › Printing.
+    await openSettings(page, 'printing');
+    await expect(page.getByTestId('template-row-thermal-80mm-printer')).toHaveText('Auto — Front counter');
+  });
+});
+
+/** A sale's receipt sheet, open, with no printer: Print goes to the print dialog once the sheet has slid out. */
+async function openPrintSheet(page: Page) {
+  await recordPrintDialog(page);
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await sellMug(page);
+  await page.getByTestId('receipt').getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+}
+
+/** The sheet's Print, then `second`, in one task (as `doubleTap`): the second click always lands in the slide-out. */
+async function printThen(page: Page, second: string) {
+  await page.evaluate((id) => {
+    for (const each of ['receipt-print-button', id]) document.querySelector<HTMLElement>(`[data-testid="${each}"]`)!.click();
+  }, second);
+}
+
+test('New sale while the receipt sheet slides out drops its print dialog, so the next till is not printed', async ({ page }) => {
+  await openPrintSheet(page);
+  await printThen(page, 'new-sale');
+  await expect(page.getByTestId('receipt')).toHaveCount(0);
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('product-tile-Tally Fixture Mug')).toBeVisible();
+  // The dropped print would come with the sheet's unmount, already passed: a moment more, then count.
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.printCalls)).toBe(0);
+});
+
+test('Orders opened while the receipt sheet slides out drops its print dialog, so the panel is not printed', async ({ page }) => {
+  await openPrintSheet(page);
+  await printThen(page, 'orders-open');
+  await expect(page.getByTestId('orders-panel')).toBeVisible();
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+  // The till, and its receipt, is hidden behind the panel, not unmounted.
+  await expect(page.getByTestId('receipt')).toBeHidden();
+  await expect(page.getByTestId('receipt')).toHaveCount(1);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.printCalls)).toBe(0);
 });
 
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
@@ -4531,6 +4777,35 @@ test('a demo cashier picks a category, still scans a product from another, and s
   await gridToggle.click();
   await expect(mugTile).toBeVisible();
   expect(consoleErrors).toEqual([]);
+});
+
+test("the category tiles show each Vendure collection's featured image, and stay when the store refuses the read", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  // 1.5b: each demo collection features its category's picture (lib/demo/store.ts DEMO_COLLECTION_IMAGES).
+  const categoryCount = new Set(CATALOGUE.map(p => p.category)).size;
+  const browse = page.getByTestId('category-browse');
+  const images = browse.locator('[data-testid^="category-tile-"][data-testid$="-image"]');
+  await expect(images).toHaveCount(categoryCount);
+  await expect(page.getByTestId('category-tile-cat1-image')).toBeVisible();
+  await expect(page.getByTestId('category-tile-cat1-fallback')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('1.5b-category-tile-images-vendurepos.png') });
+
+  // A refused re-read on Sync now keeps the images the first read gave.
+  await page.evaluate(() => localStorage.setItem('vendurepos.demo.collections_refused', '1'));
+  await page.getByTestId('sync-now').click();
+  await expect.poll(() => page.evaluate(() => window.__demoCollectionsRefused ?? 0)).toBeGreaterThanOrEqual(1);
+  await expect(page.getByTestId('category-tile-cat1-image')).toBeVisible();
+  await expect(images).toHaveCount(categoryCount);
+
+  // A refused read (403) passes no categories, so the tiles stay as 1.5a draws them: every category, each without an image.
+  await page.reload();
+  await expectSignedIn(page);
+  await expect.poll(() => page.evaluate(() => window.__demoCollectionsRefused ?? 0)).toBeGreaterThanOrEqual(1);
+  await expect(browse.getByRole('button')).toHaveCount(categoryCount + 1);
+  await expect(page.getByTestId('category-tile-cat1-fallback')).toBeVisible();
+  await expect(images).toHaveCount(0);
 });
 
 test('The till opens on v2\'s category tiles, with All products first and a search from the root', async ({ page }) => {

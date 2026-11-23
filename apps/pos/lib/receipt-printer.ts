@@ -64,7 +64,8 @@ export async function printTestTo(profile: PrinterProfile): Promise<string | nul
 
 /**
  * A receipt's direct print: the device's direct printer (read once per mount), busy while a job runs, then its status
- * line. `print` resolves to the failure line, or null; a call while a job runs is ignored.
+ * line. `print` prints on `to` (the direct printer unless given) and resolves to the failure line, or null; a call with
+ * no printer, or while a job runs, is ignored.
  */
 export function useReceiptPrinter() {
   const [printer] = useState(() => directPrinter(loadPrinterProfiles(), loadTemplatePrinters()));
@@ -72,14 +73,14 @@ export function useReceiptPrinter() {
   const [status, setStatus] = useState<{ text: string; failed: boolean } | null>(null);
   // `busy` disables the button only from the next render: a double tap lands before it.
   const running = useRef(false);
-  const print = useCallback(async (receipt: ReceiptData): Promise<string | null> => {
-    if (printer === null || running.current) return null;
+  const print = useCallback(async (receipt: ReceiptData, to: PrinterProfile | null = printer): Promise<string | null> => {
+    if (to === null || running.current) return null;
     running.current = true;
     setBusy(true);
-    const failure = await printReceiptTo(printer, receipt);
+    const failure = await printReceiptTo(to, receipt);
     running.current = false;
     setBusy(false);
-    setStatus({ text: failure ?? printedOn(printer.name), failed: failure !== null });
+    setStatus({ text: failure ?? printedOn(to.name), failed: failure !== null });
     return failure;
   }, [printer]);
   return { printer, busy, status, print };

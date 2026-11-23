@@ -5,7 +5,7 @@ import { expectClosureCash, openAllProducts, openRegister } from './register';
 import { wedgeScan } from './wedge';
 
 declare global {
-  interface Window { cspViolations: string[]; printCalls: number }
+  interface Window { cspViolations: string[]; printCalls: number; printsWithSheet: number }
 }
 
 let cspConsole: string[] = [];
@@ -628,16 +628,25 @@ test('Print receipt prints the receipt alone through the browser', async ({ page
   await tender.getByTestId('tender-complete').click();
   const receipt = page.getByTestId('receipt');
   await expect(receipt.getByTestId('receipt-total')).toHaveText('€9.52');
-  // Playwright can't drive the OS print dialog: window.print becomes a recorder.
+  // Playwright can't drive the OS print dialog: window.print becomes a recorder. printsWithSheet counts the calls made
+  // while the print sheet is still in the document.
   await page.evaluate(() => {
     window.printCalls = 0;
-    window.print = () => { window.printCalls++; };
+    window.printsWithSheet = 0;
+    window.print = () => {
+      window.printCalls++;
+      if (document.querySelector('[data-testid="receipt-dialog"]') !== null) window.printsWithSheet++;
+    };
   });
   await receipt.getByTestId('receipt-print').click();
+  await expect(page.getByTestId('receipt-dialog')).toBeVisible();
+  await page.getByTestId('receipt-print-button').click();
   await expect.poll(() => page.evaluate(() => window.printCalls)).toBe(1);
+  expect(await page.evaluate(() => window.printsWithSheet)).toBe(0);
   await page.getByTestId('register-bar-cashier').click();
   // What the dialog would print: the receipt's lines and figures, and none of the till around them.
   await page.emulateMedia({ media: 'print' });
+  await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
   await expect(receipt.getByText('1 × Tally Fixture Mug')).toBeVisible();
   for (const id of ['receipt-subtotal', 'receipt-total', 'receipt-payment-cash', 'receipt-change']) {
     await expect(receipt.getByTestId(id)).toBeVisible();
@@ -1773,6 +1782,68 @@ test('signing in again in place keeps the cart and sells with the new session', 
   expect(cspConsole).toEqual([]);
 });
 
+test('the customer sheet edits a billing field on the dev store and keeps every other address field', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.goto('/');
+  await page.getByTestId('sign-in-url').fill(STORE_URL);
+  await page.getByTestId('sign-in-email').fill(USERNAME);
+  await page.getByTestId('sign-in-password').fill(PASSWORD);
+  await page.getByTestId('sign-in-channel_token').fill(CHANNEL_TOKEN);
+  await page.getByTestId('sign-in-submit').click();
+  await openRegister(page);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const headers = { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN };
+  const admin = async (query: string, variables: Record<string, unknown>) => {
+    const response = await page.request.post(`${STORE_URL}/admin-api`, { headers, data: { query, variables } });
+    expect(response.ok()).toBe(true);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    return body.data;
+  };
+  const email = `till-address-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
+  const billing = { fullName: 'Till Address', company: 'Till Works', streetLine1: '1 Havnegade', streetLine2: 'Floor 2', city: 'Copenhagen',
+    province: 'Hovedstaden', postalCode: '1058', countryCode: 'DK', phoneNumber: '+45 11 22 33 44' };
+  const shipping = { fullName: 'Till Dock', company: 'Dock Works', streetLine1: '9 Hafenstrasse', streetLine2: 'Gate 4', city: 'Hamburg',
+    province: 'Hamburg', postalCode: '20457', countryCode: 'DE', phoneNumber: '+49 40 123456' };
+  const { createCustomer: { id } } = await admin('mutation ($input: CreateCustomerInput!) { createCustomer(input: $input) { ... on Customer { id } } }',
+    { input: { emailAddress: email, firstName: 'Till', lastName: 'Address' } });
+  try {
+    for (const [input, flag] of [[billing, 'defaultBillingAddress'], [shipping, 'defaultShippingAddress']] as const) {
+      await admin('mutation ($id: ID!, $input: CreateAddressInput!) { createCustomerAddress(customerId: $id, input: $input) { id } }', { id, input: { ...input, [flag]: true } });
+    }
+    await page.getByTestId('customers-open').click();
+    await page.getByTestId('customers-search').fill(email);
+    const sheet = page.getByTestId('customer-sheet');
+    const field = (kind: string, part: string) => sheet.getByTestId(`customer-form-addresses-${kind}-${part}`);
+    await page.getByTestId(`customers-edit-${id}`).click();
+    await field('billing', 'edit').click();
+    // The country is a picker of the store's enabled countries, so the read answered.
+    await expect(field('billing', 'country')).toHaveText('Denmark');
+    await field('billing', 'city').fill('Aarhus');
+    await page.getByTestId('customer-sheet-save').click();
+    await expect(sheet).toHaveCount(0);
+    await page.getByTestId(`customers-edit-${id}`).click();
+    await field('billing', 'edit').click();
+    await expect(field('billing', 'city')).toHaveValue('Aarhus');
+    await expect(field('billing', 'address2')).toHaveValue('Floor 2');
+    await expect(field('billing', 'company')).toHaveValue('Till Works');
+    await expect(field('shipping-fields', 'city')).toHaveValue('Hamburg');
+    await expect(field('shipping-fields', 'address2')).toHaveValue('Gate 4');
+    await page.getByTestId('customer-sheet-close').click();
+    const { customer } = await admin(`query ($id: ID!) { customer(id: $id) { addresses { fullName company streetLine1 streetLine2 city province postalCode
+      country { code } phoneNumber defaultBillingAddress defaultShippingAddress } } }`, { id });
+    const stored = (input: typeof billing, flag: string) => {
+      const { countryCode, ...rest } = input;
+      return { ...rest, country: { code: countryCode }, defaultBillingAddress: flag === 'billing', defaultShippingAddress: flag === 'shipping' };
+    };
+    expect(customer.addresses).toHaveLength(2);
+    expect(customer.addresses).toEqual(expect.arrayContaining([stored({ ...billing, city: 'Aarhus' }, 'billing'), stored(shipping, 'shipping')]));
+  } finally {
+    const { deleteCustomer } = await admin('mutation ($id: ID!) { deleteCustomer(id: $id) { result } }', { id });
+    expect(deleteCustomer.result).toBe('DELETED');
+  }
+});
+
 test('the Customers panel adds and edits a customer on the dev store, and a refused email changes nothing on the store', async ({ page }) => {
   test.setTimeout(4 * 60_000);
   await page.goto('/');
@@ -2649,6 +2720,89 @@ test('a till refund: a cash sale is refunded a mug at a time, the first resent a
   await page.getByTestId('register-open-panel').click();
   await expect(page.getByTestId('register-panel').getByTestId('register-panel-expected')).toContainText('€100.00');
   expect(await cspViolations(page)).toEqual([]);
+  expect(cspConsole).toEqual([]);
+});
+
+test('a till refund of a till-discounted line is priced as the store prices it, a mug at a time (BUG 3)', async ({ page }) => {
+  type RefundResult = { id: string; status: string; refund?: { totalMinor: number } };
+  const commands: SentCommand[] = [];
+  const results = new Map<string, RefundResult>();
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/tally/v1/commands')) commands.push(...request.postDataJSON().commands);
+  });
+  page.on('response', async (response) => {
+    if (response.request().method() !== 'POST' || !response.url().endsWith('/tally/v1/commands')) return;
+    for (const result of ((await response.json().catch(() => ({}))).results ?? []) as RefundResult[]) results.set(result.id, result);
+  });
+  await signIn(page);
+  await expect(page.getByTestId('signed-in-store')).toBeVisible();
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  await openRegister(page, '100.00');
+  const cart = page.getByTestId('cart');
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  // TallyUI's DiscountForm on the mug line, as the discounted-sale test opens it: Amount, €1.00, Apply.
+  await lineAction(page, 'TALLY-MUG', 'discount');
+  const group = cart.getByRole('group', { name: 'Discount on Tally Fixture Mug' });
+  await group.getByRole('button', { name: 'Amount' }).click();
+  await group.getByLabel('Discount value').fill('1.00');
+  await group.getByRole('button', { name: 'Apply' }).click();
+  await expect(group).toHaveCount(0);
+  // Seed: mug €8.00 excluding tax, Standard DE 19 %. Line 2 × 800 = 1600, €1.00 off = 1500 net, tax 285 (exact): 1785.
+  await expect(cart.getByTestId('cart-total')).toHaveText('€17.85');
+  await checkout(page);
+  const tender = page.getByTestId('tender-pane');
+  await expectBalanceAsEntry(page, '€17.85');
+  await typeAmount(page, '17.85');
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  await page.getByTestId('orders-open').click();
+  await page.getByTestId('orders-scope-till').click();
+  const panel = page.getByTestId('orders-panel');
+  await expect(panel.getByText(/· Synced$/)).toHaveCount(1, { timeout: 30_000 });
+  await panel.getByTestId(/^order-open-/).first().click();
+  await expect(page.getByTestId('order-sheet')).toContainText('€17.85');
+
+  // The store's figures: the line's proratedLinePriceWithTax is 2 × 952 = 1904, and its TALLY-DISCOUNT surcharge is the
+  // net −100 grossed up by the line's 19 %, −119 (exact), so the plugin's line total for a refund is 1904 − 119 = 1785.
+  // Its share rule, Math.round((r + q) × 1785 / 2) − Math.round(r × 1785 / 2): the first mug Math.round(892.5) = 893,
+  // the second 1785 − 893 = 892, together the 1785 the line was paid. Without the discount the till would send 952 each.
+  const sheet = page.getByTestId('refund-sheet');
+  const refundOneMug = async (text: string, minor: number) => {
+    await sheet.getByTestId(/^refund-qty-/).first().fill('1');
+    await sheet.getByTestId('refund-reason').fill('Damaged');
+    await expect(sheet.getByTestId('refund-total')).toHaveText(`Refund ${text}`);
+    await sheet.getByTestId('refund-submit').click();
+    await expect(sheet.getByTestId('refund-message')).toHaveText(`Refunded ${text} to the original payment.`);
+    const sent = commands.filter(({ type }) => type === 'order.refund').at(-1)!;
+    expect(sent.payload.totalMinor).toBe(minor);
+    await expect.poll(() => results.get(sent.id)?.status).toBe('applied');
+    expect(results.get(sent.id)!.refund!.totalMinor).toBe(minor);
+  };
+  await sheet.getByTestId('refund-start').click();
+  await refundOneMug('€8.93', 893);
+  // The detail re-read the order and its discounts: one mug is left.
+  await sheet.getByTestId('refund-start').click();
+  await expect(sheet.getByTestId('refund-form')).toContainText('1 left to refund');
+  await refundOneMug('€8.92', 892);
+  await expect(sheet.getByTestId('refund-start')).toHaveCount(0);
+
+  // Vendure holds both refunds, settled, and they add up to what the line was paid.
+  const clientOrderId = commands.find(({ type }) => type === 'order.create')!.payload.clientOrderId;
+  const found = await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: {
+      query: 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax lines { proratedLinePriceWithTax } surcharges { sku priceWithTax } payments { refunds { total state } } } } }',
+      variables: { id: clientOrderId },
+    },
+  });
+  const orders = (await found.json()).data.orders.items;
+  expect(orders).toEqual([{
+    totalWithTax: 1785, lines: [{ proratedLinePriceWithTax: 1904 }], surcharges: [{ sku: 'TALLY-DISCOUNT', priceWithTax: -119 }],
+    payments: [{ refunds: [{ total: 893, state: 'Settled' }, { total: 892, state: 'Settled' }] }],
+  }]);
   expect(cspConsole).toEqual([]);
 });
 
