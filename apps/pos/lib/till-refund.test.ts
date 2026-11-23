@@ -1,5 +1,5 @@
 import type { VendureOrder } from '@tallyui/connector-vendure';
-import { formatMoney, type OrderRefundEnvelope, type SyncContext } from '@tallyui/core';
+import { ConnectorUnauthorizedError, formatMoney, type OrderRefundEnvelope, type SyncContext } from '@tallyui/core';
 import { refundPayloadErrors } from '@tallyui/core/server';
 import {
   mintUuid, posRefundCollection, type CommandTransport, type OrderRefundOutcome, type PosRefund, type PosRefundCollection,
@@ -142,13 +142,15 @@ it("prices a refund of a till-discounted line on the line after its linked disco
   // 2 × 10.00 with 2.50 off the line: 1750 for the line, 875 a unit.
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, LINKED), { L1: 1 })).toBe(875);
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, LINKED), { L1: 2 })).toBe(1750);
-  expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, LINKED, [refundOf('L1', 1)]), { L1: 1 })).toBe(875);
+  // 1904 - 119 = 1785 for the line: round(892.5) = 893 for the first mug, 1785 - 893 = 892 for the second.
+  expect(refundTotalMinor(discounted([line('L1', 2, 1904)], [{ id: 'S1', priceWithTax: -119 }], LINKED), { L1: 1 })).toBe(893);
+  expect(refundTotalMinor(discounted([line('L1', 2, 1904)], [{ id: 'S1', priceWithTax: -119 }], LINKED, [refundOf('L1', 1)]), { L1: 1 })).toBe(892);
   // Only the linked line carries the discount.
   expect(refundTotalMinor(discounted([line('L1', 2, 2000), line('L2', 1, 500)], S1, LINKED), { L1: 1, L2: 1 })).toBe(1375);
   // A link to a surcharge the order does not have: undiscounted, and the plugin answers discount_unlinked.
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, JSON.stringify({ lineDiscounts: { L1: 'S9' } })), { L1: 1 })).toBe(1000);
-  // An empty map with no discounts is today's figure.
-  expect(refundTotalMinor({ ...order([], { tallySnapshot: JSON.stringify({ lineDiscounts: {} }) }), tallyDiscounts: [] }, { L2: 1 })).toBe(333);
+  // No discount surcharges read: the snapshot's links are not applied, so the figure is today's.
+  expect(refundTotalMinor({ ...order([], { tallySnapshot: JSON.stringify({ lineDiscounts: { L2: 'S1' } }) }) }, { L2: 1 })).toBe(333);
 });
 
 it('places an unlinked (legacy) discount as the plugin does: the one line, or everything left on the highest line id', () => {
@@ -187,7 +189,38 @@ describe('fetchTillDiscounts', () => {
 
   it('throws for a 403', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({}, { status: 403 })));
-    await expect(fetchTillDiscounts(context, 'order-1')).rejects.toThrow('Vendure API error: 403');
+    const request = fetchTillDiscounts(context, 'order-1');
+    await expect(request).rejects.toThrow('Vendure API error: 403');
+    await expect(request).rejects.toBeInstanceOf(ConnectorUnauthorizedError);
+    await expect(request).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('throws for a 401', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({}, { status: 401 })));
+    const request = fetchTillDiscounts(context, 'order-1');
+    await expect(request).rejects.toBeInstanceOf(ConnectorUnauthorizedError);
+    await expect(request).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws for a GraphQL FORBIDDEN with HTTP 200', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ errors: [
+      { message: 'You are not currently authorized to perform this action', extensions: { code: 'FORBIDDEN' } },
+    ] })));
+    const request = fetchTillDiscounts(context, 'order-1');
+    await expect(request).rejects.toBeInstanceOf(ConnectorUnauthorizedError);
+    await expect(request).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('throws an ordinary error for other GraphQL errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ errors: [{ message: 'boom' }] })));
+    const request = fetchTillDiscounts(context, 'order-1');
+    await expect(request).rejects.toThrow('boom');
+    await expect(request).rejects.not.toBeInstanceOf(ConnectorUnauthorizedError);
+  });
+
+  it('resolves to an empty array for a null order', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: { order: null } })));
+    await expect(fetchTillDiscounts(context, 'order-1')).resolves.toEqual([]);
   });
 });
 

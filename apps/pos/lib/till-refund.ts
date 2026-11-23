@@ -1,5 +1,5 @@
 import { vendureLineRefundWithTax, vendureRefundable, type VendureOrder } from '@tallyui/connector-vendure';
-import { formatMoney, type OrderRefundEnvelope, type OrderRefundPayload, type SyncContext } from '@tallyui/core';
+import { ConnectorUnauthorizedError, formatMoney, type OrderRefundEnvelope, type OrderRefundPayload, type SyncContext } from '@tallyui/core';
 import {
   mintUuid, RefundAnswerPendingError, submitOrderRefund,
   type CommandTransport, type OrderRefundOutcome, type PosRefund, type PosRefundCollection,
@@ -36,10 +36,10 @@ export async function fetchTillDiscounts(context: SyncContext, orderId: string):
     method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers }, signal: context.signal,
     body: JSON.stringify({ query, variables: { id: orderId } }),
   });
-  if (response.status === 401 || response.status === 403) throw new Error(`Vendure API error: ${response.status}`);
+  if (response.status === 401 || response.status === 403) throw new ConnectorUnauthorizedError(`Vendure API error: ${response.status}`, response.status);
   if (!response.ok) throw new Error(`Vendure API error: ${response.status}`);
   const body = await response.json();
-  if (body.errors?.length) throw new Error(body.errors[0].message);
+  if (body.errors?.length) throw body.errors[0].extensions?.code === 'FORBIDDEN' ? new ConnectorUnauthorizedError(body.errors[0].message, 403) : new Error(body.errors[0].message);
   const surcharges: { id: string; sku: string; priceWithTax: number }[] = body.data.order?.surcharges ?? [];
   return surcharges.filter(item => item.sku === TALLY_DISCOUNT_SKU).map(({ id, priceWithTax }) => ({ id, priceWithTax }));
 }
