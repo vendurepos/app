@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Order, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
+import type { CommandEnvelope, CommandResult, OrderCreatePayload, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
@@ -130,7 +132,8 @@ describe('GET /tally/v1/reports/sales', () => {
     const body = await ok({ from: '2026-03-10T00:00:00Z', to: '2026-03-11T00:00:00Z', registerId });
     expect(body).toEqual({
       version: 1, from: '2026-03-10T00:00:00Z', to: '2026-03-11T00:00:00Z', timezone: 'UTC', currencyCode: 'EUR', registerId,
-      orders: { count: 2, salesMinor: first.totalMinor + second.totalMinor, taxMinor: first.taxMinor + second.taxMinor, discountsMinor: 100 },
+      // A v4 discount of 100 is net, and Discounts is gross (+25 %).
+      orders: { count: 2, salesMinor: first.totalMinor + second.totalMinor, taxMinor: first.taxMinor + second.taxMinor, discountsMinor: 125 },
       refunds: { count: 0, totalMinor: 0 },
       byMethod: [
         { method: 'cash', salesMinor: first.totalMinor + 500, refundsMinor: 0 },
@@ -138,6 +141,35 @@ describe('GET /tally/v1/reports/sales', () => {
       ],
       byDay: [{ day: '2026-03-10', orderCount: 2, salesMinor: first.totalMinor + second.totalMinor, refundsMinor: 0 }],
     });
+  });
+
+  it('Discounts is the gross amount taken off the receipt, whatever the command version and tax mode', async () => {
+    const at = '2026-03-12T09:00:00.000Z';
+    const expected: Record<string, { lines: Record<string, { grossDiscountMinor: number }> }> =
+      JSON.parse(readFileSync(join(__dirname, 'fixtures/order-create-v4-expected.json'), 'utf8'));
+    for (const name of ['inclusive', 'inclusive-sent-as-v3', 'exclusive-v3']) {
+      const registerId = randomUUID();
+      let discountsMinor = 125;
+      if (name === 'exclusive-v3') {
+        await sell(at, registerId, { discountMinor: 100, version: 3 });
+      } else {
+        const command: CommandEnvelope<OrderCreatePayload> = JSON.parse(
+          readFileSync(join(__dirname, `fixtures/order-create-v4-${name}.json`), 'utf8')
+            .replaceAll('"VARIANT_A"', JSON.stringify(variantIds.mug[0]))
+            .replaceAll('"VARIANT_B"', JSON.stringify(variantIds.beans[0])));
+        command.id = randomUUID();
+        command.createdAt = at;
+        Object.assign(command.payload, { clientOrderId: randomUUID(), createdAt: at, registerId });
+        for (const payment of command.payload.payments) payment.clientPaymentId = randomUUID();
+        expect(await post(command)).toMatchObject({ status: 'applied' });
+        discountsMinor = Object.values(expected[name].lines).reduce((sum, line) => sum + line.grossDiscountMinor, 0);
+      }
+      const params = { from: '2026-03-12T00:00:00Z', to: '2026-03-13T00:00:00Z', registerId };
+      expect((await ok(params)).orders.discountsMinor).toBe(discountsMinor);
+      const response = await fetch(`${base}/tally/v1/reports/sales/v2?${new URLSearchParams(params)}`, { headers: reporter });
+      expect(response.status).toBe(200);
+      expect((await response.json() as Report).orders.discountsMinor).toBe(discountsMinor);
+    }
   });
 
   it('buckets days in the requested time zone', async () => {
@@ -196,6 +228,22 @@ describe('GET /tally/v1/reports/sales', () => {
     Object.assign(day(saleAt), { orderCount: 1, salesMinor: payload.totalMinor });
     day(refund.createdAt).refundsMinor = refundedMinor;
     expect(body.byDay).toEqual([...expected.values()]);
+  });
+
+  it('a refund of a discounted sale changes neither Discounts nor the refund figures', async () => {
+    const session = await openSession();
+    const at = new Date(Date.now() - 60_000).toISOString();
+    const { orderId, payload } = await sell(at, session.registerId, { discountMinor: 100, version: 4, sessionId: session.sessionId });
+    const order = await readOrder(orderId);
+    // The discount comes off its own line, so a full refund is the sale's total.
+    const refund = refundFor(order, session, { totalMinor: payload.totalMinor });
+    expect(await post(refund)).toMatchObject({ status: 'applied' });
+    const now = Date.now();
+    const body = await ok({ from: new Date(now - 3_600_000).toISOString(), to: new Date(now + 3_600_000).toISOString(),
+      registerId: session.registerId });
+    expect(body.orders.discountsMinor).toBe(125);
+    expect(body.refunds).toEqual({ count: 1, totalMinor: payload.totalMinor });
+    expect(body.refunds.totalMinor).toBe(refund.payload.totalMinor);
   });
 
   it('reports only the active channel', async () => {
