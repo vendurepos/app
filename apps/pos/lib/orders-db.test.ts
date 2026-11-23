@@ -157,6 +157,7 @@ it('adds the refunds collection to the orders database, and a refund record surv
   // Only what buildRefundEnvelope reads; till-refund.test.ts builds a whole store order.
   const order = {
     id: 'order-1', customFields: { tallyClientOrderId: 'client-1' }, shippingWithTax: 0, payments: [],
+    surcharges: [],
     lines: [{ id: 'L1', quantity: 1, orderPlacedQuantity: 1, proratedUnitPriceWithTax: 952, proratedLinePriceWithTax: 952 }],
   } as unknown as VendureOrder;
   const envelope = buildRefundEnvelope(order, { quantities: { L1: 1 }, reason: 'Damaged', restock: true },
