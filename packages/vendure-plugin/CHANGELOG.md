@@ -4,7 +4,7 @@
 
 ### Behaviour change
 
-- `order.create` takes the channel's default currency only. A sale in another currency the channel offers is now refused `unsupported_currency` (before, it was accepted and its amounts were added to the register's expected figures as if they were the default currency, while the sales report left it out). Nothing is stored, so the same command applies once its currency is the channel's default; a command already recorded still replays its recorded answer. A store that sells in several currencies needs one channel per currency.
+- `order.create` takes the channel's default currency only. A sale in another currency the channel offers is now refused `unsupported_currency` (before, it was accepted and its amounts were added to the register's expected figures as if they were the default currency, while the sales report left it out). Nothing is stored, so the same command applies once its currency is the channel's default; a command already recorded still replays its recorded answer. A sale in another currency still queued on a till is refused on every resend until that currency is the channel's default. A store that sells in several currencies needs one channel per currency.
 
 ## 0.4.0 (2026-11-23)
 
