@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { TALLY_DISCOUNT_SKU, TALLY_FEE_SKU } from '../src/service/constants';
-import { lineTotalsForRefund } from '../src/service/refund-line-totals';
+import { TALLY_DISCOUNT_SKU, TALLY_FEE_SKU, TALLY_ROUNDING_SKU } from '../src/service/constants';
+import { lineTotalsForRefund, roundingForRefund } from '../src/service/refund-line-totals';
 
 // #460: a pure unit test (no Postgres), kept under test/ like classification.e2e.ts so vitest's include finds it.
 describe('lineTotalsForRefund (#460)', () => {
@@ -21,6 +21,30 @@ describe('lineTotalsForRefund (#460)', () => {
 
   it('a linked discount comes off its own line only', () => {
     expect(run([a, b], [discount, fee], linked({ 1: '7' }), [[b, 1]])).toEqual({ 1: 1750, 2: 500 });
+  });
+
+  it('a linked order with a discount surcharge no link names is refused, never refunded undiscounted', () => {
+    const surcharges = [discount, { id: 9, sku: TALLY_DISCOUNT_SKU, priceWithTax: -100 }];
+    expect(run([a, b], surcharges, linked({ 1: '7' }), [[b, 1]])).toEqual({ refuse: true });
+    expect(run([a, b], surcharges, linked({ 1: '7' }), [[a, 2], [b, 1]])).toEqual({ refuse: true });
+  });
+
+  it('the rounding bridge goes with the refund that takes everything left on the lines, whatever its sign', () => {
+    const bridge = { id: 11, sku: TALLY_ROUNDING_SKU, priceWithTax: -2 };
+    const order = { lines: [a, b], surcharges: [bridge] };
+    const whole = [{ line: a, quantity: 2 }, { line: b, quantity: 1 }];
+    expect(roundingForRefund(order, whole, none)).toBe(-2);
+    expect(roundingForRefund(order, [{ line: a, quantity: 1 }], none)).toBe(0);
+    expect(roundingForRefund(order, [], none)).toBe(0);
+    expect(roundingForRefund(order, [{ line: a, quantity: 1 }, { line: b, quantity: 1 }], line => line.id === a.id ? 1 : 0)).toBe(-2);
+    expect(roundingForRefund({ ...order, surcharges: [{ ...bridge, priceWithTax: 3 }] }, whole, none)).toBe(3);
+    expect(roundingForRefund({ ...order, surcharges: [discount, fee] }, whole, none)).toBe(0);
+  });
+
+  it('a line cancelled below what was refunded counts as nothing left, as the till counts it', () => {
+    const bridge = { id: 11, sku: TALLY_ROUNDING_SKU, priceWithTax: -2 };
+    const order = { lines: [a, b], surcharges: [bridge] };
+    expect(roundingForRefund(order, [{ line: b, quantity: 1 }], line => line.id === a.id ? a.quantity + 1 : 0)).toBe(-2);
   });
 
   it('an empty link map leaves every line at its prorated total', () => {

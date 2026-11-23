@@ -1,5 +1,5 @@
 import type { ID } from '@vendure/core';
-import { TALLY_DISCOUNT_SKU } from './constants';
+import { TALLY_DISCOUNT_SKU, TALLY_ROUNDING_SKU } from './constants';
 
 // #460, desk ruling 2: an order whose discounts have no line link, refunded one line at a time, is refused, never guessed.
 export const REFUND_DISCOUNT_UNLINKED_MESSAGE =
@@ -21,6 +21,8 @@ export function lineTotalsForRefund<L extends RefundLine>(order: RefundOrder<L>,
     links = JSON.parse(order.customFields.tallySnapshot ?? '').lineDiscounts;
   } catch { /* unparsable: unlinked */ }
   if (typeof links === 'object' && links !== null && !Array.isArray(links)) {
+    // Money P2 #2: a discount no link names would refund undiscounted (an overpay), so refuse it.
+    if (discounts.some(surcharge => !Object.values(links as object).some(id => String(id) === String(surcharge.id)))) return { refuse: true };
     for (const [lineId, surchargeId] of Object.entries(links)) {
       const surcharge = discounts.find(item => String(item.id) === String(surchargeId));
       if (!surcharge) return { refuse: true };
@@ -39,4 +41,12 @@ export function lineTotalsForRefund<L extends RefundLine>(order: RefundOrder<L>,
   const last = payloadLines.map(item => item.line)
     .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true })).at(-1)!;
   return { totals: totals.set(last.id, last.proratedLinePriceWithTax + discountSum) };
+}
+
+/** Money P2 #2: the order's TALLY_ROUNDING_SKU bridge, which goes with the refund that takes everything left on its lines; else 0. */
+export function roundingForRefund<L extends RefundLine>(order: Pick<RefundOrder<L>, 'lines' | 'surcharges'>,
+  payloadLines: Array<{ line: L; quantity: number }>, refundedOf: (line: L) => number): number {
+  if (!payloadLines.length || order.lines.some(line => Math.max(0, line.quantity - refundedOf(line))
+    !== payloadLines.filter(item => String(item.line.id) === String(line.id)).reduce((sum, item) => sum + item.quantity, 0))) return 0;
+  return order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU).reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
 }

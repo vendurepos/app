@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import { Button, discountLabel, orderReference, Text, VStack } from '@tallyui/components';
 import type { ServerCapabilities, SyncContext } from '@tallyui/core';
 import { buildReceiptData, CurrencyProvider, type PosOrder, type useSale } from '@tallyui/pos';
@@ -76,7 +76,12 @@ export function SaleReceipt({ sale, store, cashier, registerId, till, onPrintFai
                 <Text>Print with the dialog</Text>
               </Button>
             ) : null}
-            {emailTo ? <EmailReceiptAction testID="receipt-email" open={email.open} onToggle={email.toggle} /> : null}
+            {/* Reserve the email action's space while the sale waits to reach the store. */}
+            {emailTo ? <EmailReceiptAction testID="receipt-email" open={email.open} onToggle={email.toggle} /> : canEmailReceipt(capabilities) && context !== undefined && code === null ? (
+              <View testID="receipt-email-pending" pointerEvents="none" aria-hidden accessibilityElementsHidden importantForAccessibility="no-hide-descendants" className="opacity-0">
+                <Button variant="secondary" disabled><Text>Email receipt</Text></Button>
+              </View>
+            ) : null}
             <Button testID="new-sale" className="flex-1" onPress={sale.newSale}>
               <Text>New sale</Text>
             </Button>
