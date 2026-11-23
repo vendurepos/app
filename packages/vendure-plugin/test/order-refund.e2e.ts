@@ -224,6 +224,28 @@ describe('order.refund v1', () => {
     expect(paid).toBe(command.payload.totalMinor);
     return { order, paid };
   }
+  async function sellBridged(offset: number) {
+    const command = orderCommand([
+      { variantId: variantIds.mug[0], unitPriceMinor: 1000, quantity: 1 },
+      { variantId: variantIds.beans[0], unitPriceMinor: 500, quantity: 1 },
+    ]);
+    command.payload.totalMinor += offset;
+    command.payload.subtotalMinor += offset;
+    command.payload.display!.totalMinor += offset;
+    command.payload.display!.subtotalMinor += offset;
+    command.payload.display!.lines.at(-1)!.amountMinor += offset;
+    command.payload.payments[0].amountMinor += offset;
+    const result = await post(command);
+    expect(result).toMatchObject({ status: 'applied', totalWarnings: [{ code: 'total_mismatch', bridgeMinor: offset }] });
+    const order = await readOrder(result.serverRefs!.orderId);
+    const paid = order.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    expect(paid).toBe(command.payload.totalMinor);
+    const bridges = (await storedOrder(order)).surcharges.filter(surcharge => surcharge.sku === 'TALLY-ROUNDING');
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].priceWithTax).toBe(offset);
+    expect(paid).toBe(order.lines.reduce((sum, line) => sum + line.proratedLinePriceWithTax, 0) + offset);
+    return { order, paid };
+  }
   const wholeLine = (order: ReadOrder, line: ReadOrder['lines'][number], session: { registerId: string; sessionId: string }, totalMinor: number) =>
     refundFor(order, session, { lines: [{ orderLineId: line.id, quantity: line.quantity, restock: true }], shippingMinor: 0, totalMinor });
 
@@ -261,6 +283,42 @@ describe('order.refund v1', () => {
     expect(Object.keys(old)).toEqual(['display', 'taxByRate']);
     await connection.rawConnection.getRepository(Order).update(environment.decode(order.id), { customFields: { tallySnapshot: JSON.stringify(old) } });
   }
+
+  it('a sale with a negative rounding bridge refunds in full for the amount paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellBridged(-2);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    const b = order.lines.find(line => line.productVariant.id === variantIds.beans[0])!;
+    const B = b.proratedLinePriceWithTax;
+    expect(await post(wholeLine(order, a, session, a.proratedLinePriceWithTax))).toMatchObject({ status: 'applied' });
+    await refused(wholeLine(order, b, session, B), order.id, 'amount_mismatch',
+      `Refund total ${B} does not match the server's ${B - 2}`, { expectedMinor: B, serverMinor: B - 2 });
+    expect(await post(wholeLine(order, b, session, B - 2))).toMatchObject({ status: 'applied', refund: { totalMinor: B - 2 } });
+    const refunds = (await readOrder(order.id)).payments.flatMap(payment => payment.refunds).filter(refund => refund.state !== 'Failed');
+    expect(refunds.reduce((sum, refund) => sum + refund.total, 0)).toBe(paid);
+  });
+
+  it('a sale with a negative rounding bridge refunds in one go for the amount paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellBridged(-2);
+    expect(await post(refundFor(order, session, { shippingMinor: 0, totalMinor: paid })))
+      .toMatchObject({ status: 'applied', refund: { totalMinor: paid } });
+  });
+
+  it('a sale with a positive rounding bridge refunds in full for the amount paid', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellBridged(3);
+    expect(await post(refundFor(order, session, { shippingMinor: 0, totalMinor: paid })))
+      .toMatchObject({ status: 'applied', refund: { totalMinor: paid } });
+  });
+
+  it('a partial refund of a bridged order is priced on its lines alone', async () => {
+    const session = await openSession();
+    const { order } = await sellBridged(-2);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    expect(await post(wholeLine(order, a, session, a.proratedLinePriceWithTax)))
+      .toMatchObject({ status: 'applied', refund: { totalMinor: a.proratedLinePriceWithTax } });
+  });
 
   it('a partial quantity of a discounted line refunds its share of what was paid', async () => {
     const session = await openSession();

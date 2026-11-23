@@ -153,6 +153,20 @@ it("prices a refund of a till-discounted line on the line after its linked disco
   expect(refundTotalMinor({ ...order([], { tallySnapshot: JSON.stringify({ lineDiscounts: { L2: 'S1' } }) }) }, { L2: 1 })).toBe(333);
 });
 
+it('a linked order with a discount no link names prices undiscounted, so the plugin refuses it', () => {
+  const sale = discounted(order().lines, [{ id: 'S1', priceWithTax: -119 }, { id: 'S2', priceWithTax: -50 }], LINKED);
+  expect(refundLineTotals(sale, { L1: 2, L2: 3 })).toEqual({ L1: 1904, L2: 1000 });
+});
+
+it('the refund that takes everything left on the lines takes the rounding bridge too, whatever its sign', () => {
+  const surcharges = [{ description: 'POS rounding', sku: 'TALLY-ROUNDING', price: -2, priceWithTax: -2 }];
+  const sale = { ...order(), surcharges };
+  expect(refundTotalMinor(sale, { L1: 2, L2: 3 })).toBe(2902);
+  expect(refundTotalMinor(sale, { L1: 1, L2: 0 })).toBe(952);
+  expect(refundTotalMinor({ ...order([refundOf('L1', 1)]), surcharges }, { L1: 1, L2: 3 })).toBe(1950);
+  expect(refundTotalMinor({ ...sale, surcharges: [{ ...surcharges[0], priceWithTax: 3 }] }, { L1: 2, L2: 3 })).toBe(2907);
+});
+
 it('places an unlinked (legacy) discount as the plugin does: the one line, or everything left on the highest line id', () => {
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, LEGACY), { L1: 2 })).toBe(1750);
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, null), { L1: 1 })).toBe(875);
