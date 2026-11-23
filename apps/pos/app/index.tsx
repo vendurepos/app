@@ -372,7 +372,10 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {/* Keep the receipt's buttons still when the sync line goes. */}
       {syncShown ? (
-        <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border" onLayout={(event) => setSyncHeight(event.nativeEvent.layout.height)}>
+        <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border" onLayout={(event) => setSyncHeight(Platform.OS === 'web'
+          // react-native-web rounds layout.height to whole pixels (offsetHeight); the DOM node's own box is exact.
+          ? (event.nativeEvent as unknown as { target: Element }).target.getBoundingClientRect().height
+          : event.nativeEvent.layout.height)}>
           <SyncStatus state={outbox.state} pluginName={PLUGIN_NAME} />
         </View>
       ) : receiptShown && syncBesideReceipt && !saleHidden ? (
