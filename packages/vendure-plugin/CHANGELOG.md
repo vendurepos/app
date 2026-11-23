@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Behaviour change
+
+- `order.create` takes the channel's default currency only. A sale in another currency the channel offers is now refused `unsupported_currency` (before, it was accepted and its amounts were added to the register's expected figures as if they were the default currency, while the sales report left it out). Nothing is stored, so the same command applies once its currency is the channel's default; a command already recorded still replays its recorded answer. A store that sells in several currencies needs one channel per currency.
+
 ## 0.4.0 (2026-11-23)
 
 **Version pairing:** the VendurePOS app from vendurepos/app#466 on needs plugin 0.4.0 or later. Against 0.3.0, the final refund of a sale with a rounding bridge is refused, and nothing is refunded. Update the plugin before or with the app.
