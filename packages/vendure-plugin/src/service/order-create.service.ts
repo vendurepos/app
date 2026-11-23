@@ -405,6 +405,12 @@ export class OrderCreateService {
     if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
       throw new SetupRefusal(refuse(command.id, 'unsupported_currency', `The channel does not offer ${currency}`));
     }
+    // Money P2 #4 (Front desk ruling, 2026-11-23): one currency per till. The register's expected figures and the sales
+    // report both count the channel's default currency, so a sale in another currency the channel offers is refused too.
+    if (currency !== ctx.channel.defaultCurrencyCode) {
+      throw new SetupRefusal(refuse(command.id, 'unsupported_currency',
+        `The channel takes POS sales in ${ctx.channel.defaultCurrencyCode} only, not ${currency}`));
+    }
     const setup = await this.setupState(ctx);
     if (setup === 'repairable') throw new RepairStoreSetup();
     if (setup === 'refuse') throw new SetupRefusal(storeConfiguration(command.id));

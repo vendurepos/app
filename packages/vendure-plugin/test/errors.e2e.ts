@@ -326,7 +326,7 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(after.orders).toBe(before.orders + 1);
   });
 
-  it('TallyUI #219: unsupported_currency is not stored and releases the claim; the same id applies once the channel offers it', async () => {
+  it('TallyUI #219, money P2 #4: a currency that is not the channel default is unsupported_currency, not stored; the same id applies once it is the default, and replays after the default moves back', async () => {
     const input = orderCommand([mug()]);
     input.payload.currency = 'USD';
     input.payload.display!.currency = 'USD';
@@ -340,12 +340,29 @@ describe('error classes (ADR 0002 §2)', () => {
     await adminClient.query(parse(`mutation Currencies($id: ID!) {
       updateChannel(input: { id: $id, availableCurrencyCodes: [EUR, USD] }) { ... on Channel { id } }
     }`), { id: activeChannel.id });
-    const retry = input;
-    const result = await run(retry);
-    expect(result, JSON.stringify(result)).toMatchObject({ id: retry.id, status: 'applied' });
+    expect(await run(input)).toEqual({ id: input.id, status: 'rejected', error: {
+      code: 'unsupported_currency', message: 'The channel takes POS sales in EUR only, not USD',
+    } });
+    expect(await counts()).toEqual(before);
+    expect(await ledgerFor(input)).toBeNull();
+    const euro = orderCommand([mug()]);
+    expect(await run(euro)).toMatchObject({ id: euro.id, status: 'applied' });
+    const usdChannel = await adminClient.query<{ updateChannel: { defaultCurrencyCode: string } }>(parse(`mutation DefaultCurrency($id: ID!) {
+      updateChannel(input: { id: $id, defaultCurrencyCode: USD }) { ... on Channel { id defaultCurrencyCode } }
+    }`), { id: activeChannel.id });
+    expect(usdChannel.updateChannel.defaultCurrencyCode).toBe('USD');
+    const result = await run(input);
+    expect(result, JSON.stringify(result)).toMatchObject({ id: input.id, status: 'applied' });
     const order = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: decode(result.serverRefs!.orderId) });
     expect(order.currencyCode).toBe('USD');
     expect(order.totalWithTax).toBe(1000);
+    const eurChannel = await adminClient.query<{ updateChannel: { defaultCurrencyCode: string } }>(parse(`mutation DefaultCurrency($id: ID!) {
+      updateChannel(input: { id: $id, defaultCurrencyCode: EUR }) { ... on Channel { id defaultCurrencyCode } }
+    }`), { id: activeChannel.id });
+    expect(eurChannel.updateChannel.defaultCurrencyCode).toBe('EUR');
+    const afterApplied = await counts();
+    expect(await run(input)).toEqual({ ...result, status: 'duplicate' });
+    expect(await counts()).toEqual(afterApplied);
   });
 
   it('classifies only connection, lock, deadlock, timeout and resource failures as transient', () => {
