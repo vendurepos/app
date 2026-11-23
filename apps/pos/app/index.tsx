@@ -202,8 +202,9 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [tenderInProgress, setTenderInProgress] = useState(false);
   const [receiptShown, setReceiptShown] = useState(false);
   const syncShown = !!(outbox.state.pending || outbox.state.backendMissing);
-  // The sync line's last height, and whether it showed beside this receipt: when it goes, its space is kept so the receipt's buttons stay still.
-  const [syncHeight, setSyncHeight] = useState(0);
+  // The sync line's last state, and whether it showed beside this receipt: once it goes, it stays, invisible, so the receipt's buttons stay still.
+  const [shownSync, setShownSync] = useState(outbox.state);
+  useEffect(() => { if (syncShown) setShownSync(outbox.state); }, [syncShown, outbox.state]);
   const [syncBesideReceipt, setSyncBesideReceipt] = useState(false);
   useEffect(() => { if (!receiptShown) setSyncBesideReceipt(false); else if (syncShown) setSyncBesideReceipt(true); }, [receiptShown, syncShown]);
   // A device is not a person; M7 cashier switching will set the chosen cashier here when there is one.
@@ -371,16 +372,13 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <NotificationsSheet open={notificationsOpen} onOpenChange={setNotificationsOpen} notices={notices} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
       {/* Keep the receipt's buttons still when the sync line goes. */}
-      {syncShown ? (
-        <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border" onLayout={(event) => setSyncHeight(Platform.OS === 'web'
-          // react-native-web rounds layout.height to whole pixels (offsetHeight); the DOM node's own box is exact.
-          ? (event.nativeEvent as unknown as { target: Element }).target.getBoundingClientRect().height
-          : event.nativeEvent.layout.height)}>
-          <SyncStatus state={outbox.state} pluginName={PLUGIN_NAME} />
+      {syncShown || (receiptShown && syncBesideReceipt && !saleHidden) ? (
+        <View testID={syncShown ? 'sync-status' : 'sync-status-space'} dataSet={{ print: 'hide' }}
+          pointerEvents={syncShown ? 'auto' : 'none'} aria-hidden={!syncShown} accessibilityElementsHidden={!syncShown}
+          importantForAccessibility={syncShown ? 'auto' : 'no-hide-descendants'}
+          className={syncShown ? 'border-b border-border' : 'border-b border-border opacity-0'}>
+          <SyncStatus state={syncShown ? outbox.state : shownSync} pluginName={PLUGIN_NAME} />
         </View>
-      ) : receiptShown && syncBesideReceipt && !saleHidden ? (
-        <View testID="sync-status-space" dataSet={{ print: 'hide' }} pointerEvents="none" aria-hidden
-          accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ height: syncHeight }} />
       ) : null}
       {sessionEnded ? (
         <View testID="sign-in-again" className="border-b border-border px-4 py-2">
