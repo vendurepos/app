@@ -64,7 +64,7 @@ const REFUND_METHOD = "COALESCE(CAST(refund.metadata AS jsonb) ->> 'tallyMethod'
 // SUM and COUNT come back from Postgres as strings (bigint/numeric); money stays integer minor units.
 const minor = (value: string | null | undefined) => Number(value ?? 0);
 
-/** GET /tally/v1/reports/sales: the channel's POS sales and refunds in a range, every figure a SQL aggregate. */
+/** GET /tally/v1/reports/sales: the channel's POS sales and refunds in a range, every figure but discounts a SQL aggregate. */
 @Injectable()
 export class ReportService {
   // The zone node-pg wrote tallySaleAt in, read once.
