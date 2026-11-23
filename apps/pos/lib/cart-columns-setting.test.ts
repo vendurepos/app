@@ -10,7 +10,7 @@ beforeEach(() => {
 
 const order = [...CART_COLUMN_ORDER];
 
-it('uses TallyUI defaults when nothing is stored', () => {
+it('uses the app\'s default columns and order when nothing is stored', () => {
   expect(loadCartColumns(store)).toEqual({ order });
   expect(order).toEqual(['quantity', 'image', 'name', 'sku', 'price', 'total']);
   expect(cartColumnShown({})).toEqual({
@@ -27,6 +27,17 @@ it('round-trips every known boolean field and the order', () => {
   };
   saveCartColumns(columns, store);
   expect(loadCartColumns(store)).toEqual(columns);
+});
+
+it('a save with the default order stores no order, so a column added later takes its default place', () => {
+  saveCartColumns({ order: [...CART_COLUMN_ORDER], price: { show: false } }, store);
+  expect(JSON.parse(store.getItem('vendurepos.till.cartColumns')!)).toEqual({ price: { show: false } });
+  expect(loadCartColumns(store)).toEqual({ order: [...CART_COLUMN_ORDER], price: { show: false } });
+});
+
+it('a moved order is stored', () => {
+  saveCartColumns(moveCartColumn({}, 'total', -1), store);
+  expect(JSON.parse(store.getItem('vendurepos.till.cartColumns')!).order).toEqual(['quantity', 'image', 'name', 'sku', 'total', 'price']);
 });
 
 it.each(['{', '[1]', '7', 'null', 'true', '"columns"'])('ignores invalid or non-object JSON: %s', (stored) => {

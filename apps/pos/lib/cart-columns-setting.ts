@@ -46,7 +46,10 @@ export function loadCartColumns(store: KeyValueStore = defaultStore()): CartColu
 }
 
 export function saveCartColumns(columns: CartColumnSettings, store: KeyValueStore = defaultStore()): void {
-  store.setItem(CART_COLUMNS_KEY, JSON.stringify(columns));
+  const order = fillOrder(columns.order);
+  store.setItem(CART_COLUMNS_KEY, JSON.stringify({
+    ...columns, order: order.every((id, index) => id === CART_COLUMN_ORDER[index]) ? undefined : order,
+  }));
 }
 
 export function cartColumnShown(columns: CartColumnSettings) {
