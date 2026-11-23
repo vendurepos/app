@@ -45,6 +45,14 @@ mutation {
 - **Postgres only.** The ledger claim relies on Postgres semantics: `INSERT … ON CONFLICT`
   waits on another transaction's uncommitted row, and `SET LOCAL lock_timeout` bounds that
   wait. MySQL, MariaDB and SQLite are not supported.
+- **Run the Vendure server with `TZ=UTC`, and keep it there.** The sale time (`tallySaleAt`) is
+  stored in the server process's local time without a zone, and the sales report reads it back in the
+  zone the process has now. In a zone with daylight saving, a sale in the repeated hour when clocks go
+  back can fall in the wrong hour or day, and changing the server's zone later shifts every stored sale.
+  Set `TZ` in the environment the process starts with, before the first POS sale. A server that has
+  already taken POS sales in another zone keeps that zone: switching it would shift those sales.
+  Keep the database's `timezone` setting at UTC as well, since refund times are written by Postgres
+  in its session zone.
 
 ## Installation
 
