@@ -46,7 +46,7 @@ export function lineTotalsForRefund<L extends RefundLine>(order: RefundOrder<L>,
 /** Money P2 #2: the order's TALLY_ROUNDING_SKU bridge, which goes with the refund that takes everything left on its lines; else 0. */
 export function roundingForRefund<L extends RefundLine>(order: Pick<RefundOrder<L>, 'lines' | 'surcharges'>,
   payloadLines: Array<{ line: L; quantity: number }>, refundedOf: (line: L) => number): number {
-  if (!payloadLines.length || order.lines.some(line => line.quantity - refundedOf(line)
+  if (!payloadLines.length || order.lines.some(line => Math.max(0, line.quantity - refundedOf(line))
     !== payloadLines.filter(item => String(item.line.id) === String(line.id)).reduce((sum, item) => sum + item.quantity, 0))) return 0;
   return order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU).reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
 }

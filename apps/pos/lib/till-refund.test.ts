@@ -167,6 +167,15 @@ it('the refund that takes everything left on the lines takes the rounding bridge
   expect(refundTotalMinor({ ...sale, surcharges: [{ ...surcharges[0], priceWithTax: 3 }] }, { L1: 2, L2: 3 })).toBe(2907);
 });
 
+it('an empty refund of a bridged order sends nothing, not the bridge', () => {
+  const sale = {
+    ...order(order().lines.map(line => refundOf(line.id, line.quantity))),
+    surcharges: [{ description: 'POS rounding', sku: 'TALLY-ROUNDING', price: -2, priceWithTax: -2 }],
+  };
+  expect(refundTotalMinor(sale, {})).toBe(0);
+  expect(refundTotalMinor(sale, { L1: 0, L2: 0 })).toBe(0);
+});
+
 it('places an unlinked (legacy) discount as the plugin does: the one line, or everything left on the highest line id', () => {
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, LEGACY), { L1: 2 })).toBe(1750);
   expect(refundTotalMinor(discounted([line('L1', 2, 2000)], S1, null), { L1: 1 })).toBe(875);

@@ -346,6 +346,28 @@ describe('order.refund v1', () => {
     expect(JSON.parse((await storedOrder(plain)).customFields.tallySnapshot!).lineDiscounts).toEqual({});
   });
 
+  it('a linked order whose snapshot leaves a discount unnamed refuses the refund, whole or by line', async () => {
+    const session = await openSession();
+    const { order, paid } = await sellDiscounted([
+      { variantId: variantIds.mug[0], unitPriceMinor: 1000, discountMinor: 200 },
+      { variantId: variantIds.beans[0], unitPriceMinor: 500, discountMinor: 100 },
+    ]);
+    const a = order.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
+    const b = order.lines.find(line => line.productVariant.id === variantIds.beans[0])!;
+    const stored = await storedOrder(order);
+    const snapshot = JSON.parse(stored.customFields.tallySnapshot!);
+    expect(stored.surcharges.filter(surcharge => surcharge.sku === 'TALLY-DISCOUNT')).toHaveLength(2);
+    expect(Object.keys(snapshot.lineDiscounts)).toHaveLength(2);
+    const firstId = environment.decode(a.id);
+    snapshot.lineDiscounts = { [firstId]: snapshot.lineDiscounts[firstId] };
+    await connection.rawConnection.getRepository(Order).update(environment.decode(order.id), {
+      customFields: { tallySnapshot: JSON.stringify(snapshot) },
+    });
+    await refused(refundFor(order, session, { shippingMinor: 0, totalMinor: paid }), order.id,
+      'discount_unlinked', REFUND_DISCOUNT_UNLINKED_MESSAGE);
+    await refused(wholeLine(order, b, session, b.proratedLinePriceWithTax), order.id, 'discount_unlinked', REFUND_DISCOUNT_UNLINKED_MESSAGE);
+  });
+
   it('a legacy order with an unlinked discount refuses one line, and refunds everything left for what was paid', async () => {
     const session = await openSession();
     const { order, paid } = await sellDiscounted([

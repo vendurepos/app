@@ -41,6 +41,12 @@ describe('lineTotalsForRefund (#460)', () => {
     expect(roundingForRefund({ ...order, surcharges: [discount, fee] }, whole, none)).toBe(0);
   });
 
+  it('a line cancelled below what was refunded counts as nothing left, as the till counts it', () => {
+    const bridge = { id: 11, sku: TALLY_ROUNDING_SKU, priceWithTax: -2 };
+    const order = { lines: [a, b], surcharges: [bridge] };
+    expect(roundingForRefund(order, [{ line: b, quantity: 1 }], line => line.id === a.id ? a.quantity + 1 : 0)).toBe(-2);
+  });
+
   it('an empty link map leaves every line at its prorated total', () => {
     expect(run([a, b], [fee], linked({}), [[a, 1]])).toEqual({ 1: 2000, 2: 500 });
   });
