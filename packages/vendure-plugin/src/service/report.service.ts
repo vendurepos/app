@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Collection, Order, ProductVariant, RequestContext, TransactionalConnection, translateEntity } from '@vendure/core';
+import { Collection, Order, ProductVariant, RequestContext, Surcharge, TransactionalConnection, translateEntity } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { In } from 'typeorm';
+import type { SelectQueryBuilder } from 'typeorm';
 import { channelRefunds } from './channel-refunds';
 import { TALLY_DISCOUNT_SKU } from './constants';
 import { OrderCreateService } from './order-create.service';
@@ -80,11 +81,7 @@ export class ReportService {
       .addSelect('SUM(o.subTotalWithTax - o.subTotal + o.shippingWithTax - o.shipping)', 'tax')
       .setParameters(params).groupBy(dayKey(SALE_AT))
       .getRawMany<{ day: string; count: string; sales: string | null; tax: string | null }>();
-    const [discounts] = await this.posOrders(ctx, query)
-      .innerJoin('o.surcharges', 's')
-      .andWhere('s.sku = :discountSku', { discountSku: TALLY_DISCOUNT_SKU })
-      .select('SUM(0 - s.listPrice)', 'discounts')
-      .getRawMany<{ discounts: string | null }>();
+    const discounts = await this.discountsOf(ctx, this.posOrders(ctx, query));
     const methods = await this.posOrders(ctx, query)
       .innerJoin('o.payments', 'p')
       .andWhere("p.state = 'Settled'")
@@ -104,7 +101,7 @@ export class ReportService {
     const dayOf = (day: string) => byDay.get(day) ?? byDay.set(day, { day, orderCount: 0, salesMinor: 0, refundsMinor: 0 }).get(day)!;
     const byMethod = new Map<string, TallySalesReport['byMethod'][number]>();
     const methodOf = (method: string) => byMethod.get(method) ?? byMethod.set(method, { method, salesMinor: 0, refundsMinor: 0 }).get(method)!;
-    const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: minor(discounts?.discounts) };
+    const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: discounts };
     for (const row of days) {
       const entry = dayOf(row.day);
       entry.orderCount += minor(row.count);
@@ -129,6 +126,13 @@ export class ReportService {
       byMethod: [...byMethod.values()].sort((a, b) => ascending(a.method, b.method)),
       byDay: [...byDay.values()].sort((a, b) => ascending(a.day, b.day)),
     };
+  }
+
+  // Gross to match salesMinor: priceWithTax is Vendure's gross-up from stored taxLines, whatever the command version stored.
+  private async discountsOf(ctx: RequestContext, orders: SelectQueryBuilder<Order>): Promise<number> {
+    const surcharges = await this.connection.getRepository(ctx, Surcharge).createQueryBuilder('s').innerJoin('s.order', 'discountOrder')
+      .where(`discountOrder.id IN (${orders.select('o.id').getQuery()}) AND s.sku = :discountSku`, { ...orders.getParameters(), discountSku: TALLY_DISCOUNT_SKU }).getMany();
+    return surcharges.reduce((sum, s) => sum - s.priceWithTax, 0);
   }
 
   /** POS sales: order.create recorded them in full (tallyPayments is written last), not rejected (ADR-068 d13.6), in the channel's currency. */
@@ -217,11 +221,7 @@ export class ReportService {
       .getRawMany<{ hour: string; count: string; sales: string | null; tax: string | null }>();
     const [items] = await this.posOrdersV2(ctx, query).innerJoin('o.lines', 'l')
       .select('SUM(l.quantity)', 'items').getRawMany<{ items: string | null }>();
-    const [discounts] = await this.posOrdersV2(ctx, query)
-      .innerJoin('o.surcharges', 's')
-      .andWhere('s.sku = :discountSku', { discountSku: TALLY_DISCOUNT_SKU })
-      .select('SUM(0 - s.listPrice)', 'discounts')
-      .getRawMany<{ discounts: string | null }>();
+    const discounts = await this.discountsOf(ctx, this.posOrdersV2(ctx, query));
     const methods = await this.posOrdersV2(ctx, query)
       .innerJoin('o.payments', 'p')
       .andWhere("p.state = 'Settled'")
@@ -247,7 +247,7 @@ export class ReportService {
     const byMethod = new Map<string, TallySalesReportV2['byMethod'][number]>();
     const methodOf = (method: string) => bucket(byMethod, method,
       () => ({ method, salesMinor: 0, refundsMinor: 0, orderCount: 0, refundCount: 0 }));
-    const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: minor(discounts?.discounts), itemCount: minor(items?.items) };
+    const orders = { count: 0, salesMinor: 0, taxMinor: 0, discountsMinor: discounts, itemCount: minor(items?.items) };
     for (const row of hours) {
       const entry = hourOf(row.hour);
       entry.orderCount += minor(row.count);

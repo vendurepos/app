@@ -11,7 +11,7 @@ type RawOrder = {
   id: string; subTotal: number; subTotalWithTax: number; shipping: number; shippingWithTax: number;
   customFields: { tallySaleAt: string; tallyRegisterId: string; tallyCashierRef: string };
   lines: Array<{ id: string; quantity: number; proratedLinePriceWithTax: number; productVariant: { id: string; sku: string; name: string } }>;
-  surcharges: Array<{ sku: string; price: number }>;
+  surcharges: Array<{ sku: string; price: number; priceWithTax: number }>;
   taxSummary: Array<{ description: string; taxRate: number; taxBase: number; taxTotal: number }>;
   payments: Array<{
     method: string; amount: number; state: string; metadata: { tender?: { method?: string } } | null;
@@ -58,11 +58,12 @@ describe('GET /tally/v1/reports/sales/v2', () => {
     range = { from: new Date(now - 3 * HOUR).toISOString(), to: new Date(now + HOUR).toISOString() };
     const mug = (quantity: number, discountMinor?: number): Line => ({ variantId: variantIds.mug[0], quantity, unitPriceMinor: 800,
       ...(discountMinor ? { discountMinor } : {}) });
-    const beans = (quantity: number): Line => ({ variantId: variantIds.beans[0], quantity, unitPriceMinor: 500, ratePpm: 100_000 });
+    const beans = (quantity: number, discountMinor?: number): Line => ({ variantId: variantIds.beans[0], quantity, unitPriceMinor: 500, ratePpm: 100_000,
+      ...(discountMinor ? { discountMinor } : {}) });
     const session = await openSession();
     registerB = session.registerId;
     const o1 = await sell(new Date(now - 2 * HOUR).toISOString(), registerA, cashier1, [mug(2), beans(1)], 'cash');
-    await sell(new Date(now - 2 * HOUR + 60_000).toISOString(), registerA, cashier2, [mug(1, 100)], 'split');
+    await sell(new Date(now - 2 * HOUR + 60_000).toISOString(), registerA, cashier2, [mug(1, 100), beans(1, 100)], 'split');
     await sell(new Date(now - HOUR).toISOString(), registerB, cashier1, [beans(3)], 'external');
     const first = await readOrder(o1);
     const mugLine = first.lines.find(line => line.productVariant.id === variantIds.mug[0])!;
@@ -129,7 +130,7 @@ describe('GET /tally/v1/reports/sales/v2', () => {
       id subTotal subTotalWithTax shipping shippingWithTax
       customFields { tallySaleAt tallyRegisterId tallyCashierRef }
       lines { id quantity proratedLinePriceWithTax productVariant { id sku name } }
-      surcharges { sku price }
+      surcharges { sku price priceWithTax }
       taxSummary { description taxRate taxBase taxTotal }
       payments { method amount state metadata refunds { id total state metadata } }
     } }`), { id });
@@ -200,8 +201,8 @@ describe('GET /tally/v1/reports/sales/v2', () => {
       totals.count += 1;
       totals.salesMinor += sales;
       totals.taxMinor += order.subTotalWithTax - order.subTotal + order.shippingWithTax - order.shipping;
-      // A v4 till discount is net, so the surcharge's price is its list price.
-      totals.discountsMinor += order.surcharges.filter(item => item.sku === 'TALLY-DISCOUNT').reduce((sum, item) => sum - item.price, 0);
+      // Discounts is gross, whatever the version stored.
+      totals.discountsMinor += order.surcharges.filter(item => item.sku === 'TALLY-DISCOUNT').reduce((sum, item) => sum - item.priceWithTax, 0);
       for (const payment of order.payments.filter(item => item.state === 'Settled')) {
         const entry = method(payment.metadata?.tender?.method ?? payment.method);
         entry.salesMinor += payment.amount;
@@ -250,7 +251,7 @@ describe('GET /tally/v1/reports/sales/v2', () => {
     expect(store.byMethod.map(row => row.method)).toEqual(['cash', 'external']);
     // The two line rates, beside the 0% row of the zero-priced till shipping line.
     expect(store.taxes.map(row => row.ratePercent)).toEqual(expect.arrayContaining([10, 25]));
-    expect(store.orders.discountsMinor).toBeGreaterThan(0);
+    expect(store.orders.discountsMinor).toBe(235); // 125 (100 net at 25 %) + 110 (100 net at 10 %)
     expect(store.refunds.count).toBe(1);
     // The refund's own register and cashier differ from its sale's, so the filters can tell the two rules apart.
     expect(derive({ registerId: registerB }).refunds.count).toBe(1);
