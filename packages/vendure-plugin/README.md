@@ -14,7 +14,7 @@ so it emits no event. A command already in the ledger always replays its recorde
 malformed or out-of-range payload (`invalid_payload`: shape, amounts, quantities, fiscal figures, a `createdAt` more than a day ahead) is refused before any claim and not stored. The
 state-dependent facts about the sale (`unknown_variant`, `underpaid`) are stored on the command's
 ledger claim. The store's setup (`store_configuration`, including the order limits
-`orderItemsLimit` and `orderLineItemsLimit`, and `unsupported_currency`) is not stored, so the same
+`orderItemsLimit` and `orderLineItemsLimit`, and `unsupported_currency`, which refuses any currency but the channel's default) is not stored, so the same
 command applies once the store is fixed. Once the sale has started writing (Vendure publishes its first event there), a
 failure rolls the whole transaction back as a transient 503 and Vendure drops the events it had
 emitted; the resend is checked again. A plugin bug before that point is a stored `internal_error`.
