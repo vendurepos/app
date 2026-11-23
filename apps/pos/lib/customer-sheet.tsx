@@ -109,8 +109,8 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
             formatMoney({ amount: order.totalMinor, currency: order.currency })].map((text, index) => <Text key={index} className="text-sm">{text}</Text>)}
         </HStack></Pressable>} />}
       {!online && <Text testID="customer-sheet-offline">{CUSTOMER_OFFLINE_TEXT}</Text>}
-      {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       </ScrollView>
+      {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       <HStack space="sm" className="mt-auto justify-between">
         <Button testID="customer-sheet-save" disabled={saving || !online || (row !== null && Object.keys(customerPatch(row, values)).length + Object.keys(addressChange).length === 0)} onPress={save}>
           <Text>Save</Text>

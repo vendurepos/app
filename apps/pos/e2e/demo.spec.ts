@@ -667,6 +667,12 @@ test('the customer sheet body scrolls on a short screen; Save and Close stay on 
   await orders.scrollIntoViewIfNeeded();
   await expect(orders).toBeInViewport();
   await expect(sheet.getByTestId('customer-sheet-close')).toBeInViewport();
+  // An empty address line 1 is refused before any request; the refusal shows on screen, not below the order history.
+  await sheet.getByTestId('customer-form-addresses-billing-edit').click();
+  await sheet.getByTestId('customer-form-addresses-billing-address1').fill('');
+  await sheet.getByTestId('customer-sheet-save').click();
+  await expect(sheet.getByTestId('customer-sheet-error')).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-error')).toBeInViewport();
   await sheet.getByTestId('customer-sheet-close').click();
   await expect(sheet).toBeHidden();
 });
