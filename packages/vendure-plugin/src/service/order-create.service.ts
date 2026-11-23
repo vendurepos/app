@@ -849,10 +849,11 @@ export class OrderCreateService {
     order.orderPlacedAt = new Date(payload.createdAt);
     // #460: lineDiscounts is the link from each order line id to its TALLY_DISCOUNT_SKU surcharge id, which refunds read.
     // An empty map is an order with no line discounts; no lineDiscounts key at all means the order was sold before links.
+    // totalMinor is the total the tender cap used (ADR-039), and the register reads it.
     if (command.version >= 3) {
-      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts });
-    } else if (Object.keys(lineDiscounts).length) {
-      order.customFields.tallySnapshot = JSON.stringify({ lineDiscounts });
+      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts, totalMinor: payload.totalMinor });
+    } else {
+      order.customFields.tallySnapshot = JSON.stringify({ ...(Object.keys(lineDiscounts).length ? { lineDiscounts } : {}), totalMinor: payload.totalMinor });
     }
     await this.connection.getRepository(ctx, Order).save(order);
     // P2.11a: order.create 7's sale note, as Vendure's own public order note, in the sale's transaction. A replay never

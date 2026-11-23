@@ -30,10 +30,19 @@ export function storedReceiptData(order: VendureOrder, config: ReceiptConfig & {
   // whole list in tallyPayments.
   const tenders = storedTenders(order.customFields?.tallyPayments);
   if (tenders) {
+    let remaining = order.totalWithTax;
+    let changeDueMinor = 0;
+    const payments = tenders.flatMap(({ method, amountMinor, tenderedMinor, changeMinor, reference }) => {
+      if (Number.isSafeInteger(order.totalWithTax) && remaining === 0) return [];
+      const applied = Number.isSafeInteger(order.totalWithTax) ? Math.min(amountMinor, remaining) : amountMinor;
+      remaining -= applied;
+      changeDueMinor += changeMinor ?? 0;
+      return [{ method, amountMinor: tenderedMinor ?? applied, ...(reference ? { reference } : {}) }];
+    });
     return {
       ...receipt,
-      payments: tenders.map(({ method, amountMinor, tenderedMinor, reference }) => ({ method, amountMinor: tenderedMinor ?? amountMinor, ...(reference ? { reference } : {}) })),
-      changeDueMinor: tenders.reduce((sum, tender) => sum + (tender.changeMinor ?? 0), 0),
+      payments,
+      changeDueMinor,
     };
   }
   const payments = (order.payments ?? []).filter(payment => !UNPAID_PAYMENT_STATES.includes(payment.state)).map((payment) => {

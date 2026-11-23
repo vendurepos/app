@@ -137,7 +137,7 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       const discount = order.surcharges.find(row => row.sku === 'TALLY-DISCOUNT');
       expect(discount?.listPrice).toBe(-50);
       // #460: a v2 sale stores no v3 snapshot, only the link from its discounted line to that line's surcharge.
-      expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({ lineDiscounts: { [String(order.lines[0].id)]: String(discount!.id) } });
+      expect(JSON.parse(order.customFields.tallySnapshot!)).toEqual({ lineDiscounts: { [String(order.lines[0].id)]: String(discount!.id) }, totalMinor: command.payload.totalMinor });
     });
 
     it('negative control: a POS total off by B + 5 is applied, bridged in full, and exceeds the bound', async () => {

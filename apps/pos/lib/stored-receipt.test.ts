@@ -93,6 +93,15 @@ describe('storedReceiptData', () => {
     expect(receipt.payments.reduce((sum, row) => sum + row.amountMinor, 0) - receipt.changeDueMinor).toBe(receipt.totals.totalMinor);
   });
 
+  it('a tender that only partly applies prints what was tendered, and a short tender list prints as stored', () => {
+    const receipt = storedReceiptData(order({
+      line: EXCLUSIVE, total: 1600, totalWithTax: 1904,
+      tallyPayments: JSON.stringify([{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 904 }]),
+    }), { storeName: 'Store', pricesIncludeTax: false });
+    expect(receipt.payments).toEqual([{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 904 }]);
+    expect(receipt.changeDueMinor).toBe(0);
+  });
+
   it('without tallyPayments a payment is named by its tender method', () => {
     const card = order({ line: EXCLUSIVE, total: 1600, totalWithTax: 1904, tallyPayments: null,
       payments: [payment(1904, { metadata: { tender: { method: 'card' } } }), payment(500, { state: 'Declined' })] });
