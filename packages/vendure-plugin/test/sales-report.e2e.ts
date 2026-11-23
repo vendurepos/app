@@ -235,7 +235,8 @@ describe('GET /tally/v1/reports/sales', () => {
     const at = new Date(Date.now() - 60_000).toISOString();
     const { orderId, payload } = await sell(at, session.registerId, { discountMinor: 100, version: 4, sessionId: session.sessionId });
     const order = await readOrder(orderId);
-    const refund = refundFor(order, session);
+    // The discount comes off its own line, so a full refund is the sale's total.
+    const refund = refundFor(order, session, { totalMinor: payload.totalMinor });
     expect(await post(refund)).toMatchObject({ status: 'applied' });
     const now = Date.now();
     const body = await ok({ from: new Date(now - 3_600_000).toISOString(), to: new Date(now + 3_600_000).toISOString(),
