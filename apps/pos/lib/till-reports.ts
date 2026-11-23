@@ -72,7 +72,7 @@ export function tillSalesFigures({ orders, refunds, filters, timezone }: {
   orders: readonly PosOrder[]; refunds: readonly PosRefund[]; filters: SalesFilters; timezone: string;
 }): SalesFigures {
   const kept = keptTillOrders(orders, filters);
-  const orderCashiers = new Map(orders.map((order) => [order.id, order.cashierRef]));
+  const orderCashiers = new Map(orders.flatMap((order) => (order.serverRefs?.orderId ? [[order.serverRefs.orderId, order.cashierRef] as const] : [])));
   const keptRefunds = refunds.flatMap((refund) => {
     const report = reportRefundFromPosRefund(refund);
     if (!report) return [];
