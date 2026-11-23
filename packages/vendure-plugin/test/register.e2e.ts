@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { RequestContextService, StockMovementService, TransactionalConnection } from '@vendure/core';
+import { Order, RequestContextService, StockMovementService, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { OrderCreateService, RegisterService, TallyCommand } from '../src';
 import type { RegisterEnvelope, RegisterResult } from '../src';
 import { markTallyRoute } from '../src/config/strategies';
 import { TEST_HOOKS_ENV } from '../src/service/order-create.service';
+import { ReportService } from '../src/service/report.service';
 import { parseCommandResult } from '../src/vendored/command-result';
 import type { RegisterCommandType } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
@@ -298,6 +299,53 @@ describe('register commands', () => {
     await applyAll(open(s2, r), transition(s2, 'closed'));
     await refused(closure(s2, r, 1), 'register_closure_number_invalid', 'Closure number 1 is not 2', true,
       { counters: { lastClosureNumber: 1, perpetualSalesTotalMinor: 2000, perpetualRefundsTotalMinor: 0 } });
+  });
+
+  it("an over-tendered sale adds only the applied amount to the session's expected figures, as the sales report counts it (money P2 #3)", async () => {
+    const [s, r] = [uuid(), uuid()];
+    await applyAll(open(s, r));
+    const cashSale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], [
+      { method: 'cash', amountMinor: 2000, tenderedMinor: 2000, changeMinor: 1000 },
+    ]);
+    const extraTenderSale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], [
+      { method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 500 },
+    ]);
+    for (const command of [cashSale, extraTenderSale]) {
+      command.payload.sessionId = s;
+      command.payload.registerId = r;
+      command.createdAt = AT;
+      command.payload.createdAt = AT;
+      expect(await run(command)).toMatchObject({ status: 'applied' });
+    }
+    expect((await send(movement(s, 'no_sale', 0))).register).toMatchObject({
+      session: { expected: { cash: 12000, external: 0 }, salesCount: 2 },
+    });
+    const ctx = markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom' }));
+    const from = new Date(Date.parse(AT) - 86400000).toISOString();
+    const to = new Date(Date.parse(AT) + 86400000).toISOString();
+    const report = await server.app.get(ReportService).sales(ctx, { from, to, timezone: 'UTC', registerId: r });
+    expect(report.byMethod.find(row => row.method === 'cash')?.salesMinor).toBe(2000);
+  });
+
+  it('a sale stored before its snapshot recorded totalMinor counts its tenders as stored (money P2 #3 fallback)', async () => {
+    const [s, r] = [uuid(), uuid()];
+    await applyAll(open(s, r));
+    const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], [
+      { method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 500 },
+    ]);
+    command.payload.sessionId = s;
+    command.payload.registerId = r;
+    command.createdAt = AT;
+    command.payload.createdAt = AT;
+    expect(await run(command)).toMatchObject({ status: 'applied' });
+    const repository = connection.rawConnection.getRepository(Order);
+    const order = await repository.findOneByOrFail({ customFields: { tallyClientOrderId: command.payload.clientOrderId } });
+    const { totalMinor, ...old } = JSON.parse(order.customFields.tallySnapshot!);
+    expect(totalMinor).toBeDefined();
+    await repository.update(order.id, { customFields: { tallySnapshot: JSON.stringify(old) } });
+    expect((await send(movement(s, 'no_sale', 0))).register).toMatchObject({
+      session: { expected: { cash: 11000, external: 500 }, salesCount: 1 },
+    });
   });
 
   it('/info advertises register [1, 2, 3], and one batch applies order.create and register.session.open in array order', async () => {

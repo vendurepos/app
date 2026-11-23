@@ -78,6 +78,52 @@ describe('storedReceiptData', () => {
     expect(receipt.payments.reduce((sum, row) => sum + row.amountMinor, 0) - receipt.changeDueMinor).toBe(receipt.totals.totalMinor);
   });
 
+  it("an over-tendered order's receipt prints only the tenders that applied: a card after the covering cash is left off (money P2 #3)", () => {
+    const overTendered = order({
+      line: EXCLUSIVE, total: 1600, totalWithTax: 1904,
+      tallyPayments: JSON.stringify([
+        { clientPaymentId: 'cash', method: 'cash', amountMinor: 1904 },
+        { clientPaymentId: 'card', method: 'external', amountMinor: 500, reference: 'auth-1' },
+      ]),
+      payments: [payment(1904)],
+    });
+    const receipt = storedReceiptData(overTendered, { storeName: 'Store', pricesIncludeTax: false });
+    expect(receipt.payments).toEqual([{ method: 'cash', amountMinor: 1904 }]);
+    expect(receipt.changeDueMinor).toBe(0);
+    expect(receipt.payments.reduce((sum, row) => sum + row.amountMinor, 0) - receipt.changeDueMinor).toBe(receipt.totals.totalMinor);
+  });
+
+  it('a tender that only partly applies prints the part that applied', () => {
+    const receipt = storedReceiptData(order({
+      line: EXCLUSIVE, total: 1600, totalWithTax: 1904,
+      tallyPayments: JSON.stringify([{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 1500 }]),
+    }), { storeName: 'Store', pricesIncludeTax: false });
+    expect(receipt.payments).toEqual([{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 904 }]);
+    expect(receipt.changeDueMinor).toBe(0);
+  });
+
+  it("the cap is the total the sale was paid against, not a total changed later: both tenders print after the order's total drops", () => {
+    const sale = order({
+      line: EXCLUSIVE, total: 1600, totalWithTax: 1904,
+      tallyPayments: JSON.stringify([{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 904 }]),
+    });
+    const receipt = storedReceiptData({
+      ...sale, totalWithTax: 952,
+      customFields: { ...sale.customFields!, tallySnapshot: JSON.stringify({ totalMinor: 1904 }) },
+    }, { storeName: 'Store', pricesIncludeTax: false });
+    expect(receipt.payments).toEqual([{ method: 'cash', amountMinor: 1000 }, { method: 'external', amountMinor: 904 }]);
+  });
+
+  it('a gross cash tender without tenderedMinor prints what was handed over, so paid minus change is the total', () => {
+    const receipt = storedReceiptData(order({
+      line: EXCLUSIVE, total: 1600, totalWithTax: 1904,
+      tallyPayments: JSON.stringify([{ method: 'cash', amountMinor: 2904, changeMinor: 1000 }]),
+    }), { storeName: 'Store', pricesIncludeTax: false });
+    expect(receipt.payments).toEqual([{ method: 'cash', amountMinor: 2904 }]);
+    expect(receipt.changeDueMinor).toBe(1000);
+    expect(receipt.payments.reduce((sum, row) => sum + row.amountMinor, 0) - receipt.changeDueMinor).toBe(receipt.totals.totalMinor);
+  });
+
   it('without tallyPayments a payment is named by its tender method', () => {
     const card = order({ line: EXCLUSIVE, total: 1600, totalWithTax: 1904, tallyPayments: null,
       payments: [payment(1904, { metadata: { tender: { method: 'card' } } }), payment(500, { state: 'Declined' })] });
