@@ -17,6 +17,7 @@ import { ErrorResultThrown, unwrap } from './errors';
 import { OrderCreateService } from './order-create.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
+import { REFUND_DISCOUNT_UNLINKED_MESSAGE, lineTotalsForRefund } from './refund-line-totals';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
 /** ADR 0007: one till refund, with the register lock before the order lock. */
@@ -96,12 +97,16 @@ export class RefundService {
         });
         const refundedOf = (line: OrderLine) => previous.flatMap(refund => refund.lines)
           .filter(refundLine => idsAreEqual(refundLine.orderLineId, line.id)).reduce((sum, refundLine) => sum + refundLine.quantity, 0);
+        // #460: the line totals after their till discounts; refused (lines only) when the discounts cannot be placed.
+        const lineTotals = lineTotalsForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf,
+          previous.some(refund => refund.lines.length > 0));
+        const totals = 'totals' in lineTotals ? lineTotals.totals : new Map<ID, number>();
         // ADR 0007: a line's share of its total, so a whole line is the line total and partial refunds add up to it.
         const shareOf = (line: OrderLine, quantity: number) => {
           if (line.quantity === 0) return 0;
           const before = refundedOf(line);
-          return Math.round((before + quantity) * line.proratedLinePriceWithTax / line.quantity)
-            - Math.round(before * line.proratedLinePriceWithTax / line.quantity);
+          const total = totals.get(line.id)!;
+          return Math.round((before + quantity) * total / line.quantity) - Math.round(before * total / line.quantity);
         };
         const over = lines.map(({ input, line }) => ({
           orderLineId: input.orderLineId, quantity: input.quantity,
@@ -110,6 +115,7 @@ export class RefundService {
         if (over.length) throw new Unstored(refuse(id, 'quantity_exceeds',
           'A refunded quantity is more than the line has left to refund', { lines: over }));
         if (!lines.length && shippingMinor === 0 && adjustmentMinor === 0) throw new Unstored(refuse(id, 'nothing_to_refund', 'Nothing to refund'));
+        if ('refuse' in lineTotals && lines.length) throw new Unstored(refuse(id, 'discount_unlinked', REFUND_DISCOUNT_UNLINKED_MESSAGE));
         const refundableShipping = order.shippingWithTax - previous.reduce((sum, refund) => sum + refund.shipping, 0);
         const remainderOf = (payment: Payment) => Math.max(0, payment.amount - payment.refunds
           .filter(refund => refund.state !== 'Failed').reduce((sum, refund) => sum + refund.total, 0));

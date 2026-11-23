@@ -18,6 +18,9 @@ export const REFUND_FORBIDDEN_TEXT = "This account can't refund. Ask the store's
 export const REFUND_NO_SESSION_TEXT = 'The store has no open register session for this till. Open the register, then try again.';
 export const REFUND_UNKNOWN_TEXT = "The store hasn't answered yet. Don't hand back cash until it confirms. Send the refund again: it is never refunded twice.";
 export const REFUND_UNAUTHORIZED_TEXT = 'Your session has ended. Sign in again, then send the refund again.';
+// The plugin's REFUND_DISCOUNT_UNLINKED_MESSAGE (#460), word for word.
+export const REFUND_DISCOUNT_UNLINKED_TEXT =
+  "This order's discounts were recorded before they were linked to its lines, so one line of it can't be refunded at the till. Refund everything left on the order, or refund it in Vendure.";
 export const REFUND_PENDING_TEXT = "The store hasn't answered the last refund for this order yet. Don't hand back cash until it confirms. Send it again before starting a new one.";
 
 /** Sum of vendureLineRefundWithTax over the lines with a quantity above 0; quantities are by order line id. */
@@ -98,6 +101,7 @@ export function refundMessage(attempt: RefundAttempt, currency: string): RefundM
         case 'not_till_order': return message(REFUND_NOT_TILL_ORDER_TEXT);
         case 'forbidden': return message(REFUND_FORBIDDEN_TEXT);
         case 'no_open_session': return message(REFUND_NO_SESSION_TEXT);
+        case 'discount_unlinked': return message(REFUND_DISCOUNT_UNLINKED_TEXT);
         default: return message(`The store refused this refund (${error.code}). Nothing was refunded.`);
       }
     }
