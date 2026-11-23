@@ -200,6 +200,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // Settings › General may bind this till to another register (CHECKLIST 6.6): re-read it when the Settings panel closes.
   useEffect(() => { if (!settingsOpen) setBoundRegisterId(mintBoundRegisterId(defaultStore())); }, [settingsOpen]);
   const [tenderInProgress, setTenderInProgress] = useState(false);
+  const [receiptShown, setReceiptShown] = useState(false);
   // A device is not a person; M7 cashier switching will set the chosen cashier here when there is one.
   const identity = tillIdentity(session);
   const actor = useMemo(() => ({ id: identity, name: identity }), [identity]);
@@ -363,9 +364,16 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       <SupportSheet open={supportOpen} onOpenChange={setSupportOpen} version={APP_VERSION} />
       <NotificationsSheet open={notificationsOpen} onOpenChange={setNotificationsOpen} notices={notices} />
       {/* Shown only while there is something to report: like the WCPOS v2 till, an up-to-date till has no sync line. */}
+      {/* Keep the receipt's buttons still when the sync line goes. */}
       {outbox.state.pending || outbox.state.backendMissing ? (
         <View testID="sync-status" dataSet={{ print: 'hide' }} className="border-b border-border">
           <SyncStatus state={outbox.state} pluginName={PLUGIN_NAME} />
+        </View>
+      ) : receiptShown ? (
+        <View testID="sync-status-space" dataSet={{ print: 'hide' }} pointerEvents="none" aria-hidden
+          accessibilityElementsHidden importantForAccessibility="no-hide-descendants" className="border-b border-transparent opacity-0">
+          <Text className="px-4 py-2 text-xs"> </Text>
+          <Text className="px-4 pb-2 text-xs"> </Text>
         </View>
       ) : null}
       {sessionEnded ? (
@@ -444,7 +452,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
                   onHolds={setSaleHolds}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
-                  registerReady={!!registerStore} onTender={setTenderInProgress} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
+                  registerReady={!!registerStore} onTender={setTenderInProgress} onReceipt={setReceiptShown} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels} settingsOpen={settingsOpen}
                   onSettingsCard={(card) => { setProductsOpen(false); setOrdersOpen(false); setReportsOpen(false); setCustomersOpen(false); setHealthOpen(false); setOpenOrder(null); setSettingsSection('general'); setSettingsCard(card); setSettingsOpen(true); }}
                   registerClosing={isClosingStatus(sessionStatus) || register.closing || closureShown}
@@ -517,7 +525,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 }
 
 function Sale({
-  session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, panelOpen, onClosePanels,
+  session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, onReceipt, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
   onSettingsCard,
 }: {
@@ -526,6 +534,8 @@ function Sale({
   drafts: RxCollection | null;
   taxClasses: { id: string; label: string }[];
   boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
+  /** Reports whether the sale's receipt is shown without a panel covering it. */
+  onReceipt(shown: boolean): void;
   onRebindRegister(): void;
   onHolds(holds: { parkedSales: number; paidMinor: number }): void;
   /** The Orders or the Register panel (and any cash-movement sheet in it) covers the sale. */
@@ -592,6 +602,10 @@ function Sale({
     onTender(stage.kind === 'tender');
     return () => onTender(false);
   }, [stage.kind, onTender]);
+  useEffect(() => {
+    onReceipt(stage.kind === 'receipt' && !panelOpen);
+    return () => onReceipt(false);
+  }, [stage.kind, panelOpen, onReceipt]);
   const [payError, setPayError] = useState<string>();
   async function checkout() {
     setPayError(undefined);

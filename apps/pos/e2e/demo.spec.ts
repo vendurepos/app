@@ -30,6 +30,7 @@ declare global {
     ordersRequests: number; releaseOrders: () => void;
     customersRequests: number; releaseCustomers: () => void;
     productsRequests: number;
+    heldSales: number; releaseSales: () => void;
   }
 }
 
@@ -3403,6 +3404,43 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await page.getByTestId('default-customer-clear').click();
   await expect(page.getByTestId('default-customer')).toHaveText('Default customer: none (guest sales)');
   await page.getByTestId('settings-back').click();
+});
+
+test("the receipt's buttons stay put when the sale reaches the store", async ({ page }) => {
+  // The demo store answers in the page, so going offline holds nothing. Instead, hold the sale's order.create until
+  // the receipt is measured. The command transport keeps the fetch it finds when the outbox opens, so wrap whichever
+  // fetch the demo installs, at the moment it installs it.
+  await page.addInitScript(() => {
+    window.heldSales = 0;
+    window.releaseSales = () => {};
+    const hold = (pass: typeof fetch): typeof fetch => async (input, init) => {
+      if (typeof init?.body === 'string' && init.body.includes('order.create')) {
+        window.heldSales++;
+        await new Promise<void>((resolve) => { window.releaseSales = resolve; });
+      }
+      return pass(input, init);
+    };
+    let current = window.fetch;
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (next: typeof fetch) => { current = hold(next); } });
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await typeAmount(page, '9.52');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect.poll(() => page.evaluate(() => window.heldSales)).toBe(1);
+  await expect(page.getByTestId('receipt-email-pending')).toBeVisible();
+  await expect(page.getByTestId('sync-status')).toBeVisible();
+  const before = { print: await page.getByTestId('receipt-print').boundingBox(), newSale: await page.getByTestId('new-sale').boundingBox() };
+  await page.evaluate(() => window.releaseSales());
+  await expectSaleStored(page);
+  await expect(page.getByTestId('receipt-email-pending')).toHaveCount(0);
+  await expect(page.getByTestId('sync-status-space')).toHaveCount(1);
+  expect({ print: await page.getByTestId('receipt-print').boundingBox(), newSale: await page.getByTestId('new-sale').boundingBox() }).toEqual(before);
 });
 
 test("a demo cashier sees Guest in the cart's customer chip and a toast when an item is added", async ({ page }) => {
