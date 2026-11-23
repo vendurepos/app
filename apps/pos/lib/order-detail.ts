@@ -8,6 +8,7 @@ import { orderHistoryNotice, orderStateLabel, type OrderHistoryNotice } from './
 import { paymentTenderName, storeDayOf } from './order-list';
 import { registerLabel, type ListedRegister } from './register-choice';
 import { sessionContext, type Session } from './session';
+import { fetchTillDiscounts, TALLY_DISCOUNT_SKU, type TillOrder } from './till-refund';
 
 export const ORDER_NOT_SYNCED_TEXT = "This sale hasn't reached the store yet. You can open it here once it has synced.";
 const ORDER_GONE_TEXT = "This order isn't in the store any more.";
@@ -119,9 +120,9 @@ export function orderDetailNotice(error: unknown): OrderHistoryNotice {
 }
 
 export function useOrderDetail(session: Session, orderId: string | null): {
-  order: VendureOrder | null; notice: OrderHistoryNotice | null; loading: boolean; reload(): void;
+  order: TillOrder | null; notice: OrderHistoryNotice | null; loading: boolean; reload(): void;
 } {
-  const [order, setOrder] = useState<VendureOrder | null>(null);
+  const [order, setOrder] = useState<TillOrder | null>(null);
   const [notice, setNotice] = useState<OrderHistoryNotice | null>(null);
   const [loading, setLoading] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -134,7 +135,11 @@ export function useOrderDetail(session: Session, orderId: string | null): {
     if (orderId === null) return;
     let cancelled = false;
     setLoading(true);
-    void getVendureOrder(sessionContext(session), orderId).then(found => {
+    const context = sessionContext(session);
+    // BUG 3: only an order with a till discount reads its surcharge ids, which a refund needs; the demo posts none.
+    void getVendureOrder(context, orderId).then(async (found): Promise<TillOrder | null> =>
+      found?.surcharges.some(item => item.sku === TALLY_DISCOUNT_SKU)
+        ? { ...found, tallyDiscounts: await fetchTillDiscounts(context, found.id) } : found).then(found => {
       if (cancelled) return;
       setOrder(found);
       setNotice(found ? null : { text: ORDER_GONE_TEXT, retry: false });

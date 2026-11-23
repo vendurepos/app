@@ -1,5 +1,5 @@
 import { vendureLineRefundWithTax, vendureRefundable, type VendureOrder } from '@tallyui/connector-vendure';
-import { formatMoney, type OrderRefundEnvelope, type OrderRefundPayload } from '@tallyui/core';
+import { ConnectorUnauthorizedError, formatMoney, type OrderRefundEnvelope, type OrderRefundPayload, type SyncContext } from '@tallyui/core';
 import {
   mintUuid, RefundAnswerPendingError, submitOrderRefund,
   type CommandTransport, type OrderRefundOutcome, type PosRefund, type PosRefundCollection,
@@ -23,19 +23,64 @@ export const REFUND_DISCOUNT_UNLINKED_TEXT =
   "This order's discounts were recorded before they were linked to its lines, so one line of it can't be refunded at the till. Refund everything left on the order, or refund it in Vendure.";
 export const REFUND_PENDING_TEXT = "The store hasn't answered the last refund for this order yet. Don't hand back cash until it confirms. Send it again before starting a new one.";
 
+export type RefundDiscount = { id: string; priceWithTax: number };
+/** getVendureOrder's order with its TALLY-DISCOUNT surcharges' ids (fetchTillDiscounts), which the connector leaves out. */
+export type TillOrder = VendureOrder & { tallyDiscounts?: RefundDiscount[] };
+// The plugin's TALLY_DISCOUNT_SKU (packages/vendure-plugin/src/service/constants.ts): the surcharge of a till line discount.
+export const TALLY_DISCOUNT_SKU = 'TALLY-DISCOUNT';
+
+/** The order's TALLY-DISCOUNT surcharges with their ids; [] for no order. */
+export async function fetchTillDiscounts(context: SyncContext, orderId: string): Promise<RefundDiscount[]> {
+  const query = `query TillDiscounts($id: ID!) { order(id: $id) { surcharges { id sku priceWithTax } } }`;
+  const response = await fetch(`${context.baseUrl}/admin-api`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers }, signal: context.signal,
+    body: JSON.stringify({ query, variables: { id: orderId } }),
+  });
+  if (response.status === 401 || response.status === 403) throw new ConnectorUnauthorizedError(`Vendure API error: ${response.status}`, response.status);
+  if (!response.ok) throw new Error(`Vendure API error: ${response.status}`);
+  const body = await response.json();
+  if (body.errors?.length) throw body.errors[0].extensions?.code === 'FORBIDDEN' ? new ConnectorUnauthorizedError(body.errors[0].message, 403) : new Error(body.errors[0].message);
+  const surcharges: { id: string; sku: string; priceWithTax: number }[] = body.data.order?.surcharges ?? [];
+  return surcharges.filter(item => item.sku === TALLY_DISCOUNT_SKU).map(({ id, priceWithTax }) => ({ id, priceWithTax }));
+}
+
+/** Each line's total for a refund, after its till discount where the plugin's lineTotalsForRefund (#460) places one. */
+export function refundLineTotals(order: TillOrder, quantities: RefundDraft['quantities']): Record<string, number> {
+  const lines = vendureRefundable(order).lines;
+  const totals = Object.fromEntries(lines.map(line => [line.orderLineId, line.lineTotalWithTax]));
+  const discounts = order.tallyDiscounts ?? [];
+  if (!discounts.length) return totals;
+  let links: unknown;
+  try { links = JSON.parse(order.customFields?.tallySnapshot ?? '').lineDiscounts; } catch { /* unparsable: unlinked */ }
+  if (typeof links === 'object' && links !== null && !Array.isArray(links)) {
+    const linked = Object.entries(links).map(([lineId, id]) => [lineId, discounts.find(item => item.id === String(id))] as const);
+    // A link to a surcharge the order lacks: the plugin refuses (discount_unlinked), so undiscounted, and the till shows that answer.
+    if (linked.some(([, discount]) => !discount)) return totals;
+    for (const [lineId, discount] of linked) if (Object.hasOwn(totals, lineId)) totals[lineId] += discount!.priceWithTax;
+    return totals;
+  }
+  const sum = discounts.reduce((total, discount) => total + discount.priceWithTax, 0);
+  // Unlinked: the one line, or everything left with no earlier refund by line on the highest refunded line id; else undiscounted.
+  const whole = lines.every(line => line.refundedQuantity === 0 && (quantities[line.orderLineId] ?? 0) === line.refundableQuantity);
+  const last = lines.length === 1 ? lines[0].orderLineId : !whole ? undefined : lines.map(line => line.orderLineId)
+    .filter(id => (quantities[id] ?? 0) > 0).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1);
+  return last === undefined ? totals : { ...totals, [last]: totals[last] + sum };
+}
+
 /** Sum of vendureLineRefundWithTax over the lines with a quantity above 0; quantities are by order line id. */
-export function refundTotalMinor(order: VendureOrder, quantities: RefundDraft['quantities']): number {
+export function refundTotalMinor(order: TillOrder, quantities: RefundDraft['quantities']): number {
+  const totals = refundLineTotals(order, quantities);
   let total = 0;
   for (const line of vendureRefundable(order).lines) {
     const quantity = quantities[line.orderLineId] ?? 0;
     // The plugin's own line-share rule, so partial refunds add up to the line and never trip amount_mismatch.
-    if (quantity > 0) total += vendureLineRefundWithTax(line, quantity);
+    if (quantity > 0) total += vendureLineRefundWithTax({ ...line, lineTotalWithTax: totals[line.orderLineId] }, quantity);
   }
   return total;
 }
 
 /** The order.refund v1 envelope for the cashier's quantities. The plugin is authoritative, so nothing else is checked here. */
-export function buildRefundEnvelope(order: VendureOrder, draft: RefundDraft, till: RefundTill,
+export function buildRefundEnvelope(order: TillOrder, draft: RefundDraft, till: RefundTill,
   ids?: { id?: string; clientRefundId?: string; now?: string }): OrderRefundEnvelope {
   const id = ids?.id ?? mintUuid();
   const clientRefundId = ids?.clientRefundId ?? mintUuid();

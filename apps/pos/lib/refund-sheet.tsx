@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, HStack, Input, InputField, Label, Switch, Text, VStack } from '@tallyui/components';
-import { vendureRefundable, type VendureOrder } from '@tallyui/connector-vendure';
+import { vendureRefundable } from '@tallyui/connector-vendure';
 import { formatMoney, type OrderRefundEnvelope, type ServerCapabilities } from '@tallyui/core';
 import { mintUuid, type PosRefundCollection, type RegisterSession } from '@tallyui/pos';
 import { orderTransport } from './order-transport';
 import { tillIdentity, type Session } from './session';
 import { SignInAgain } from './sign-in-again';
-import { buildRefundEnvelope, pendingRefund, refundMessage, refundTotalMinor, sendTillRefund, type RefundMessage } from './till-refund';
+import { buildRefundEnvelope, pendingRefund, refundMessage, refundTotalMinor, sendTillRefund, type RefundMessage, type TillOrder } from './till-refund';
 
 const REFUND_NEEDS_REGISTER_TEXT = 'Open the register to refund this order.';
 const REFUND_FAILED_TEXT = "Can't send this refund. Check the quantities and try again.";
@@ -19,7 +19,7 @@ function parseQuantity(text: string, max: number): number | null {
 
 /** The till's refund of an order's items to their original payment, in OrderSheet's footer. */
 export function RefundSheet({ order, session, refunds, registerSession, deviceId, capabilities, onRefunded }: {
-  order: VendureOrder; session: Session; refunds: PosRefundCollection | null;
+  order: TillOrder; session: Session; refunds: PosRefundCollection | null;
   registerSession: RegisterSession | null; deviceId: string; capabilities: ServerCapabilities | undefined;
   onRefunded(): void;
 }): JSX.Element | null {
