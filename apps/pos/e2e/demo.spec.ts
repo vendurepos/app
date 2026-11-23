@@ -3383,6 +3383,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
+  await expectSaleStored(page);
   await expect(page.getByTestId('receipt-customer')).toHaveText('Customer: Ada Lovelace');
   await page.getByTestId('new-sale').click();
   await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
@@ -3395,6 +3396,7 @@ test('a default customer starts each new sale and can be removed from one', asyn
   await typeAmount(page, '9.52');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
+  await expectSaleStored(page);
   await expect(page.getByTestId('receipt')).toBeVisible();
   await expect(page.getByTestId('receipt-customer')).toHaveCount(0);
   await openSettings(page, 'general');
@@ -3767,13 +3769,20 @@ async function doubleTap(button: Locator) {
   await button.evaluate((element: HTMLElement) => { element.click(); element.click(); });
 }
 
+/** The sale reached the store: the sync line is gone and Email receipt has taken its place, so the receipt's buttons stop moving. */
+async function expectSaleStored(page: Page) {
+  await expect(page.getByTestId('receipt-email')).toBeVisible();
+  await expect(page.getByTestId('sync-status')).toHaveCount(0);
+}
+
 /** One mug, paid exactly in cash. */
-async function sellMug(page: Page) {
+async function sellMug(page: Page, receiptShown = true /* receiptShown is false when Auto-show receipt is off, so there is no receipt to settle. */) {
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
   await checkout(page);
   await typeAmount(page, '9.52');
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  if (receiptShown) await expectSaleStored(page);
 }
 
 test.describe('with a network printer', () => {
@@ -3877,7 +3886,7 @@ test.describe('with a network printer', () => {
     await expect(page.getByTestId('auto-show-receipt-toggle')).toHaveAttribute('aria-checked', 'false');
     await page.getByTestId('settings-back').click();
     await openRegister(page);
-    await sellMug(page);
+    await sellMug(page, false);
     await expect(page.getByTestId('print-failed-toast')).toHaveText(PRINTER_FAILED_AFTER_CLOSE);
     // It stands for Sale complete, never on top of it. Counted now: an awaited toHaveCount(0) would pass once Sale
     // complete timed out by itself.
@@ -4310,6 +4319,7 @@ test('a demo cashier parks a sale, sells another, then resumes the parked one', 
   await typeAmount(page, '20.00');
   await takePayment(page);
   await tender.getByTestId('tender-complete').click();
+  await expectSaleStored(page);
   await expect(page.getByTestId('receipt').getByText('1 × Filter Coffee', { exact: true })).toBeVisible();
   await page.getByTestId('new-sale').click();
 
