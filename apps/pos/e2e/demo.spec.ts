@@ -2691,6 +2691,32 @@ test("Settings › General › Cart columns show an item's image and SKU, and Sp
   }
 });
 
+test('Settings › General › Cart columns move up and down, and the cart draws its columns in the saved order (9.10b)', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const heads = page.getByTestId('till-cart').getByRole('columnheader');
+  await expect(heads).toHaveText(['Qty', 'Item', 'Price', 'Total']);
+  await openSettings(page, 'general');
+  await expect(page.getByRole('button', { name: 'Move Qty up' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Move Total down' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Move Total up' }).click();
+  await expect(page.getByRole('button', { name: 'Move Total down' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Move Price down' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Move Price down' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('9.10b-cart-column-order-vendurepos.png') });
+  await page.getByTestId('settings-back').click();
+  await expect(heads).toHaveText(['Qty', 'Item', 'Total', 'Price']);
+  await page.reload();
+  await expectSignedIn(page);
+  await expect(heads).toHaveText(['Qty', 'Item', 'Total', 'Price']);
+  await openSettings(page, 'general');
+  await expect(page.getByRole('button', { name: 'Move Price down' })).toBeDisabled();
+});
+
 test('Settings › General › Cart sorts the items newest or oldest at top', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
