@@ -15,7 +15,11 @@ malformed or out-of-range payload (`invalid_payload`: shape, amounts, quantities
 state-dependent facts about the sale (`unknown_variant`, `underpaid`) are stored on the command's
 ledger claim. The store's setup (`store_configuration`, including the order limits
 `orderItemsLimit` and `orderLineItemsLimit`, and `unsupported_currency`, which refuses any currency but the channel's default) is not stored, so the same
-command applies once the store is fixed. Once the sale has started writing (Vendure publishes its first event there), a
+command applies once the store is fixed. A till total that differs from Vendure's by more than
+max(2, one per order line) minor units (`total_mismatch`, with the four figures in `error.data`) is
+refused the same way, not stored, after the whole sale rolls back, and the server logs one warning
+line for it; a smaller difference is bridged by a `POS rounding` surcharge with a `total_mismatch`
+warning. Once the sale has started writing (Vendure publishes its first event there), a
 failure rolls the whole transaction back as a transient 503 and Vendure drops the events it had
 emitted; the resend is checked again. A plugin bug before that point is a stored `internal_error`.
 
