@@ -12,7 +12,7 @@ const defs: CustomerFieldDef[] = [
 ];
 const config = { data: { globalSettings: { serverConfig: { entityCustomFields: [{ entityName: 'Customer',
   customFields: defs.map(def => ({ ...def, label: [{ languageCode: 'en', value: def.label }] })),
-}] } } } };
+}] } }, me: { channels: [{ id: '1', permissions: ['ReadCustomer'] }] }, activeChannel: { id: '1' } } };
 afterEach(() => vi.unstubAllGlobals());
 
 it('customerFieldDefs keeps Customer fields in order, excludes internal, relation, struct and invalid names, and selects labels', () => {
@@ -27,8 +27,18 @@ it('customerFieldDefs keeps Customer fields in order, excludes internal, relatio
       { name: 'notes', type: 'text', list: true, label: [{ languageCode: 'de', value: 'Notizen' }] },
       { name: '_code2', type: 'int', list: false },
     ] },
-  ])).toEqual([defs[0], { name: 'notes', label: 'Notizen', type: 'text', list: true }, { name: '_code2', label: '_code2', type: 'int', list: false }]);
-  expect(customerFieldDefs([{ entityName: 'Product', customFields: [{ name: 'code', type: 'string', list: false }] }])).toEqual([]);
+  ], [])).toEqual([defs[0], { name: 'notes', label: 'Notizen', type: 'text', list: true }, { name: '_code2', label: '_code2', type: 'int', list: false }]);
+  expect(customerFieldDefs([{ entityName: 'Product', customFields: [{ name: 'code', type: 'string', list: false }] }], [])).toEqual([]);
+});
+
+it('customerFieldDefs leaves out a field gated by a permission the role lacks; any one listed permission is enough', () => {
+  expect(customerFieldDefs([{ entityName: 'Customer', customFields: [
+    { name: 'open', type: 'string', list: false },
+    { name: 'empty', type: 'string', list: false, requiresPermission: [] },
+    { name: 'nulled', type: 'string', list: false, requiresPermission: null },
+    { name: 'anyOf', type: 'string', list: false, requiresPermission: ['SuperAdmin', 'ReadCustomer'] },
+    { name: 'gated', type: 'string', list: false, requiresPermission: ['SuperAdmin'] },
+  ] }], ['ReadCustomer']).map(def => def.name)).toEqual(['open', 'empty', 'nulled', 'anyOf']);
 });
 
 it('customerFieldValue formats strings, numbers, booleans, dates, lists and empty values', () => {
@@ -68,6 +78,18 @@ it('readCustomerFields POSTs the config and customer queries and returns rows in
 
 it('readCustomerFields returns no rows after one fetch when there are no Customer fields', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: { globalSettings: { serverConfig: { entityCustomFields: [] } } } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await readCustomerFields(context, 'c1')).toEqual([]);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('readCustomerFields uses the active channel\'s permissions and makes one fetch when every field is gated', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: {
+    globalSettings: { serverConfig: { entityCustomFields: [{ entityName: 'Customer', customFields: [
+      { name: 'taxId', type: 'string', list: false, requiresPermission: ['SuperAdmin'] },
+    ] }] } },
+    me: { channels: [{ id: '1', permissions: ['SuperAdmin'] }, { id: '2', permissions: ['ReadCustomer'] }] }, activeChannel: { id: '2' },
+  } }));
   vi.stubGlobal('fetch', fetch);
   expect(await readCustomerFields(context, 'c1')).toEqual([]);
   expect(fetch).toHaveBeenCalledTimes(1);

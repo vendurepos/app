@@ -4,11 +4,13 @@ import { sessionContext, type Session } from './session';
 // Vendure keeps a tax ID and other customer data as Customer custom fields, shown read-only as v2 shows a tax ID.
 export type CustomerFieldDef = { name: string; label: string; type: string; list: boolean };
 export type CustomerFieldRow = { name: string; label: string; value: string };
-export const CUSTOMER_FIELD_CONFIG_QUERY = 'query CustomerCustomFieldConfig { globalSettings { serverConfig { entityCustomFields { entityName customFields { ... on CustomField { name type list internal label { languageCode value } } } } } } }';
+export const CUSTOMER_FIELD_CONFIG_QUERY = 'query CustomerCustomFieldConfig { globalSettings { serverConfig { entityCustomFields { entityName customFields { ... on CustomField { name type list internal requiresPermission label { languageCode value } } } } } } me { channels { id permissions } } activeChannel { id } }';
 export const CUSTOMER_FIELD_EMPTY = '—';
-export function customerFieldDefs(entities: { entityName: string; customFields: { name: string; type: string; list: boolean; internal?: boolean | null; label?: { languageCode: string; value: string }[] | null }[] }[]): CustomerFieldDef[] {
+export function customerFieldDefs(entities: { entityName: string; customFields: { name: string; type: string; list: boolean; internal?: boolean | null; requiresPermission?: string[] | null; label?: { languageCode: string; value: string }[] | null }[] }[], permissions: readonly string[]): CustomerFieldDef[] {
   return (entities.find(entity => entity.entityName === 'Customer')?.customFields ?? [])
     .filter(field => !field.internal && field.type !== 'relation' && field.type !== 'struct' && /^[_A-Za-z][_0-9A-Za-z]*$/.test(field.name))
+    // Vendure answers null for a field the role may not read (any one listed permission reads it), so it would show as empty.
+    .filter(field => !field.requiresPermission?.length || field.requiresPermission.some(permission => permissions.includes(permission)))
     .map(field => ({ name: field.name, label: field.label?.find(label => label.languageCode === 'en')?.value ?? field.label?.[0]?.value ?? field.name, type: field.type, list: field.list }));
 }
 export function customerFieldsQuery(defs: CustomerFieldDef[]): string {
@@ -29,7 +31,8 @@ async function adminRead(context: SyncContext, query: string, variables?: { id: 
 }
 export async function readCustomerFields(context: SyncContext, customerId: string): Promise<CustomerFieldRow[] | null> {
   const config = await adminRead(context, CUSTOMER_FIELD_CONFIG_QUERY);
-  const defs = customerFieldDefs(config.globalSettings.serverConfig.entityCustomFields);
+  const channel = config.me?.channels?.find((c: { id: string }) => c.id === config.activeChannel?.id);
+  const defs = customerFieldDefs(config.globalSettings.serverConfig.entityCustomFields, channel?.permissions ?? []);
   if (defs.length === 0) return [];
   const { customer } = await adminRead(context, customerFieldsQuery(defs), { id: customerId });
   return customer === null ? null : defs.map(def => ({ name: def.name, label: def.label, value: customerFieldValue(def, customer.customFields?.[def.name]) }));

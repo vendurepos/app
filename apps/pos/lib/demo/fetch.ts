@@ -223,8 +223,11 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       }
       case 'CustomerAccount': { const c = store.customer(String(variables.id)); data = { customer: c ? { id: c.id, user: demoCustomerUser(c) } : null }; break; }
       case 'CustomerCustomFieldConfig': data = { globalSettings: { serverConfig: { entityCustomFields: [{ entityName: 'Customer', customFields: [
-        { name: 'taxId', type: 'string', list: false, internal: false, label: [{ languageCode: 'en', value: 'Tax ID' }] },
-        { name: 'wholesale', type: 'boolean', list: false, internal: false, label: [{ languageCode: 'en', value: 'Wholesale' }] }] }] } } }; break;
+        { name: 'taxId', type: 'string', list: false, internal: false, requiresPermission: [], label: [{ languageCode: 'en', value: 'Tax ID' }] },
+        { name: 'wholesale', type: 'boolean', list: false, internal: false, requiresPermission: [], label: [{ languageCode: 'en', value: 'Wholesale' }] },
+        // A field gated by a permission the demo till lacks, which the sheet leaves out.
+        { name: 'creditLimit', type: 'int', list: false, internal: false, requiresPermission: ['SuperAdmin'], label: [{ languageCode: 'en', value: 'Credit limit' }] }] }] } },
+        me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: DEMO_PERMISSIONS }] }, activeChannel: { id: DEMO_CHANNEL_ID } }; break;
       case 'CustomerCustomFields': { const c = store.customer(String(variables.id)); data = { customer: c ? { id: c.id, customFields: demoCustomerFields(c) } : null }; break; }
       case 'AddCustomerNote': case 'addNoteToCustomer': data = { addNoteToCustomer: store.addCustomerNote(variables.input) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
