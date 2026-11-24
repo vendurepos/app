@@ -118,14 +118,17 @@ it('signs in through the app, checks the barcode field and reads the seeded tax 
   expect(original).not.toHaveBeenCalled();
 });
 
-it('answers RegisterPermissions with the approve permission, and without it for the e2e till role', async () => {
+it("answers /info's permissions with the approve permission, and without it for the e2e till role", async () => {
   const context = sessionContext(await signedIn());
-  const permissions = async () => (await (await fetch(`${context.baseUrl}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
-    body: JSON.stringify({ query: 'query RegisterPermissions { me { channels { id permissions } } activeChannel { id } }' }) })).json()).data.me.channels[0].permissions;
+  const permissions = async () => (await (await fetch(`${context.baseUrl}/tally/v1/info`, { headers: context.headers })).json()).permissions;
+  const mePermissions = async () => (await (await fetch(`${context.baseUrl}/admin-api`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...context.headers },
+    body: JSON.stringify({ query: 'query TillPermissions { me { channels { id permissions } } activeChannel { id } }' }) })).json()).data.me.channels[0].permissions;
   expect(await permissions()).toContain('ApproveTallyPosVariance');
+  expect(await mePermissions()).toEqual(await permissions());
   expect(await registerBlind(context)).toBe(false);
   storage.setItem(DEMO_TILL_ROLE_KEY, '1');
   expect(await permissions()).not.toContain('ApproveTallyPosVariance');
+  expect(await mePermissions()).toEqual(await permissions());
   expect(await registerBlind(context)).toBe(true);
 });
 

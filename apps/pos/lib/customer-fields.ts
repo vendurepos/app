@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { SyncContext } from '@tallyui/core';
+import { channelPermissions } from './channel-permissions';
 import { sessionContext, type Session } from './session';
 // Vendure keeps a tax ID and other customer data as Customer custom fields, shown read-only as v2 shows a tax ID.
 export type CustomerFieldDef = { name: string; label: string; type: string; list: boolean };
 export type CustomerFieldRow = { name: string; label: string; value: string };
 export const CUSTOMER_FIELD_CONFIG_QUERY = 'query CustomerCustomFieldConfig { globalSettings { serverConfig { entityCustomFields { entityName customFields { ... on CustomField { name type list internal requiresPermission label { languageCode value } } } } } } }';
-export const CUSTOMER_FIELD_PERMISSIONS_QUERY = 'query CustomerFieldPermissions { me { channels { id permissions } } activeChannel { id } }';
 export const CUSTOMER_FIELD_EMPTY = '—';
 export function customerFieldDefs(entities: { entityName: string; customFields: { name: string; type: string; list: boolean; internal?: boolean | null; requiresPermission?: string[] | null; label?: { languageCode: string; value: string }[] | null }[] }[], permissions: readonly string[] | null): CustomerFieldDef[] {
   return (entities.find(entity => entity.entityName === 'Customer')?.customFields ?? [])
@@ -30,15 +30,14 @@ async function adminRead(context: SyncContext, query: string, variables?: { id: 
   const body = await response.json(); if (body.errors?.length) throw new Error(body.errors[0].message);
   return body.data;
 }
-// null (unknown), not []: Vendure refuses Admin `me` to a device-key till, whose user has no Administrator.
+// null (unknown), not []: a device-key till now reads its permissions from /tally/v1/info (#487); null is left for a till on an older plugin, which can't read Admin `me` either.
 async function tillPermissions(context: SyncContext): Promise<string[] | null> {
-  const data = await adminRead(context, CUSTOMER_FIELD_PERMISSIONS_QUERY).catch(() => null);
-  return data?.me ? data.me.channels?.find((c: { id: string }) => c.id === data.activeChannel?.id)?.permissions ?? [] : null;
+  return (await channelPermissions(context)) ?? null;
 }
 export async function readCustomerFields(context: SyncContext, customerId: string): Promise<CustomerFieldRow[] | null> {
   const config = await adminRead(context, CUSTOMER_FIELD_CONFIG_QUERY);
   const entities = config.globalSettings.serverConfig.entityCustomFields;
-  // No permissions drop every gated field, so the counts differ only when some field is gated; only then is `me` read.
+  // No permissions drop every gated field, so the counts differ only when some field is gated; only then are the permissions read.
   const gated = customerFieldDefs(entities, []).length < customerFieldDefs(entities, null).length;
   const defs = customerFieldDefs(entities, gated ? await tillPermissions(context) : []);
   if (defs.length === 0) return [];

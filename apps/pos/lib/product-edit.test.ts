@@ -54,8 +54,34 @@ it("offers the price edit only when the till's currency is the channel's default
   expect(await catalogueEditable(context, till)).toEqual({ editable: true, priceEditable: true });
   vi.stubGlobal('fetch', editor({ defaultCurrencyCode: 'USD', pricesIncludeTax: false }));
   expect(await catalogueEditable(context, till)).toEqual({ editable: true, priceEditable: false });
-  expect(JSON.parse((vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit])[1].body as string).query)
-    .toContain('activeChannel { id defaultCurrencyCode pricesIncludeTax }');
+  expect(JSON.parse((vi.mocked(fetch).mock.calls.at(-1) as unknown as [string, RequestInit])[1].body as string).query)
+    .toBe('query CatalogueChannel { activeChannel { id defaultCurrencyCode pricesIncludeTax } }');
+});
+
+// #487: a device-key till's permissions come from /tally/v1/info; its Admin read asks only for the active channel.
+const keyTill = (permissions: unknown, channelAnswer: unknown = { data: { activeChannel: { id: '2', defaultCurrencyCode: 'EUR', pricesIncludeTax: false } } }) =>
+  vi.fn(async (input: unknown) => new Response(JSON.stringify(String(input).endsWith('/tally/v1/info') ? { permissions } : channelAnswer), { status: 200 }));
+it("reads a device-key till's permissions from /tally/v1/info and the channel from the Admin API, without me", async () => {
+  const fetch = keyTill(['UpdateCatalog']);
+  vi.stubGlobal('fetch', fetch);
+  expect(await catalogueEditable(context, till)).toEqual({ editable: true, priceEditable: true });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect((fetch.mock.calls[1] as unknown as [string, RequestInit])[1].body).not.toContain('me ');
+  vi.stubGlobal('fetch', keyTill(['ReadCatalog']));
+  expect(await catalogueEditable(context, till)).toEqual({ editable: false, priceEditable: false });
+});
+it('grants no edit when the permissions are unknown or the channel read fails', async () => {
+  vi.stubGlobal('fetch', keyTill('UpdateCatalog', { data: { me: null }, errors: [{ message: 'Forbidden' }] }));
+  expect(await catalogueEditable(context, till)).toEqual({ editable: false, priceEditable: false });
+  vi.stubGlobal('fetch', keyTill(['UpdateCatalog'], { data: { activeChannel: null }, errors: [{ message: 'Forbidden' }] }));
+  expect(await catalogueEditable(context, till)).toEqual({ editable: false, priceEditable: false });
+  vi.stubGlobal('fetch', keyTill(['UpdateCatalog'], { data: {} }));
+  expect(await catalogueEditable(context, till)).toEqual({ editable: false, priceEditable: false });
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => String(input).endsWith('/tally/v1/info')
+    ? new Response(JSON.stringify({ permissions: ['UpdateCatalog'] })) : new Response('', { status: 500 })));
+  expect(await catalogueEditable(context, till)).toEqual({ editable: false, priceEditable: false });
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+  expect(await catalogueEditable(context, till)).toEqual({ editable: false, priceEditable: false });
 });
 
 it("offers the price edit only when the channel's tax mode is the one the till shows", async () => {

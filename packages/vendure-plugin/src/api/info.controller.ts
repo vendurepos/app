@@ -13,6 +13,7 @@ import type { RegisterApprovalOptions } from '../service/register.service';
 import { taxRoundingFor } from '../service/tax-rounding';
 import type { TaxRounding } from '../service/tax-rounding';
 import { taxesByAddress } from '../service/tax-zone-info';
+import { sessionChannelPermissions } from '../service/session-permissions';
 
 export type TallyInfo = { contracts: { 'order.create': number[]; register: number[]; 'order.refund': number[] }; taxRounding: TaxRounding;
   /** 5.2a: whether the tax zone can follow the order's address, and the channel's default tax zone's country codes. */
@@ -23,7 +24,9 @@ export type TallyInfo = { contracts: { 'order.create': number[]; register: numbe
   /** 3.2a: the channel's listed Tally methods, id ascending; [] keeps the till's default tiles. */
   paymentMethods: TenderMethod[]; receiptEmail?: { v: 1 };
   /** #332: only when the plugin's `registerApproval` option is set. */
-  registerApproval?: { thresholdMinor: number } };
+  registerApproval?: { thresholdMinor: number };
+  /** #487: the caller's own permissions on the active channel (a device-key till cannot read Admin `me`). */
+  permissions: string[] };
 
 /** Capability discovery (ADR 0002 §5), behind Vendure's own auth like the command route. */
 @Controller('tally/v1')
@@ -56,6 +59,7 @@ export class TallyInfoController {
       maxShippingLines: MAX_SHIPPING_LINES, // ADR 0005 ruling (b): one shipping charge per order.
       lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
       customerDisplay: this.displays.advertisement(), paymentMethods: await this.paymentMethods.listed(ctx),
+      permissions: sessionChannelPermissions(ctx),
     };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };

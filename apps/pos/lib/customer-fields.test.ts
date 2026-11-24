@@ -1,6 +1,6 @@
 import type { SyncContext } from '@tallyui/core';
 import { afterEach, expect, it, vi } from 'vitest';
-import { CUSTOMER_FIELD_CONFIG_QUERY, CUSTOMER_FIELD_EMPTY, CUSTOMER_FIELD_PERMISSIONS_QUERY, customerFieldDefs, customerFieldsQuery, customerFieldValue, readCustomerFields, type CustomerFieldDef } from './customer-fields';
+import { CUSTOMER_FIELD_CONFIG_QUERY, CUSTOMER_FIELD_EMPTY, customerFieldDefs, customerFieldsQuery, customerFieldValue, readCustomerFields, type CustomerFieldDef } from './customer-fields';
 
 const context: SyncContext = {
   connectorId: 'vendure', baseUrl: 'https://shop.example.com',
@@ -89,26 +89,44 @@ const gatedConfig = { data: { globalSettings: { serverConfig: { entityCustomFiel
   { name: 'taxId', type: 'string', list: false, requiresPermission: ['SuperAdmin'] },
 ] }] } } } };
 
-it('readCustomerFields reads the active channel\'s permissions only when a field is gated, and leaves out a field the role lacks', async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({ data: {
-    me: { channels: [{ id: '1', permissions: ['SuperAdmin'] }, { id: '2', permissions: ['ReadCustomer'] }] }, activeChannel: { id: '2' },
-  } }));
+it('readCustomerFields reads the till\'s permissions from /tally/v1/info only when a field is gated, and leaves out a field the role lacks', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({ permissions: ['ReadCustomer'] }));
   vi.stubGlobal('fetch', fetch);
   expect(await readCustomerFields(context, 'c1')).toEqual([]);
   expect(fetch).toHaveBeenCalledTimes(2);
-  expect(fetch.mock.calls[1][1].body).toBe(JSON.stringify({ query: CUSTOMER_FIELD_PERMISSIONS_QUERY }));
+  expect(fetch.mock.calls[1][0]).toBe('https://shop.example.com/tally/v1/info');
+  expect(fetch.mock.calls[1][1]).toEqual({ headers: context.headers, signal: context.signal });
 });
 
-it('readCustomerFields keeps a gated field when the till\'s permissions cannot be read, as on a device-key till', async () => {
+it('readCustomerFields keeps a gated field the device-key till\'s role reads by /tally/v1/info', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({ permissions: ['SuperAdmin'] }))
+    .mockResolvedValueOnce(Response.json({ data: { customer: { id: 'c1', customFields: { taxId: 'GB1' } } } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await readCustomerFields(context, 'c1')).toEqual([{ name: 'taxId', label: 'taxId', value: 'GB1' }]);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+it('readCustomerFields on a plugin older than #487 reads the active channel\'s permissions from Admin me', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({ contracts: {} }))
+    .mockResolvedValueOnce(Response.json({ data: {
+      me: { channels: [{ id: '1', permissions: ['SuperAdmin'] }, { id: '2', permissions: ['ReadCustomer'] }] }, activeChannel: { id: '2' },
+    } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await readCustomerFields(context, 'c1')).toEqual([]);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(fetch.mock.calls[2][1].body).toBe(JSON.stringify({ query: 'query TillPermissions { me { channels { id permissions } } activeChannel { id } }' }));
+});
+
+it('readCustomerFields keeps a gated field when the till\'s permissions cannot be read, as on a device-key till on an older plugin', async () => {
   const values = () => Response.json({ data: { customer: { id: 'c1', customFields: { taxId: 'GB1' } } } });
-  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig))
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({ contracts: {} }))
     .mockResolvedValueOnce(Response.json({ data: { me: null, activeChannel: { id: '1' } },
       errors: [{ message: 'You are not currently authorized to perform this action', path: ['me'] }] }))
     .mockResolvedValueOnce(values());
   vi.stubGlobal('fetch', fetch);
   expect(await readCustomerFields(context, 'c1')).toEqual([{ name: 'taxId', label: 'taxId', value: 'GB1' }]);
-  expect(fetch).toHaveBeenCalledTimes(3);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(gatedConfig))
+  expect(fetch).toHaveBeenCalledTimes(4);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({}, { status: 500 }))
     .mockResolvedValueOnce(Response.json({}, { status: 403 })).mockResolvedValueOnce(values()));
   expect(await readCustomerFields(context, 'c1')).toEqual([{ name: 'taxId', label: 'taxId', value: 'GB1' }]);
 });

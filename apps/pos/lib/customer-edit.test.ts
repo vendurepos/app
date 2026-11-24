@@ -94,30 +94,44 @@ it('makes no request for an empty edit patch or missing email', async () => {
   }
   expect(fetchStub).not.toHaveBeenCalled();
 });
+// #487: /tally/v1/info answers `info`; Admin me (a plugin older than #487) answers `me`.
+const byUrl = (info: unknown, me?: unknown) => vi.fn<typeof fetch>(async input =>
+  new Response(JSON.stringify(String(input).endsWith('/tally/v1/info') ? info : me), { status: 200 }));
+it.each([
+  [['CreateCustomer'], { create: true, update: false, remove: false }],
+  [['CreateCustomer', 'UpdateCustomer', 'DeleteCustomer'], { create: true, update: true, remove: true }],
+  [[], { create: false, update: false, remove: false }],
+] as const)("reads customer permissions %j from /tally/v1/info, as a device-key till does", async (permissions, expected) => {
+  const fetchStub = byUrl({ permissions }, { errors: [{ message: 'Forbidden' }], data: { me: null } });
+  vi.stubGlobal('fetch', fetchStub);
+  await expect(customerAccess(context)).resolves.toEqual(expected);
+  expect(fetchStub).toHaveBeenCalledTimes(1);
+  expect(String(fetchStub.mock.calls[0][0])).toBe('https://store.test/tally/v1/info');
+});
 it.each([
   [['CreateCustomer'], 'active', { create: true, update: false, remove: false }],
   [['CreateCustomer', 'UpdateCustomer'], 'active', { create: true, update: true, remove: false }],
   [['CreateCustomer', 'UpdateCustomer'], 'other', { create: false, update: false, remove: false }],
-] as const)('reads customer permissions %s only on the active channel (%s)', async (permissions, id, expected) => {
-  const fetchStub = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: {
-    me: { channels: [{ id, permissions }] }, activeChannel: { id: 'active' },
-  } })));
+] as const)('on an older plugin reads customer permissions %s only on the active channel (%s)', async (permissions, id, expected) => {
+  const fetchStub = byUrl({ contracts: {} }, { data: { me: { channels: [{ id, permissions }] }, activeChannel: { id: 'active' } } });
   vi.stubGlobal('fetch', fetchStub);
   await expect(customerAccess(context)).resolves.toEqual(expected);
-  expect(JSON.parse(fetchStub.mock.calls[0][1]!.body as string).query)
-    .toBe('query CustomerPermissions { me { channels { id permissions } } activeChannel { id } }');
+  expect(JSON.parse(fetchStub.mock.calls[1][1]!.body as string).query)
+    .toBe('query TillPermissions { me { channels { id permissions } } activeChannel { id } }');
 });
-it('grants no access on GraphQL errors, HTTP failures or a rejected fetch', async () => {
+it('grants no access when neither /info nor Admin me answers: GraphQL errors, HTTP failures or a rejected fetch', async () => {
   vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ contracts: {} })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ message: 'boom' }] })))
+    .mockResolvedValueOnce(new Response('', { status: 500 }))
     .mockResolvedValueOnce(new Response('', { status: 403 }))
-    .mockRejectedValueOnce(new TypeError('Failed to fetch')));
+    .mockRejectedValue(new TypeError('Failed to fetch')));
   for (let i = 0; i < 3; i++) await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false, remove: false });
 });
 it('grants remove only for DeleteCustomer on the active channel', async () => {
-  const answer = (id: string) => new Response(JSON.stringify({ data: { me: { channels: [{ id, permissions: ['DeleteCustomer'] }] }, activeChannel: { id: 'active' } } }));
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(answer('active')).mockResolvedValueOnce(answer('other')));
+  vi.stubGlobal('fetch', byUrl({}, { data: { me: { channels: [{ id: 'active', permissions: ['DeleteCustomer'] }] }, activeChannel: { id: 'active' } } }));
   await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false, remove: true });
+  vi.stubGlobal('fetch', byUrl({}, { data: { me: { channels: [{ id: 'other', permissions: ['DeleteCustomer'] }] }, activeChannel: { id: 'active' } } }));
   await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false, remove: false });
 });
 

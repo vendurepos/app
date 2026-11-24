@@ -15,12 +15,12 @@ const session: Session = {
   settings: { currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 200000 } },
   stock: { trackInventory: true, outOfStockThreshold: 0 },
 };
-const approver = { data: { me: { channels: [{ id: '1', permissions: ['ApproveTallyPosVariance'] }] }, activeChannel: { id: '1' } } };
+const approverInfo = { permissions: ['ApproveTallyPosVariance'] };
 const useStart = () => {
   fake.initial.length = fake.set.length = fake.effects.length = 0;
   let resolve!: (response: Response) => void;
   vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(done => { resolve = done; })));
-  return { blind: useRegisterBlind(session), answer: () => resolve(new Response(JSON.stringify(approver), { status: 200 })) };
+  return { blind: useRegisterBlind(session), answer: () => resolve(new Response(JSON.stringify(approverInfo), { status: 200 })) };
 };
 afterEach(() => vi.unstubAllGlobals());
 

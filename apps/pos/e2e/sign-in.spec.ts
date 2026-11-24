@@ -2076,6 +2076,10 @@ test('a till signs in with a device key, sells, and asks for a new key once the 
     .toContain(command.payload.clientOrderId);
   await expect(page.getByTestId('orders-history-notice')).toHaveCount(0);
   await page.getByTestId('orders-open').click();
+  // #487: the key till reads its role's permissions from /tally/v1/info, so the till role's CreateCustomer shows Add.
+  await page.getByTestId('customers-open').click();
+  await expect(page.getByTestId('customers-add')).toBeVisible();
+  await page.getByTestId('customers-open').click();
 
   await admin('mutation ($ids: [ID!]!) { deleteApiKeys(ids: $ids) { result } }', { ids: [key.entityId] });
   const violations = await cspViolations(page);

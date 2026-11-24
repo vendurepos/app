@@ -4,6 +4,7 @@ import { createVendureCustomer, listVendureCustomers, updateVendureCustomer } fr
 import type { AddressEditorValue, AddressFieldsProps, CustomerFormValues } from '@tallyui/components';
 import type { CustomerRow } from './customer-list';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
+import { channelPermissions } from './channel-permissions';
 import { sessionContext, type Session } from './session';
 
 export const CUSTOMER_EMAIL_REQUIRED_TEXT = "Enter the customer's email address.";
@@ -17,17 +18,9 @@ export type CustomerAccess = { create: boolean; update: boolean; remove: boolean
 const NO_ACCESS: CustomerAccess = { create: false, update: false, remove: false };
 
 export async function customerAccess(context: SyncContext): Promise<CustomerAccess> {
-  try {
-    const query = 'query CustomerPermissions { me { channels { id permissions } } activeChannel { id } }';
-    const response = await fetch(`${context.baseUrl}/admin-api`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...context.headers }, body: JSON.stringify({ query }) });
-    if (!response.ok) return NO_ACCESS;
-    const body = await response.json();
-    if (body.errors?.length) return NO_ACCESS;
-    const channel = body.data?.me?.channels?.find((channel: { id: string; permissions: string[] }) => channel.id === body.data?.activeChannel?.id);
-    return channel ? { create: channel.permissions.includes(CUSTOMER_CREATE_PERMISSION), update: channel.permissions.includes(CUSTOMER_UPDATE_PERMISSION),
-      remove: channel.permissions.includes(CUSTOMER_DELETE_PERMISSION) } : NO_ACCESS;
-  } catch { return NO_ACCESS; }
+  const permissions = await channelPermissions(context);
+  return permissions ? { create: permissions.includes(CUSTOMER_CREATE_PERMISSION), update: permissions.includes(CUSTOMER_UPDATE_PERMISSION),
+    remove: permissions.includes(CUSTOMER_DELETE_PERMISSION) } : NO_ACCESS;
 }
 export function useCustomerAccess(session: Session): CustomerAccess {
   const [access, setAccess] = useState(NO_ACCESS);

@@ -17,10 +17,11 @@
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.
  * CustomerCustomFieldConfig, CustomerCustomFields — apps/pos/lib/customer-fields.ts.
- * CataloguePermissions, VariantStockLevel, UpdateProductVariants — apps/pos/lib/product-edit.ts.
+ * CatalogueChannel, VariantStockLevel, UpdateProductVariants — apps/pos/lib/product-edit.ts.
+ * TillPermissions (an older plugin's fallback) — apps/pos/lib/channel-permissions.ts.
  * CollectionImages — apps/pos/lib/collection-categories.ts.
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
- * GET /tally/v1/info — capabilities.ts; apps/pos/lib/use-sale-settings.ts.
+ * GET /tally/v1/info, with the caller's `permissions` — capabilities.ts; apps/pos/lib/use-sale-settings.ts; apps/pos/lib/channel-permissions.ts.
  * GET /tally/v1/registers — apps/pos/lib/register-choice.ts.
  * GET /tally/v1/registers/:id — apps/pos/lib/closure-history.ts.
  * POST /tally/v1/commands (order.create) — apps/pos/lib/order-transport.ts.
@@ -146,6 +147,9 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
   const original = globalThis.fetch;
   const storage = options.storage ?? globalThis.localStorage ?? memoryStorage;
   const store = new DemoStore(storage);
+  // as the plugin's till role, which holds no DeleteCustomer (#358)
+  const demoPermissions = () => storage.getItem(DEMO_TILL_ROLE_KEY) === '1'
+    ? DEMO_PERMISSIONS.filter(p => p !== 'ApproveTallyPosVariance' && p !== 'DeleteCustomer') : DEMO_PERMISSIONS;
   globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (!url.startsWith(origin)) return original(input, init);
@@ -153,7 +157,8 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
     const route = url.slice(origin.length).split('?')[0];
     const reply = (body: unknown, headers?: Record<string, string>, status?: number) =>
       new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
-    if (route === INFO_PATH) return reply(store.info());
+    // #487: as the plugin's /info, the caller's own permissions on the active channel.
+    if (route === INFO_PATH) return reply({ ...store.info(), permissions: demoPermissions() });
     if (route === REGISTERS_PATH) return reply({ items: store.registers() });
     const search = new URL(url).searchParams;
     const read = route.startsWith(`${REGISTERS_PATH}/`) && store.register(decodeURIComponent(route.slice(REGISTERS_PATH.length + 1)),
@@ -260,9 +265,8 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         data = { products: page(store.products(), variables.options) }; break;
       case 'GetVariants': case 'VariantStock': case 'GetVariantPrices': case 'productVariants':
         data = { productVariants: page(store.products().flatMap(product => product.variants), variables.options) }; break;
-      case 'CustomerPermissions': case 'CustomerFieldPermissions': case 'CataloguePermissions': case 'RegisterPermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID,
-        // as the plugin's till role, which holds no DeleteCustomer (#358)
-        permissions: storage.getItem(DEMO_TILL_ROLE_KEY) === '1' ? DEMO_PERMISSIONS.filter(p => p !== 'ApproveTallyPosVariance' && p !== 'DeleteCustomer') : DEMO_PERMISSIONS }] }, activeChannel: {
+      case 'CustomerPermissions': case 'CustomerFieldPermissions': case 'CataloguePermissions': case 'RegisterPermissions': case 'TillPermissions':
+      case 'CatalogueChannel': data = { me: { channels: [{ id: DEMO_CHANNEL_ID, permissions: demoPermissions() }] }, activeChannel: {
         id: DEMO_CHANNEL_ID, defaultCurrencyCode: DEMO_CHANNEL.defaultCurrencyCode, pricesIncludeTax: DEMO_CHANNEL.pricesIncludeTax } }; break;
       case 'VariantStockLevel': data = { globalSettings: { outOfStockThreshold: 0 },
         productVariant: store.products().flatMap(product => product.variants).find(variant => variant.id === variables.id) ?? null }; break;
