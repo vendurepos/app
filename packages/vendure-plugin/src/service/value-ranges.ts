@@ -11,6 +11,9 @@ export const CUSTOMER_ID_MAX = 64;
 export const SESSION_ID_MAX = 36; // a UUID's length, the contract's sessionId bound
 // TallyUI core's ORDER_NOTE_MAX (ADR-083): order.create 7's note, in UTF-16 code units.
 export const ORDER_NOTE_MAX = 1000;
+// order.create 11's address fields (5.2a): Vendure's Address columns are varchar(255), and the field is stored on the
+// order and may later prefill a customer address.
+export const ORDER_ADDRESS_FIELD_MAX = 255;
 
 /**
  * The largest amount the store's money columns hold (N2): int4 for the default MoneyStrategy, and
@@ -24,9 +27,10 @@ export function maxMoneyMinor(moneyColumnType: unknown): number {
  * Range errors of a payload whose shape is already valid (payloadShapeErrors), answered as
  * `invalid_payload` before the claim; [] when every value fits. `maxMoney` bounds the amounts that
  * land in the store's money columns (maxMoneyMinor). Every length bound lives here, after the
- * replay read and the collision lookup (ADR-038 #220 step 4).
+ * replay read and the collision lookup (ADR-038 #220 step 4). `version` is the command's; the customer addresses are
+ * checked from 11 (strict-shape.ts refuses them before).
  */
-export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number): string[] {
+export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number, version: number): string[] {
   const errors: string[] = [];
   const minor = (value: unknown, path: string, max: number) => {
     if (value === undefined) return;
@@ -54,6 +58,22 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number):
   }
   // The bound both plugins share (RFC 5321's 254), inside Vendure's varchar(255) emailAddress.
   text(payload.customer?.email, 'customer.email', 254);
+  // 5.2a: v11's addresses, informational strings with a country code (the vendored type predates them).
+  const addresses = payload.customer as { billing?: unknown; shipping?: unknown } | undefined;
+  for (const field of version >= 11 ? ['billing', 'shipping'] as const : []) {
+    const address = addresses?.[field];
+    if (address === undefined) continue;
+    if (typeof address !== 'object' || address === null || Array.isArray(address)) {
+      errors.push(`customer.${field}: expected an object`);
+      continue;
+    }
+    for (const [key, value] of Object.entries(address)) {
+      if (typeof value !== 'string') errors.push(`customer.${field}.${key}: expected a string`);
+      else text(value, `customer.${field}.${key}`, ORDER_ADDRESS_FIELD_MAX);
+    }
+    const { country } = address as { country?: unknown };
+    if (country === undefined || country === '') errors.push(`customer.${field}.country: expected a country code`);
+  }
   for (const [path, item] of [
     ...(payload.fees ?? []).map((fee, index) => [`fees[${index}]`, fee] as const),
     ...(payload.shipping ?? []).map((shipping, index) => [`shipping[${index}]`, shipping] as const),

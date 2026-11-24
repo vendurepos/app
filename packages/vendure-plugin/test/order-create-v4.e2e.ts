@@ -146,10 +146,10 @@ describe('order.create version 4: net discounts', () => {
       commands: await connection.rawConnection.getRepository(TallyCommand).count(),
     });
     const before = await counts();
-    const command = { ...fixture('mixed-inclusive'), id: '01a0e775-0100-7000-8000-00000000f005', version: 11 };
+    const command = { ...fixture('mixed-inclusive'), id: '01a0e775-0100-7000-8000-00000000f005', version: 12 };
     const result = await run(command as unknown as Envelope);
     expect(result.status).toBe('rejected');
-    expect(result.error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 10 } });
+    expect(result.error).toMatchObject({ code: 'unsupported_version', data: { orderCreate: 11 } });
     expect(await counts()).toEqual(before);
   });
 });

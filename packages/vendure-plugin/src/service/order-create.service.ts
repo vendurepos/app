@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  Allocation, ConfigService, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderModifier, OrderService, PaymentMethod, PaymentService,
+  Allocation, ConfigService, Country, Customer, CustomerService, ID, Logger, Order, OrderCalculator, OrderLine, OrderModifier, OrderService, PaymentMethod, PaymentService,
   ProductVariant, ProductVariantService, RequestContext, ShippingLine, ShippingMethod, StockLevel, StockLevelService,
   StockLocationService, StockMovementService, Surcharge, TaxCategory, TaxRate, TaxRateService, TransactionalConnection, ZoneService,
   idsAreEqual, isGraphQlErrorResult, manualFulfillmentHandler, normalizeEmailAddress,
@@ -76,6 +76,19 @@ type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensati
 class Rerun extends Error {}
 class RepairStoreSetup extends Error {}
 /** An unstored refusal after the claim (store-wide setup, TallyUI #219; a bridge over the bound, money P3 #7): the claim rolls back, so the same id is checked again. */
+/** order.create 11's address fields (5.2a), unchecked by the vendored payload type. */
+type SaleAddress = Partial<Record<'firstName' | 'lastName' | 'company' | 'address1' | 'address2' | 'city' | 'state' | 'postcode' | 'country' | 'phone', string>>;
+const saleAddresses = (payload: OrderCreatePayload) => payload.customer as { billing?: SaleAddress; shipping?: SaleAddress } | undefined;
+
+/** A v11 address as Vendure's order address input, with only its present, non-empty fields. */
+function toVendure(address: SaleAddress): Parameters<OrderService['setShippingAddress']>[2] {
+  const fullName = [address.firstName, address.lastName].filter(Boolean).join(' ');
+  const fields = { fullName, company: address.company, streetLine2: address.address2, city: address.city,
+    province: address.state, postalCode: address.postcode, phoneNumber: address.phone };
+  // streetLine1 is required by the GraphQL type; setShippingAddress stores the object as given.
+  return { ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value)), streetLine1: address.address1 || '', countryCode: address.country! };
+}
+
 class SetupRefusal extends Error {
   constructor(readonly result: OrderCreateResult) {
     super(result.error!.code);
@@ -365,7 +378,7 @@ export class OrderCreateService {
     const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
     // Ruling 17: strict per version, by path; here, not in step 1, so a stored answer always wins (#36 review).
     const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
-    errors.push(...valueRangeErrors(command.payload, maxMoney));
+    errors.push(...valueRangeErrors(command.payload, maxMoney, command.version));
     if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
@@ -452,6 +465,14 @@ export class OrderCreateService {
             ? `${field}[${i}].taxClass: tax_class_unknown: this store has no default tax category; mark one as default in the Dashboard (Settings → Tax categories) or send taxClass`
             : `${field}[${i}].taxClass: tax_class_unknown: no tax category "${charge.taxClass}" in this store`,
           { reason: 'tax_class_unknown', path: `${field}[${i}].taxClass` });
+      }
+    }
+    // 5.2a: setBillingAddress and setShippingAddress throw for a country the store does not have.
+    for (const field of command.version >= 11 ? ['billing', 'shipping'] as const : []) {
+      const address = saleAddresses(command.payload)?.[field];
+      if (address && !await this.connection.getRepository(ctx, Country).findOneBy({ code: address.country })) {
+        return refuse(command.id, 'invalid_payload', `customer.${field}.country: country_unknown: no country "${address.country}" in this store`,
+          { reason: 'country_unknown', path: `customer.${field}.country` });
       }
     }
     return undefined;
@@ -623,6 +644,25 @@ export class OrderCreateService {
       throw transientKind(error) === 'lock' ? new TransientCommandError(command.id, 'lock', error) : error;
     }
     await orderRepository.query(`SET LOCAL lock_timeout = '${RECIPE_LOCK_TIMEOUT}'`);
+    // 5.2a: v11's addresses are informational. Stored on the order (never on the customer's saved addresses), and the
+    // sale refused, unstored, when they would move it out of the tax zone the till priced it in.
+    const { billing, shipping: shippingAddress } = (command.version >= 11 && saleAddresses(payload)) || {};
+    if (billing || shippingAddress) {
+      const strategy = this.config.taxOptions.taxZoneStrategy;
+      const zones = await this.zoneService.getAllWithMembers(ctx);
+      const tillZone = await strategy.determineTaxZone(ctx, zones, ctx.channel, order);
+      if (billing) order = await this.orders.setBillingAddress(ctx, order.id, toVendure(billing));
+      if (shippingAddress) order = await this.orders.setShippingAddress(ctx, order.id, toVendure(shippingAddress));
+      const addressZone = await strategy.determineTaxZone(ctx, zones, ctx.channel, order);
+      if (!idsAreEqual(tillZone?.id, addressZone?.id)) {
+        const data = { tillZone: tillZone?.name ?? null, addressZone: addressZone?.name ?? null };
+        Logger.warn(`order.create ${command.id} refused tax_zone_mismatch: ${JSON.stringify({
+          clientOrderId: payload.clientOrderId, version: command.version, ...data,
+        })}`, loggerCtx);
+        throw new SetupRefusal(refuse(command.id, 'tax_zone_mismatch',
+          `The sale's address puts it in tax zone ${addressZone?.name}, but the till priced it in ${tillZone?.name}`, data));
+      }
+    }
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();
     for (const line of payload.lines) {
       if (line.custom) continue;

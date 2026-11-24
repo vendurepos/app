@@ -82,8 +82,8 @@ describe('order.create v8, v9 and v10: shape only', () => {
     await expectRefused(command, 'payments[0].methodId: requires order.create version 10, command is version 7');
   });
 
-  it('(e) a v11 sale is unsupported_version, naming 10 as the highest', async () => {
-    const result = await send(sale(11));
-    expect(result).toMatchObject({ status: 'rejected', error: { code: 'unsupported_version', data: { orderCreate: 10 } } });
+  it('(e) a v12 sale is unsupported_version, naming 11 as the highest', async () => {
+    const result = await send(sale(12));
+    expect(result).toMatchObject({ status: 'rejected', error: { code: 'unsupported_version', data: { orderCreate: 11 } } });
   });
 });
