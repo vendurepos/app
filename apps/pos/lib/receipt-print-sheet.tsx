@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { ReceiptSheet } from '@tallyui/components';
 import type { PrinterProfile } from '@tallyui/pos';
 import { loadPrinterProfiles, loadTemplatePrinters } from './printer-profiles';
+import { coveredByDialog } from './print-cover';
 import { PRINT_DIALOG, RECEIPT_TEMPLATES, routablePrinters, sheetPrinter, sheetTemplateId, templatePrinter } from './receipt-templates';
 
 const TEMPLATES = RECEIPT_TEMPLATES.map(({ id, title }) => ({ id, title }));
@@ -20,8 +21,8 @@ function WhenGone({ gone }: { gone: RefObject<() => void> }) {
  * v2's print sheet for a manual Print receipt (desk ruling 9.5d): template, printer for this print, preview,
  * Close/Print. Nothing picked here is saved. `onPrint` gets a direct printer, or null for the print dialog, and is
  * called only once the sheet has left the document, so a dialog print never prints the sheet. A dialog print goes only
- * if the receipt (this sheet's parent) is still shown then: not unmounted, and not hidden with the till behind a panel
- * opened meanwhile. A direct print always goes, as it holds its own receipt.
+ * if the receipt (this sheet's parent) is still shown then: not unmounted, and not hidden or covered with the till behind
+ * a panel or overlay opened meanwhile. A direct print always goes, as it holds its own receipt.
  */
 export function ReceiptPrintSheet({ open, onOpenChange, onPrint, children }: {
   open: boolean; onOpenChange(open: boolean): void; onPrint(printer: PrinterProfile | null): void; children: ReactNode;
@@ -52,8 +53,10 @@ export function ReceiptPrintSheet({ open, onOpenChange, onPrint, children }: {
       const target = pending.current;
       pending.current = null;
       const node = marker.current;
-      const shown = !!node && (node.checkVisibility?.() ?? node.offsetParent !== null);
-      // A dialog print now would print whatever replaced or covers the receipt (the next sale's till, a panel).
+      const shown = !!node && (node.checkVisibility?.() ?? node.offsetParent !== null)
+        && !(typeof document !== 'undefined' && coveredByDialog(node as unknown as Node, document));
+      // A dialog print now would print whatever replaced or covers the receipt (the next sale's till, a panel,
+      // or overlays drawn over the till).
       if (target && (target.printer !== null || shown)) onPrint(target.printer);
     };
   });

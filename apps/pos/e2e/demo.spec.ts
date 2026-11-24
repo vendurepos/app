@@ -4159,6 +4159,23 @@ test('Orders opened while the receipt sheet slides out drops its print dialog, s
   expect(await page.evaluate(() => window.printCalls)).toBe(0);
 });
 
+for (const [name, opener, overlay] of [
+  ['Support', 'support-open', 'support-sheet'],
+  ['Notifications', 'notifications-open', 'notifications-sheet'],
+  ['Register panel', 'register-open-panel', 'register-panel'],
+  ['Cashier sheet (Hand over)', 'register-bar-cashier', 'cashier-sheet'],
+] as const) {
+  test(`${name} opened while the receipt sheet slides out drops its print dialog, so the overlay is not printed`, async ({ page }) => {
+    await openPrintSheet(page);
+    await printThen(page, opener);
+    await expect(page.getByTestId(overlay)).toBeVisible();
+    await expect(page.getByTestId('receipt-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('receipt')).toHaveCount(1);
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => window.printCalls)).toBe(0);
+  });
+}
+
 test('with the receipt after each sale off, a cash sale ends on an empty cart, and on again shows the receipt', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
