@@ -50,6 +50,12 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   const [addressValue, setAddressValue] = useState<AddressEditorValue>({});
   useEffect(() => { setAddressValue(source.stored ? addressEditorValue(source.stored) : {}); }, [source.stored]);
   const addressChange = source.stored ? addressPatch(source.stored, addressValue) : {};
+  const changeAddresses = (next: AddressEditorValue) => {
+    // TallyUI's billing-row Remove on the saved default billing address opens our confirm, as our own Remove does, instead of an edit Save refuses.
+    const billing = removable.find(a => a.billing);
+    if (canRemoveAddress && billing && next.billing === undefined && addressValue.billing !== undefined) { setConfirming(billing.id); setRemoveError(null); return; }
+    setAddressValue(next); setError(null); setConfirming(null);
+  };
   const [note, setNote] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -101,7 +107,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
       {/* The body scrolls so the Save and Close footer stays on screen when the address editor makes the sheet taller than the window. */}
       <ScrollView testID="customer-sheet-body" className="flex-1" contentContainerClassName="gap-4">
       <CustomerForm values={values} onChangeField={(field, value) => { setValues(current => ({ ...current, [field]: value })); setError(null); }} showAddress={false}
-        addresses={source.stored ? addressValue : undefined} onChangeAddresses={next => { setAddressValue(next); setError(null); }} countries={source.countries} />
+        addresses={source.stored ? addressValue : undefined} onChangeAddresses={changeAddresses} countries={source.countries} />
       {source.inVendure && <Text testID="customer-sheet-address-vendure" className="px-4 text-sm text-muted-foreground">{CUSTOMER_ADDRESS_VENDURE_TEXT}</Text>}
       {row !== null && canRemoveAddress && removable.length > 0 && <VStack testID="customer-sheet-saved-addresses" className="gap-1 px-4">
         {removable.map(a => <VStack key={a.id} className="gap-1">
@@ -115,7 +121,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
           {confirming === a.id && <VStack testID="customer-sheet-address-confirm" className="gap-2 rounded-md border border-border p-3">
             {removeConfirmText(a, saved ?? [], name).map(line => <Text key={line} className="text-sm">{line}</Text>)}
             <HStack space="sm">
-              <Button testID="customer-sheet-address-confirm-remove" variant="destructive" size="sm" disabled={!online || removing} onPress={remove}><Text>Remove address</Text></Button>
+              <Button testID="customer-sheet-address-confirm-remove" variant="destructive" size="sm" disabled={!online || removing || saving || addressUnsaved} onPress={remove}><Text>Remove address</Text></Button>
               <Button testID="customer-sheet-address-confirm-keep" variant="outline" size="sm" disabled={removing} onPress={() => setConfirming(null)}><Text>Keep</Text></Button>
             </HStack>
           </VStack>}
@@ -163,7 +169,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
       </ScrollView>
       {error && <Text testID="customer-sheet-error" accessibilityRole="alert" className="text-sm text-destructive">{error}</Text>}
       <HStack space="sm" className="mt-auto justify-between">
-        <Button testID="customer-sheet-save" disabled={saving || removing || !online || (row !== null && Object.keys(customerPatch(row, values)).length + Object.keys(addressChange).length === 0)} onPress={save}>
+        <Button testID="customer-sheet-save" disabled={saving || removing || !online || confirming !== null || (row !== null && Object.keys(customerPatch(row, values)).length + Object.keys(addressChange).length === 0)} onPress={save}>
           <Text>Save</Text>
         </Button>
         <Button testID="customer-sheet-close" variant="outline" disabled={saving || removing} onPress={close}><Text>Close</Text></Button>

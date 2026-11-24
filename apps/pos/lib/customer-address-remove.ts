@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
-import { CUSTOMER_OFFLINE_TEXT } from './customer-edit';
 import { sessionContext, type Session } from './session';
 
 export type SavedAddress = { id: string; street: string; city: string; billing: boolean; shipping: boolean };
@@ -10,6 +9,7 @@ export const DELETE_ADDRESS_MUTATION = 'mutation DeleteCustomerAddress($id: ID!)
 export const CUSTOMER_ADDRESS_REMOVE_FAILED_TEXT = "The store didn't remove this address, so it is still saved";
 export const CUSTOMER_ADDRESS_REMOVE_FORBIDDEN_TEXT = "This till's role can't remove the store's customer addresses. Ask the store's admin to add the Delete customer permission.";
 export const CUSTOMER_ADDRESS_REMOVE_UNSAVED_TEXT = 'Save or undo the address changes before removing an address.';
+export const CUSTOMER_ADDRESS_REMOVE_UNREACHED_TEXT = "The till lost the store before it answered, so this address may not be removed. Close and reopen the customer to check.";
 
 type RawAddress = { id: string; streetLine1?: string | null; city?: string | null; defaultBillingAddress?: boolean; defaultShippingAddress?: boolean };
 
@@ -64,11 +64,13 @@ export async function removeCustomerAddress(context: SyncContext, addressId: str
     const body = await response.json().catch(() => ({}));
     const errors: { message: string; extensions?: { code?: string } }[] | undefined = body.errors;
     if (errors?.some(error => error.extensions?.code === 'FORBIDDEN')) return { error: CUSTOMER_ADDRESS_REMOVE_FORBIDDEN_TEXT };
+    // Vendure finds no such address: it is already gone, so the sheet re-reads as after a remove.
+    if (errors?.some(error => error.extensions?.code === 'ENTITY_NOT_FOUND')) return { ok: true };
     if (errors?.length) return { error: `${CUSTOMER_ADDRESS_REMOVE_FAILED_TEXT}: ${errors[0].message}.` };
     if (response.ok && body.data?.deleteCustomerAddress?.success === true) return { ok: true };
     return { error: `${CUSTOMER_ADDRESS_REMOVE_FAILED_TEXT}. Try again.` };
   } catch {
-    return { error: CUSTOMER_OFFLINE_TEXT };
+    return { error: CUSTOMER_ADDRESS_REMOVE_UNREACHED_TEXT };
   }
 }
 

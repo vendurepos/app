@@ -1,8 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
-import { CUSTOMER_OFFLINE_TEXT } from './customer-edit';
-import { CUSTOMER_ADDRESS_REMOVE_FORBIDDEN_TEXT, DELETE_ADDRESS_MUTATION, readSavedAddresses, removableAddresses, removeConfirmText, removeCustomerAddress,
+import { CUSTOMER_ADDRESS_REMOVE_FORBIDDEN_TEXT, CUSTOMER_ADDRESS_REMOVE_UNREACHED_TEXT, DELETE_ADDRESS_MUTATION, readSavedAddresses, removableAddresses, removeConfirmText, removeCustomerAddress,
   SAVED_ADDRESSES_QUERY, type SavedAddress } from './customer-address-remove';
 
 const context = { baseUrl: 'https://store.test', headers: {} } as SyncContext;
@@ -63,7 +62,8 @@ it('removes one address and maps every refusal to its text', async () => {
     [new Response('', { status: 401 }), { error: SESSION_ENDED_TEXT }],
     [json({ errors: [{ message: 'Address is in use' }] }), { error: "The store didn't remove this address, so it is still saved: Address is in use." }],
     [json({ data: { deleteCustomerAddress: { success: false } } }), { error: "The store didn't remove this address, so it is still saved. Try again." }],
-    [new TypeError('Failed to fetch'), { error: CUSTOMER_OFFLINE_TEXT }],
+    [json({ errors: [{ message: 'No Address with the id "a1" could be found', extensions: { code: 'ENTITY_NOT_FOUND' } }], data: null }), { ok: true }],
+    [new TypeError('Failed to fetch'), { error: CUSTOMER_ADDRESS_REMOVE_UNREACHED_TEXT }],
   ];
   for (const [answer, expected] of answers) {
     vi.stubGlobal('fetch', answer instanceof Error ? vi.fn().mockRejectedValue(answer) : vi.fn().mockResolvedValue(answer));

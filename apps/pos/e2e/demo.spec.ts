@@ -967,16 +967,31 @@ test("the customer sheet removes one saved address from Vendure after a confirm 
   await expect(address).toBeVisible();
   await page.evaluate(() => (window as typeof window & { __restoreAddressFetch: () => void }).__restoreAddressFetch());
 
+  // TallyUI's own billing-row Remove opens the same confirm, which holds back a pending Save, and Keep leaves the address as it was.
+  const phone = sheet.getByPlaceholder('Phone number', { exact: true });
+  const phoneBefore = await phone.inputValue();
+  await phone.fill(`${phoneBefore}1`);
+  await expect(page.getByTestId('customer-sheet-save')).toBeEnabled();
+  await sheet.getByTestId('customer-form-addresses-billing-remove').click();
+  await expect(confirm).toContainText('Remove 353 Volume Way, Stanford');
+  await expect(page.getByTestId('customer-sheet-save')).toBeDisabled();
+  await page.getByTestId('customer-sheet-address-confirm-keep').click();
   await expect(editorAddress).toBeVisible();
+  await expect(page.getByTestId('customer-sheet-address-unsaved')).toHaveCount(0);
+  await phone.fill(phoneBefore);
+
   await remove.click();
   await page.getByTestId('customer-sheet-address-confirm-remove').click();
   await expect(page.getByTestId('customer-sheet-saved-addresses')).toHaveCount(0);
+  // The editor's Add billing button shows only once the address read has answered with no address.
+  await expect(sheet.getByTestId('customer-form-addresses-billing-add')).toBeVisible();
   await expect(editorAddress).toHaveCount(0);
   await page.getByTestId('customer-sheet-close').click();
   await expect(sheet).toHaveCount(0);
   await expect(page.getByTestId('customers-row-c6')).not.toContainText('353 Volume Way');
   await page.getByTestId('customers-edit-c6').click();
   await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-form-addresses-billing-add')).toBeVisible();
   await expect(page.getByTestId('customer-sheet-saved-addresses')).toHaveCount(0);
 });
 
