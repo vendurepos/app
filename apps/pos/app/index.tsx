@@ -68,7 +68,8 @@ import { RegisterSwitchRows } from '../lib/register-switch';
 import { ReportsDrawerCard } from '../lib/reports-drawer-card';
 import { ReportsPanel } from '../lib/reports-panel';
 import { SaleCart } from '../lib/sale-cart';
-import { SaleCustomer } from '../lib/sale-customer';
+import { ADDRESS_ZONE_BLOCK_TEXT, addressBlocked, retryOrders, useSaleAddressPrefill, useTaxZone } from '../lib/sale-address';
+import { AddressZoneGate, SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { loadCameraPanelHeight, saveCameraPanelHeight } from '../lib/scanner-settings';
 import { defaultStore, sessionContext, tillIdentity, type Session } from '../lib/session';
@@ -178,6 +179,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   // The register's collections share the orders database, so they open, close and are kept with it.
   const registerStore = useMemo(() => registerCollections(outbox.orders), [outbox.orders]);
   const drafts = useMemo(() => orderDrafts(outbox.orders), [outbox.orders]);
+  // Every Retry on the till: a tax_zone_mismatch order is sent without its address instead of refused again.
+  const retry = useMemo(() => retryOrders(outbox.orders, outbox.requeue), [outbox.orders, outbox.requeue]);
   // Register commands go to the same POST /tally/v1/commands as the orders, from the one register outbox over this
   // collection (TallyUI #357: a second would send twice). No result is applied to the session yet (TallyUI's c2b
   // anchoring), so results are only logged. A closure waits for its session's orders (lib/closure-hold.ts); the till
@@ -404,14 +407,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
       {ordersOpen ? (
         <VStack testID="orders-panel" className="flex-1">
-          {openOrder ? <OrderSheet session={session} row={openOrder} timezone={TIMEZONE} onClose={() => setOpenOrder(null)} onRetry={outbox.requeue} footer={(order, reload) => <RefundSheet order={order}
+          {openOrder ? <OrderSheet session={session} row={openOrder} timezone={TIMEZONE} onClose={() => setOpenOrder(null)} onRetry={retry} footer={(order, reload) => <RefundSheet order={order}
             session={session} refunds={registerStore?.refunds ?? null} registerSession={register.session} deviceId={registerId}
             capabilities={readSettingsCapabilities} onRefunded={reload} />}
             receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back}
               capabilities={readSettingsCapabilities} context={sessionContext(session)} />} /> : null}
           <View className="flex-1" style={openOrder ? { display: 'none' } : undefined}>
             <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
-              till={{ orders: outbox.recent, onRetry: outbox.requeue, stuck: outbox.state.stuck }}
+              till={{ orders: outbox.recent, onRetry: retry, stuck: outbox.state.stuck }}
               registerId={boundRegisterId} cashier={identity} onOpen={setOpenOrder} />
           </View>
         </VStack>
@@ -428,7 +431,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {healthOpen ? <StoreHealthPanel
         session={session}
         attention={attentionRows(outbox.recent, outbox.state.stuck)}
-        onRetry={outbox.requeue}
+        onRetry={retry}
         onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
         onViewLog={() => { setHealthOpen(false); setSettingsSection('sync-log'); setSettingsOpen(true); }}
         ready={readyToSell({ catalogueSynced: !!catalogue.lastSyncedAt, signedOut: sessionEnded, settingsReady: saleSettings.status === 'ready', ordersOpen: outbox.orders !== null })}
@@ -575,6 +578,10 @@ function Sale({
   // The store name only: a display never shows the cashier or the register (Front desk ruling 4, 2026-11-18).
   useSaleDisplay(customerDisplay, { order: sale.order, stage: sale.stage }, { receipt: { storeName: storeLabel(session) }, methodTitle: tenderName, declinedMessage: 'Payment declined' });
   useDefaultCustomer(sale, session);
+  const taxZone = useTaxZone(session);
+  const prefill = useSaleAddressPrefill(sale, session, taxZone, capabilities?.orderCreate);
+  // A store that taxes by address would refuse this sale after payment: no tender until the address is removed.
+  const addressBlock = addressBlocked(taxZone, sale.order.customer?.billing, sale.order.customer?.shipping);
   const [parkedOpen, setParkedOpen] = useState(false);
   const [parked, setParked] = useState<ParkedOrderSummary[]>([]);
   useEffect(() => {
@@ -612,6 +619,8 @@ function Sale({
   }, [stage.kind, onReceipt]);
   const [payError, setPayError] = useState<string>();
   async function checkout() {
+    prefill.settle(); // From here a late customer read never pins an address: the sale keeps the one it has now.
+    if (addressBlock) return setPayError(ADDRESS_ZONE_BLOCK_TEXT);
     setPayError(undefined);
     setPayError(await startTenderInSession(register, sale, 'cash', (id) => setTenderDrawer((current) => current ?? id)));
   }
@@ -693,8 +702,8 @@ function Sale({
           <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
         </Button>
       ) : null}
-      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={() => onSettingsCard('cart')} />
-      <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate} payError={payError}
+      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={() => onSettingsCard('cart')} orderCreate={capabilities?.orderCreate} />
+      <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate ?? (addressBlock ? <AddressZoneGate sale={sale} /> : undefined)} payError={payError}
         highlightSku={highlightSku} store={storeLabel(session)} />
       {openOrdersPosition === 'bottom' ? openSaleTabs : null}
     </>

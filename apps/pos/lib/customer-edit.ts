@@ -72,7 +72,7 @@ export const CUSTOMER_ADDRESS_VENDURE_TEXT = 'This store keeps extra address fie
 export const CUSTOMER_ADDRESS_STALE_TEXT = "This customer's addresses changed in Vendure. Close the sheet and open it again.";
 // The parts connector-vendure's toVendureAddressInput writes. Vendure keeps no address email, and its Address custom
 // fields are not among them (a store that has any edits addresses in Vendure, see addressEditorAllowed).
-const ADDRESS_PARTS = ['firstName', 'lastName', 'company', 'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phone'] as const;
+export const ADDRESS_PARTS = ['firstName', 'lastName', 'company', 'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phone'] as const;
 type AddressPatch = Pick<CustomerPatch, 'billing' | 'shipping'>;
 const sameAddress = (a?: CustomerAddress, b?: CustomerAddress) => ADDRESS_PARTS.every(part => (a?.[part] ?? '') === (b?.[part] ?? ''));
 /** The editor's starting value: a stored shipping address equal to billing shows as "Same as billing". */

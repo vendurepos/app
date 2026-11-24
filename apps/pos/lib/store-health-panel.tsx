@@ -121,11 +121,13 @@ export function StoreHealthPanel({ session, ready, waiting, productCount, varian
                 <Text testID="store-health-attention-title" className="font-semibold">
                   {`${attention.length} ${attention.length === 1 ? 'record needs' : 'records need'} attention`}
                 </Text>
-                {attention.map(({ order, reason, retry }) => (
+                {attention.map(({ order, reason, retry, rescue }) => (
                   <HStack key={order.id} testID={`store-health-attention-${order.id}`} className="flex-wrap items-center" space="sm">
                     <Text className="flex-1">{`Order ${orderReference(order)} · ${formatMoney({ amount: order.totalMinor, currency: order.currency })} — ${reason}`}</Text>
                     <Button testID={`store-health-attention-open-${order.id}`} variant="ghost" size="sm" onPress={() => onOpen(order)}><Text>Fix record</Text></Button>
                     {retry ? <Button testID={`store-health-attention-retry-${order.id}`} size="sm" onPress={() => void onRetry([order.id])}><Text>Retry</Text></Button> : null}
+                    {/* onRetry is app/index.tsx's retryOrders: it sends this one without its address. */}
+                    {rescue ? <Button testID={`store-health-attention-send-without-address-${order.id}`} size="sm" onPress={() => void onRetry([order.id])}><Text>Send without the address</Text></Button> : null}
                   </HStack>
                 ))}
                 {/* v2's View log ›: once per callout, whatever the rows; it opens Settings › Sync log. */}

@@ -78,10 +78,13 @@ export async function readServerTotals(context: SyncContext): Promise<ServerTota
   return { products: productTotal, variants: variantTotal, orders: orderTotal };
 }
 
-export type AttentionRow = { order: PosOrder; reason: string; retry: boolean };
+export type AttentionRow = { order: PosOrder; reason: string; retry: boolean; rescue: boolean };
 
-/** A refused sale that Retry can fix: a requeueable code, exactly where TallyUI's OrdersList offers Retry. */
-export const canSendAgain = (order: PosOrder): boolean => order.syncStatus === 'rejected' && isRequeueable(order.error?.code);
+export const TAX_ZONE_REFUSED_TEXT = "Refused by the store — the customer's address is in another tax zone. Send it without the address.";
+/** The plugin's refusal of a sale whose address moves the tax zone (5.2a): it goes again only without its address (sendWithoutAddress). */
+export const canSendWithoutAddress = (order: Pick<PosOrder, 'syncStatus' | 'error'>): boolean => order.syncStatus === 'rejected' && order.error?.code === 'tax_zone_mismatch';
+/** A refused sale that Retry can fix: a requeueable code, where TallyUI's OrdersList offers Retry, but for tax_zone_mismatch. */
+export const canSendAgain = (order: PosOrder): boolean => order.syncStatus === 'rejected' && isRequeueable(order.error?.code) && !canSendWithoutAddress(order);
 
 const FIELD_PATH = /^[A-Za-z_]\w*(\[\d+\])?(\.[A-Za-z_]\w*(\[\d+\])?)*$/;
 
@@ -101,6 +104,7 @@ export function refusedFields(error: { code?: string; message?: string } | undef
 /** Why an order needs attention, in Store health's words; `stuck` gives a pending sale's reason. */
 export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): string {
   const entry = stuck?.orders.find((entry) => entry.commandId === order.commandId);
+  if (canSendWithoutAddress(order)) return TAX_ZONE_REFUSED_TEXT;
   if (order.syncStatus === 'rejected') {
     const fields = refusedFields(order.error);
     return 'Refused by the store' + (order.error?.code ? ` — ${order.error.code}` : '') + (fields.length ? `: ${fields.join(', ')}` : '');
@@ -112,7 +116,7 @@ export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): 
 /** Store health's "needs attention" records (CHECKLIST 10.3): the orders the Orders panel counts (needsAttention), each with
  * the outbox's reason, and Retry exactly where TallyUI's OrdersList offers it (a refused sale with a requeueable code). */
 export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck']): AttentionRow[] {
-  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order) }));
+  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order), rescue: canSendWithoutAddress(order) }));
 }
 
 /** Clear & re-download's confirm (CHECKLIST 10.3): how many products leave this device and download again from the store. */
