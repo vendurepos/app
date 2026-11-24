@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { moneyFromDecimalString, type SyncContext } from '@tallyui/core';
+import { channelPermissions } from './channel-permissions';
 import { sessionContext, type Session } from './session';
 
 /** Vendure permissions that let a role change a variant's price, stock and stock tracking (updateProductVariants). */
@@ -43,15 +44,17 @@ export type CatalogueAccess = { editable: boolean; priceEditable: boolean };
 const NO_ACCESS: CatalogueAccess = { editable: false, priceEditable: false };
 export async function catalogueEditable(context: SyncContext, till: { currency: string; pricesIncludeTax: boolean }): Promise<CatalogueAccess> {
   try {
-    const query = 'query CataloguePermissions { me { channels { id permissions } } activeChannel { id defaultCurrencyCode pricesIncludeTax } }';
+    const permissions = await channelPermissions(context);
+    if (!permissions) return NO_ACCESS;
+    const query = 'query CatalogueChannel { activeChannel { id defaultCurrencyCode pricesIncludeTax } }';
     const response = await fetch(`${context.baseUrl}/admin-api`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...context.headers }, body: JSON.stringify({ query }) });
     if (!response.ok) return NO_ACCESS;
     const body = await response.json();
     if (body.errors?.length) return NO_ACCESS;
     const active = body.data?.activeChannel;
-    const channel = body.data?.me?.channels?.find((channel: { id: string; permissions: string[] }) => channel.id === active?.id);
-    const editable = channel ? canEditCatalogue(channel.permissions) : false;
+    if (!active) return NO_ACCESS;
+    const editable = canEditCatalogue(permissions);
     return { editable, priceEditable: editable && active.defaultCurrencyCode === till.currency && active.pricesIncludeTax === till.pricesIncludeTax };
   } catch { return NO_ACCESS; }
 }

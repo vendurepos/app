@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { parse } from 'graphql';
+import { ChannelService, RequestContext } from '@vendure/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { POS_TILL_PERMISSIONS, POS_TILL_ROLE_CODE } from '../src';
+import { sessionChannelPermissions } from '../src/service/session-permissions';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
@@ -16,6 +18,8 @@ describe('POS till API keys', () => {
   let roleId: string;
   let key: { apiKey: string; entityId: string };
   let orderId: string;
+  let tillEmail: string;
+  let secondChannelId: string;
   beforeAll(async () => {
     await environment.init();
     base = await server.app.getUrl();
@@ -65,13 +69,14 @@ describe('POS till API keys', () => {
       defaultTaxZoneId: channel.defaultTaxZone.id, defaultShippingZoneId: channel.defaultTaxZone.id,
     } });
     expect(createChannel.id).toEqual(expect.any(String));
+    secondChannelId = createChannel.id;
     const extended = (await adminClient.query<{ tallyEnsurePosTillRole: Role }>(ensureRole)).tallyEnsurePosTillRole;
     expect(extended.id).toBe(roleId);
     expect(new Set(extended.permissions)).toEqual(new Set([...POS_TILL_PERMISSIONS, 'Authenticated', 'ReadPromotion']));
     expect(extended.channels.map(item => item.id).sort())
       .toEqual([...first.channels.map(item => item.id), createChannel.id].sort());
 
-    const emailAddress = `till-${randomUUID()}@example.com`;
+    const emailAddress = tillEmail = `till-${randomUUID()}@example.com`;
     await adminClient.query(parse(`mutation Admin($input: CreateAdministratorInput!) {
       createAdministrator(input: $input) { id }
     }`), { input: { firstName: 'Till', lastName: 'Admin', emailAddress, password: 'till-password', roleIds: [roleId] } });
@@ -159,6 +164,69 @@ describe('POS till API keys', () => {
       customer(id: $id) { id }
     }`), { id: createCustomer.id });
     expect(customer).toEqual({ id: createCustomer.id });
+  });
+
+  // #487: GET /tally/v1/info carries the caller's own permissions on the active channel.
+  const infoPermissions = async (headers: Record<string, string>) => {
+    const response = await fetch(`${base}/tally/v1/info`, { headers });
+    expect(response.status).toBe(200);
+    return (await response.json()).permissions as string[];
+  };
+  async function signIn(emailAddress: string, password: string) {
+    const login = await fetch(`${base}/admin-api`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: `mutation { login(username: "${emailAddress}", password: "${password}") { ... on CurrentUser { id } } }` }),
+    });
+    const token = login.headers.get('vendure-auth-token');
+    expect(token).toBeTruthy();
+    return token as string;
+  }
+  async function mePermissions(token: string, channelToken = channel.token) {
+    const response = await fetch(`${base}/admin-api`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'vendure-token': channelToken },
+      body: JSON.stringify({ query: 'query { me { channels { id permissions } } activeChannel { id } }' }),
+    });
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    return body.data.me.channels.find((item: { id: string }) => item.id === body.data.activeChannel.id).permissions as string[];
+  }
+
+  it("a key till reads its role's permissions on the active channel from /info, and its activeChannel from the Admin API", async () => {
+    const permissions = await infoPermissions(keyHeaders());
+    expect(permissions).toEqual(expect.arrayContaining(['TallyPosSell', 'CreateCustomer', 'UpdateCustomer']));
+    expect(permissions).not.toContain('ApproveTallyPosVariance');
+    const { activeChannel } = await keyQuery('{ activeChannel { id defaultCurrencyCode pricesIncludeTax } }');
+    expect(activeChannel).toEqual({ id: channel.id, defaultCurrencyCode: expect.any(String), pricesIncludeTax: expect.any(Boolean) });
+  });
+
+  it("a password session's /info permissions are the same set as Admin me's on the active channel", async () => {
+    for (const token of [await signIn(tillEmail, 'till-password'), adminClient.getAuthToken()]) {
+      const permissions = await infoPermissions({ Authorization: `Bearer ${token}`, 'vendure-token': channel.token });
+      expect([...permissions].sort()).toEqual([...(await mePermissions(token))].sort());
+    }
+  });
+
+  it("/info answers only the active channel's permissions", async () => {
+    const { createRole } = await adminClient.query(parse(`mutation Role($input: CreateRoleInput!) { createRole(input: $input) { id } }`), {
+      input: { code: `approver-second-${randomUUID()}`, description: 'Approver on the second channel', channelIds: [secondChannelId],
+        permissions: ['Authenticated', 'ApproveTallyPosVariance'] },
+    });
+    const emailAddress = `approver-${randomUUID()}@example.com`;
+    await adminClient.query(parse(`mutation Admin($input: CreateAdministratorInput!) { createAdministrator(input: $input) { id } }`), {
+      input: { firstName: 'Second', lastName: 'Approver', emailAddress, password: 'approver-password', roleIds: [roleId, createRole.id] },
+    });
+    const token = await signIn(emailAddress, 'approver-password');
+    expect(await infoPermissions({ Authorization: `Bearer ${token}`, 'vendure-token': 'api-key-second-token' })).toContain('ApproveTallyPosVariance');
+    expect(await infoPermissions({ Authorization: `Bearer ${token}`, 'vendure-token': channel.token })).not.toContain('ApproveTallyPosVariance');
+  });
+
+  it('without a session there are no permissions, and an unauthenticated /info is refused without them', async () => {
+    const defaultChannel = await server.app.get(ChannelService).getDefaultChannel();
+    expect(sessionChannelPermissions(new RequestContext({ apiType: 'admin', isAuthorized: false, authorizedAsOwnerOnly: false, channel: defaultChannel })))
+      .toEqual([]);
+    const refused = await fetch(`${base}/tally/v1/info`);
+    expect(refused.status).toBe(403);
+    expect('permissions' in await refused.json()).toBe(false);
   });
 
   it('the audit trail of a sale made with an API key', async () => {
