@@ -54,7 +54,8 @@ const ADMINISTRATOR_ID = '1';
 const DEMO_CHANNEL_ID = '1';
 // The demo cashier's role on that channel: it sells, reads customers and edits prices and stock (Products panel, CHECKLIST 10.2).
 // The demo's till role also approves register variances, so its count shows every figure (ApproveTallyPosVariance unblinds it, lib/register-blind.ts).
-const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
+// The demo cashier may remove a customer's saved address (10.1n); the plugin's till role may not.
+const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance', 'DeleteCustomer'];
 // The countries the demo store ships to, for the customer address editor's country picker (Admin `countries`).
 const DEMO_COUNTRIES = [{ code: 'DE', name: 'Germany' }, { code: 'GB', name: 'United Kingdom' }, { code: 'US', name: 'United States' }];
 // Ada's demo tax ID, shown read-only as a Customer custom field.
@@ -203,6 +204,12 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'Countries': data = { countries: { items: DEMO_COUNTRIES } }; break;
       case 'CreateAddress': data = { createCustomerAddress: store.saveAddress(variables.input, String(variables.customerId)) }; break;
       case 'UpdateAddress': data = { updateCustomerAddress: store.saveAddress(variables.input) }; break;
+      case 'CustomerAddressIds': data = { customer: store.customer(String(variables.id)) }; break;
+      case 'DeleteCustomerAddress': {
+        const removed = store.deleteAddress(String(variables.id));
+        if (!removed) return reply({ errors: [{ message: `No Address with the id "${variables.id}" could be found`, extensions: { code: 'ENTITY_NOT_FOUND' } }] });
+        data = { deleteCustomerAddress: { success: true } }; break;
+      }
       case 'Orders': case 'orders':
         // Detail list queries select lines and payments as well as the summary fields.
         data = { orders: page(store.orderSummaries().map(summary => ({ ...summary, ...store.order(String(summary.id)) })), variables.options) }; break;
@@ -254,7 +261,8 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
       case 'GetVariants': case 'VariantStock': case 'GetVariantPrices': case 'productVariants':
         data = { productVariants: page(store.products().flatMap(product => product.variants), variables.options) }; break;
       case 'CustomerPermissions': case 'CustomerFieldPermissions': case 'CataloguePermissions': case 'RegisterPermissions': data = { me: { channels: [{ id: DEMO_CHANNEL_ID,
-        permissions: storage.getItem(DEMO_TILL_ROLE_KEY) === '1' ? DEMO_PERMISSIONS.filter(p => p !== 'ApproveTallyPosVariance') : DEMO_PERMISSIONS }] }, activeChannel: {
+        // as the plugin's till role, which holds no DeleteCustomer (#358)
+        permissions: storage.getItem(DEMO_TILL_ROLE_KEY) === '1' ? DEMO_PERMISSIONS.filter(p => p !== 'ApproveTallyPosVariance' && p !== 'DeleteCustomer') : DEMO_PERMISSIONS }] }, activeChannel: {
         id: DEMO_CHANNEL_ID, defaultCurrencyCode: DEMO_CHANNEL.defaultCurrencyCode, pricesIncludeTax: DEMO_CHANNEL.pricesIncludeTax } }; break;
       case 'VariantStockLevel': data = { globalSettings: { outOfStockThreshold: 0 },
         productVariant: store.products().flatMap(product => product.variants).find(variant => variant.id === variables.id) ?? null }; break;

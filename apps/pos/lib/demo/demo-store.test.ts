@@ -634,6 +634,18 @@ it('refuses another customer email without changing either customer, but accepts
   expect(store.updateCustomer({ id: ada.id, emailAddress: ada.emailAddress })).toEqual(ada);
 });
 
+it('deletes one saved address, and the first remaining address by id takes over the defaults, as Vendure', () => {
+  const store = new DemoStore(storage);
+  const second = store.saveAddress({ streetLine1: '1 Second St', city: 'Leeds', countryCode: 'GB' }, 'c1')!;
+  expect(second).toMatchObject({ defaultBillingAddress: false, defaultShippingAddress: false });
+  expect(store.deleteAddress('a1')).toBe(true);
+  expect(store.customer('c1')!.addresses).toEqual([{ ...second, defaultBillingAddress: true, defaultShippingAddress: true }]);
+  expect(new DemoStore(storage).customer('c1')!.addresses).toEqual(store.customer('c1')!.addresses);
+  expect(store.deleteAddress('a1')).toBe(false);
+  expect(store.deleteAddress(second.id)).toBe(true);
+  expect(store.customer('c1')!.addresses).toEqual([]);
+});
+
 it('keeps Ada’s seeded order linked by id after her email changes', () => {
   const store = new DemoStore(storage);
   store.updateCustomer({ id: 'c1', emailAddress: 'new@x.test' });

@@ -95,9 +95,9 @@ it('makes no request for an empty edit patch or missing email', async () => {
   expect(fetchStub).not.toHaveBeenCalled();
 });
 it.each([
-  [['CreateCustomer'], 'active', { create: true, update: false }],
-  [['CreateCustomer', 'UpdateCustomer'], 'active', { create: true, update: true }],
-  [['CreateCustomer', 'UpdateCustomer'], 'other', { create: false, update: false }],
+  [['CreateCustomer'], 'active', { create: true, update: false, remove: false }],
+  [['CreateCustomer', 'UpdateCustomer'], 'active', { create: true, update: true, remove: false }],
+  [['CreateCustomer', 'UpdateCustomer'], 'other', { create: false, update: false, remove: false }],
 ] as const)('reads customer permissions %s only on the active channel (%s)', async (permissions, id, expected) => {
   const fetchStub = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: {
     me: { channels: [{ id, permissions }] }, activeChannel: { id: 'active' },
@@ -112,7 +112,13 @@ it('grants no access on GraphQL errors, HTTP failures or a rejected fetch', asyn
     .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ message: 'boom' }] })))
     .mockResolvedValueOnce(new Response('', { status: 403 }))
     .mockRejectedValueOnce(new TypeError('Failed to fetch')));
-  for (let i = 0; i < 3; i++) await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false });
+  for (let i = 0; i < 3; i++) await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false, remove: false });
+});
+it('grants remove only for DeleteCustomer on the active channel', async () => {
+  const answer = (id: string) => new Response(JSON.stringify({ data: { me: { channels: [{ id, permissions: ['DeleteCustomer'] }] }, activeChannel: { id: 'active' } } }));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(answer('active')).mockResolvedValueOnce(answer('other')));
+  await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false, remove: true });
+  await expect(customerAccess(context)).resolves.toEqual({ create: false, update: false, remove: false });
 });
 
 // A full stored billing address and a different shipping address, as Vendure's customers list answers them.
