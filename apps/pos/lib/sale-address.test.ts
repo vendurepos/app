@@ -3,7 +3,7 @@ import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { ADDRESS_PARTS, CUSTOMER_ADDRESS_REQUIRED_TEXT } from './customer-edit';
 import {
-  ADDRESS_PART_TOO_LONG_TEXT, addressBlocked, addressCopy, claimPrefill, lateReadApplies, parseTaxZone, retryOrders, saleAddresses, sendWithoutAddress,
+  ADDRESS_PART_TOO_LONG_TEXT, ADDRESS_ZONE_BLOCK_TEXT, addressBlocked, addressCopy, beginCheckout, claimPrefill, lateReadApplies, parseTaxZone, retryOrders, saleAddresses, sendWithoutAddress,
 } from './sale-address';
 
 describe('parseTaxZone (u1)', () => {
@@ -25,14 +25,34 @@ describe('addressBlocked (u2)', () => {
   const DE = { address1: '1 Str', country: 'DE' }, DK = { address1: '2 Vej', country: 'DK' };
   const byAddress = { byAddress: true, countries: ['DE'] };
   it.each([
-    ['byAddress false, outside the zone', { byAddress: false, countries: ['DE'] }, DK, DK, false],
-    ['byAddress true, both inside', byAddress, DE, DE, false],
-    ['billing outside', byAddress, DK, DE, true],
-    ['shipping outside', byAddress, DE, DK, true],
-    ['no address', byAddress, undefined, undefined, false],
-    ['taxZone undefined', undefined, DK, DK, false],
-  ] as const)('%s', (_, zone, billing, shipping, blocked) => {
-    expect(addressBlocked(zone && { ...zone, countries: [...zone.countries] }, billing, shipping)).toBe(blocked);
+    ['byAddress false, outside the zone', { byAddress: false, countries: ['DE'] }, 11, DK, DK, false],
+    ['byAddress true, both inside', byAddress, 11, DE, DE, false],
+    ['billing outside', byAddress, 11, DK, DE, true],
+    ['shipping outside', byAddress, 11, DE, DK, true],
+    ['no address', byAddress, 11, undefined, undefined, false],
+    ['taxZone undefined', undefined, 11, DK, DK, false],
+    ['orderCreate 10, outside the zone', byAddress, 10, DK, DK, false],
+    ['orderCreate undefined, outside the zone', byAddress, undefined, DK, DK, false],
+  ] as const)('%s', (_, zone, orderCreate, billing, shipping, blocked) => {
+    expect(addressBlocked(zone && { ...zone, countries: [...zone.countries] }, orderCreate, billing, shipping)).toBe(blocked);
+  });
+});
+
+describe('beginCheckout (u8)', () => {
+  const run = async (blocked: boolean) => {
+    const calls: unknown[][] = [];
+    await beginCheckout({
+      settle: () => { calls.push(['settle']); }, blocked,
+      start: async () => { calls.push(['start']); return 'tender refused'; },
+      setError: (error) => { calls.push(['setError', error]); },
+    });
+    return calls;
+  };
+  it('refuses a blocked sale after settling, and never starts a tender', async () => {
+    expect(await run(true)).toEqual([['settle'], ['setError', ADDRESS_ZONE_BLOCK_TEXT]]);
+  });
+  it('settles, clears the error, starts the tender and shows its result', async () => {
+    expect(await run(false)).toEqual([['settle'], ['setError', undefined], ['start'], ['setError', 'tender refused']]);
   });
 });
 

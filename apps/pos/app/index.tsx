@@ -68,7 +68,7 @@ import { RegisterSwitchRows } from '../lib/register-switch';
 import { ReportsDrawerCard } from '../lib/reports-drawer-card';
 import { ReportsPanel } from '../lib/reports-panel';
 import { SaleCart } from '../lib/sale-cart';
-import { ADDRESS_ZONE_BLOCK_TEXT, addressBlocked, retryOrders, useSaleAddressPrefill, useTaxZone } from '../lib/sale-address';
+import { addressBlocked, beginCheckout, retryOrders, useSaleAddressPrefill, useTaxZone } from '../lib/sale-address';
 import { AddressZoneGate, SaleCustomer } from '../lib/sale-customer';
 import { SaleReceipt } from '../lib/sale-receipt';
 import { loadCameraPanelHeight, saveCameraPanelHeight } from '../lib/scanner-settings';
@@ -581,7 +581,7 @@ function Sale({
   const taxZone = useTaxZone(session);
   const prefill = useSaleAddressPrefill(sale, session, taxZone, capabilities?.orderCreate);
   // A store that taxes by address would refuse this sale after payment: no tender until the address is removed.
-  const addressBlock = addressBlocked(taxZone, sale.order.customer?.billing, sale.order.customer?.shipping);
+  const addressBlock = addressBlocked(taxZone, capabilities?.orderCreate, sale.order.customer?.billing, sale.order.customer?.shipping);
   const [parkedOpen, setParkedOpen] = useState(false);
   const [parked, setParked] = useState<ParkedOrderSummary[]>([]);
   useEffect(() => {
@@ -619,10 +619,8 @@ function Sale({
   }, [stage.kind, onReceipt]);
   const [payError, setPayError] = useState<string>();
   async function checkout() {
-    prefill.settle(); // From here a late customer read never pins an address: the sale keeps the one it has now.
-    if (addressBlock) return setPayError(ADDRESS_ZONE_BLOCK_TEXT);
-    setPayError(undefined);
-    setPayError(await startTenderInSession(register, sale, 'cash', (id) => setTenderDrawer((current) => current ?? id)));
+    await beginCheckout({ settle: prefill.settle, blocked: addressBlock, setError: setPayError,
+      start: () => startTenderInSession(register, sale, 'cash', (id) => setTenderDrawer((current) => current ?? id)) });
   }
   const format = useCurrencyFormatter();
   // Narrow only. The cashier picks the tab: an add, a scan or a tender never switches it (but for a scan that closes a
@@ -702,7 +700,7 @@ function Sale({
           <Text>{parked.length > 0 ? `Parked (${parked.length})` : 'Park'}</Text>
         </Button>
       ) : null}
-      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={() => onSettingsCard('cart')} orderCreate={capabilities?.orderCreate} />
+      <SaleCustomer sale={sale} connector={connector} session={session} onSettings={() => onSettingsCard('cart')} orderCreate={capabilities?.orderCreate} taxZone={taxZone} />
       <SaleCart sale={sale} taxClasses={taxClasses} canEditPrice={loadPriceEditAllowed()} onCheckout={() => void checkout()} payGate={payGate ?? (addressBlock ? <AddressZoneGate sale={sale} /> : undefined)} payError={payError}
         highlightSku={highlightSku} store={storeLabel(session)} />
       {openOrdersPosition === 'bottom' ? openSaleTabs : null}

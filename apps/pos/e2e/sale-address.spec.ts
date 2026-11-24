@@ -117,7 +117,7 @@ test('e2: a store that taxes by address blocks checkout for an address outside t
   expect(order.billingAddress.streetLine1 ?? null).toBeNull();
 });
 
-test('e3: /info without taxZone leaves the pin empty', async ({ page }) => {
+test('e3: /info without taxZone leaves the pin empty and offers no Add', async ({ page }) => {
   test.setTimeout(3 * 60_000);
   await page.route('**/tally/v1/info', async (route) => {
     const response = await route.fetch();
@@ -125,8 +125,11 @@ test('e3: /info without taxZone leaves the pin empty', async ({ page }) => {
     await route.fulfill({ response, json: body });
   });
   const { pickCustomer } = await sellToDkCustomer(page);
+  const countries = page.waitForResponse((response) => response.url() === `${STORE_URL}/admin-api` && response.request().method() === 'POST' && (response.request().postData() ?? '').includes('countries('));
   await pickCustomer();
-  await expect(page.getByTestId('sale-address-add')).toBeVisible();
+  await countries;
+  await expect(page.getByTestId('sale-address-add')).toHaveCount(0);
+  await expect(page.getByTestId('sale-address-edit')).toHaveCount(0);
   await expect(page.getByTestId('sale-address')).toHaveCount(0);
 });
 
