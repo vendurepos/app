@@ -6,12 +6,12 @@ import { ORDER_LOADING_TEXT, orderCustomerName, orderHeaderMeta, orderDetailTarg
 import { NOTE_LABEL, STAFF_NOTE_LABEL, useOrderNotes } from './order-notes';
 import { fetchRegisters, type ListedRegister } from './register-choice';
 import type { Session } from './session';
-import { attentionReason, canSendAgain } from './store-health';
+import { attentionReason, canSendAgain, canSendWithoutAddress } from './store-health';
 
 /** One order's read-only detail from the store, opened from the Orders panel. */
 export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, receipt }: {
   session: Session; row: PosOrder | OrderHistoryRow; timezone: string; onClose(): void;
-  /** The till's retry (outbox.requeue): a refused sale Retry can fix gets a primary Retry, and the sheet closes once it is sent. */
+  /** The till's retry (retryOrders): a refused sale Retry can fix gets a primary Retry (tax_zone_mismatch: Send without the address), and the sheet closes once it is sent. */
   onRetry?: (orderIds: string[]) => Promise<number>;
   /** Rendered in OrderDetail's footerSlot once the order is loaded; reload re-reads it from the store. */
   footer?: (order: VendureOrder, reload: () => void) => ReactNode;
@@ -24,6 +24,7 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
   const [showReceipt, setShowReceipt] = useState(false);
   const view = order ? orderDetailView(order) : null;
   const refused = 'syncStatus' in row && row.syncStatus === 'rejected' ? row : null;
+  const resend = refused && onRetry ? canSendAgain(refused) ? 'send-again' : canSendWithoutAddress(refused) ? 'send-without-address' : null : null;
   const [sending, setSending] = useState(false);
   const [registers, setRegisters] = useState<ListedRegister[]>([]);
   useEffect(() => {
@@ -49,9 +50,9 @@ export function OrderSheet({ session, row, timezone, onClose, onRetry, footer, r
       {refused ? (
         <HStack className="items-center border-b border-destructive bg-destructive/10 px-4 py-3" space="sm">
           <Text testID="order-sheet-refused" className="flex-1 font-semibold">{attentionReason(refused)}</Text>
-          {onRetry && canSendAgain(refused) ? (
-            <Button testID="order-sheet-send-again" disabled={sending} onPress={() => { setSending(true); void onRetry([refused.id]).then(onClose, () => setSending(false)); }}>
-              <Text>Retry</Text>
+          {onRetry && resend ? (
+            <Button testID={`order-sheet-${resend}`} disabled={sending} onPress={() => { setSending(true); void onRetry([refused.id]).then(onClose, () => setSending(false)); }}>
+              <Text>{resend === 'send-again' ? 'Retry' : 'Send without the address'}</Text>
             </Button>
           ) : null}
         </HStack>

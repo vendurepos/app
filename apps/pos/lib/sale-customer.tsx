@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { View } from 'react-native';
-import { Avatar, avatarInitials, Button, CustomerPicker, HStack, IconButton, Text, XIcon } from '@tallyui/components';
+import { AddressEditor, Avatar, avatarInitials, Button, CustomerPicker, HStack, IconButton, Text, VStack, XIcon, type AddressEditorValue } from '@tallyui/components';
 import type { TallyConnector } from '@tallyui/core';
-import type { useSale } from '@tallyui/pos';
+import { ADDRESS_CHANGE_REFUSED, UNTAXED_ADDRESS_ORDER_CREATE_VERSION, type useSale } from '@tallyui/pos';
+import { addressEditorValue } from './customer-edit';
 import { isWalkIn } from './customer-list';
+import { ADDRESS_ZONE_BLOCK_TEXT, saleAddresses, useSaleCountries } from './sale-address';
 import { sessionContext, type Session } from './session';
 import { SlidersIcon } from './nav-icons';
 
-export function SaleCustomer({ sale, connector, session, onSettings }: {
+export function SaleCustomer({ sale, connector, session, onSettings, orderCreate }: {
   sale: ReturnType<typeof useSale>; connector: TallyConnector; session: Session;
   onSettings?: () => void;
+  /** The store's order.create cap: the address pin shows from v11, which carries it to the store. */
+  orderCreate?: number;
 }) {
   const [open, setOpen] = useState(false);
   if (!connector.searchCustomers) return null;
@@ -38,6 +42,9 @@ export function SaleCustomer({ sale, connector, session, onSettings }: {
           </IconButton>
         </> : null}
       </HStack>
+      {/* A guest sale gets no pin: TallyUI keeps addresses on a picked customer only. */}
+      {customer && (orderCreate ?? 0) >= UNTAXED_ADDRESS_ORDER_CREATE_VERSION
+        ? <SaleAddress key={`${sale.order.id}|${customer.id}`} sale={sale} session={session} /> : null}
       {open ? (
         <View testID="customer-picker" className="rounded-md border border-border p-3">
           <CustomerPicker
@@ -56,5 +63,53 @@ export function SaleCustomer({ sale, connector, session, onSettings }: {
         </View>
       ) : null}
     </View>
+  );
+}
+
+/** The sale's address pin: shipping, else billing, with Edit and Remove in the cart; text only at any other stage. */
+function SaleAddress({ sale, session }: { sale: ReturnType<typeof useSale>; session: Session }) {
+  const { billing, shipping } = sale.order.customer ?? {};
+  const shown = shipping ?? billing, editable = sale.stage.kind === 'cart' && !sale.saving;
+  // Without the store's countries there is no Add or Edit: a free-text country would be refused after payment.
+  const countries = useSaleCountries(session, editable);
+  const [editing, setEditing] = useState<{ value: AddressEditorValue; error?: string } | null>(null);
+  const save = (value: AddressEditorValue) => {
+    const addresses = saleAddresses(value);
+    if ('error' in addresses) return setEditing({ value, error: addresses.error });
+    setEditing(sale.setAddresses(addresses.billing, addresses.shipping) ? null : { value, error: ADDRESS_CHANGE_REFUSED });
+  };
+  const canEdit = editable && !!countries && !editing;
+  if (!shown && !canEdit && !editing) return null;
+  return (
+    <VStack className="gap-2">
+      <HStack className="items-center gap-2">
+        {shown ? <Text testID="sale-address" numberOfLines={1} className="flex-1 text-sm text-muted-foreground">{[shown.address1, shown.city, shown.country].filter(Boolean).join(', ')}</Text> : null}
+        {canEdit ? <Button testID={shown ? 'sale-address-edit' : 'sale-address-add'} variant="outline" size="sm"
+          onPress={() => setEditing({ value: addressEditorValue({ billing, shipping }) })}><Text>{shown ? 'Edit' : 'Add address'}</Text></Button> : null}
+        {shown && editable ? <Button testID="sale-address-remove" variant="ghost" size="sm"
+          onPress={() => { sale.setAddresses(undefined, undefined); setEditing(null); }}><Text>Remove</Text></Button> : null}
+      </HStack>
+      {editing && editable ? (
+        <View className="gap-2 rounded-md border border-border p-3">
+          <AddressEditor testID="sale-address-editor" value={editing.value} onChange={(value) => setEditing({ value })} countries={countries} />
+          {editing.error ? <Text testID="sale-address-error" accessibilityRole="alert" className="text-sm text-destructive">{editing.error}</Text> : null}
+          <HStack space="sm">
+            <Button testID="sale-address-save" size="sm" onPress={() => save(editing.value)}><Text>Save</Text></Button>
+            <Button testID="sale-address-cancel" variant="outline" size="sm" onPress={() => setEditing(null)}><Text>Cancel</Text></Button>
+          </HStack>
+        </View>
+      ) : null}
+    </VStack>
+  );
+}
+
+/** Checkout's place while the address is outside the till's tax zone on a store that taxes by address: not dismissible. */
+export function AddressZoneGate({ sale }: { sale: ReturnType<typeof useSale> }) {
+  return (
+    <VStack className="gap-2 rounded-md border border-destructive bg-destructive/10 p-3">
+      <Text testID="address-block" className="text-sm">{ADDRESS_ZONE_BLOCK_TEXT}</Text>
+      <Button testID="address-block-remove" variant="secondary" size="sm" disabled={sale.saving}
+        onPress={() => sale.setAddresses(undefined, undefined)}><Text>Remove address</Text></Button>
+    </VStack>
   );
 }
