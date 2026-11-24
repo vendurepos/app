@@ -352,7 +352,7 @@ describe('register commands', () => {
     const base = await server.app.getUrl();
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${adminClient.getAuthToken()}`, 'X-Tally-Protocol': '1' };
     const info = await (await fetch(`${base}/tally/v1/info`, { headers })).json();
-    expect(info.contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], register: [1, 2, 3], 'order.refund': [1] });
+    expect(info.contracts).toEqual({ 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], register: [1, 2, 3], 'order.refund': [1] });
     const s = uuid();
     const opening = open(s, uuid());
     const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);

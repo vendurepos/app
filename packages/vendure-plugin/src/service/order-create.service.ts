@@ -75,7 +75,6 @@ type SaleOutcome = { result: OrderCreateResult; needsAdmin?: boolean; compensati
 /** A clientOrderId collision after the recipe's first event: roll everything back and run the command again. */
 class Rerun extends Error {}
 class RepairStoreSetup extends Error {}
-/** An unstored refusal after the claim (store-wide setup, TallyUI #219; a bridge over the bound, money P3 #7): the claim rolls back, so the same id is checked again. */
 /** order.create 11's address fields (5.2a), unchecked by the vendored payload type. */
 type SaleAddress = Partial<Record<'firstName' | 'lastName' | 'company' | 'address1' | 'address2' | 'city' | 'state' | 'postcode' | 'country' | 'phone', string>>;
 const saleAddresses = (payload: OrderCreatePayload) => payload.customer as { billing?: SaleAddress; shipping?: SaleAddress } | undefined;
@@ -89,6 +88,7 @@ function toVendure(address: SaleAddress): Parameters<OrderService['setShippingAd
   return { ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value)), streetLine1: address.address1 || '', countryCode: address.country! };
 }
 
+/** An unstored refusal after the claim (store-wide setup, TallyUI #219; a bridge over the bound, money P3 #7): the claim rolls back, so the same id is checked again. */
 class SetupRefusal extends Error {
   constructor(readonly result: OrderCreateResult) {
     super(result.error!.code);
