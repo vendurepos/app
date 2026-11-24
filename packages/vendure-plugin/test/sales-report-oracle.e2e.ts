@@ -424,6 +424,17 @@ describe('sales report oracle fixture (#481)', () => {
     }
   });
 
+  it('skips an id whose order row is gone, as find does', async () => {
+    const service = server.app.get(ReportService) as any;
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin', channelOrToken: channels[0].token });
+    const [first, second] = channels[0].orders;
+    const gone = '2147483647'; // int4 max: no fixture order has this id
+    const ids = [first, gone, second];
+    const found: Order[] = await service.ordersFind(ctx, ids), raw: Order[] = await service.ordersRaw(ctx, ids);
+    expect(raw.map(order => String(order.id))).toEqual([first, second]);
+    expect(found.map(order => String(order.id)).sort()).toEqual([first, second].sort());
+  });
+
   it('keeps the drift guard sensitive to missing columns while preserving Vendure instances', async () => {
     const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin', channelOrToken: channels[0].token });
     const [raw]: Order[] = await (server.app.get(ReportService) as any).ordersRaw(ctx, [channels[0].orders[0]]);
