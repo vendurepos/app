@@ -660,7 +660,7 @@ export class OrderCreateService {
           clientOrderId: payload.clientOrderId, version: command.version, ...data,
         })}`, loggerCtx);
         throw new SetupRefusal(refuse(command.id, 'tax_zone_mismatch',
-          `The sale's address puts it in tax zone ${addressZone?.name}, but the till priced it in ${tillZone?.name}`, data));
+          `The sale's address puts it in tax zone ${addressZone?.name ?? 'none'}, but the till priced it in ${tillZone?.name ?? 'none'}`, data));
       }
     }
     const requested = new Map<string, { variant: ProductVariant; quantity: number }>();

@@ -22,7 +22,9 @@ const EMPTY: Address = { fullName: null, streetLine1: null, city: null, postalCo
 
 function setup(environment: ReturnType<typeof createPluginTestEnvironment>) {
   const { server, adminClient, variantIds, run } = environment;
-  const sale = (version: number, customer?: Customer) => ({ ...orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }],
+  type Lines = Parameters<typeof orderCommand>[0];
+  const sale = (version: number, customer?: Customer,
+    lines: Lines = [{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]) => ({ ...orderCommand(lines,
     undefined, customer as OrderCreatePayload['customer']), version }) as unknown as CommandEnvelope<OrderCreatePayload>;
   const send = (command: CommandEnvelope<OrderCreatePayload>, attempt = 1) => run({ ...command, attempt });
   const connection = () => server.app.get(TransactionalConnection).rawConnection;
@@ -144,7 +146,7 @@ describe('order.create v11, default tax zone strategy', () => {
 describe('order.create v11, AddressBasedTaxZoneStrategy', () => {
   const environment = createPluginTestEnvironment({ taxOptions: { taxZoneStrategy: new AddressBasedTaxZoneStrategy() } },
     [TallyPosPlugin, DefaultSearchPlugin.init({})]);
-  const { server } = environment;
+  const { server, variantIds } = environment;
   beforeAll(() => environment.init());
   afterAll(() => server.destroy());
   const { sale, send, counts, readOrder } = setup(environment);
@@ -154,6 +156,7 @@ describe('order.create v11, AddressBasedTaxZoneStrategy', () => {
     expect(result.status, JSON.stringify(result)).toBe('applied');
     const order = await readOrder(result.serverRefs!.orderId);
     expect(order.totalWithTax).toBe(1000);
+    expect(order.taxSummary.map(row => row.taxRate)).toEqual([25, 0]);
     expect(order.shippingAddress).toEqual(stored(DK));
   });
 
@@ -168,6 +171,20 @@ describe('order.create v11, AddressBasedTaxZoneStrategy', () => {
     }
     const v10 = await send(sale(10, { email: 'i@example.com' }));
     expect(v10.status).toBe('applied');
+    expect((await readOrder(v10.serverRefs!.orderId)).totalWithTax).toBe(1000);
+  });
+
+  it('(j) a v11 sale with a tax-inclusive line and a DE shipping address is refused tax_zone_mismatch, though its total is the same in both zones', async () => {
+    // Inclusive, the total is 1000 in either zone, so only the guard stops Germany's 19% replacing Denmark's 25%.
+    const lines = [{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 1000, taxInclusive: true }];
+    const command = sale(11, { email: 'j@example.com', shipping: DE }, lines);
+    const before = await counts(command.id);
+    const result = await send(command);
+    expect(result, JSON.stringify(result)).toMatchObject({ status: 'rejected',
+      error: { code: 'tax_zone_mismatch', data: { tillZone: 'Denmark', addressZone: 'Germany' } } });
+    expect(await counts(command.id)).toEqual({ orders: before.orders, commands: 0 });
+    const v10 = await send(sale(10, undefined, lines));
+    expect(v10.status, JSON.stringify(v10)).toBe('applied');
     expect((await readOrder(v10.serverRefs!.orderId)).totalWithTax).toBe(1000);
   });
 });
