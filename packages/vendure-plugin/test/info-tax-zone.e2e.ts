@@ -43,5 +43,24 @@ for (const [name, override, byAddress] of cases) {
       }`), { zoneId: activeChannel.defaultTaxZone.id, memberIds: [countries.items.find(country => country.code === 'DE')!.id] });
       expect(await taxZone()).toEqual({ byAddress, countries: ['DE', 'DK'] });
     });
+
+    it("lists the channel's default zone, not the first zone", async () => {
+      const { activeChannel, zones } = await adminClient.query<{
+        activeChannel: { id: string; defaultTaxZone: { id: string } }; zones: { items: Array<{ id: string; name: string }> };
+      }>(parse(`query { activeChannel { id defaultTaxZone { id } } zones { items { id name } } }`));
+      const setDefaultZone = async (defaultTaxZoneId: string) => {
+        const { updateChannel } = await adminClient.query<{ updateChannel: { __typename: string; errorCode?: string } }>(
+          parse(`mutation SetZone($input: UpdateChannelInput!) {
+            updateChannel(input: $input) { __typename ... on Channel { id } ... on ErrorResult { errorCode message } }
+          }`), { input: { id: activeChannel.id, defaultTaxZoneId } });
+        expect(updateChannel).toMatchObject({ __typename: 'Channel' });
+      };
+      await setDefaultZone(zones.items.find(zone => zone.name === 'Germany')!.id);
+      try {
+        expect(await taxZone()).toEqual({ byAddress, countries: ['DE'] });
+      } finally {
+        await setDefaultZone(activeChannel.defaultTaxZone.id);
+      }
+    });
   });
 }
