@@ -96,7 +96,8 @@ export function CustomersPanel({ session, timezone, onOpenOrder }: { session: Se
           </Button> : null}
         </HStack> : null}
       </ScrollView>
-      <CustomerSheet session={session} row={sheet?.row ?? null} open={sheet !== null} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} onOpenOrder={onOpenOrder} />
+      <CustomerSheet session={session} row={sheet?.row ?? null} open={sheet !== null} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} onOpenOrder={onOpenOrder}
+        canRemoveAddress={access.remove} onAddressRemoved={reload} />
     </VStack>
   );
 }

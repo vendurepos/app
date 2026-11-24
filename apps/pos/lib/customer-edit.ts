@@ -11,8 +11,10 @@ export const CUSTOMER_OFFLINE_TEXT = 'The till is offline. Customers are saved s
 export const CUSTOMER_SAVE_FORBIDDEN_TEXT = "This till's role can't add or change the store's customers. Ask the store's admin to add the Create customer and Update customer permissions.";
 export const CUSTOMER_SAVE_FAILED_TEXT = "The store didn't save this customer";
 export const CUSTOMER_CREATE_PERMISSION = 'CreateCustomer', CUSTOMER_UPDATE_PERMISSION = 'UpdateCustomer';
-export type CustomerAccess = { create: boolean; update: boolean };
-const NO_ACCESS: CustomerAccess = { create: false, update: false };
+// Vendure gates deleteCustomerAddress on DeleteCustomer, not UpdateCustomer.
+export const CUSTOMER_DELETE_PERMISSION = 'DeleteCustomer';
+export type CustomerAccess = { create: boolean; update: boolean; remove: boolean };
+const NO_ACCESS: CustomerAccess = { create: false, update: false, remove: false };
 
 export async function customerAccess(context: SyncContext): Promise<CustomerAccess> {
   try {
@@ -23,7 +25,8 @@ export async function customerAccess(context: SyncContext): Promise<CustomerAcce
     const body = await response.json();
     if (body.errors?.length) return NO_ACCESS;
     const channel = body.data?.me?.channels?.find((channel: { id: string; permissions: string[] }) => channel.id === body.data?.activeChannel?.id);
-    return channel ? { create: channel.permissions.includes(CUSTOMER_CREATE_PERMISSION), update: channel.permissions.includes(CUSTOMER_UPDATE_PERMISSION) } : NO_ACCESS;
+    return channel ? { create: channel.permissions.includes(CUSTOMER_CREATE_PERMISSION), update: channel.permissions.includes(CUSTOMER_UPDATE_PERMISSION),
+      remove: channel.permissions.includes(CUSTOMER_DELETE_PERMISSION) } : NO_ACCESS;
   } catch { return NO_ACCESS; }
 }
 export function useCustomerAccess(session: Session): CustomerAccess {
@@ -132,7 +135,7 @@ function sessionAddressFields(session: Session, context: SyncContext): Promise<s
 }
 export type CustomerAddressSource = { stored: AddressEditorValue | null; countries?: AddressFieldsProps['countries']; inVendure?: boolean };
 /** Read when the sheet opens: stored is null until the read answers and when it fails, so no address is written unseen. */
-export function useCustomerAddresses(session: Session, open: boolean, customerId: string | null): CustomerAddressSource {
+export function useCustomerAddresses(session: Session, open: boolean, customerId: string | null, version = 0): CustomerAddressSource {
   const [source, setSource] = useState<CustomerAddressSource>({ stored: null });
   useEffect(() => {
     setSource({ stored: null }); if (!open) return;
@@ -142,7 +145,7 @@ export function useCustomerAddresses(session: Session, open: boolean, customerId
       addressEditorAllowed(sessionAddressFields(session, context))])
       .then(([stored, countries, allowed]) => { if (!cancelled) setSource(allowed ? { stored, countries } : { stored: null, inVendure: true }); }, () => {});
     return () => { cancelled = true; };
-  }, [session, open, customerId]);
+  }, [session, open, customerId, version]);
   return source;
 }
 /** The connector picks the address it writes at write time, so the addresses must still be the ones the sheet opened with. */

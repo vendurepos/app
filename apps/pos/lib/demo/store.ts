@@ -370,6 +370,21 @@ export class DemoStore {
     return address;
   }
 
+  /** deleteCustomerAddress: as Vendure, the first remaining address by id takes over a deleted default. */
+  deleteAddress(id: string): boolean {
+    const owner = this.state.customers.find(customer => customer.addresses.some(address => address.id === id));
+    if (!owner) return false;
+    const removed = owner.addresses.find(address => address.id === id)!;
+    owner.addresses = owner.addresses.filter(address => address.id !== id);
+    if ((removed.defaultBillingAddress || removed.defaultShippingAddress) && owner.addresses.length > 0) {
+      const [next] = [...owner.addresses].sort((a, b) => (a.id < b.id ? -1 : 1));
+      if (removed.defaultBillingAddress) next.defaultBillingAddress = true;
+      if (removed.defaultShippingAddress) next.defaultShippingAddress = true;
+    }
+    this.save();
+    return true;
+  }
+
   products() {
     let variantIndex = 0;
     // Each product's bundled picture; variants keep featuredAsset null and fall back to it, as in Vendure.

@@ -929,6 +929,88 @@ test('the Customers panel adds and edits customers on the store; a refused save 
   await expect(page.getByTestId('cart')).toContainText('Tally Fixture Mug');
 });
 
+test("the customer sheet removes one saved address from Vendure after a confirm naming it; offline it can't, and a refused remove leaves it in place", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  const address = page.getByTestId('customer-sheet-address-a6');
+  const remove = page.getByTestId('customer-sheet-address-remove-a6');
+  const confirm = page.getByTestId('customer-sheet-address-confirm');
+  // TallyUI's address editor shows a saved address as one summary line that starts with the street.
+  const editorAddress = sheet.getByText(/^353 Volume Way, /);
+  await page.getByTestId('customers-edit-c6').click();
+  await expect(address).toContainText('Billing and shipping: 353 Volume Way, Stanford');
+
+  await page.context().setOffline(true);
+  await expect(remove).toBeDisabled();
+  await expect(page.getByTestId('customer-sheet-offline')).toBeVisible();
+  await page.context().setOffline(false);
+  await expect(remove).toBeEnabled();
+
+  await page.evaluate(() => {
+    const target = window as typeof window & { __restoreAddressFetch: () => void };
+    const originalFetch = window.fetch;
+    target.__restoreAddressFetch = () => { window.fetch = originalFetch; };
+    window.fetch = async (...args) => String(args[1]?.body).includes('deleteCustomerAddress')
+      ? new Response(JSON.stringify({ errors: [{ message: 'Address is in use' }] }), { headers: { 'Content-Type': 'application/json' } })
+      : originalFetch(...args);
+  });
+  await remove.click();
+  await expect(confirm).toContainText("Remove 353 Volume Way, Stanford from Donald Knuth's account in Vendure?");
+  await expect(confirm).toContainText('the customer has no other saved address');
+  await page.getByTestId('customer-sheet-address-confirm-remove').click();
+  await expect(page.getByTestId('customer-sheet-address-error')).toHaveText("The store didn't remove this address, so it is still saved: Address is in use.");
+  await expect(address).toBeVisible();
+  await page.evaluate(() => (window as typeof window & { __restoreAddressFetch: () => void }).__restoreAddressFetch());
+
+  // TallyUI's own billing-row Remove opens the same confirm, which holds back a pending Save, and Keep leaves the address as it was.
+  const phone = sheet.getByPlaceholder('Phone number', { exact: true });
+  const phoneBefore = await phone.inputValue();
+  await phone.fill(`${phoneBefore}1`);
+  await expect(page.getByTestId('customer-sheet-save')).toBeEnabled();
+  await sheet.getByTestId('customer-form-addresses-billing-remove').click();
+  await expect(confirm).toContainText('Remove 353 Volume Way, Stanford');
+  await expect(page.getByTestId('customer-sheet-save')).toBeDisabled();
+  await page.getByTestId('customer-sheet-address-confirm-keep').click();
+  await expect(editorAddress).toBeVisible();
+  await expect(page.getByTestId('customer-sheet-address-unsaved')).toHaveCount(0);
+  await phone.fill(phoneBefore);
+
+  await remove.click();
+  await page.getByTestId('customer-sheet-address-confirm-remove').click();
+  await expect(page.getByTestId('customer-sheet-saved-addresses')).toHaveCount(0);
+  // The editor's Add billing button shows only once the address read has answered with no address.
+  await expect(sheet.getByTestId('customer-form-addresses-billing-add')).toBeVisible();
+  await expect(editorAddress).toHaveCount(0);
+  await page.getByTestId('customer-sheet-close').click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByTestId('customers-row-c6')).not.toContainText('353 Volume Way');
+  await page.getByTestId('customers-edit-c6').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-form-addresses-billing-add')).toBeVisible();
+  await expect(page.getByTestId('customer-sheet-saved-addresses')).toHaveCount(0);
+});
+
+test("a role without Delete customer sees no Remove on the customer sheet, as the plugin's till role", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('vendurepos.demo.till_role', '1'));
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByText(/^12 Engine Row, /)).toBeVisible();
+  await expect(page.getByTestId('customer-sheet-saved-addresses')).toHaveCount(0);
+  await expect(sheet.locator('[data-testid^="customer-sheet-address-remove-"]')).toHaveCount(0);
+});
+
 test("the Products panel lists the catalogue's variants with SKU, price and stock, searches them, and a scan closes it and adds", async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
