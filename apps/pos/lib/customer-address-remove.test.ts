@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
-import { CUSTOMER_ADDRESS_REMOVE_FORBIDDEN_TEXT, CUSTOMER_ADDRESS_REMOVE_UNREACHED_TEXT, DELETE_ADDRESS_MUTATION, readSavedAddresses, removableAddresses, removeConfirmText, removeCustomerAddress,
+import { addressEditorChange, CUSTOMER_ADDRESS_REMOVE_FORBIDDEN_TEXT, CUSTOMER_ADDRESS_REMOVE_UNREACHED_TEXT, DELETE_ADDRESS_MUTATION, readSavedAddresses, removableAddresses, removeConfirmText, removeCustomerAddress,
   SAVED_ADDRESSES_QUERY, type SavedAddress } from './customer-address-remove';
 
 const context = { baseUrl: 'https://store.test', headers: {} } as SyncContext;
@@ -69,4 +69,19 @@ it('removes one address and maps every refusal to its text', async () => {
     vi.stubGlobal('fetch', answer instanceof Error ? vi.fn().mockRejectedValue(answer) : vi.fn().mockResolvedValue(answer));
     await expect(removeCustomerAddress(context, 'a1')).resolves.toEqual(expected);
   }
+});
+
+const A = { address1: '1 Way', country: 'GB' }, A2 = { address1: '2 Way', country: 'GB' }, B = { address1: '3 Road', country: 'GB' };
+it.each([
+  ['the billing Remove of a billing+shipping default', [address('a1', true, true)], { billing: A }, {}, false, { confirm: 'a1' }],
+  ['the billing Remove with a separate shipping default', [address('a1', true, false), address('a2', false, true)], { billing: A, shipping: B }, { shipping: B }, false, { confirm: 'a1' }],
+  ['the shipping-only Remove (#491 path 2)', [address('a2', false, true)], { shipping: B }, {}, false, { confirm: 'a2' }],
+  ['clearing shipping to same as billing', [address('a1', true, false), address('a2', false, true)], { billing: A, shipping: B }, { billing: A }, false, 'apply'],
+  ['adding billing to a shipping-only customer', [address('a2', false, true)], { shipping: B }, { billing: { country: 'GB' }, shipping: B }, false, 'apply'],
+  ['a Remove with no permission or no answered read', [], { billing: A }, {}, false, 'apply'],
+  ['an edit', [address('a1', true, true)], { billing: A }, { billing: A2 }, false, 'apply'],
+  ['an edit during a remove (#491 path 3)', [address('a1', true, true)], { billing: A }, { billing: A2 }, true, 'ignore'],
+  ['a Remove during a remove', [address('a1', true, true)], { billing: A }, {}, true, 'ignore'],
+] as const)('routes %s', (_, removable, current, next, removing, expected) => {
+  expect(addressEditorChange([...removable], current, next, removing)).toEqual(expected);
 });

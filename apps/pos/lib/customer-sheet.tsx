@@ -7,7 +7,7 @@ import { addressEditorValue, addressPatch, CUSTOMER_ADDRESS_VENDURE_TEXT, CUSTOM
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
 import { CUSTOMER_ACCOUNT_LABEL, useCustomerAccount } from './customer-account';
 import { useCustomerFields } from './customer-fields';
-import { CUSTOMER_ADDRESS_REMOVE_UNSAVED_TEXT, removableAddresses, removeConfirmText, removeCustomerAddress, savedAddressName, savedAddressRole, useSavedAddresses } from './customer-address-remove';
+import { addressEditorChange, CUSTOMER_ADDRESS_REMOVE_UNSAVED_TEXT, removableAddresses, removeConfirmText, removeCustomerAddress, savedAddressName, savedAddressRole, useSavedAddresses } from './customer-address-remove';
 import { addCustomerNote, useCustomerNotes } from './customer-notes';
 import { useCustomerOrders } from './customer-orders';
 import { STAFF_NOTE_LABEL } from './order-notes';
@@ -51,9 +51,10 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   useEffect(() => { setAddressValue(source.stored ? addressEditorValue(source.stored) : {}); }, [source.stored]);
   const addressChange = source.stored ? addressPatch(source.stored, addressValue) : {};
   const changeAddresses = (next: AddressEditorValue) => {
-    // TallyUI's billing-row Remove on the saved default billing address opens our confirm, as our own Remove does, instead of an edit Save refuses.
-    const billing = removable.find(a => a.billing);
-    if (canRemoveAddress && billing && next.billing === undefined && addressValue.billing !== undefined) { setConfirming(billing.id); setRemoveError(null); return; }
+    // TallyUI's billing-row or shipping-only-row Remove on a saved default opens our confirm instead of an edit Save refuses; an edit during a remove is ignored.
+    const action = addressEditorChange(canRemoveAddress ? removable : [], addressValue, next, removing);
+    if (action === 'ignore') return;
+    if (action !== 'apply') { setConfirming(action.confirm); setRemoveError(null); return; }
     setAddressValue(next); setError(null); setConfirming(null);
   };
   const [note, setNote] = useState('');
