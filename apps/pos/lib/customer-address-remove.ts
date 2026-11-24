@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { AddressEditorValue } from '@tallyui/components';
 import type { SyncContext } from '@tallyui/core';
 import { SESSION_ENDED_TEXT } from './catalogue-status';
 import { sessionContext, type Session } from './session';
@@ -32,6 +33,15 @@ export async function readSavedAddresses(context: SyncContext, customerId: strin
 export function removableAddresses(all: SavedAddress[]): SavedAddress[] {
   const billing = all.find(address => address.billing), shipping = all.find(address => address.shipping);
   return [billing, shipping].filter((address, index, list): address is SavedAddress => address !== undefined && list.indexOf(address) === index);
+}
+
+/** What a change from TallyUI's address editor does on the customer sheet (#490, #491): its per-row Remove on a saved default opens our confirm, and nothing is taken while a remove is in flight, since the re-read after it would drop the edit. */
+export function addressEditorChange(removable: SavedAddress[], current: AddressEditorValue, next: AddressEditorValue, removing: boolean): 'apply' | 'ignore' | { confirm: string } {
+  if (removing) return 'ignore';
+  const billing = removable.find(address => address.billing), shipping = removable.find(address => address.shipping);
+  if (current.billing !== undefined && next.billing === undefined && billing) return { confirm: billing.id };
+  if (current.billing === undefined && next.billing === undefined && current.shipping !== undefined && next.shipping === undefined && shipping) return { confirm: shipping.id };
+  return 'apply';
 }
 
 export function savedAddressName(address: SavedAddress): string {
