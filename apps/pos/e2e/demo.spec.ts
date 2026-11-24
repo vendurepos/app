@@ -715,6 +715,7 @@ test("the customer sheet shows the customer's Vendure custom fields read-only, a
   await expect(sheet.getByTestId('customer-sheet-field-taxId-value')).toHaveText('GB123456789');
   await expect(sheet.getByTestId('customer-sheet-field-wholesale-value')).toHaveText('Yes');
   await expect(sheet.getByTestId('customer-sheet-fields').getByRole('textbox')).toHaveCount(0);
+  await sheet.getByTestId('customer-sheet-fields').scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath('06k-customer-fields.png') });
   await page.getByTestId('customer-sheet-close').click();
   await page.getByTestId('customers-edit-c3').click();
