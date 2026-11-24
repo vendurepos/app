@@ -16,6 +16,7 @@
  * VariantStock — reconcile/stock.ts.
  * GetVariantPrices — reconcile/prices.ts.
  * Search, Create, One — customers.ts.
+ * CustomerCustomFieldConfig, CustomerCustomFields — apps/pos/lib/customer-fields.ts.
  * CataloguePermissions, VariantStockLevel, UpdateProductVariants — apps/pos/lib/product-edit.ts.
  * CollectionImages — apps/pos/lib/collection-categories.ts.
  * Orders, CustomerOrders — orders.ts; apps/pos/lib/order-history.ts.
@@ -56,6 +57,12 @@ const DEMO_CHANNEL_ID = '1';
 const DEMO_PERMISSIONS = ['Authenticated', 'ReadCatalog', 'UpdateCatalog', 'ReadCustomer', 'CreateCustomer', 'UpdateCustomer', 'ReadOrder', 'ApproveTallyPosVariance'];
 // The countries the demo store ships to, for the customer address editor's country picker (Admin `countries`).
 const DEMO_COUNTRIES = [{ code: 'DE', name: 'Germany' }, { code: 'GB', name: 'United Kingdom' }, { code: 'US', name: 'United States' }];
+// Ada's demo tax ID, shown read-only as a Customer custom field.
+const DEMO_CUSTOMER_TAX_ID = 'GB123456789';
+function demoCustomerFields(customer: { emailAddress: string }): { taxId: string | null; wholesale: boolean } {
+  return customer.emailAddress.trim().toLowerCase() === 'ada@demo.vendurepos.com'
+    ? { taxId: DEMO_CUSTOMER_TAX_ID, wholesale: true } : { taxId: null, wholesale: false };
+}
 // e2e only: a till without the approve permission, which counts blind.
 export const DEMO_TILL_ROLE_KEY = 'vendurepos.demo.till_role';
 // e2e only: an account without TallyPosSell or ReadOrder, which the sales report refuses with 403.
@@ -215,6 +222,10 @@ export function installDemoStore(origin: string, options: { storage?: DemoStorag
         break;
       }
       case 'CustomerAccount': { const c = store.customer(String(variables.id)); data = { customer: c ? { id: c.id, user: demoCustomerUser(c) } : null }; break; }
+      case 'CustomerCustomFieldConfig': data = { globalSettings: { serverConfig: { entityCustomFields: [{ entityName: 'Customer', customFields: [
+        { name: 'taxId', type: 'string', list: false, internal: false, label: [{ languageCode: 'en', value: 'Tax ID' }] },
+        { name: 'wholesale', type: 'boolean', list: false, internal: false, label: [{ languageCode: 'en', value: 'Wholesale' }] }] }] } } }; break;
+      case 'CustomerCustomFields': { const c = store.customer(String(variables.id)); data = { customer: c ? { id: c.id, customFields: demoCustomerFields(c) } : null }; break; }
       case 'AddCustomerNote': case 'addNoteToCustomer': data = { addNoteToCustomer: store.addCustomerNote(variables.input) }; break;
       case 'Create': case 'createCustomer': data = { createCustomer: store.createCustomer(variables.input) }; break;
       case 'Addresses': data = { customer: store.customer(variables.id) }; break;
