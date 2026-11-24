@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Collection, Order, ProductVariant, RequestContext, Surcharge, TransactionalConnection, translateEntity } from '@vendure/core';
+import { Collection, Order, OrderLine, ProductVariant, RequestContext, ShippingLine, Surcharge, TransactionalConnection, translateEntity } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { In } from 'typeorm';
 import type { SelectQueryBuilder } from 'typeorm';
@@ -53,6 +53,15 @@ const hourKey = (instant: string) => `to_char(${instant} AT TIME ZONE :timezone,
 const MAX_PRODUCTS = 100;
 // Orders are loaded for products and taxes (OrderLine prices and Order.taxSummary are getters, not columns) this many at a time.
 const ORDER_PAGE = 500;
+// Measured on the year fixture: four raw reads can load larger pages without the joined cartesian product.
+const RAW_PAGE = 5000;
+// Vendure 3.7.3: the drift test reads these copied keys through the guarded entity instances.
+const RAW_KEYS = {
+  Order: ['id', 'subTotalWithTax', 'shippingWithTax'],
+  OrderLine: ['productVariantId', 'quantity', 'orderPlacedQuantity', 'listPrice', 'listPriceIncludesTax', 'adjustments', 'taxLines'],
+  Surcharge: ['listPrice', 'listPriceIncludesTax', 'taxLines'],
+  ShippingLine: ['listPrice', 'listPriceIncludesTax', 'adjustments', 'taxLines'],
+} as const;
 
 // tallySaleAt is timestamp without time zone holding the Node process's wall time (node-pg writes a Date in local time);
 // Refund.createdAt holds the Postgres session's wall time (now()). Both become real instants before any comparison.
@@ -69,6 +78,7 @@ const minor = (value: string | null | undefined) => Number(value ?? 0);
 export class ReportService {
   // The zone node-pg wrote tallySaleAt in, read once.
   private readonly writerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  private readonly rawPage = RAW_PAGE;
 
   constructor(private connection: TransactionalConnection, private ids: OrderCreateService) {}
 
@@ -287,18 +297,66 @@ export class ReportService {
     return { report, orderTotals, sold };
   }
 
-  /** Products and tax rows from the matching orders, loaded ORDER_PAGE at a time by id. */
+  private async ordersFind(ctx: RequestContext, ids: ID[]): Promise<Order[]> {
+    // Only the relations Order.taxSummary reads (lines, surcharges, shipping lines).
+    return this.connection.getRepository(ctx, Order).find({
+      where: { id: In(ids) }, relations: { lines: true, surcharges: true, shippingLines: true },
+    });
+  }
+
+  private async ordersRaw(ctx: RequestContext, ids: ID[]): Promise<Order[]> {
+    const driver = this.connection.rawConnection.driver;
+    const orders = new Map<string, Order>();
+    for (const [Entity, keys] of [
+      [Order, RAW_KEYS.Order], [OrderLine, RAW_KEYS.OrderLine],
+      [Surcharge, RAW_KEYS.Surcharge], [ShippingLine, RAW_KEYS.ShippingLine],
+    ] as const) {
+      const repository = this.connection.getRepository<Order | OrderLine | Surcharge | ShippingLine>(ctx, Entity);
+      const builder = repository.createQueryBuilder('row');
+      const columns = keys.map(key => {
+        const column = repository.metadata.findColumnWithPropertyName(key);
+        if (!column) throw new Error(`raw copy lacks ${Entity.name}.${key} column`);
+        return { key, column };
+      });
+      const fk = Entity === Order ? undefined : repository.metadata.findRelationWithPropertyPath('order')?.joinColumns[0];
+      if (Entity !== Order && !fk) throw new Error(`raw copy lacks ${Entity.name}.order relation column`);
+      builder.select([]);
+      for (const { key, column } of columns) {
+        builder.addSelect(`${builder.escape('row')}.${builder.escape(column.databaseName)}`, key);
+      }
+      if (fk) builder.addSelect(`${builder.escape('row')}.${builder.escape(fk.databaseName)}`, 'order_fk');
+      const filterColumn = fk ?? columns[0].column;
+      const rows = await builder.where(`${builder.escape('row')}.${builder.escape(filterColumn.databaseName)} = ANY(:ids)`, { ids })
+        .getRawMany<Record<string, unknown>>();
+      for (const row of rows) {
+        const copied = Object.fromEntries(columns.map(({ key, column }) => [key, driver.prepareHydratedValue(row[key], column)]));
+        if (Entity === Order) {
+          const order = new Order({ ...copied, lines: [], surcharges: [], shippingLines: [] });
+          orders.set(String(order.id), order);
+        } else {
+          const order = orders.get(String(driver.prepareHydratedValue(row.order_fk, fk!)))!;
+          if (Entity === OrderLine) order.lines.push(new OrderLine(copied));
+          else if (Entity === Surcharge) order.surcharges.push(new Surcharge(copied));
+          else order.shippingLines.push(new ShippingLine(copied));
+        }
+      }
+    }
+    return ids.map(id => orders.get(String(id))!);
+  }
+
+  /** Products and tax rows from the matching orders, loaded in pages by id. */
   private async linesAndTaxes(ctx: RequestContext, query: SalesQueryV2, ascending: (a: string, b: string) => number) {
     const products = new Map<string, TallySalesReportV2['products'][number] & { id: ID }>();
     const taxes = new Map<string, TallySalesReportV2['taxes'][number]>();
     const orderTotals: number[] = [];
     // One id query instead of one per page (#481); ids alone are small.
     const ids = (await this.posOrdersV2(ctx, query).select('o.id', 'id').orderBy('o.id', 'ASC').getRawMany<{ id: ID }>()).map(row => row.id);
-    for (let start = 0; start < ids.length; start += ORDER_PAGE) {
-      // Only the relations Order.taxSummary reads (lines, surcharges, shipping lines).
-      const loaded = await this.connection.getRepository(ctx, Order).find({
-        where: { id: In(ids.slice(start, start + ORDER_PAGE)) }, relations: { lines: true, surcharges: true, shippingLines: true },
-      });
+    // Postgres only: the raw reads bind = ANY(:ids); other databases keep find.
+    const raw = this.connection.rawConnection.options.type === 'postgres';
+    const pageSize = raw ? this.rawPage : ORDER_PAGE;
+    for (let start = 0; start < ids.length; start += pageSize) {
+      const slice = ids.slice(start, start + pageSize);
+      const loaded = await (raw ? this.ordersRaw(ctx, slice) : this.ordersFind(ctx, slice));
       for (const order of loaded) {
         orderTotals.push(order.subTotalWithTax + order.shippingWithTax);
         for (const line of order.lines) {

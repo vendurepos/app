@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { TransactionalConnection } from '@vendure/core';
+import { Order, OrderLine, RequestContextService, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ReportService } from '../src/service/report.service';
 import type { CommandResult, OrderRefundEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -318,5 +319,119 @@ describe('sales report oracle fixture (#481)', () => {
       expect(second.status).toBe(200);
       expect(second.text).toBe(first.text);
     }
+  });
+
+  // Vendure 3.7.3: an upgrade whose getters read a column missing from RAW_KEYS must fail here.
+  function guard<T extends object>(entity: T): T {
+    return new Proxy(entity, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && !(prop in target)) {
+          throw new Error(`raw copy lacks ${target.constructor.name}.${prop}`);
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+  }
+  function guardOrder(order: Order): Order {
+    order.lines = order.lines.map(guard);
+    order.surcharges = order.surcharges.map(guard);
+    order.shippingLines = order.shippingLines.map(guard);
+    return guard(order);
+  }
+
+  type Mode = 'find' | 'raw' | 'paged' | 'guarded';
+  async function runMode(mode: Mode) {
+    const service = server.app.get(ReportService) as any;
+    const realFind = service.ordersFind.bind(service), realRaw = service.ordersRaw.bind(service);
+    const realLines = service.linesAndTaxes.bind(service), rawPage = service.rawPage;
+    const spies: Array<{ mockRestore(): void }> = [];
+    const bodies: string[] = [], lines: unknown[][] = [];
+    let captured: unknown[] = [];
+    try {
+      const findSpy = vi.spyOn(service, 'ordersFind');
+      spies.push(findSpy);
+      const rawSpy = vi.spyOn(service, 'ordersRaw');
+      spies.push(rawSpy);
+      if (mode === 'find') rawSpy.mockImplementation((...args) => realFind(...args));
+      if (mode === 'guarded') rawSpy.mockImplementation(async (...args) => (await realRaw(...args)).map(guardOrder));
+      if (mode === 'paged') service.rawPage = 3;
+      const linesSpy = vi.spyOn(service, 'linesAndTaxes').mockImplementation(async (...args) => {
+        const result = await realLines(...args);
+        captured.push({ ...result, orderTotals: [...result.orderTotals].sort((a, b) => a - b) });
+        return result;
+      });
+      spies.push(linesSpy);
+      for (const channel of channels) for (const version of ['', '/v2', '/v3']) {
+        captured = [];
+        const callsBefore = rawSpy.mock.calls.length;
+        const response = await report(`reports/sales${version}`, version ? { ...range, timezone } : range, channel.headers);
+        expect(response.status, response.text).toBe(200);
+        bodies.push(response.text);
+        expect(captured).toHaveLength(version ? 1 : 0);
+        lines.push(captured);
+        if (mode === 'paged' && channel === channels[0] && version === '/v2') {
+          expect(rawSpy.mock.calls.length - callsBefore).toBeGreaterThan(1);
+        }
+      }
+      expect(rawSpy).toHaveBeenCalled();
+      if (mode !== 'find') expect(findSpy).not.toHaveBeenCalled();
+      return { bodies, lines };
+    } finally {
+      for (const spy of spies.reverse()) spy.mockRestore();
+      service.rawPage = rawPage;
+    }
+  }
+  const modes = new Map<Mode, Awaited<ReturnType<typeof runMode>>>();
+  beforeAll(async () => {
+    for (const mode of ['find', 'raw', 'paged', 'guarded'] as const) modes.set(mode, await runMode(mode));
+  });
+
+  it('returns byte-identical bodies with raw, paged and guarded loaders versus find', () => {
+    const oracle = modes.get('find')!;
+    for (const mode of ['raw', 'paged', 'guarded'] as const) {
+      const actual = modes.get(mode)!;
+      expect(actual.bodies).toHaveLength(oracle.bodies.length);
+      actual.bodies.forEach((body, index) => expect(body).toBe(oracle.bodies[index]));
+    }
+  });
+
+  it('returns identical lines and taxes with raw, paged and guarded loaders versus find', () => {
+    for (const mode of ['raw', 'paged', 'guarded'] as const) {
+      expect(modes.get(mode)!.lines).toEqual(modes.get('find')!.lines);
+    }
+  });
+
+  it('matches every fixture order and its child getters, including the zero-line order', async () => {
+    const service = server.app.get(ReportService) as any;
+    const sorted = <T,>(rows: T[]) => rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    const figures = (order: Order) => ({
+      subTotalWithTax: order.subTotalWithTax, shippingWithTax: order.shippingWithTax,
+      taxSummary: [...order.taxSummary].sort((a, b) => a.description.localeCompare(b.description) || a.taxRate - b.taxRate),
+      lines: sorted(order.lines.map(line => ({ productVariantId: line.productVariantId, quantity: line.quantity,
+        proratedLinePrice: line.proratedLinePrice, proratedLinePriceWithTax: line.proratedLinePriceWithTax }))),
+      surcharges: sorted(order.surcharges.map(line => ({ price: line.price, priceWithTax: line.priceWithTax }))),
+      shippingLines: sorted(order.shippingLines.map(line => ({ discountedPrice: line.discountedPrice,
+        discountedPriceWithTax: line.discountedPriceWithTax }))),
+    });
+    for (const channel of channels) {
+      const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin', channelOrToken: channel.token });
+      const ids = [...channel.orders].reverse();
+      const found: Order[] = await service.ordersFind(ctx, ids), raw: Order[] = await service.ordersRaw(ctx, ids);
+      expect(raw.map(order => String(order.id))).toEqual(ids);
+      expect(raw.map(order => String(order.id)).sort()).toEqual(found.map(order => String(order.id)).sort());
+      for (const order of raw) expect(figures(order)).toEqual(figures(found.find(item => String(item.id) === String(order.id))!));
+      if (channel === channels[0]) expect(raw.find(order => String(order.id) === zeroId)!.lines).toEqual([]);
+    }
+  });
+
+  it('keeps the drift guard sensitive to missing columns while preserving Vendure instances', async () => {
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin', channelOrToken: channels[0].token });
+    const [raw]: Order[] = await (server.app.get(ReportService) as any).ordersRaw(ctx, [channels[0].orders[0]]);
+    const order = guardOrder(raw), line = order.lines[0];
+    expect(() => line.id).toThrow('raw copy lacks OrderLine.id');
+    expect(() => line.order).toThrow('raw copy lacks OrderLine.order');
+    expect(() => order.code).toThrow('raw copy lacks Order.code');
+    expect(line instanceof OrderLine).toBe(true);
+    expect(order instanceof Order).toBe(true);
   });
 });
