@@ -292,20 +292,18 @@ export class ReportService {
     const products = new Map<string, TallySalesReportV2['products'][number] & { id: ID }>();
     const taxes = new Map<string, TallySalesReportV2['taxes'][number]>();
     const orderTotals: number[] = [];
-    let after: ID | undefined;
-    for (;;) {
-      const page = this.posOrdersV2(ctx, query).select('o.id', 'id').orderBy('o.id', 'ASC').limit(ORDER_PAGE);
-      const ids = (await (after === undefined ? page : page.andWhere('o.id > :after', { after })).getRawMany<{ id: ID }>()).map(row => row.id);
-      if (!ids.length) break;
-      // Only the relations Order.taxSummary reads (lines, surcharges, shipping lines), plus each line's variant for its sku.
+    // One id query instead of one per page (#481); ids alone are small.
+    const ids = (await this.posOrdersV2(ctx, query).select('o.id', 'id').orderBy('o.id', 'ASC').getRawMany<{ id: ID }>()).map(row => row.id);
+    for (let start = 0; start < ids.length; start += ORDER_PAGE) {
+      // Only the relations Order.taxSummary reads (lines, surcharges, shipping lines).
       const loaded = await this.connection.getRepository(ctx, Order).find({
-        where: { id: In(ids) }, relations: { lines: { productVariant: true }, surcharges: true, shippingLines: true },
+        where: { id: In(ids.slice(start, start + ORDER_PAGE)) }, relations: { lines: true, surcharges: true, shippingLines: true },
       });
       for (const order of loaded) {
         orderTotals.push(order.subTotalWithTax + order.shippingWithTax);
         for (const line of order.lines) {
           const product = products.get(String(line.productVariantId)) ?? products.set(String(line.productVariantId), {
-            id: line.productVariantId, productVariantId: this.ids.encodeId(line.productVariantId), sku: line.productVariant.sku,
+            id: line.productVariantId, productVariantId: this.ids.encodeId(line.productVariantId), sku: '',
             name: '', quantity: 0, salesMinor: 0,
           }).get(String(line.productVariantId))!;
           product.quantity += line.quantity;
@@ -318,8 +316,13 @@ export class ReportService {
           tax.taxMinor += row.taxTotal;
         }
       }
-      if (ids.length < ORDER_PAGE) break;
-      after = ids[ids.length - 1];
+    }
+    if (products.size) {
+      const skus = await this.connection.getRepository(ctx, ProductVariant).createQueryBuilder('v')
+        .select('v.id', 'id').addSelect('v.sku', 'sku')
+        .where('v.id = ANY(:ids)', { ids: [...products.values()].map(row => row.id) })
+        .getRawMany<{ id: ID; sku: string }>();
+      for (const { id, sku } of skus) products.get(String(id))!.sku = sku;
     }
     const sorted = [...products.values()].sort((a, b) => b.salesMinor - a.salesMinor || ascending(a.sku, b.sku)
       || ascending(a.productVariantId, b.productVariantId));
