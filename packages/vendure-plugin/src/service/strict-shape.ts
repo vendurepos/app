@@ -26,6 +26,8 @@ const SHIPPING = since(1, 'clientShippingId name methodId amountMinor taxStatus 
 const LINE_CUSTOM = since(1, 'name sku taxClass taxStatus');
 const PAYMENT = { ...since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference'), methodId: 10 };
 const CUSTOMER = { email: 1, customerId: 3, billing: 8, shipping: 8 };
+// v11 (5.2a): the fields of customer.billing and customer.shipping, declared with the addresses at version 8.
+const ADDRESS = since(8, 'firstName lastName company address1 address2 city state postcode country phone');
 // Coupons are refused below; the table names v9's `lines`, so it reads "not supported", never "unknown field".
 const COUPON = { ...since(6, 'code couponId discountMinor discountTaxMinor'), lines: 9 };
 // Inside v3's `display` and `taxByRate` (their parents carry the version).
@@ -72,10 +74,13 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
     if (isObject(line) && Object.hasOwn(line, 'anyAttributes')) unsupported(`lines[${index}].anyAttributes`);
   });
-  // 3.2a-1: v8's tax address and customer addresses are refused until this server honours them.
+  // 3.2a-1: v8's tax address is refused until this server honours it; the customer addresses are refused before 11 and
+  // honoured from 11 (5.2a), each checked field by field.
   if (Object.hasOwn(payload, 'taxAddress')) unsupported('taxAddress');
   for (const field of ['billing', 'shipping']) {
-    if (isObject(payload.customer) && Object.hasOwn(payload.customer, field)) unsupported(`customer.${field}`);
+    if (!isObject(payload.customer) || !Object.hasOwn(payload.customer, field)) continue;
+    if (version >= 11) check(payload.customer[field], ADDRESS, `customer.${field}`);
+    else unsupported(`customer.${field}`);
   }
   each(payload.lines, LINE, 'lines', (line, at) => check(line.custom, LINE_CUSTOM, `${at}.custom`));
   each(payload.fees, FEE, 'fees');
