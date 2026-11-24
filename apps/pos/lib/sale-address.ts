@@ -43,9 +43,19 @@ export function useTaxZone(session: Session): TaxZone | undefined {
   }, [key]);
   return useMemo(() => { try { return parseTaxZone(JSON.parse(json ?? 'null')); } catch { return undefined; } }, [json]);
 }
-/** True only when the store taxes by address and either address's country is outside the till's zone. */
-export function addressBlocked(taxZone: TaxZone | undefined, billing?: CustomerAddress, shipping?: CustomerAddress): boolean {
+/** True only at order.create v11 (v10 sends no address), when the store taxes by address and either address's country is outside the till's zone. */
+export function addressBlocked(taxZone: TaxZone | undefined, orderCreate: number | undefined, billing?: CustomerAddress, shipping?: CustomerAddress): boolean {
+  if ((orderCreate ?? 0) < UNTAXED_ADDRESS_ORDER_CREATE_VERSION) return false;
   return taxZone?.byAddress === true && [billing?.country, shipping?.country].some(country => !!country && !taxZone.countries.includes(country));
+}
+/** Checkout's address guard: settle the prefill, then refuse a blocked sale before any tender starts. */
+export async function beginCheckout({ settle, blocked, start, setError }: {
+  settle(): void; blocked: boolean; start(): Promise<string | undefined>; setError(error: string | undefined): void;
+}): Promise<void> {
+  settle(); // From here a late customer read never pins an address: the sale keeps the one it has now.
+  if (blocked) return setError(ADDRESS_ZONE_BLOCK_TEXT);
+  setError(undefined);
+  setError(await start());
 }
 /** The ten parts plugin v11 takes, empty ones dropped; never `email` (it would be refused after payment). */
 export function addressCopy(address: CustomerAddress | undefined): CustomerAddress | undefined {

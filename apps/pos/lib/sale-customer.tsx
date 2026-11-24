@@ -5,15 +5,17 @@ import type { TallyConnector } from '@tallyui/core';
 import { ADDRESS_CHANGE_REFUSED, UNTAXED_ADDRESS_ORDER_CREATE_VERSION, type useSale } from '@tallyui/pos';
 import { addressEditorValue } from './customer-edit';
 import { isWalkIn } from './customer-list';
-import { ADDRESS_ZONE_BLOCK_TEXT, saleAddresses, useSaleCountries } from './sale-address';
+import { ADDRESS_ZONE_BLOCK_TEXT, saleAddresses, useSaleCountries, type TaxZone } from './sale-address';
 import { sessionContext, type Session } from './session';
 import { SlidersIcon } from './nav-icons';
 
-export function SaleCustomer({ sale, connector, session, onSettings, orderCreate }: {
+export function SaleCustomer({ sale, connector, session, onSettings, orderCreate, taxZone }: {
   sale: ReturnType<typeof useSale>; connector: TallyConnector; session: Session;
   onSettings?: () => void;
   /** The store's order.create cap: the address pin shows from v11, which carries it to the store. */
   orderCreate?: number;
+  /** /info's taxZone: while it is unknown the store could refuse a hand-added address after payment, so there is no Add or Edit. */
+  taxZone?: TaxZone;
 }) {
   const [open, setOpen] = useState(false);
   if (!connector.searchCustomers) return null;
@@ -44,7 +46,7 @@ export function SaleCustomer({ sale, connector, session, onSettings, orderCreate
       </HStack>
       {/* A guest sale gets no pin: TallyUI keeps addresses on a picked customer only. */}
       {customer && (orderCreate ?? 0) >= UNTAXED_ADDRESS_ORDER_CREATE_VERSION
-        ? <SaleAddress key={`${sale.order.id}|${customer.id}`} sale={sale} session={session} /> : null}
+        ? <SaleAddress key={`${sale.order.id}|${customer.id}`} sale={sale} session={session} zoneKnown={!!taxZone} /> : null}
       {open ? (
         <View testID="customer-picker" className="rounded-md border border-border p-3">
           <CustomerPicker
@@ -67,7 +69,7 @@ export function SaleCustomer({ sale, connector, session, onSettings, orderCreate
 }
 
 /** The sale's address pin: shipping, else billing, with Edit and Remove in the cart; text only at any other stage. */
-function SaleAddress({ sale, session }: { sale: ReturnType<typeof useSale>; session: Session }) {
+function SaleAddress({ sale, session, zoneKnown }: { sale: ReturnType<typeof useSale>; session: Session; zoneKnown: boolean }) {
   const { billing, shipping } = sale.order.customer ?? {};
   const shown = shipping ?? billing, editable = sale.stage.kind === 'cart' && !sale.saving;
   // Without the store's countries there is no Add or Edit: a free-text country would be refused after payment.
@@ -78,7 +80,7 @@ function SaleAddress({ sale, session }: { sale: ReturnType<typeof useSale>; sess
     if ('error' in addresses) return setEditing({ value, error: addresses.error });
     setEditing(sale.setAddresses(addresses.billing, addresses.shipping) ? null : { value, error: ADDRESS_CHANGE_REFUSED });
   };
-  const canEdit = editable && !!countries && !editing;
+  const canEdit = editable && zoneKnown && !!countries && !editing;
   if (!shown && !canEdit && !editing) return null;
   return (
     <VStack className="gap-2">
