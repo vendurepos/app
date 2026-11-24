@@ -1,6 +1,6 @@
 import type { SyncContext } from '@tallyui/core';
 import { afterEach, expect, it, vi } from 'vitest';
-import { CUSTOMER_FIELD_CONFIG_QUERY, CUSTOMER_FIELD_EMPTY, customerFieldDefs, customerFieldsQuery, customerFieldValue, readCustomerFields, type CustomerFieldDef } from './customer-fields';
+import { CUSTOMER_FIELD_CONFIG_QUERY, CUSTOMER_FIELD_EMPTY, CUSTOMER_FIELD_PERMISSIONS_QUERY, customerFieldDefs, customerFieldsQuery, customerFieldValue, readCustomerFields, type CustomerFieldDef } from './customer-fields';
 
 const context: SyncContext = {
   connectorId: 'vendure', baseUrl: 'https://shop.example.com',
@@ -27,8 +27,20 @@ it('customerFieldDefs keeps Customer fields in order, excludes internal, relatio
       { name: 'notes', type: 'text', list: true, label: [{ languageCode: 'de', value: 'Notizen' }] },
       { name: '_code2', type: 'int', list: false },
     ] },
-  ])).toEqual([defs[0], { name: 'notes', label: 'Notizen', type: 'text', list: true }, { name: '_code2', label: '_code2', type: 'int', list: false }]);
-  expect(customerFieldDefs([{ entityName: 'Product', customFields: [{ name: 'code', type: 'string', list: false }] }])).toEqual([]);
+  ], [])).toEqual([defs[0], { name: 'notes', label: 'Notizen', type: 'text', list: true }, { name: '_code2', label: '_code2', type: 'int', list: false }]);
+  expect(customerFieldDefs([{ entityName: 'Product', customFields: [{ name: 'code', type: 'string', list: false }] }], [])).toEqual([]);
+});
+
+it('customerFieldDefs leaves out a field gated by a permission the role lacks; any one listed permission is enough', () => {
+  const entities = [{ entityName: 'Customer', customFields: [
+    { name: 'open', type: 'string', list: false },
+    { name: 'empty', type: 'string', list: false, requiresPermission: [] },
+    { name: 'nulled', type: 'string', list: false, requiresPermission: null },
+    { name: 'anyOf', type: 'string', list: false, requiresPermission: ['SuperAdmin', 'ReadCustomer'] },
+    { name: 'gated', type: 'string', list: false, requiresPermission: ['SuperAdmin'] },
+  ] }];
+  expect(customerFieldDefs(entities, ['ReadCustomer']).map(def => def.name)).toEqual(['open', 'empty', 'nulled', 'anyOf']);
+  expect(customerFieldDefs(entities, null).map(def => def.name)).toEqual(['open', 'empty', 'nulled', 'anyOf', 'gated']);
 });
 
 it('customerFieldValue formats strings, numbers, booleans, dates, lists and empty values', () => {
@@ -71,6 +83,34 @@ it('readCustomerFields returns no rows after one fetch when there are no Custome
   vi.stubGlobal('fetch', fetch);
   expect(await readCustomerFields(context, 'c1')).toEqual([]);
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+const gatedConfig = { data: { globalSettings: { serverConfig: { entityCustomFields: [{ entityName: 'Customer', customFields: [
+  { name: 'taxId', type: 'string', list: false, requiresPermission: ['SuperAdmin'] },
+] }] } } } };
+
+it('readCustomerFields reads the active channel\'s permissions only when a field is gated, and leaves out a field the role lacks', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig)).mockResolvedValueOnce(Response.json({ data: {
+    me: { channels: [{ id: '1', permissions: ['SuperAdmin'] }, { id: '2', permissions: ['ReadCustomer'] }] }, activeChannel: { id: '2' },
+  } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await readCustomerFields(context, 'c1')).toEqual([]);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls[1][1].body).toBe(JSON.stringify({ query: CUSTOMER_FIELD_PERMISSIONS_QUERY }));
+});
+
+it('readCustomerFields keeps a gated field when the till\'s permissions cannot be read, as on a device-key till', async () => {
+  const values = () => Response.json({ data: { customer: { id: 'c1', customFields: { taxId: 'GB1' } } } });
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(gatedConfig))
+    .mockResolvedValueOnce(Response.json({ data: { me: null, activeChannel: { id: '1' } },
+      errors: [{ message: 'You are not currently authorized to perform this action', path: ['me'] }] }))
+    .mockResolvedValueOnce(values());
+  vi.stubGlobal('fetch', fetch);
+  expect(await readCustomerFields(context, 'c1')).toEqual([{ name: 'taxId', label: 'taxId', value: 'GB1' }]);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(gatedConfig))
+    .mockResolvedValueOnce(Response.json({}, { status: 403 })).mockResolvedValueOnce(values()));
+  expect(await readCustomerFields(context, 'c1')).toEqual([{ name: 'taxId', label: 'taxId', value: 'GB1' }]);
 });
 
 it('readCustomerFields returns null for an absent customer', async () => {

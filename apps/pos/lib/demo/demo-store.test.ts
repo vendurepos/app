@@ -950,7 +950,7 @@ it("answers CustomerAccount with each customer's Vendure User: verified, a guest
   expect(await account('unknown')).toBeNull();
 });
 
-it("answers CustomerCustomFieldConfig and CustomerCustomFields with each customer's read-only fields, empty values, and an unknown id null", async () => {
+it("answers CustomerCustomFieldConfig and CustomerCustomFields with each customer's read-only fields, empty values, an unknown id null, and a field gated by a permission the till lacks left out", async () => {
   const context = sessionContext(await signedIn());
   expect(await readCustomerFields(context, 'c1')).toEqual([
     { name: 'taxId', label: 'Tax ID', value: 'GB123456789' }, { name: 'wholesale', label: 'Wholesale', value: 'Yes' },
