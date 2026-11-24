@@ -11,7 +11,7 @@ import { canSendWithoutAddress } from './store-health';
 export type TaxZone = { byAddress: boolean; countries: string[] };
 // Device storage for the store's last good /info taxZone (raw JSON), one per session key, as use-tender-methods.ts keeps its list.
 export const TAX_ZONE_KEY = 'vendurepos.tax_zone';
-export const ADDRESS_ZONE_BLOCK_TEXT = "This store taxes by the customer's address, and this address is outside the till's tax zone. Remove the address to take payment.";
+export const ADDRESS_ZONE_BLOCK_TEXT = "This customer's address is outside this till's tax area, so the store would refuse the sale. Tap Remove address to take payment.";
 export const ADDRESS_PART_TOO_LONG_TEXT = 'An address line can be at most 255 characters. Shorten it to save.';
 const ADDRESS_PART_MAX = 255; // Plugin order.create v11 refuses a longer address value, after payment (invalid_payload).
 type Sale = ReturnType<typeof useSale>;

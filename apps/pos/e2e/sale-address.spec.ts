@@ -9,7 +9,7 @@ const CHANNEL_TOKEN = 'vendurepos-dev-pos';
 const USERNAME = 'superadmin';
 const PASSWORD = 'superadmin';
 // apps/pos/lib/sale-address.ts and store-health.ts own these sentences; keep app code out of the e2e.
-const ADDRESS_ZONE_BLOCK_TEXT = "This store taxes by the customer's address, and this address is outside the till's tax zone. Remove the address to take payment.";
+const ADDRESS_ZONE_BLOCK_TEXT = "This customer's address is outside this till's tax area, so the store would refuse the sale. Tap Remove address to take payment.";
 const TAX_ZONE_REFUSED_TEXT = "Refused by the store — the customer's address is in another tax zone. Send it without the address.";
 // A default billing and shipping address in Denmark: outside the e2e store's default tax zone, Germany (dev/vendure-store/src/seed.ts).
 const DK_ADDRESS = { fullName: 'Dana Zone', streetLine1: '1 Havnegade', city: 'Copenhagen', postalCode: '1058', countryCode: 'DK' };
