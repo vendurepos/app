@@ -3,7 +3,7 @@ import type { PosOrder } from '@tallyui/pos';
 import type { RxCollection } from 'rxdb';
 import { ADDRESS_PARTS, CUSTOMER_ADDRESS_REQUIRED_TEXT } from './customer-edit';
 import {
-  ADDRESS_PART_TOO_LONG_TEXT, addressBlocked, addressCopy, parseTaxZone, retryOrders, saleAddresses, sendWithoutAddress, shouldPrefill,
+  ADDRESS_PART_TOO_LONG_TEXT, addressBlocked, addressCopy, claimPrefill, lateReadApplies, parseTaxZone, retryOrders, saleAddresses, sendWithoutAddress,
 } from './sale-address';
 
 describe('parseTaxZone (u1)', () => {
@@ -36,18 +36,49 @@ describe('addressBlocked (u2)', () => {
   });
 });
 
-describe('shouldPrefill (u3)', () => {
-  const facts = { key: 'order|customer', seen: null, cart: true, hasAddress: false, orderCreate: 11, taxZone: { byAddress: false, countries: ['DE'] } };
-  it('prefills when every fact holds', () => expect(shouldPrefill(facts)).toBe(true));
+describe('claimPrefill (u3)', () => {
+  const facts = { key: 'order|customer', cart: true, hasAddress: false, orderCreate: 11, taxZone: { byAddress: false, countries: ['DE'] } };
+  it('prefills when every fact holds, and claims the key', () => {
+    const seen = new Set<string>();
+    expect(claimPrefill(seen, facts)).toBe(true);
+    expect(seen).toEqual(new Set(['order|customer']));
+  });
   it.each([
     ['taxZone undefined', { taxZone: undefined }],
     ['orderCreate 10', { orderCreate: 10 }],
-    ['the same order and customer seen before', { seen: 'order|customer' }],
-    ['an address already on the sale', { hasAddress: true }],
     ['outside the cart', { cart: false }],
     ['no customer', { key: null }],
   ])('does not with %s', (_, change) => {
-    expect(shouldPrefill({ ...facts, ...change })).toBe(false);
+    const seen = new Set<string>();
+    expect(claimPrefill(seen, { ...facts, ...change })).toBe(false);
+    expect(seen.size).toBe(0);
+  });
+  it('does not with the same order and customer seen before', () => {
+    expect(claimPrefill(new Set(['order|customer']), facts)).toBe(false);
+  });
+  it('never refills a sale switched away from and back to', () => {
+    const seen = new Set<string>();
+    expect([claimPrefill(seen, { ...facts, key: 'A|X' }), claimPrefill(seen, { ...facts, key: 'B|Y' }), claimPrefill(seen, { ...facts, key: 'A|X' })]).toEqual([true, true, false]);
+  });
+  it('lets an address already on the sale use up the key, so a later Remove is not refilled', () => {
+    const seen = new Set<string>();
+    expect(claimPrefill(seen, { ...facts, hasAddress: true })).toBe(false);
+    expect(claimPrefill(seen, facts)).toBe(false);
+  });
+});
+
+describe('lateReadApplies (u7)', () => {
+  const now = { order: { id: 'A', customer: { id: 'X' } }, stage: { kind: 'cart' } } as unknown as Parameters<typeof lateReadApplies>[0]['now'];
+  const facts = { settled: new Set<string>(), key: 'A|X', now, orderId: 'A', customerId: 'X' };
+  it('applies to the same untouched cart', () => expect(lateReadApplies(facts)).toBe(true));
+  it.each([
+    ['the key settled at Checkout', { settled: new Set(['A|X']) }],
+    ['a different order', { orderId: 'B' }],
+    ['a different customer', { customerId: 'Y' }],
+    ['a sale no longer in the cart', { now: { ...now, stage: { kind: 'tender' } } as typeof now }],
+    ['an address already pinned', { now: { ...now, order: { ...now.order, customer: { id: 'X', shipping: { address1: '1 Str', country: 'DE' } } } } as typeof now }],
+  ])('does not with %s', (_, change) => {
+    expect(lateReadApplies({ ...facts, ...change })).toBe(false);
   });
 });
 

@@ -15,7 +15,7 @@ const TAX_ZONE_REFUSED_TEXT = "Refused by the store — the customer's address i
 const DK_ADDRESS = { fullName: 'Dana Zone', streetLine1: '1 Havnegade', city: 'Copenhagen', postalCode: '1058', countryCode: 'DK' };
 const PIN_TEXT = '1 Havnegade, Copenhagen, DK';
 
-type Sent = { id: string; type: string; payload: { clientOrderId: string; customer?: { shipping?: unknown } } };
+type Sent = { id: string; type: string; payload: { clientOrderId: string; customer?: { billing?: unknown; shipping?: unknown } } };
 
 /**
  * Signs in, opens the register, makes a customer with the DK default address and puts the mug in the cart. Every
@@ -77,7 +77,7 @@ async function sellToDkCustomer(page: Page) {
     await expect.poll(async () => (items = (await admin(query, { id: orderId })).orders.items).length, { timeout: 30_000 }).toBe(1);
     return items[0];
   };
-  return { sent, pickCustomer, pay, storeOrder };
+  return { sent, customerId: id as string, pickCustomer, pay, storeOrder };
 }
 
 test('e1: a store that does not tax by address takes the DK customer\'s default address onto the order', async ({ page }) => {
@@ -155,7 +155,68 @@ test('e4: a tax_zone_mismatch refusal is sent again without the address from Sto
   await page.getByTestId('store-health-open').click();
   const row = page.getByTestId('store-health-attention').getByTestId(`store-health-attention-${orderId}`);
   await expect(row).toContainText(TAX_ZONE_REFUSED_TEXT);
-  await page.getByTestId(`store-health-attention-send-without-address-${orderId}`).click();
+  await expect(page.getByTestId(`store-health-attention-send-without-address-${orderId}`)).toBeVisible();
+  // Fix record opens the order sheet, whose own button sends it without the address.
+  await page.getByTestId(`store-health-attention-open-${orderId}`).click();
+  await page.getByTestId('order-sheet').getByTestId('order-sheet-send-without-address').click();
+  const order = await storeOrder(orderId);
+  expect(order.shippingAddress.streetLine1 ?? null).toBeNull();
+  expect(order.billingAddress.streetLine1 ?? null).toBeNull();
+});
+
+test('e5: a customer read still out when Checkout is pressed never pins the address onto the tender', async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  const { sent, customerId, pickCustomer, storeOrder } = await sellToDkCustomer(page);
+  // readCustomerAddresses (lib/customer-edit.ts) is connector-vendure's listVendureCustomers: an /admin-api customers query by id.
+  let release!: () => void, held = false;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/admin-api', async (route) => {
+    const body = route.request().method() === 'POST' ? route.request().postDataJSON() : null;
+    if (!body?.query?.includes('customers(') || body.variables?.options?.filter?.id?.eq !== customerId) return route.continue();
+    held = true;
+    await released;
+    await route.continue();
+  });
+  await pickCustomer();
+  await expect.poll(() => held).toBe(true);
+  await expect(page.getByTestId('sale-address')).toHaveCount(0);
+  const before = sent.length;
+  await checkout(page);
+  await expect(page.getByTestId('tender-pane')).toBeVisible();
+  const read = page.waitForResponse((response) => response.url().endsWith('/admin-api') && response.request().postDataJSON()?.variables?.options?.filter?.id?.eq === customerId);
+  release();
+  await read;
+  await expect(page.getByTestId('sale-address')).toHaveCount(0);
+  await takePayment(page);
+  await expect(page.getByTestId('sale-address')).toHaveCount(0);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await expect.poll(() => sent.length).toBeGreaterThan(before);
+  expect(sent[before].payload.customer?.billing).toBeUndefined();
+  expect(sent[before].payload.customer?.shipping).toBeUndefined();
+  const order = await storeOrder(sent[before].payload.clientOrderId);
+  expect(order.shippingAddress.streetLine1 ?? null).toBeNull();
+  expect(order.billingAddress.streetLine1 ?? null).toBeNull();
+});
+
+test('e6: a store at order.create 10 gets no address pin, and the sale goes without one', async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  // The plugin advertises order.create as a list of versions (info.controller.ts); taxZone stays as the store sends it.
+  await page.route('**/tally/v1/info', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const orderCreate = (body.contracts['order.create'] as number[]).filter((version) => version <= 10);
+    await route.fulfill({ response, json: { ...body, contracts: { ...body.contracts, 'order.create': orderCreate } } });
+  });
+  const { sent, pickCustomer, pay, storeOrder } = await sellToDkCustomer(page);
+  await pickCustomer();
+  await expect(page.getByTestId('sale-address')).toHaveCount(0);
+  await expect(page.getByTestId('sale-address-add')).toHaveCount(0);
+  await expect(page.getByTestId('address-block')).toHaveCount(0);
+  const before = sent.length;
+  const orderId = await pay();
+  expect(sent[before].payload.customer?.billing).toBeUndefined();
+  expect(sent[before].payload.customer?.shipping).toBeUndefined();
   const order = await storeOrder(orderId);
   expect(order.shippingAddress.streetLine1 ?? null).toBeNull();
   expect(order.billingAddress.streetLine1 ?? null).toBeNull();

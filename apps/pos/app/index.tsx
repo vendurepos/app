@@ -579,7 +579,7 @@ function Sale({
   useSaleDisplay(customerDisplay, { order: sale.order, stage: sale.stage }, { receipt: { storeName: storeLabel(session) }, methodTitle: tenderName, declinedMessage: 'Payment declined' });
   useDefaultCustomer(sale, session);
   const taxZone = useTaxZone(session);
-  useSaleAddressPrefill(sale, session, taxZone, capabilities?.orderCreate);
+  const prefill = useSaleAddressPrefill(sale, session, taxZone, capabilities?.orderCreate);
   // A store that taxes by address would refuse this sale after payment: no tender until the address is removed.
   const addressBlock = addressBlocked(taxZone, sale.order.customer?.billing, sale.order.customer?.shipping);
   const [parkedOpen, setParkedOpen] = useState(false);
@@ -619,6 +619,7 @@ function Sale({
   }, [stage.kind, onReceipt]);
   const [payError, setPayError] = useState<string>();
   async function checkout() {
+    prefill.settle(); // From here a late customer read never pins an address: the sale keeps the one it has now.
     if (addressBlock) return setPayError(ADDRESS_ZONE_BLOCK_TEXT);
     setPayError(undefined);
     setPayError(await startTenderInSession(register, sale, 'cash', (id) => setTenderDrawer((current) => current ?? id)));

@@ -63,27 +63,32 @@ export function saleAddresses(value: AddressEditorValue): { billing?: CustomerAd
   return { billing, shipping };
 }
 export const hasAddress = (sale: Pick<Sale, 'order'>): boolean => !!(sale.order.customer?.billing || sale.order.customer?.shipping);
-/** Whether a picked customer's defaults are read into the sale: once per order and customer (so a Remove is never refilled). */
-export function shouldPrefill(facts: { key: string | null; seen: string | null; cart: boolean; hasAddress: boolean; orderCreate?: number; taxZone?: TaxZone }): boolean {
-  return facts.key !== null && facts.key !== facts.seen && facts.cart && !facts.hasAddress && (facts.orderCreate ?? 0) >= UNTAXED_ADDRESS_ORDER_CREATE_VERSION && facts.taxZone !== undefined;
+/** Whether a picked customer's defaults are read into the sale: once per order and customer (so a Remove is never refilled). It claims the key on true, and on an address already on the sale. */
+export function claimPrefill(seen: Set<string>, facts: { key: string | null; cart: boolean; hasAddress: boolean; orderCreate?: number; taxZone?: TaxZone }): boolean {
+  if (facts.key === null || seen.has(facts.key) || !facts.cart || (facts.orderCreate ?? 0) < UNTAXED_ADDRESS_ORDER_CREATE_VERSION || facts.taxZone === undefined) return false;
+  seen.add(facts.key); return !facts.hasAddress;
 }
-/** Pins the picked customer's default addresses to the sale, from the picker and from the default customer alike. */
-export function useSaleAddressPrefill(sale: Sale, session: Session, taxZone: TaxZone | undefined, orderCreate: number | undefined): void {
-  const saleRef = useRef(sale), seen = useRef<string | null>(null); saleRef.current = sale;
+/** Whether a customer read that lands late still fills the sale: not once Checkout settled it, and only for the same untouched cart. */
+export function lateReadApplies({ settled, key, now, orderId, customerId }: { settled: Set<string>; key: string; now: Pick<Sale, 'order' | 'stage'>; orderId: string; customerId: string }): boolean {
+  return !settled.has(key) && now.order.id === orderId && now.order.customer?.id === customerId && now.stage.kind === 'cart' && !hasAddress(now);
+}
+// `${orderId}|${customerId}` keys, one set per JS runtime (order ids are unique): they outlive tab switches and remounts.
+const prefillSeen = new Set<string>(), prefillSettled = new Set<string>();
+/** Pins the picked customer's default addresses to the sale, from the picker and from the default customer alike; settle() at Checkout drops a late read. */
+export function useSaleAddressPrefill(sale: Sale, session: Session, taxZone: TaxZone | undefined, orderCreate: number | undefined): { settle(): void } {
+  const saleRef = useRef(sale); saleRef.current = sale;
   const orderId = sale.order.id, customerId = sale.order.customer?.id ?? null, cart = sale.stage.kind === 'cart', pinned = hasAddress(sale);
   useEffect(() => {
     const key = customerId === null ? null : `${orderId}|${customerId}`;
-    // A sale that already has an address uses up its key too, so a later Remove stays removed.
-    if (!shouldPrefill({ key, seen: seen.current, cart, hasAddress: false, orderCreate, taxZone })) return;
-    seen.current = key;
-    if (pinned) return;
+    if (!claimPrefill(prefillSeen, { key, cart, hasAddress: pinned, orderCreate, taxZone })) return;
     void readCustomerAddresses(sessionContext(session), customerId!).then(read => {
       const now = saleRef.current;
-      if (!read || now.order.id !== orderId || now.order.customer?.id !== customerId || now.stage.kind !== 'cart' || hasAddress(now)) return;
+      if (!read || !lateReadApplies({ settled: prefillSettled, key: key!, now, orderId, customerId: customerId! })) return;
       const addresses = saleAddresses(read);
       if (!('error' in addresses) && (addresses.billing || addresses.shipping)) now.setAddresses(addresses.billing, addresses.shipping);
     }, () => {});
   }, [orderId, customerId, cart, pinned, orderCreate, taxZone, session]);
+  return { settle: () => { const now = saleRef.current.order; if (now.customer?.id) prefillSettled.add(`${now.id}|${now.customer.id}`); } };
 }
 const countryReads = new WeakMap<Session, Promise<NonNullable<AddressFieldsProps['countries']>>>();
 /** The store's countries, read once per session; undefined until read and when the read fails (dropped, so the next mount asks again). */

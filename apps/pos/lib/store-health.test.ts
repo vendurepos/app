@@ -162,6 +162,8 @@ describe('attentionReason and canSendAgain', () => {
     [{ syncStatus: 'rejected', error: { code: 'idempotency_mismatch' } }, 'Refused by the store — idempotency_mismatch', false],
     [{ syncStatus: 'pending' }, "Can't reach the store", false],
     [{ syncStatus: 'rejected', error: { code: 'tax_zone_mismatch' } }, TAX_ZONE_REFUSED_TEXT, false],
+    // Only a refusal offers Send without the address: a pending order that carries the code is still on its way.
+    [{ syncStatus: 'pending', error: { code: 'tax_zone_mismatch' } }, "Can't reach the store", false],
   ] as const)('words %o as attentionRows did', (fields, reason, retry) => {
     const order = { ...sale, ...fields } as PosOrder;
     expect([attentionReason(order), canSendAgain(order)]).toEqual([reason, retry]);
