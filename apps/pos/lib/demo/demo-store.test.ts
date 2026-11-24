@@ -8,6 +8,7 @@ import { orderTransport } from '../order-transport';
 import { loadOrderHistory } from '../order-history';
 import { loadOrderPage } from '../order-list';
 import { loadCustomerPage } from '../customer-list';
+import { readCustomerFields } from '../customer-fields';
 import { listCustomerNotes } from '../customer-notes';
 import { addressEditorValue, readCountries, readCustomerAddresses, saveCustomer } from '../customer-edit';
 import { orderDetailView } from '../order-detail';
@@ -947,6 +948,17 @@ it("answers CustomerAccount with each customer's Vendure User: verified, a guest
   const created = await createVendureConnector().createCustomer!(sessionContext(await signedIn()), { email: 'till@example.com', firstName: 'Till', lastName: 'Made' });
   expect((await account(created.id)).user).toEqual({ id: expect.any(String), verified: false });
   expect(await account('unknown')).toBeNull();
+});
+
+it("answers CustomerCustomFieldConfig and CustomerCustomFields with each customer's read-only fields, empty values, and an unknown id null", async () => {
+  const context = sessionContext(await signedIn());
+  expect(await readCustomerFields(context, 'c1')).toEqual([
+    { name: 'taxId', label: 'Tax ID', value: 'GB123456789' }, { name: 'wholesale', label: 'Wholesale', value: 'Yes' },
+  ]);
+  expect(await readCustomerFields(context, 'c3')).toEqual([
+    { name: 'taxId', label: 'Tax ID', value: '—' }, { name: 'wholesale', label: 'Wholesale', value: 'No' },
+  ]);
+  expect(await readCustomerFields(context, 'unknown')).toBeNull();
 });
 
 it("the customer notes read returns the newest 100 of more than 100 notes, oldest first", async () => {

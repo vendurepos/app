@@ -6,6 +6,7 @@ import { formatMoney, type Customer } from '@tallyui/core';
 import { addressEditorValue, addressPatch, CUSTOMER_ADDRESS_VENDURE_TEXT, CUSTOMER_OFFLINE_TEXT, customerFormValues, customerPatch, saveCustomer, useCustomerAddresses } from './customer-edit';
 import { CUSTOMER_GROUPS_LABEL, CUSTOMER_GROUPS_HINT, customerGroupsText, type CustomerRow } from './customer-list';
 import { CUSTOMER_ACCOUNT_LABEL, useCustomerAccount } from './customer-account';
+import { useCustomerFields } from './customer-fields';
 import { addCustomerNote, useCustomerNotes } from './customer-notes';
 import { useCustomerOrders } from './customer-orders';
 import { STAFF_NOTE_LABEL } from './order-notes';
@@ -35,6 +36,7 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
   const groupsText = customerGroupsText(row);
   const { notes, reload } = useCustomerNotes(session, open && row ? row.id : null);
   const account = useCustomerAccount(session, open && row ? row.id : null);
+  const fields = useCustomerFields(session, open && row ? row.id : null);
   const orders = useCustomerOrders(session, open && row ? row.id : null);
   const source = useCustomerAddresses(session, open, row?.id ?? null);
   const [addressValue, setAddressValue] = useState<AddressEditorValue>({});
@@ -89,6 +91,13 @@ export function CustomerSheet({ session, row, open, onClose, onSaved, onOpenOrde
         <Text testID="customer-sheet-account-value" className="flex-1 px-3 text-sm">{account}</Text>
         <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
       </HStack>}
+      {row !== null && fields !== null && fields.length > 0 && <VStack testID="customer-sheet-fields" className="gap-1">
+        {fields.map(field => <HStack key={field.name} testID={`customer-sheet-field-${field.name}`} className="items-center justify-between px-4">
+          <Text className="w-20 text-sm text-muted-foreground">{field.label}</Text>
+          <Text testID={`customer-sheet-field-${field.name}-value`} className="flex-1 px-3 text-sm">{field.value}</Text>
+          <Text className="text-xs text-muted-foreground">{CUSTOMER_GROUPS_HINT}</Text>
+        </HStack>)}
+      </VStack>}
       {row !== null && <VStack testID="customer-sheet-notes" className="gap-1 px-4">
         {notes.map(item => <Text key={item.id} testID={`customer-sheet-note-${item.id}`} className="text-sm">{`${STAFF_NOTE_LABEL}: ${item.text}`}</Text>)}
         <HStack space="sm" className="items-center">

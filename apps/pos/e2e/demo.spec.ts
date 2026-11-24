@@ -703,6 +703,29 @@ test("the customer sheet shows the customer's account read-only, as v2's usernam
   await expect(sheet.getByTestId('customer-sheet-account')).toHaveCount(0);
 });
 
+test("the customer sheet shows the customer's Vendure custom fields read-only, as v2's tax ID; an empty field reads —", async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('customers-open').click();
+  const sheet = page.getByTestId('customer-sheet');
+  await page.getByTestId('customers-edit-c1').click();
+  await expect(sheet.getByTestId('customer-sheet-field-taxId-value')).toHaveText('GB123456789');
+  await expect(sheet.getByTestId('customer-sheet-field-wholesale-value')).toHaveText('Yes');
+  await expect(sheet.getByTestId('customer-sheet-fields').getByRole('textbox')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('06k-customer-fields.png') });
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-edit-c3').click();
+  await expect(sheet.getByTestId('customer-sheet-field-taxId-value')).toHaveText('—');
+  await expect(sheet.getByTestId('customer-sheet-field-wholesale-value')).toHaveText('No');
+  await page.getByTestId('customer-sheet-close').click();
+  await page.getByTestId('customers-add').click();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId('customer-sheet-fields')).toHaveCount(0);
+});
+
 test("the customer sheet lists a customer's staff notes and adds one; notes are never on a receipt or a print", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/demo');
