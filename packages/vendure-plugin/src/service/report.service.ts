@@ -341,7 +341,8 @@ export class ReportService {
         }
       }
     }
-    return ids.map(id => orders.get(String(id))!);
+    // An order deleted after the id query has no row: skip it, as find does (#481).
+    return ids.flatMap(id => orders.get(String(id)) ?? []);
   }
 
   /** Products and tax rows from the matching orders, loaded in pages by id. */
