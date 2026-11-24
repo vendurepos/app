@@ -209,12 +209,18 @@ test('e6: a store at order.create 10 gets no address pin, and the sale goes with
     await route.fulfill({ response, json: { ...body, contracts: { ...body.contracts, 'order.create': orderCreate } } });
   });
   const { sent, pickCustomer, pay, storeOrder } = await sellToDkCustomer(page);
+  let countryReads = 0;
+  page.on('request', (request) => {
+    if (request.url() === `${STORE_URL}/admin-api` && (request.postData() ?? '').includes('countries(')) countryReads += 1;
+  });
   await pickCustomer();
   await expect(page.getByTestId('sale-address')).toHaveCount(0);
   await expect(page.getByTestId('sale-address-add')).toHaveCount(0);
   await expect(page.getByTestId('address-block')).toHaveCount(0);
   const before = sent.length;
   const orderId = await pay();
+  // The pin is the only thing on the sell screen that reads countries, and it fires that read as it mounts in the cart.
+  expect(countryReads).toBe(0);
   expect(sent[before].payload.customer?.billing).toBeUndefined();
   expect(sent[before].payload.customer?.shipping).toBeUndefined();
   const order = await storeOrder(orderId);

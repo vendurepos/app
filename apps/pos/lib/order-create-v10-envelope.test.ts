@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createVendureConnector } from '@tallyui/connector-vendure';
 import { defaultPaymentMethods, wireMethodOf, type Customer, type PaymentMethodDescriptor, type StoreSettings } from '@tallyui/core';
@@ -77,11 +77,15 @@ it.each([['the stored default customer', false], ['builder.setCustomer directly'
     expectNoAddressFields(sent);
   });
 
-it('no app or lib source sets a tax-by-address hook or sale addresses', () => {
+it('no app or lib source sets a tax-by-address hook, and only the 5.2a pin sets sale addresses', () => {
   // A source check: useSale's options are inline in app/index.tsx, and a spread-in from any other file is caught too.
+  const root = fileURLToPath(new URL('..', import.meta.url).href);
   const files = ['../app', '.'].flatMap((dir) => sources(fileURLToPath(new URL(dir, import.meta.url).href)));
   expect(files.some((file) => file.endsWith(join('app', 'index.tsx')))).toBe(true);
-  expect(files.filter((file) => /taxContextFor|setAddresses/.test(readFileSync(file, 'utf8')))).toEqual([]);
+  expect(files.filter((file) => /taxContextFor/.test(readFileSync(file, 'utf8')))).toEqual([]);
+  // The 5.2a address pin, gated on order.create >= 11, is the only caller of setAddresses.
+  expect(files.filter((file) => /setAddresses/.test(readFileSync(file, 'utf8'))).map((file) => relative(root, file)).sort())
+    .toEqual([join('lib', 'sale-address.ts'), join('lib', 'sale-customer.tsx')]);
 });
 
 it("the merchant's tiles at cap 10 send v10 with the voucher's methodId, and still no addresses or coupons", () => {
