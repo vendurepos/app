@@ -3260,6 +3260,78 @@ test('Hand over in the cashier sheet signs this account out and leaves the regis
   await expect(page.getByTestId('register-open-panel')).toBeVisible();
 });
 
+test('Sign out and Hand over wait while the sale holds a payment (#504)', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const sheet = page.getByTestId('cashier-sheet');
+  const tender = page.getByTestId('tender-pane');
+  const cart = page.getByTestId('cart');
+  const expectSignOut = async (locked: boolean) => {
+    await page.getByTestId('register-bar-cashier').click();
+    await expect(sheet).toBeVisible();
+    if (locked) {
+      await expect(sheet.getByTestId('sign-out-locked')).toHaveText('Take the rest of the payment or cancel it before signing out.');
+      await expect(sheet.getByTestId('sign-out')).toBeDisabled();
+      await expect(sheet.getByTestId('hand-over')).toBeDisabled();
+    } else {
+      await expect(sheet.getByTestId('sign-out-locked')).toHaveCount(0);
+      await expect(sheet.getByTestId('sign-out')).toBeEnabled();
+      await expect(sheet.getByTestId('hand-over')).toBeEnabled();
+    }
+  };
+  const closeSheet = async () => {
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+  };
+
+  // 1. A cart with lines and no payment: open.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await expectSignOut(false);
+  await closeSheet();
+
+  // 2. €5.00 cash taken: locked, and a forced press of either button signs nobody out.
+  await checkout(page);
+  await tender.getByTestId('tender-method-cash').click();
+  await typeAmount(page, '5.00');
+  await takePayment(page);
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
+  await expectSignOut(true);
+  await sheet.getByTestId('sign-out').click({ force: true });
+  await sheet.getByTestId('hand-over').click({ force: true });
+  await expect(page.getByTestId('switch-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('demo-enter')).toHaveCount(0);
+  await expect(page.getByTestId('register-bar-cashier')).toBeVisible();
+  await closeSheet();
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
+
+  // 3. Paid in full: the receipt is a completed sale, so the sheet is open again.
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await expectSignOut(false);
+  await closeSheet();
+  await page.getByTestId('receipt').getByTestId('new-sale').click();
+
+  // 4. A cash payment cancelled (its leg voided): open again.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await tender.getByTestId('tender-method-cash').click();
+  await typeAmount(page, '5.00');
+  await takePayment(page);
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
+  await tender.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByTestId('tender-cancel-view').getByTestId('tender-cancel-confirm').click();
+  await expect(tender).toHaveCount(0);
+  await expectSignOut(false);
+
+  // 5. Hand over works from there.
+  await sheet.getByTestId('hand-over').click();
+  await page.getByTestId('switch-confirm').getByTestId('switch-confirm-confirm').click();
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+});
+
 test('the cashier sheet and the hand-over name the register the till is at', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
@@ -4563,6 +4635,21 @@ test('a parked sale holding a payment is counted by the register and cannot be d
   await cancelView.getByTestId('tender-cancel-back').click();
   await expect(tender).toHaveCount(0);
   await expect(saleTab).toContainText('Partly paid · €4.52 due');
+  // The kept leg locks Sign out and Hand over: signing out would unmount it (#504).
+  const sheet = page.getByTestId('cashier-sheet');
+  const expectSignOut = async (locked: boolean) => {
+    await page.getByTestId('register-bar-cashier').click();
+    await expect(sheet).toBeVisible();
+    if (locked) await expect(sheet.getByTestId('sign-out-locked')).toHaveText('Take the rest of the payment or cancel it before signing out.');
+    else await expect(sheet.getByTestId('sign-out-locked')).toHaveCount(0);
+    for (const button of ['sign-out', 'hand-over']) {
+      if (locked) await expect(sheet.getByTestId(button)).toBeDisabled();
+      else await expect(sheet.getByTestId(button)).toBeEnabled();
+    }
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+  };
+  await expectSignOut(true);
 
   // 3. Parked, the live sale is empty: the register counts the parked €5.00 through the draft.
   await page.getByTestId('parked-open').click();
@@ -4570,6 +4657,8 @@ test('a parked sale holding a payment is counted by the register and cannot be d
   await expect(page.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
   await page.getByTestId('parked-sales-dismiss').click();
   await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+  // The draft survives sign-out and counts on the Z, so a parked payment doesn't lock it.
+  await expectSignOut(false);
   const panel = page.getByTestId('register-panel');
   const otherTenders = async (amount: string) => {
     await page.getByTestId('register-open-panel').click();
@@ -4591,6 +4680,9 @@ test('a parked sale holding a payment is counted by the register and cannot be d
   await expect(row).toHaveCount(1);
   await expect(page.getByTestId(`parked-discard-cancel-${id}`)).toBeVisible();
   await page.getByTestId(`parked-discard-cancel-${id}`).click();
+  await page.getByTestId('parked-sales-dismiss').click();
+  await otherTenders('€5.00');
+  await page.getByTestId('parked-open').click();
 
   // 5. Resumed and finished in cash: paid once, and counted once.
   await page.getByTestId(`parked-resume-${id}`).click();
