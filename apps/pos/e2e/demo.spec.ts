@@ -829,7 +829,7 @@ test('The sale\'s customer picker shows v2\'s avatars and a Guest row, and Guest
   await page.getByLabel('Search customers').fill('ada');
   const picker = page.getByTestId('customer-picker');
   await expect(picker.getByTestId('customer-picker-option-guest')).toBeVisible();
-  // avatarInitials('Ada Lovelace') in TallyUI 4.2.0 is 'AL'.
+  // avatarInitials('Ada Lovelace') in TallyUI 5.0.0 is 'AL'.
   await expect(picker.getByText('AL', { exact: true })).toBeVisible();
   await picker.getByText('Ada Lovelace', { exact: true }).click();
   await expect(page.getByTestId('sale-customer')).toHaveText('Ada Lovelace');
@@ -2053,7 +2053,7 @@ test("Reports › a card's head opens its panel as v2: Payments, Products and Ta
   await expect(panel).toHaveCount(0);
   await expect(page.getByTestId('card-categories')).toBeVisible();
 
-  // No panel for Orders or Refunds in TallyUI 4.2.0: both open the Orders screen (stand-in until TallyUI/tallyui#1215).
+  // No panel for Orders or Refunds in TallyUI 5.0.0: both open the Orders screen (stand-in until TallyUI/tallyui#1215).
   await page.getByTestId('card-orders-open').click();
   await expect(page.getByTestId('reports-panel')).toHaveCount(0);
   await expect(page.getByTestId('orders-panel')).toBeVisible();
@@ -2675,7 +2675,7 @@ test('Settings › General › Products keeps Browse by and Variations for this 
   await page.getByTestId('settings-back').click();
   await search.fill('T-Shirt');
   await tee.click();
-  // TallyUI 4.2.0's grid list chooser has no testIDs (variation-row-* are the table's rows): its label and a variant's SKU.
+  // TallyUI 5.0.0's grid list chooser has no testIDs (variation-row-* are the table's rows): its label and a variant's SKU.
   const chooser = page.getByLabel('Choose variant');
   await expect(chooser.getByRole('button', { name: /TEE-S-BLK/ })).toBeVisible();
   // At 600 high the open chooser squeezes the category tiles to nothing: its own Cancel closes it.
@@ -4553,6 +4553,45 @@ test('a demo cashier splits a sale between cash and card', async ({ page }) => {
   await expect(receipt.getByTestId('receipt-payment-cash')).toHaveText('€5.00');
   await expect(receipt.getByTestId('receipt-payment-external')).toBeVisible();
   await expect(receipt.getByTestId('receipt-change')).toHaveText('€0.00');
+});
+
+test("the register's drawer counts a payment while its sale is still open, once", async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const panel = page.getByTestId('register-panel');
+  const hero = panel.getByTestId('register-panel-hero');
+  const drawer = async (amount: string) => {
+    await page.getByTestId('register-open-panel').click();
+    await expect(hero).toContainText(amount);
+    await panel.getByTestId('register-panel-dismiss').click();
+    await expect(panel).toHaveCount(0);
+  };
+  const takeCash = async () => {
+    await page.getByTestId('tender-method-cash').click();
+    await typeAmount(page, '5.00');
+    await takePayment(page);
+    await expect(page.getByTestId('cart').getByTestId('cart-paid')).toHaveText('€5.00');
+  };
+  // One mug, €9.52: €5.00 cash taken, the sale still at its tender, is in the drawer already (TallyUI's liveSale).
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await takeCash();
+  await drawer('€105.00');
+  // The pane's own Cancel payment on the cash leg: the drawer is back to its float.
+  await page.locator('[data-testid^="tender-leg-"][data-testid$="-void"]').click();
+  await expect(page.getByTestId('cart').getByTestId('cart-paid')).toHaveText('€0.00');
+  await drawer('€100.00');
+  // €5.00 cash again, the rest by card terminal, completed: the stored sale counts the cash, the live sale no longer does.
+  await takeCash();
+  await page.getByTestId('tender-method-card-terminal').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await page.getByTestId('new-sale').click();
+  await page.getByTestId('register-open-panel').click();
+  await expect(hero).toContainText('€105.00');
+  await expect(panel.getByTestId('register-panel-other-tenders')).toContainText('€4.52');
 });
 
 /** A cart line's TallyUI PickStepper part (`cart-line-<line id>-pick-*`), found inside the app's `cart-line-<sku>` wrapper. */

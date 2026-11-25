@@ -7,6 +7,7 @@ const figures: SalesFigures = {
   range: { from: '2026-11-17', to: '2026-11-17' },
   totals: {
     grossMinor: 952, netMinor: 800, taxMinor: 152, discountMinor: 80, refundsMinor: 0, embeddedRefundsMinor: 0,
+    roundingMinor: 0, refundBasis: 'dated', grossAfterRefundsMinor: 952,
     orderCount: 1, averageMinor: 952, items: 1, margin,
   },
   payments: { rows: [{ method: 'cash', label: 'Cash', amountMinor: 952, orders: 1 }], takenMinor: 952 },

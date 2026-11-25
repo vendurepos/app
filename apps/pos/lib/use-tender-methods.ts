@@ -28,7 +28,7 @@ function listOf(json: string | null): unknown[] | undefined {
  * The store's Tally POS payment methods for TenderPane, or undefined for its default tiles. It reads /tally/v1/info on
  * mount and whenever `capabilities` (the sale settings' read) changes. A refused or failed read, or a body with no
  * paymentMethods array, keeps the last good list; an empty list replaces it. The result is the same array while the
- * list and the order.create cap are unchanged. TallyUI 4.2.0's useTender does not restart on a new `methods`
+ * list and the order.create cap are unchanged. TallyUI 5.0.0's useTender does not restart on a new `methods`
  * (tender-methods-mid-tender.test.ts pins it); the stable array is hygiene.
  */
 export function useTenderMethods(session: Session, capabilities?: ServerCapabilities): PaymentMethodDescriptor[] | undefined {

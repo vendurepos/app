@@ -46,7 +46,8 @@ describe('storeSalesFigures', () => {
   it('maps the v2 report to SalesFigures in exact cents', () => {
     const figures = storeSalesFigures(REPORT, COMPARE, DAY, BEFORE);
     expect(figures.totals).toEqual({ grossMinor: 4521, netMinor: 3900, taxMinor: 621, discountMinor: 150, refundsMinor: 952,
-      embeddedRefundsMinor: 0, orderCount: 3, averageMinor: 1507, items: 5, margin: NO_MARGIN });
+      embeddedRefundsMinor: 0, roundingMinor: 0, refundBasis: 'dated', grossAfterRefundsMinor: 3569, orderCount: 3,
+      averageMinor: 1507, items: 5, margin: NO_MARGIN });
     expect('medianMinor' in figures.totals).toBe(false);
     expect('largestMinor' in figures.totals).toBe(false);
     expect(figures.products).toEqual([
@@ -61,7 +62,8 @@ describe('storeSalesFigures', () => {
     expect(figures.categories).toEqual([]);
     expect(figures.range).toEqual(DAY);
     expect(figures.comparison?.range).toEqual(BEFORE);
-    expect(figures.comparison?.totals).toMatchObject({ grossMinor: 1000, taxMinor: 160, netMinor: 840, averageMinor: 1000, items: 1 });
+    expect(figures.comparison?.totals).toMatchObject({ grossMinor: 1000, taxMinor: 160, netMinor: 840, averageMinor: 1000, items: 1,
+      grossAfterRefundsMinor: 1000 });
   });
 
   it('takes the tax headline from the sum of tax rows, not orders.taxMinor', () => {

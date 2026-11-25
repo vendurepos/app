@@ -37,6 +37,7 @@ import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
 import { HandOverConfirm } from '../lib/hand-over';
+import { liveSaleView, usePublishLiveSale, type LiveSale, type LiveSaleRef } from '../lib/live-sale';
 import { subscribeLogEntries, unreadErrorCount } from '../lib/log-buffer';
 import { logout } from '../lib/logout';
 import { SlidersIcon } from '../lib/nav-icons';
@@ -215,6 +216,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const actor = useMemo(() => ({ id: identity, name: identity }), [identity]);
   const readSettingsCapabilities = saleSettings.status === 'ready' ? saleSettings.capabilities : undefined;
   const blind = useRegisterBlind(session);
+  // The sale on screen, published by Sale (lib/live-sale.ts): its taken legs and parked sales' count on the session's Z.
+  const liveSale = useRef<LiveSale | null>(null);
   // The one register session hook for this store: the sale, the panel and the count share it.
   const register = useRegisterSession({
     sessions: registerStore?.sessions ?? null, movements: registerStore?.movements ?? null, closures: registerStore?.closures ?? null,
@@ -225,6 +228,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     enabled: (readSettingsCapabilities?.register ?? 0) >= MIN_REGISTER, actor, timezone: TIMEZONE, softwareVersion: APP_VERSION, tenderInProgress,
     varianceThreshold: loadVarianceLimitMinor(),
     expectedCloseTime: loadCloseBy(boundRegisterId), blind,
+    drafts, liveSale: () => liveSaleView(liveSale),
   });
   // #332: the "approval needed again" card's button, only where the store has the approval route.
   const approvalSheet = useApprovalSheet({ session, register, capabilities: readSettingsCapabilities });
@@ -457,7 +461,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue}
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
                   outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
-                  onHolds={setSaleHolds}
+                  liveSale={liveSale} onHolds={setSaleHolds}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} onReceipt={setReceiptShown} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
                   onClosePanels={closePanels} settingsOpen={settingsOpen}
@@ -534,7 +538,7 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 function Sale({
   session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, onReceipt, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
-  onSettingsCard,
+  onSettingsCard, liveSale,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>;
   outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
@@ -557,6 +561,8 @@ function Sale({
   overSheet: boolean;
   /** The paired displays' service: each one shows this sale (P9.8c-2b). */
   customerDisplay: TillDisplayService | null;
+  /** Where this sale is published for the register's live-sale count. */
+  liveSale: LiveSaleRef;
 }) {
   const { connector, products, lastSyncedAt, error, stockOverlayAsOf } = catalogue;
   const catalogueView = useCatalogueView(settingsOpen);
@@ -575,6 +581,7 @@ function Sale({
     onSaleCompleted: session.url === DEMO_STORE_ORIGIN ? withDemoSaleEvent(outbox.record) : outbox.record,
     isStored: outbox.isStored, drafts: drafts ?? undefined,
   });
+  usePublishLiveSale(liveSale, sale);
   // The store name only: a display never shows the cashier or the register (Front desk ruling 4, 2026-11-18).
   useSaleDisplay(customerDisplay, { order: sale.order, stage: sale.stage }, { receipt: { storeName: storeLabel(session) }, methodTitle: tenderName, declinedMessage: 'Payment declined' });
   useDefaultCustomer(sale, session);

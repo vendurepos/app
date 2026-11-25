@@ -36,9 +36,11 @@ function totals(r: Report): SalesFigures['totals'] {
   const grossMinor = r.orders.salesMinor;
   const taxMinor = r.taxes.reduce((sum, row) => sum + row.taxMinor, 0);
   const count = r.orders.count;
+  // The plugin's report dates refunds by their own date, and a Vendure order carries no cash rounding.
   return {
     grossMinor, netMinor: grossMinor - taxMinor, taxMinor, discountMinor: r.orders.discountsMinor,
-    refundsMinor: r.refunds.totalMinor, embeddedRefundsMinor: 0, orderCount: count,
+    refundsMinor: r.refunds.totalMinor, embeddedRefundsMinor: 0, roundingMinor: 0, refundBasis: 'dated',
+    grossAfterRefundsMinor: grossMinor - r.refunds.totalMinor, orderCount: count,
     averageMinor: count > 0 ? Math.round(grossMinor / count) : 0, items: r.orders.itemCount, margin: NO_MARGIN,
     ...(r.version === 3 ? { medianMinor: r.orders.medianMinor, largestMinor: r.orders.largestMinor } : {}),
   };

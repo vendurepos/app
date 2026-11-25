@@ -124,9 +124,10 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
     initialSection && sections.some(({ id }) => id === initialSection) ? initialSection : 'general');
   // The store stopped advertising a display (or the session changed) while its section showed.
   useEffect(() => { if (!customerDisplay && section === 'customer-display') setSection('general'); }, [customerDisplay, section]);
-  // TallyUI 4.2.0's stacked menu keeps its open state inside and stays open after a pick, so below the breakpoint a
-  // key per section remounts the layout closed on the picked section; split width keeps one key, so it never remounts.
-  // Goes once TallyUI's SettingsLayout takes a controlled nav (CHECKLIST 9.1, 9.1b).
+  // TallyUI 5.0.0's stacked menu, left uncontrolled, keeps its open state inside and stays open after a pick, so below
+  // the breakpoint a key per section remounts the layout closed on the picked section; split width keeps one key, so it
+  // never remounts. From 5.0.0 SettingsLayout has a controlled nav (`navOpen`); adopting it is its own change
+  // (CHECKLIST 9.1, 9.1b).
   const stacked = useWindowDimensions().width < SETTINGS_BREAKPOINT;
 
   return (

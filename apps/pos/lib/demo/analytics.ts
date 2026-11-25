@@ -34,9 +34,16 @@ export function trackDemoEvent(event: DemoEvent, enabled: boolean = demoAnalytic
   } catch { /* A missing or throwing fetch must not interrupt the demo. */ }
 }
 
-export function withDemoSaleEvent<T>(record: (order: T) => Promise<void> | void, enabled?: boolean): (order: T) => Promise<void> {
+// Orders whose sale event this page load has sent. Module-level: the Sale component wraps outbox.record afresh on every
+// render, so a Set in the wrapper's closure would be a new one each time, and a repeat of onSaleCompleted for one order
+// (its 60 s timeout, then Retry) would send a second event.
+const saleEventsSent = new Set<string>();
+
+export function withDemoSaleEvent<T extends { id: string }>(record: (order: T) => Promise<void> | void, enabled?: boolean): (order: T) => Promise<void> {
   return async (order) => {
     await record(order);
+    if (saleEventsSent.has(order.id)) return;
+    saleEventsSent.add(order.id);
     trackDemoEvent('demo_sale_completed', enabled);
   };
 }

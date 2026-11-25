@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // 3.2a-3b (2026-11-22): what the cashier sees when useTenderMethods hands useTender a new list mid-tender. It pins
-// @tallyui/components 4.2.0 dist/index.js: useTender (:10834) re-inits only on a stage.kind change (:10838-10840), so
-// state.methodId outlives the list; TenderPane's method lookup (:10932), take() (:10965-10966, returns with no
-// method), the tiles' aria-selected (:11047) and the Take button, rendered only with a method (:11111).
+// @tallyui/components 5.0.0 dist/index.js: useTender (:10961) re-inits only on a stage.kind change (:10966-10968), so
+// state.methodId outlives the list; TenderPane's method lookup (:11154), take() (:11204-11205, returns with no
+// method), the tiles' aria-selected (:11293) and the Take button, rendered only with a method (:11368).
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createVendureConnector } from '@tallyui/connector-vendure';
