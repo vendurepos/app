@@ -296,6 +296,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
 
   const signOutLocked = signOutLockReason({ saving, savesInFlight: outbox.savesInFlight, closing: register.closing, holdsPayment: heldPayment });
 
+  // The sale would be lost after the press with whatever it took meanwhile, so it goes at once (#508).
+  if (pending) return <SigningOut />;
   // An order store that can't open would lose the next sale at tender, so replace the sale instead of showing it.
   if (storageFailure) return <StorageFailure {...storageFailure} />;
 
@@ -513,6 +515,14 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       ) : null}
     </VStack>
     </AppShell>
+  );
+}
+
+function SigningOut() {
+  return (
+    <VStack className="flex-1 items-center justify-center bg-background p-6">
+      <Text testID="signing-out" role="status">Signing out…</Text>
+    </VStack>
   );
 }
 

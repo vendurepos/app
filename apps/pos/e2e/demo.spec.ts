@@ -3332,6 +3332,118 @@ test('Sign out and Hand over wait while the sale holds a payment (#504)', async 
   await expect(page.getByTestId('demo-enter')).toBeVisible();
 });
 
+type HeldFetch = { holdInfo: boolean; heldInfo: (() => void)[]; heldLogout: (() => void)[] };
+
+// Holds the server's logout until released, so the sign-out window stays open (#508); with `info`, also holds the
+// till's own /info reads once signed in, as the #503 test does, until `holdInfo` is cleared.
+async function holdFetch(page: Page, info: boolean) {
+  await page.evaluate(({ sessionKey, info }) => {
+    const held = window as unknown as HeldFetch;
+    Object.assign(held, { holdInfo: info, heldInfo: [], heldLogout: [] });
+    const inner = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const hold = (queue: (() => void)[]) => new Promise<Response>((resolve) => { queue.push(() => resolve(inner(input, init))); });
+      if (init?.method === 'POST' && url.endsWith('/admin-api') && String(init.body).includes('logout')) return hold(held.heldLogout);
+      if (held.holdInfo && url.endsWith('/tally/v1/info') && !init?.method && localStorage.getItem(sessionKey)) return hold(held.heldInfo);
+      return inner(input, init);
+    };
+  }, { sessionKey: 'vendurepos.session', info });
+}
+
+// The logout follows the catalogue's removal, so it is waited for.
+const heldLogouts = (page: Page) => page.evaluate(() => (window as unknown as HeldFetch).heldLogout.length);
+
+async function releaseHeld(page: Page, queue: 'heldInfo' | 'heldLogout') {
+  await page.evaluate((queue) => {
+    const held = window as unknown as HeldFetch;
+    held.holdInfo = false;
+    for (const release of held[queue].splice(0)) release();
+  }, queue);
+}
+
+test('Sign out replaces the till at once, so nothing is taken while it is pending (#508)', async ({ page }) => {
+  await page.goto('/demo');
+  await holdFetch(page, false);
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('register-bar-cashier').click();
+  await page.getByTestId('cashier-sheet').getByTestId('sign-out').click();
+
+  const signingOut = page.getByTestId('signing-out');
+  const expectOnlySigningOut = async () => {
+    await expect(signingOut).toHaveText('Signing out…');
+    for (const id of ['cashier-sheet', 'register-bar-cashier', 'checkout', 'parked-open', 'product-tile-Tally Fixture Mug']) {
+      await expect(page.getByTestId(id)).toHaveCount(0);
+    }
+  };
+  await expectOnlySigningOut();
+  // The window is really open: the logout is held and the session is still stored.
+  await expect.poll(() => heldLogouts(page)).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem('vendurepos.session'))).not.toBeNull();
+  await page.keyboard.press('Escape');
+  await wedgeScan(page, 'TALLY-MUG');
+  await expectOnlySigningOut();
+
+  await releaseHeld(page, 'heldLogout');
+  await expect(page.getByTestId('demo-enter')).toBeVisible();
+  await expect(signingOut).toHaveCount(0);
+});
+
+test('A parked payment is safe through a pending hand-over (#508)', async ({ page }) => {
+  await page.goto('/demo');
+  await holdFetch(page, true);
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const tender = page.getByTestId('tender-pane');
+  const panel = page.getByTestId('register-panel');
+  const otherTenders = async () => {
+    await page.getByTestId('register-open-panel').click();
+    const text = await panel.getByTestId('register-panel-other-tenders').textContent();
+    await panel.getByTestId('register-panel-dismiss').click();
+    await expect(panel).toHaveCount(0);
+    return text;
+  };
+
+  // 1. €5.00 kept on the sale as the #503 test keeps it (External, taken before the store's list is in), then parked.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await tender.getByTestId('tender-method-external').click();
+  await typeAmount(page, '5.00');
+  await takePayment(page);
+  await expect(page.getByTestId('cart').getByTestId('cart-paid')).toHaveText('€5.00');
+  await releaseHeld(page, 'heldInfo');
+  await expect(tender.getByTestId('tender-method-external')).toHaveCount(0);
+  await tender.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByTestId('tender-cancel-view').getByTestId('tender-cancel-back').click();
+  await page.getByTestId('parked-open').click();
+  await page.getByTestId('parked-sales-park').click();
+  await page.getByTestId('parked-sales-dismiss').click();
+  await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+  const figure = await otherTenders();
+  expect(figure).toContain('€5.00');
+
+  // 2. Hand over with the logout held: the till goes at the confirm.
+  await page.getByTestId('register-bar-cashier').click();
+  await page.getByTestId('cashier-sheet').getByTestId('hand-over').click();
+  await page.getByTestId('switch-confirm').getByTestId('switch-confirm-confirm').click();
+  await expect(page.getByTestId('signing-out')).toHaveText('Signing out…');
+  for (const id of ['switch-confirm', 'cashier-sheet', 'parked-open', 'register-bar-cashier']) {
+    await expect(page.getByTestId(id)).toHaveCount(0);
+  }
+
+  // 3. Back in, the sale is still parked and the register still counts its payment.
+  await expect.poll(() => heldLogouts(page)).toBe(1);
+  await releaseHeld(page, 'heldLogout');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+  expect(await otherTenders()).toBe(figure);
+});
+
 test('the cashier sheet and the hand-over name the register the till is at', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
