@@ -33,6 +33,7 @@ import { CloseWarningsCard } from '../lib/close-warnings-card';
 import { ClosureHistory, ClosureList } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
+import { discardParkedSale } from '../lib/discard-parked';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
@@ -855,7 +856,8 @@ function Sale({
       </View>
       {approvalSheet.dialog}
       <ParkedSales sale={sale} parked={parked}
-        onDiscard={async (id) => { await drafts!.findOne(id).exec().then((doc) => doc?.remove()); }}
+        // Refused while the draft holds a payment: the Z counts a parked payment through the draft.
+        onDiscard={(id) => discardParkedSale(drafts!, id)}
         currency={session.settings.currency} open={parkedOpen} onOpenChange={setParkedOpen} />
       {/* A line removed meanwhile shows nothing. */}
       <AddToast name={sale.order.lineItems.find((line) => line.id === toast.lineId)?.name ?? null} />
