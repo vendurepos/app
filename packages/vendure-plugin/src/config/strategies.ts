@@ -3,6 +3,7 @@ import {
   OrderLine, ShippingCalculator, ShippingEligibilityChecker, StockLevel, StockLocationService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
 import type { Injector, Order, OrderItemPriceCalculationStrategy, Payment, PaymentMethod, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
+import { MAX_CASH_ROUNDING_INCREMENT_MINOR } from '../service/constants';
 import { loggerCtx } from '../service/errors';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
@@ -163,6 +164,15 @@ export const tallyPaymentHandler = new PaymentMethodHandler({
     { value: 'cash', label: [{ languageCode: LanguageCode.en, value: 'Cash' }] },
     { value: 'card', label: [{ languageCode: LanguageCode.en, value: 'Card' }] },
     { value: 'other', label: [{ languageCode: LanguageCode.en, value: 'Other' }] },
+  ] } },
+  // TallyUI ADR-094: a cash method's rounding (cashRoundingOf). A method stored before these args existed has none.
+  roundingIncrement: { type: 'int', required: false, defaultValue: 1,
+    label: [{ languageCode: LanguageCode.en, value: 'Cash rounding increment' }],
+    description: [{ languageCode: LanguageCode.en, value: 'The cash rounding increment in minor units, used only when tender is Cash. 1 means no rounding.' }] },
+  roundingMode: { type: 'string', required: false, defaultValue: 'nearest', ui: { component: 'select-form-input', options: [
+    { value: 'nearest', label: [{ languageCode: LanguageCode.en, value: 'Nearest (half up)' }] },
+    { value: 'up', label: [{ languageCode: LanguageCode.en, value: 'Up' }] },
+    { value: 'down', label: [{ languageCode: LanguageCode.en, value: 'Down' }] },
   ] } } },
   // 3.2a: the handler serves every Tally method, so the decline names none.
   createPayment: (ctx, order, amount, args, metadata) => ctx.apiType === 'custom' && isTallyRoute(ctx)
@@ -194,6 +204,24 @@ export function isTallyMethod(paymentMethod: Pick<PaymentMethod, 'handler'>): bo
 export function tenderKind(paymentMethod: Pick<PaymentMethod, 'handler'>): 'cash' | 'card' | 'other' {
   const value = paymentMethod.handler.args.find(arg => arg.name === 'tender')?.value;
   return value === 'cash' || value === 'card' ? value : 'other';
+}
+
+export type CashRoundingMode = 'nearest' | 'up' | 'down';
+export type CashRounding = { incrementMinor: number; mode: CashRoundingMode };
+
+/**
+ * TallyUI ADR-094: a cash method's rounding, or null when the method is not cash or its increment is unusable.
+ * The plugin re-derives every cash rounding from this, never the till's figure.
+ */
+export function cashRoundingOf(paymentMethod: Pick<PaymentMethod, 'handler'>): CashRounding | null {
+  if (tenderKind(paymentMethod) !== 'cash') return null;
+  const arg = (name: string) => paymentMethod.handler.args.find(stored => stored.name === name)?.value;
+  const increment = arg('roundingIncrement');
+  if (increment === undefined || !/^[0-9]+$/.test(increment)) return null;
+  const incrementMinor = Number(increment);
+  if (!Number.isInteger(incrementMinor) || incrementMinor < 2 || incrementMinor > MAX_CASH_ROUNDING_INCREMENT_MINOR) return null;
+  const mode = arg('roundingMode');
+  return { incrementMinor, mode: mode === 'up' || mode === 'down' || mode === 'nearest' ? mode : 'nearest' };
 }
 
 export const tallyPaymentChecker = new PaymentMethodEligibilityChecker({

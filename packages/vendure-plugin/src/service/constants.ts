@@ -37,6 +37,10 @@ export const ORDER_REFUND_VERSIONS: readonly number[] = [1];
 // ADR 0005 ruling (b): one shipping charge per order. /tally/v1/info advertises it and the strict shape check enforces it.
 export const MAX_SHIPPING_LINES = 1;
 
+// TallyUI ADR-094: a sanity cap on a cash method's rounding increment (no national cash rounding is coarser than this
+// in minor units), since a write-off's size is bounded by the increment.
+export const MAX_CASH_ROUNDING_INCREMENT_MINOR = 100000;
+
 // The SKUs of the surcharges order.create writes (ADR 0005): a fee, a line discount and the tax rounding bridge.
 // They are stored on orders, and order.create's fiscal check reads the fee and discount back, so they never change.
 export const TALLY_FEE_SKU = 'TALLY-FEE';

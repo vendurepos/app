@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigArgService, Logger, PaymentMethod, TransactionalConnection, TranslatorService } from '@vendure/core';
 import type { Order, RequestContext } from '@vendure/core';
-import { TALLY_PAYMENT_METHOD_CODE, isTallyMethod, tallyPaymentChecker, tenderKind } from '../config/strategies';
+import { TALLY_PAYMENT_METHOD_CODE, cashRoundingOf, isTallyMethod, tallyPaymentChecker, tenderKind } from '../config/strategies';
+import type { CashRounding } from '../config/strategies';
 import type { OrderCreatePayment } from '../vendored/commands';
 import { loggerCtx } from './errors';
 
 /** order.create 10 adds methodId, which the vendored 4.1.0 type does not carry yet. */
 export type TenderPayment = OrderCreatePayment & { methodId?: string };
-export type TenderMethod = { code: string; name: string; kind: 'cash' | 'card' | 'other' };
+export type TenderMethod = { code: string; name: string; kind: 'cash' | 'card' | 'other'; rounding?: CashRounding };
 /** R3: a payment recorded under tally-pos because its method could not take it; the till ignores the code as unknown. */
 export type MethodFallback = { code: 'payment_method_fallback'; clientPaymentId: string; methodId: string; reason: 'disabled' | 'ineligible' | 'unknown' | 'duplicate_code' };
 /** The channel's Tally methods, and the codes two or more enabled methods of any handler share there: Vendure picks either one. */
@@ -39,7 +40,10 @@ export class PaymentMethodsService {
     const tally = methods ?? await this.tallyMethods(ctx);
     return tally.filter(method => method.enabled && !tally.shared.has(method.code) && method.code !== TALLY_PAYMENT_METHOD_CODE
         && (!method.checker || method.checker.code === tallyPaymentChecker.code))
-      .map(method => ({ code: method.code, name: this.translator.translate(method, ctx).name, kind: tenderKind(method) }));
+      .map(method => {
+        const rounding = cashRoundingOf(method);
+        return { code: method.code, name: this.translator.translate(method, ctx).name, kind: tenderKind(method), ...(rounding ? { rounding } : {}) };
+      });
   }
 
   /** R2: each payment's method code (a methodId naming no Tally method falls back at payment time, R3), and the shared codes. */
