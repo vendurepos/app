@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import {
   Button, Card, CardContent, CardHeader, CardTitle, CustomerDisplaySettings, CustomerPicker, Dialog, DialogContent, DialogDescription, DialogTitle, HStack, Input, InputField, Label, SettingsLayout, SettingsRow, Switch, Text, ToggleGroup, ToggleGroupItem, VStack,
 } from '@tallyui/components';
@@ -86,9 +86,6 @@ function CustomerDisplaySection({ handles, storeUrl }: { handles: TillCustomerDi
   );
 }
 
-/** SettingsLayout's own default width for split, passed to it so the remount key below agrees with its layout. */
-const SETTINGS_BREAKPOINT = 768;
-
 export type SettingsCardId = 'cart' | 'products';
 /** Settings' sections and cards: a covering panel of the till (CHECKLIST 9.1, the rail stays beside it), and the /settings route. */
 export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDisplay, initialSection, initialCard }: {
@@ -124,27 +121,22 @@ export function SettingsPanel({ session, onClose, tillUpdatesPending, customerDi
     initialSection && sections.some(({ id }) => id === initialSection) ? initialSection : 'general');
   // The store stopped advertising a display (or the session changed) while its section showed.
   useEffect(() => { if (!customerDisplay && section === 'customer-display') setSection('general'); }, [customerDisplay, section]);
-  // TallyUI 5.0.0's stacked menu, left uncontrolled, keeps its open state inside and stays open after a pick, so below
-  // the breakpoint a key per section remounts the layout closed on the picked section; split width keeps one key, so it
-  // never remounts. From 5.0.0 SettingsLayout has a controlled nav (`navOpen`); adopting it is its own change
-  // (CHECKLIST 9.1, 9.1b).
-  const stacked = useWindowDimensions().width < SETTINGS_BREAKPOINT;
 
   return (
-    <SettingsLayout key={stacked ? section : 'split'} breakpoint={SETTINGS_BREAKPOINT} navSlot={
+    <SettingsLayout testID="settings-layout" navSlot={({ closeNav }) => (
       <View className="gap-1 p-2">
         {sections.map(({ id, label }) => {
           const selected = section === id;
           return (
             <Pressable key={id} testID={`settings-section-${id}`} accessibilityRole="tab"
               aria-selected={selected} className={`rounded-md px-3 py-2${selected ? ' bg-muted' : ''}`}
-              onPress={() => { pendingCard.current = null; setSection(id); }}>
+              onPress={() => { pendingCard.current = null; setSection(id); closeNav(); }}>
               <Text className={`text-sm text-foreground${selected ? ' font-medium' : ''}`}>{label}</Text>
             </Pressable>
           );
         })}
       </View>
-    } contentSlot={
+    )} contentSlot={
     <ScrollView className="flex-1 bg-background"
       ref={scroll}
       onStartShouldSetResponderCapture={() => { pendingCard.current = null; return false; }}

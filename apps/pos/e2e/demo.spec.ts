@@ -2540,6 +2540,32 @@ test('at split width, Settings keeps its list beside each picked section, the sa
   await expect(page.getByTestId('settings-section-barcode')).toBeFocused();
 });
 
+test('on a phone, a pick from Menu keeps the same Settings layout, and picking the section already shown closes Menu too (9.1c)', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await page.getByTestId('settings-open').click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  await expect(page.getByTestId('catalogue-settings-auto')).toBeVisible();
+  // A remount would replace this node, and the mark would go with it.
+  await page.getByTestId('settings-layout').evaluate((el) => { el.dataset.probe = '1'; });
+  await page.getByText('Menu', { exact: true }).click();
+  await page.getByTestId('settings-section-barcode').click();
+  await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  await expect(page.getByTestId('settings-layout')).toHaveAttribute('data-probe', '1');
+  await page.getByText('Menu', { exact: true }).click();
+  await page.getByTestId('settings-section-barcode').click();
+  await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+  await page.getByText('Menu', { exact: true }).click();
+  await expect(page.getByTestId('settings-section-register')).toBeVisible();
+  await page.getByText('Done', { exact: true }).click();
+  await expect(page.getByTestId('scanner-min-length')).toBeVisible();
+  await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+});
+
 test('Settings keeps the tile size for this till, and the grid takes it at once', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
