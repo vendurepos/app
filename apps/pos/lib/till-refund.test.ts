@@ -2,7 +2,7 @@ import type { VendureOrder } from '@tallyui/connector-vendure';
 import { ConnectorUnauthorizedError, formatMoney, type OrderRefundEnvelope, type SyncContext } from '@tallyui/core';
 import { refundPayloadErrors } from '@tallyui/core/server';
 import {
-  mintUuid, posRefundCollection, type CommandTransport, type OrderRefundOutcome, type PosRefund, type PosRefundCollection,
+  mintUuid, posRefundCollection, refundNeedsAdminLine, type CommandTransport, type OrderRefundOutcome, type PosRefund, type PosRefundCollection,
   type TransportOutcome,
 } from '@tallyui/pos';
 import { createRxDatabase, type RxDatabase } from 'rxdb';
@@ -314,4 +314,69 @@ it('says every rejection code and outcome in words', () => {
   expect(say({ kind: 'unauthorized' })).toEqual(words(REFUND_UNAUTHORIZED_TEXT, { sendAgain: true, signInAgain: true }));
   expect(refundMessage({ kind: 'pending', record: { ...record, status: 'pending' } }, 'EUR'))
     .toEqual(words(REFUND_PENDING_TEXT, { sendAgain: true }));
+});
+
+describe('a refund an admin must finish (needs_admin)', () => {
+  const envelope = buildRefundEnvelope(order(), draft, till, ids);
+  const base: PosRefund = {
+    id: 'refund-1', commandId: 'command-1', orderId: 'order-1', sessionId: 's1', registerId: 'r1', envelope,
+    status: 'pending', createdAt: NOW, updatedAt: NOW,
+  };
+  const parked = (reason: unknown): PosRefund =>
+    ({ ...base, error: { code: 'needs_admin', message: 'Ask a manager', data: { reason, at: NOW } } });
+  const words = (text: string) => ({ text, sendAgain: true, signInAgain: false, done: false });
+  const say = (outcome: OrderRefundOutcome, record: PosRefund) => refundMessage({ kind: 'answered', outcome, record }, 'EUR');
+
+  it("says TallyUI's needs_admin line for the store's first answer, whatever the record says", () => {
+    const outcome: OrderRefundOutcome = { kind: 'needs_admin', reason: 'session_closed', message: 'Ask a manager' };
+    expect(say(outcome, base)).toEqual(words(refundNeedsAdminLine('session_closed')));
+    expect(say(outcome, { ...base, status: 'rejected' })).toEqual(words(refundNeedsAdminLine('session_closed')));
+    expect(say({ ...outcome, reason: 'payment_failed' }, parked('session_closed'))).toEqual(words(refundNeedsAdminLine('payment_failed')));
+  });
+
+  it('says the line again when the form reopens on the parked record, by its stored reason', () => {
+    expect(refundMessage({ kind: 'pending', record: parked('session_closed') }, 'EUR')).toEqual(words(refundNeedsAdminLine('session_closed')));
+    expect(refundMessage({ kind: 'pending', record: parked('payment_failed') }, 'EUR')).toEqual(words(refundNeedsAdminLine('payment_failed')));
+    expect(refundMessage({ kind: 'pending', record: parked(7) }, 'EUR')).toEqual(words(refundNeedsAdminLine('')));
+    expect(refundMessage({ kind: 'pending', record: { ...parked('session_closed'), status: 'unsent' } }, 'EUR')).toEqual(words(REFUND_PENDING_TEXT));
+  });
+
+  it('keeps the line when a resend of the parked record is unknown or refused', () => {
+    const line = words(refundNeedsAdminLine('session_closed'));
+    expect(say({ kind: 'unknown', reason: 'network' }, parked('session_closed'))).toEqual(line);
+    expect(say({ kind: 'refused', status: 503, reason: 'status_503' }, parked('session_closed'))).toEqual(line);
+  });
+
+  it('never says nothing was refunded while the record is still pending', () => {
+    const refused: OrderRefundOutcome = { kind: 'refused', status: 503, reason: 'status_503' };
+    expect(say(refused, base)).toEqual(words(REFUND_UNKNOWN_TEXT));
+    expect(say(refused, { ...base, status: 'unsent', error: { code: 'refused', message: 'status_503', data: { status: 503 } } }))
+      .toEqual(words('The store refused the request (503). Nothing was refunded. Send it again or try later.'));
+  });
+});
+
+it('a refused resend after an unknown answer stays pending and says the answer is unknown', async () => {
+  const envelope = buildRefundEnvelope(order(), draft, till, ids);
+  const fake = transport({ kind: 'retry', reason: 'timeout' }, { kind: 'refused', status: 503, reason: 'status_503' });
+  const first = await sendTillRefund(refunds, fake, envelope);
+  expect(refundMessage(first, 'EUR').text).toBe(REFUND_UNKNOWN_TEXT);
+  const again = await sendTillRefund(refunds, fake, envelope);
+  expect(again.kind === 'answered' && again.outcome.kind).toBe('refused');
+  expect(again.record.status).toBe('pending');
+  expect(refundMessage(again, 'EUR')).toEqual({ text: REFUND_UNKNOWN_TEXT, sendAgain: true, signInAgain: false, done: false });
+});
+
+it("parks a refund the store answers needs_admin, and the reopened form says the same line", async () => {
+  const envelope = buildRefundEnvelope(order(), draft, till, ids);
+  const fake = transport({
+    kind: 'retry', reason: 'needs_admin:session_closed',
+    needsAdmin: { id: envelope.id, reason: 'session_closed', message: 'The session closed before the refund finished.' },
+  });
+  const attempt = await sendTillRefund(refunds, fake, envelope);
+  expect(attempt.kind === 'answered' && attempt.outcome.kind).toBe('needs_admin');
+  const line = { text: refundNeedsAdminLine('session_closed'), sendAgain: true, signInAgain: false, done: false };
+  expect(refundMessage(attempt, 'EUR')).toEqual(line);
+  const record = await pendingRefund(refunds, 'order-1');
+  expect(record).toMatchObject({ id: 'refund-1', status: 'pending', error: { code: 'needs_admin', data: { reason: 'session_closed' } } });
+  expect(refundMessage({ kind: 'pending', record: record! }, 'EUR')).toEqual(line);
 });

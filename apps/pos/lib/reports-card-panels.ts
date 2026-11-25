@@ -1,7 +1,7 @@
 import type { SalesCardId, SalesPanelId } from '@tallyui/components';
 import type { SalesFigures } from '@tallyui/pos';
 
-/** The card's TallyUI panel, or null for Orders and Refunds (no panel in 4.2.0: they open the Orders screen, TallyUI/tallyui#1215). */
+/** The card's TallyUI panel, or null for Orders and Refunds (no panel in 5.0.0: they open the Orders screen, TallyUI/tallyui#1215). */
 export function cardPanel(card: SalesCardId): SalesPanelId | null {
   switch (card) {
     case 'payments':

@@ -15,7 +15,7 @@ import { useFreshList } from './use-fresh-list';
 import { useStoreSales } from './use-store-sales';
 
 // The desk's 8.1q ruling: the store's Categories card counts a product in every collection it is in, and says so.
-// TallyUI 4.2.0's cards take no help text, so the app shows the line, as it shows the till-only caption.
+// TallyUI 5.0.0's cards take no help text, so the app shows the line, as it shows the till-only caption.
 export const CATEGORIES_HELP_TEXT = 'Categories: a product in several collections counts in each.';
 
 /** The help line only over the store's Categories card (a v3 answer); the till view and a v2 answer have none. */

@@ -1,7 +1,7 @@
 import { vendureLineRefundWithTax, vendureRefundable, type VendureOrder } from '@tallyui/connector-vendure';
 import { ConnectorUnauthorizedError, formatMoney, type OrderRefundEnvelope, type OrderRefundPayload, type SyncContext } from '@tallyui/core';
 import {
-  mintUuid, RefundAnswerPendingError, submitOrderRefund,
+  mintUuid, RefundAnswerPendingError, refundNeedsAdminLine, submitOrderRefund,
   type CommandTransport, type OrderRefundOutcome, type PosRefund, type PosRefundCollection,
 } from '@tallyui/pos';
 import { orderStateLabel } from './order-history';
@@ -133,11 +133,19 @@ export async function sendTillRefund(refunds: PosRefundCollection, transport: Co
 
 export type RefundMessage = { text: string; sendAgain: boolean; signInAgain: boolean; done: boolean };
 
+/** The lead line of a record TallyUI parked needs_admin (still pending, error.code needs_admin); null for any other record. */
+function parkedNeedsAdminLine(record: PosRefund): string | null {
+  if (record.status !== 'pending' || record.error?.code !== 'needs_admin') return null;
+  const reason = record.error.data?.reason;
+  return refundNeedsAdminLine(typeof reason === 'string' ? reason : '');
+}
+
 /** The cashier's words for a refund attempt, with what the form offers next. */
 export function refundMessage(attempt: RefundAttempt, currency: string): RefundMessage {
   const message = (text: string, flags: Partial<Omit<RefundMessage, 'text'>> = {}): RefundMessage =>
     ({ text, sendAgain: false, signInAgain: false, done: false, ...flags });
-  if (attempt.kind === 'pending') return message(REFUND_PENDING_TEXT, { sendAgain: true });
+  const parked = parkedNeedsAdminLine(attempt.record);
+  if (attempt.kind === 'pending') return message(parked ?? REFUND_PENDING_TEXT, { sendAgain: true });
   const { outcome } = attempt;
   switch (outcome.kind) {
     case 'applied':
@@ -156,9 +164,14 @@ export function refundMessage(attempt: RefundAttempt, currency: string): RefundM
         default: return message(`The store refused this refund (${error.code}). Nothing was refunded.`);
       }
     }
+    case 'needs_admin':
+      return message(refundNeedsAdminLine(outcome.reason), { sendAgain: true });
     case 'unknown':
-      return message(REFUND_UNKNOWN_TEXT, { sendAgain: true });
+      return message(parked ?? REFUND_UNKNOWN_TEXT, { sendAgain: true });
     case 'refused':
+      if (parked) return message(parked, { sendAgain: true });
+      // Still pending: the store may hold an earlier send of this envelope, so "Nothing was refunded" is not known.
+      if (attempt.record.status === 'pending') return message(REFUND_UNKNOWN_TEXT, { sendAgain: true });
       return message(`The store refused the request (${outcome.status}). Nothing was refunded. Send it again or try later.`, { sendAgain: true });
     case 'unauthorized':
       return message(REFUND_UNAUTHORIZED_TEXT, { sendAgain: true, signInAgain: true });

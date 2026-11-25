@@ -108,7 +108,7 @@ it('records the sale before sending its event and waits until recording resolves
   vi.stubGlobal('fetch', fetch);
   let resolve!: () => void;
   const record = vi.fn(() => new Promise<void>((done) => { resolve = done; }));
-  const order = { id: 'sale' };
+  const order = { id: 'sale-recorded-first' };
   const completed = withDemoSaleEvent(record, true)(order);
   expect(record).toHaveBeenCalledExactlyOnceWith(order);
   expect(fetch).not.toHaveBeenCalled();
@@ -124,7 +124,7 @@ it('propagates the same recording error without sending an event', async () => {
   vi.stubGlobal('fetch', fetch);
   const error = new Error('record failed');
   const record = vi.fn().mockRejectedValue(error);
-  await expect(withDemoSaleEvent(record, true)({ id: 'sale' })).rejects.toBe(error);
+  await expect(withDemoSaleEvent(record, true)({ id: 'sale-record-fails' })).rejects.toBe(error);
   expect(fetch).not.toHaveBeenCalled();
 });
 
@@ -132,8 +132,34 @@ it('still records when analytics is disabled', async () => {
   const fetch = vi.fn();
   vi.stubGlobal('fetch', fetch);
   const record = vi.fn();
-  const order = { id: 'sale' };
+  const order = { id: 'sale-disabled' };
   await withDemoSaleEvent(record, false)(order);
   expect(record).toHaveBeenCalledExactlyOnceWith(order);
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it('sends one event for two overlapping completions of one order, even from two wrappers', async () => {
+  const fetch = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('fetch', fetch);
+  const record = vi.fn().mockResolvedValue(undefined);
+  const order = { id: 'sale-repeated' };
+  await Promise.all([withDemoSaleEvent(record, true)(order), withDemoSaleEvent(record, true)(order)]);
+  expect(record).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await withDemoSaleEvent(record, true)({ id: 'sale-next' });
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it('sends no event for a failed record, and one for its retry', async () => {
+  const fetch = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('fetch', fetch);
+  const error = new Error('record failed');
+  const record = vi.fn().mockRejectedValueOnce(error).mockResolvedValue(undefined);
+  const order = { id: 'sale-retried' };
+  await expect(withDemoSaleEvent(record, true)(order)).rejects.toBe(error);
+  expect(fetch).not.toHaveBeenCalled();
+  await withDemoSaleEvent(record, true)(order);
+  await withDemoSaleEvent(record, true)(order);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(fetch.mock.calls[0][1].body).event).toBe('demo_sale_completed');
 });
