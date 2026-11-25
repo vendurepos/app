@@ -51,7 +51,7 @@
   },
   "devDependencies": {
     "@swc/core": "1.16.2",
-    "@tallyui/core": "4.2.0",
+    "@tallyui/core": "5.0.0",
     "@types/node": "24.19.0",
     "@vendure/core": "3.7.3",
     "@vendure/email-plugin": "3.7.3",
