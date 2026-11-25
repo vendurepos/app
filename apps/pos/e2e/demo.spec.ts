@@ -4508,6 +4508,117 @@ test('a demo cashier parks a sale, sells another, then resumes the parked one', 
   await expect(page.getByTestId('parked-open')).toHaveText('Park');
 });
 
+// lib/discard-parked.ts's PARKED_HOLDS_PAYMENT, copied because that module imports a value from @tallyui/pos (see DEMO_STORE_ORIGIN above).
+const PARKED_HOLDS_PAYMENT = 'This parked sale holds a payment, so it can’t be discarded. Resume it to finish the sale or cancel the payment.';
+
+type HeldInfo = { holdInfo: boolean; heldInfo: (() => void)[] };
+
+test('a parked sale holding a payment is counted by the register and cannot be discarded (#503)', async ({ page }) => {
+  await page.goto('/demo');
+  // Hold the till's own /info reads (the tender methods' and the tax zone's, which pass no `method`) once signed in;
+  // the sign-in read (no session stored yet) and the capabilities read (`method: 'GET'`) go through, so the sale mounts.
+  await page.evaluate((sessionKey) => {
+    const held = window as unknown as HeldInfo;
+    held.holdInfo = true;
+    held.heldInfo = [];
+    const inner = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (held.holdInfo && url.endsWith('/tally/v1/info') && !init?.method && localStorage.getItem(sessionKey)) {
+        return new Promise((resolve) => { held.heldInfo.push(() => resolve(inner(input, init))); });
+      }
+      return inner(input, init);
+    };
+  }, 'vendurepos.session');
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  const tender = page.getByTestId('tender-pane');
+  const cart = page.getByTestId('cart');
+  // Out of the tender, a kept leg shows on the sale's tab.
+  const saleTab = page.getByTestId('open-sale-tabs').getByRole('tab', { selected: true });
+
+  // 1. €5.00 on the default External tile, taken before the store's list is in; then the list arrives.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await checkout(page);
+  await expect(tender.getByTestId('tender-methods').getByRole('button')).toHaveCount(2);
+  await tender.getByTestId('tender-method-external').click();
+  await typeAmount(page, '5.00');
+  await takePayment(page);
+  await expect(cart.getByTestId('cart-paid')).toHaveText('€5.00');
+  expect(await page.evaluate(() => (window as unknown as HeldInfo).heldInfo.length)).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const held = window as unknown as HeldInfo;
+    held.holdInfo = false;
+    for (const release of held.heldInfo.splice(0)) release();
+  });
+  await expect(tender.getByTestId('tender-method-card-terminal')).toHaveText('Card terminal');
+  await expect(tender.getByTestId('tender-method-external')).toHaveCount(0);
+
+  // 2. Cancel: the leg has no listed method, so it can't be voided here; Back returns to the cart with the leg on it.
+  await tender.getByRole('button', { name: 'Back', exact: true }).click();
+  const cancelView = page.getByTestId('tender-cancel-view');
+  await expect(cancelView.locator('[data-testid^="tender-cancel-leg-"]')).toHaveText(['Refund €5.00 on external from the order']);
+  await expect(cancelView.getByTestId('tender-cancel-confirm')).toHaveCount(0);
+  await cancelView.getByTestId('tender-cancel-back').click();
+  await expect(tender).toHaveCount(0);
+  await expect(saleTab).toContainText('Partly paid · €4.52 due');
+
+  // 3. Parked, the live sale is empty: the register counts the parked €5.00 through the draft.
+  await page.getByTestId('parked-open').click();
+  await page.getByTestId('parked-sales-park').click();
+  await expect(page.getByTestId('cart-line-TALLY-MUG')).toHaveCount(0);
+  await page.getByTestId('parked-sales-dismiss').click();
+  await expect(page.getByTestId('parked-open')).toHaveText('Parked (1)');
+  const panel = page.getByTestId('register-panel');
+  const otherTenders = async (amount: string) => {
+    await page.getByTestId('register-open-panel').click();
+    await expect(panel.getByTestId('register-panel-other-tenders')).toContainText(amount);
+    await expect(panel.getByTestId('register-panel-other-tenders')).not.toContainText('€10.00');
+    await panel.getByTestId('register-panel-dismiss').click();
+    await expect(panel).toHaveCount(0);
+  };
+  await otherTenders('€5.00');
+
+  // 4. Its discard is refused: the row stays on its question, and the register still counts the €5.00.
+  await page.getByTestId('parked-open').click();
+  const row = page.locator('[data-testid^="parked-row-"]');
+  await expect(row).toHaveCount(1);
+  const id = (await row.getAttribute('data-testid'))!.slice('parked-row-'.length);
+  await page.getByTestId(`parked-discard-${id}`).click();
+  await page.getByTestId(`parked-discard-confirm-${id}`).click();
+  await expect(page.getByTestId('parked-sales-error')).toHaveText(PARKED_HOLDS_PAYMENT);
+  await expect(row).toHaveCount(1);
+  await expect(page.getByTestId(`parked-discard-cancel-${id}`)).toBeVisible();
+  await page.getByTestId(`parked-discard-cancel-${id}`).click();
+
+  // 5. Resumed and finished in cash: paid once, and counted once.
+  await page.getByTestId(`parked-resume-${id}`).click();
+  await expect(saleTab).toContainText('Partly paid · €4.52 due');
+  await expect(page.getByTestId('parked-open')).toHaveText('Park');
+  await checkout(page);
+  await tender.getByTestId('tender-method-cash').click();
+  await takePayment(page);
+  await tender.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt')).toBeVisible();
+  await page.getByTestId('new-sale').click();
+  await expect(page.getByTestId('parked-open')).toHaveText('Park');
+  await otherTenders('€5.00');
+
+  // 6. A parked sale with no payment is discarded.
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('parked-open').click();
+  await page.getByTestId('parked-sales-park').click();
+  await expect(row).toHaveCount(1);
+  const second = (await row.getAttribute('data-testid'))!.slice('parked-row-'.length);
+  await page.getByTestId(`parked-discard-${second}`).click();
+  await page.getByTestId(`parked-discard-confirm-${second}`).click();
+  await expect(row).toHaveCount(0);
+  await expect(page.getByTestId('parked-sales-error')).toHaveCount(0);
+  await page.getByTestId('parked-sales-dismiss').click();
+  await expect(page.getByTestId('parked-open')).toHaveText('Park');
+});
+
 test('the demo page says what to try and links to the site and the quick start', async ({ page }) => {
   const cspConsole: string[] = [];
   page.on('console', (message) => {
