@@ -34,6 +34,7 @@ import { ClosureHistory, ClosureList } from '../lib/closure-history-sheet';
 import { holdClosuresForOrders, pendingSessionOrders, useClosureWaiting, useFlushOnDrain } from '../lib/closure-hold';
 import { useDefaultCustomer } from '../lib/default-customer';
 import { discardParkedSale } from '../lib/discard-parked';
+import { useReportHeldPayment } from '../lib/held-payment';
 import { withDemoSaleEvent } from '../lib/demo/analytics';
 import { DEMO_STORE_ORIGIN } from '../lib/demo/fetch';
 import { DEMO_MODE } from '../lib/demo/mode';
@@ -155,6 +156,8 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
   const [openOrder, setOpenOrder] = useState<PosOrder | OrderHistoryRow | null>(null);
   // Sign-out unmounts the sale: a save still pending (in flight, or failed and not yet retried) would be lost with it.
   const [saving, setSaving] = useState(false);
+  // Sign-out unmounts the sale too: a payment it holds would leave the till and the Z with it (#504).
+  const [heldPayment, setHeldPayment] = useState(false);
   const [registerId] = useState(() => deviceId(defaultStore()));
   // The store's latest capabilities, for the order.create version of each first send: set when the settings are
   // ready (before the outbox opens) and by a refresh that reads them, never cleared by a failed one.
@@ -291,7 +294,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
     }
   }
 
-  const signOutLocked = signOutLockReason({ saving, savesInFlight: outbox.savesInFlight, closing: register.closing });
+  const signOutLocked = signOutLockReason({ saving, savesInFlight: outbox.savesInFlight, closing: register.closing, holdsPayment: heldPayment });
 
   // An order store that can't open would lose the next sale at tender, so replace the sale instead of showing it.
   if (storageFailure) return <StorageFailure {...storageFailure} />;
@@ -461,7 +464,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
               <TaxProvider {...taxProviderProps(saleSettings.settings)}>
                 <Sale session={session} capabilities={saleSettings.capabilities} catalogue={catalogue}
                   taxClasses={chargeTaxClasses(saleSettings.settings.taxRateCodes)}
-                  outbox={outbox} drafts={drafts} onSaving={setSaving} register={register} boundRegisterId={boundRegisterId}
+                  outbox={outbox} drafts={drafts} onSaving={setSaving} onHeldPayment={setHeldPayment} register={register} boundRegisterId={boundRegisterId}
                   liveSale={liveSale} onHolds={setSaleHolds}
                   onRebindRegister={() => setBoundRegisterId(rebindRegister(defaultStore()))}
                   registerReady={!!registerStore} onTender={setTenderInProgress} onReceipt={setReceiptShown} panelOpen={ordersOpen || reportsOpen || customersOpen || productsOpen || healthOpen || settingsOpen || registerPanelShown || closuresOpen || cashierOpen || handOverOpen || supportOpen || notificationsOpen}
@@ -537,12 +540,12 @@ function outboxNotice({ authRequired, refused }: OutboxState): string | undefine
 }
 
 function Sale({
-  session, capabilities, catalogue, outbox, onSaving, register, boundRegisterId, registerReady, onTender, onReceipt, panelOpen, onClosePanels,
+  session, capabilities, catalogue, outbox, onSaving, onHeldPayment, register, boundRegisterId, registerReady, onTender, onReceipt, panelOpen, onClosePanels,
   registerClosing, overSheet, drafts, taxClasses, onRebindRegister, onHolds, settingsOpen, customerDisplay,
   onSettingsCard, liveSale,
 }: {
   session: Session; capabilities?: ServerCapabilities; catalogue: ReturnType<typeof useCatalogue>;
-  outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; register: ReturnType<typeof useRegisterSession>;
+  outbox: UseOrderOutboxResult; onSaving(saving: boolean): void; onHeldPayment(held: boolean): void; register: ReturnType<typeof useRegisterSession>;
   drafts: RxCollection | null;
   taxClasses: { id: string; label: string }[];
   boundRegisterId: string; registerReady: boolean; onTender(inProgress: boolean): void;
@@ -606,6 +609,7 @@ function Sale({
   }
   const [openOrdersPosition, setOpenOrdersPosition] = useState(() => loadOpenOrdersPosition());
   useEffect(() => onSaving(sale.saving), [sale.saving, onSaving]);
+  useReportHeldPayment(sale, onHeldPayment);
   const wide = useWindowDimensions().width >= WIDE_MIN_WIDTH;
   const { stage } = sale;
   // Before the tender the cart follows the binding: a pin whose tender never started (startTender returns silently on a
