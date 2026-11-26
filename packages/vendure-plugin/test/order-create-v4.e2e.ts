@@ -90,7 +90,7 @@ describe('order.create version 4: net discounts', () => {
     const command = fixture('exclusive');
     command.id = '01a0e775-0100-7000-8000-00000000f007';
     command.payload.clientOrderId = '01a0e775-0100-7000-8000-00000000f107';
-    // 2 lines + 2 surcharges: tolerance 2. Move the single rate's tax by 5, keeping the payload's figures agreeing.
+    // 2 payload lines, both discounted: tolerance 2.
     const shift = 5;
     command.payload.taxMinor += shift;
     command.payload.display!.taxMinor += shift;
