@@ -55,9 +55,9 @@ export type FiguresMismatch = Extract<CommandWarning, { code: 'figures_mismatch'
 /** ADR-078 d7: an unknown register session warns without refusing the sale. */
 type SessionUnknown = Extract<CommandWarning, { code: 'register_session_unknown' }>;
 
-/** TallyUI ADR-094: a cash rounding entry above what a till takes without voiding a tender; the sale is still applied. */
+/** TallyUI ADR-094: a cash rounding entry whose running sum is outside its leg's range R; the sale is still applied. */
 export type CashRoundingUnexplained = { code: 'cash_rounding_unexplained'; paymentId: string; minor: number; maxMinor: number };
-type Unexplained = Omit<CashRoundingUnexplained, 'code'>;
+type Unexplained = Omit<CashRoundingUnexplained, 'code'> & { sumMinor: number; lowMinor: number; highMinor: number };
 
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
   & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown | MethodFallback | CashRoundingUnexplained>; totalWarnings?: TotalWarning[] };
@@ -163,7 +163,7 @@ export class OrderCreateService {
       // 4. A lone surrogate (#515), then the value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal
       // figures): unstored. Then the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's; its own
       // refusal with only time messages; the clock is the request's, read once. A recorded sale skips all three: the
-      // collision guard answers it, and the claim stores only the fingerprint.
+      // collision guard answers it, and its claim row holds only the id, channel, clientOrderId, fingerprint and status.
       const invalidValue = recorded ? undefined
         : loneSurrogateRefusal(command.id, command) ?? this.valueRefusal(command) ?? clientTimeRefusal(command.id,
           [['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]],
@@ -937,7 +937,8 @@ export class OrderCreateService {
     // #460: lineDiscounts is the link from each order line id to its TALLY_DISCOUNT_SKU surcharge id, which refunds read.
     // An empty map is an order with no line discounts; no lineDiscounts key at all means the order was sold before links.
     // totalMinor is the total the tender cap used (ADR-039), and the register reads it.
-    const unexplainedKey = unexplained.length ? { cashRoundingUnexplained: unexplained } : {}; // TallyUI ADR-094: only when warned.
+    const wireEntries = unexplained.map(({ paymentId, minor, maxMinor }) => ({ paymentId, minor, maxMinor }));
+    const unexplainedKey = wireEntries.length ? { cashRoundingUnexplained: wireEntries } : {}; // TallyUI ADR-094: only when warned.
     if (command.version >= 3) {
       order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts, totalMinor: payload.totalMinor, ...unexplainedKey });
     } else {
@@ -949,9 +950,9 @@ export class OrderCreateService {
     const note = (payload as OrderCreatePayload & { note?: string }).note;
     if (command.version >= 7 && note !== undefined) await this.orders.addNoteToOrder(ctx, { id: order.id, note, isPublic: true });
     // TallyUI ADR-094: one private note for the admin, in the same transaction, so it too is written once.
-    if (unexplained.length) await this.orders.addNoteToOrder(ctx, { id: order.id, isPublic: false, note: 'Cash rounding above what a till takes without '
-      + `voiding a tender (TallyUI#1364): ${unexplained.map(({ paymentId, minor, maxMinor }) => `${minor} on payment ${paymentId} (at most ${maxMinor})`)
-        .join('; ')}. Check this sale's payments before relying on its total.` });
+    if (unexplained.length) await this.orders.addNoteToOrder(ctx, { id: order.id, isPublic: false, note: 'Cash rounding out of range: the roundings on this sale add up to '
+      + unexplained.map(({ sumMinor, paymentId, lowMinor, highMinor }) => `${sumMinor} at payment ${paymentId}, outside the allowed ${lowMinor} to ${highMinor}`).join('; ')
+      + ". Check this sale's payments before relying on its total." });
 
     const fulfillment = unwrap(await this.orders.createFulfillment(ctx, {
       lines: order.lines.map(line => ({ orderLineId: line.id, quantity: line.quantity })),
@@ -975,7 +976,7 @@ export class OrderCreateService {
     }
     const warnings: NonNullable<OrderCreateResult['warnings']> = [
       ...stockWarnings, ...ignored, ...figureWarnings, ...fallbacks,
-      ...unexplained.map(entry => ({ code: 'cash_rounding_unexplained' as const, ...entry })),
+      ...wireEntries.map(entry => ({ code: 'cash_rounding_unexplained' as const, ...entry })),
     ];
     if (command.version >= 3 && payload.sessionId !== undefined) {
       const where = { channelId: String(ctx.channelId), id: payload.sessionId };
