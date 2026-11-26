@@ -319,7 +319,7 @@ The active channel's POS sales and refunds in a time range, every figure but dis
 - `GET /tally/v1/reports/sales/v4` (same permissions; v2's query, which adds `cashierId`) answers v3's report with `version` 4 and `cashRounding` (TallyUI ADR-094, docs/adr/0009-cash-rounding.md):
   - `salesMinor` and `orderCount`: the cash rounding on the range's sales and how many carry one;
   - `unexplainedOrderCount`: the range's sales stored with a `cash_rounding_unexplained` warning. This includes a sale whose entries net to 0 and so carries no rounding, so it can exceed `orderCount`;
-  - `refundedMinor` and `refundCount`: the cash rounding returned by the range's refunds, read from each refund's `tallyCashRoundingMinor` metadata, so a dashboard refund returns none;
+  - `refundedMinor` and `refundCount`: the cash rounding returned by the range's refunds, read from each refund's `tallyCashRoundingMinor` metadata. A refund without that key (a Vendure-dashboard refund) returns the sale's rounding when its sale has no keyed refund and it is the first refund at which the sale's non-failed refunds, over all payments and all time, add up to its settled payments (#513). A partial dashboard refund returns none;
   - `netMinor`: `salesMinor − refundedMinor`.
 
   All are signed minor units, and already inside `orders.salesMinor` and `refunds.totalMinor`.
