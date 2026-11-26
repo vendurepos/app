@@ -66,7 +66,10 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     expect(withCashRounding(body, parseInfoCapabilities(body))).toEqual(parseInfoCapabilities(INFO));
     expect(withCashRounding(body, parseInfoCapabilities(body))).not.toHaveProperty('cashRounding');
     fetchMock.mockResolvedValue(Response.json(body));
-    expect(await read()).not.toHaveProperty('cashRounding');
+    const capabilities = await read();
+    expect(capabilities).toBeDefined();
+    expect(capabilities).toEqual(parseInfoCapabilities(body));
+    expect(capabilities).not.toHaveProperty('cashRounding');
   });
 
   it('C3: a body parseInfoCapabilities cannot read stays undefined, even with cashRounding', async () => {
@@ -79,9 +82,8 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
 
   it.each([
     ['401', () => new Response('', { status: 401 })], ['403', () => new Response('', { status: 403 })],
-    ['404', () => new Response('Not Found', { status: 404 })], ['500', () => new Response('oops', { status: 500 })],
-    ['a non-JSON 200', () => new Response('<html>', { status: 200 })], ['a JSON array 200', () => Response.json([1])],
-  ])('C4: %s answers exactly what the connector reader answers', async (_, response) => {
+    ['404', () => new Response('Not Found', { status: 404 })],
+  ])('C4a: %s answers exactly what the connector reader answers, read once', async (_, response) => {
     const sentinel = { orderCreate: 1 } as ServerCapabilities;
     fetchMock.mockImplementation(async () => response());
     original.mockResolvedValue(sentinel);
@@ -90,14 +92,41 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     expect(original).toHaveBeenCalledWith(context);
   });
 
-  it('C4: a fetch that throws, or aborts, answers what the connector reader answers', async () => {
-    fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
-    original.mockResolvedValueOnce(undefined);
+  it.each([
+    ['a 500', () => Promise.resolve(new Response('oops', { status: 500 }))],
+    ['a 302', () => Promise.resolve(new Response('', { status: 302, headers: { Location: '/elsewhere' } }))],
+    ['a non-JSON 200', () => Promise.resolve(new Response('<html>', { status: 200 }))],
+    ['a fetch that throws', () => Promise.reject(new TypeError('Network request failed'))],
+    ['a fetch that aborts', () => Promise.reject(new DOMException('Aborted', 'AbortError'))],
+  ])('C4b: %s answers undefined without calling the connector reader', async (_, response) => {
+    fetchMock.mockImplementation(response);
+    original.mockResolvedValue({ orderCreate: 1 });
     expect(await read()).toBeUndefined();
-    fetchMock.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
-    original.mockResolvedValueOnce(undefined);
-    expect(await read()).toBeUndefined();
-    expect(original).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a JSON array 200', [1]], ['a JSON null 200', null],
+  ])('C4c: %s answers parseInfoCapabilities alone, without the connector reader', async (_, body) => {
+    fetchMock.mockResolvedValue(Response.json(body));
+    original.mockResolvedValue({ orderCreate: 1 });
+    const capabilities = await read();
+    expect(capabilities).toEqual(parseInfoCapabilities(body));
+    expect(capabilities ?? {}).not.toHaveProperty('cashRounding');
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it('C5: after a read that throws, the next call reads /info once and takes cashRounding', async () => {
+    const body = { ...INFO, cashRounding: { v: 1 } };
+    fetchMock.mockRejectedValueOnce(new TypeError('Network request failed')).mockResolvedValueOnce(Response.json(body));
+    original.mockResolvedValue(parseInfoCapabilities(body));
+    const connector = catalogueConnector(session);
+    expect(await connector.capabilities!(context)).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await connector.capabilities!(context)).toEqual({ ...parseInfoCapabilities(body), cashRounding: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(original).not.toHaveBeenCalled();
   });
 
   it("C4: the connector reader's sign-out on 401 reaches the caller unchanged", async () => {

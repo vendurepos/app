@@ -36,16 +36,24 @@ export function withCashRounding(body: unknown, parsed: ServerCapabilities | und
   return parsed && typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 ? { ...parsed, cashRounding: true } : parsed;
 }
 
-// /info's body on a 200 that is a JSON object; undefined for anything else, which the connector's own reader answers.
-async function infoObject(context: SyncContext): Promise<object | undefined> {
+// One /info read per call, answered as readVendureCapabilities would: a second read could succeed where this one failed and drop cashRounding (#517).
+// Only 401/403 (the connector's signed-out check) and 404 (its { orderCreate: 1 }) delegate; a throw, non-ok status or non-JSON body is undefined.
+async function readInfo(context: SyncContext, original: NonNullable<TallyConnector['capabilities']>): Promise<ServerCapabilities | undefined> {
+  let response: Response;
   try {
-    const response = await fetch(`${context.baseUrl}${INFO_PATH}`, { method: 'GET', headers: context.headers, signal: context.signal });
-    if (response.status !== 200) return undefined;
-    const body: unknown = await response.json();
-    return typeof body === 'object' && body !== null && !Array.isArray(body) ? body : undefined;
+    response = await fetch(`${context.baseUrl}${INFO_PATH}`, { method: 'GET', headers: context.headers, signal: context.signal });
   } catch {
     return undefined;
   }
+  if (response.status === 401 || response.status === 403 || response.status === 404) return original(context);
+  if (!response.ok) return undefined;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  return withCashRounding(body, parseInfoCapabilities(body, warnInfo));
 }
 
 export function catalogueConnector(session: Session): TallyConnector {
@@ -61,10 +69,7 @@ export function catalogueConnector(session: Session): TallyConnector {
   // The connector is a plain object of closures (none reads `this`), so a spread keeps every other method as it is.
   return {
     ...connector,
-    capabilities: async (context) => {
-      const body = await infoObject(context);
-      return body ? withCashRounding(body, parseInfoCapabilities(body, warnInfo)) : original(context);
-    },
+    capabilities: (context) => readInfo(context, original),
   };
 }
 
