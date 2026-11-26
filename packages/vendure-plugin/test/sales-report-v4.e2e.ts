@@ -324,7 +324,7 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
     }
   });
 
-  it('U1: the lone-surrogate sale is applied, and its stored snapshot keeps the escape \\ud83d', async () => {
+  it('U1: the Staff X sale is applied, and its stored snapshot, rewritten in raw SQL, holds the escape \\ud83d', async () => {
     expect(earlyResults.U1.status).toBe('applied');
     const { customFields } = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: environment.decode(orders.U1.id) });
     expect(customFields.tallySnapshot).toContain('\\ud83d');

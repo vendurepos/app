@@ -10,7 +10,7 @@ import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefun
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
 import { channelRefunds } from './channel-refunds';
 import {
-  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeRefusal, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
+  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeRefusal, loneSurrogateRefusal, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
 } from './command-ledger';
 import { ORDER_REFUND_VERSIONS } from './constants';
 import { ErrorResultThrown, unwrap } from './errors';
@@ -45,6 +45,8 @@ export class RefundService {
     try {
       const replay = await replayRead(this.connection, ctx, command);
       if (replay) return replay;
+      const lone = loneSurrogateRefusal(id, command);
+      if (lone) return lone;
       const strict = refundEnvelopeStrictErrors(command as unknown as Record<string, unknown>, version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
       const timeRefusal = clientTimeRefusal(id, [['createdAt', command.createdAt], ['payload.createdAt', payload.createdAt]],

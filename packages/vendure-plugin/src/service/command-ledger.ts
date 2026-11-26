@@ -31,16 +31,17 @@ function stringPath(value: unknown, path: string, pattern: RegExp): string | und
   return undefined;
 }
 
+/** The path of the first string holding U+0000 in an envelope, or undefined. */
+export const nulPath = (value: unknown, path: string) => stringPath(value, path, /\u0000/);
+
 // #515: a high surrogate with no low after it, or a low with no high before it. No u flag, so it reads code units.
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /**
- * Review: Postgres text cannot hold U+0000, and #515: jsonb refuses the escape JSON.stringify writes for a lone
- * surrogate. A string carrying either is refused before any database access, U+0000 first; the path never echoes the value.
+ * #515: jsonb refuses the escape JSON.stringify writes for a lone surrogate. Checked after the replay read, as ADR 0002 §2
+ * replays a committed command whatever its values would now fail; the path never echoes the value.
  */
-export function envelopeTextRefusal(id: string, command: unknown) {
-  const nul = stringPath(command, '', /\u0000/);
-  if (nul) return refuse(id, 'invalid_payload', `${nul}: must not contain U+0000`);
+export function loneSurrogateRefusal(id: string, command: unknown) {
   const lone = stringPath(command, '', LONE_SURROGATE);
   return lone ? refuse(id, 'invalid_payload', `${lone}: must not contain a lone surrogate`) : undefined;
 }
@@ -87,8 +88,11 @@ export function clientTimeRefusal(id: string, fields: [path: string, value: unkn
   return errors.length ? refuse(id, 'invalid_payload', errors.slice(0, MAX_CLIENT_TIME_ERRORS).join('; ')) : undefined;
 }
 
-/** The envelope text refusal of a command whose id is a string (order.refund, the register commands). */
-export const nulRefusal = (command: { id: string }) => envelopeTextRefusal(command.id, command);
+/** Review: Postgres text cannot hold U+0000, so a string carrying it is refused before any database access. */
+export function nulRefusal(command: { id: string }) {
+  const nul = nulPath(command, '');
+  return nul ? refuse(command.id, 'invalid_payload', `${nul}: must not contain U+0000`) : undefined;
+}
 
 /** ADR-068 d5 and core's precheckCommand: the message and data name this server's own list. */
 export function versionRefusal(id: string, version: number, label: string, key: string, versions: readonly number[]) {

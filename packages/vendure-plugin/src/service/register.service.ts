@@ -96,7 +96,9 @@ export class RegisterService {
       // 2. The replay read: a committed id answers as recorded.
       const replay = await ledger.replayRead(this.connection, ctx, command);
       if (replay) return replay;
-      // 3. Unknown fields and map keys (ADR-070 d1), then the client-time stage (field-kinds.md): unstored.
+      // 3. A lone surrogate (#515), unknown fields and map keys (ADR-070 d1), then the client-time stage (field-kinds.md): unstored.
+      const lone = ledger.loneSurrogateRefusal(id, command);
+      if (lone) return lone;
       const strict = registerStrictErrors(command as unknown as Record<string, unknown>, type, command.version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
       const timeRefusal = clientTimeRefusal(id, [['createdAt', command.createdAt], ...CLIENT_TIMES[type].map(

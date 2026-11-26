@@ -8,6 +8,7 @@ import { markTallyRoute } from '../src/config/strategies';
 import { RefundService } from '../src/service/refund.service';
 import { jsonbOf } from '../src/service/sql-json';
 import type { CommandResult, OrderRefundEnvelope } from '../src/vendored/commands';
+import { commandFingerprint } from '../src/vendored/fingerprint';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
@@ -21,9 +22,10 @@ const ESCAPE = String.raw`\ud83d`;
 
 /**
  * #515: JSON.stringify keeps a lone UTF-16 surrogate as the escape \ud83d, which Postgres jsonb refuses.
- * L1–L5: a command carrying one is refused at the envelope, before any database access; a valid pair is applied.
- * S1–S6: a stored one never 500s a read. Since L1–L5 refuse these strings at the envelope, the S rows write the stored
- * text directly in raw SQL, as a row written before #515 (or by a foreign writer) holds it.
+ * L1–L6: a command carrying one is refused after the replay read (U+0000 still before any database access), so a
+ * command recorded before #515 still replays its recorded answer (ADR 0002 §2); a valid pair is applied.
+ * S1–S7: a stored one never 500s a read. Since L1–L3 refuse these strings, the S rows write the stored text directly in
+ * raw SQL, as a row written before #515 (or by a foreign writer) holds it.
  * S5 (a rejected ledger row and an approval by closureId) is in register-approval.e2e.ts, whose plugin option it needs.
  */
 describe('#515: lone surrogates', () => {
@@ -132,6 +134,8 @@ describe('#515: lone surrogates', () => {
   afterAll(() => server.destroy());
 
   const refundId = () => decode(refundResult.refund!.refunds[0].id);
+  const paymentId = async () => String((await connection.rawConnection.getRepository(Payment)
+    .find({ where: { order: { id: decode(order.id) } } }))[0].id);
   // S1's rewrite, for a row run on its own (S3, S4); a no-op once S1 has run.
   async function rewriteRefund() {
     if ((await storedText(Refund, refundId())).includes(ESCAPE)) return;
@@ -160,17 +164,40 @@ describe('#515: lone surrogates', () => {
     }
   });
 
-  it('S2: the sale\'s stored tender reference holding \\ud83d: v1–v4 answer 200 as before', async () => {
-    const [payment] = await connection.rawConnection.getRepository(Payment).find({ where: { order: { id: decode(order.id) } } });
-    // Written directly: the envelope now refuses this reference.
-    await rewrite(Payment, String(payment.id), metadata => {
+  // S2's rewrite, for a row run on its own (S7); a no-op once S2 has run. Written directly: the envelope now refuses this reference.
+  async function rewritePayment() {
+    if ((await storedText(Payment, await paymentId())).includes(ESCAPE)) return;
+    await rewrite(Payment, await paymentId(), metadata => {
       expect(metadata.tender).toMatchObject({ method: 'external', reference: 'card-1' });
       metadata.tender.reference = 'card \ud83d';
     });
+  }
+
+  it('S2: the sale\'s stored tender reference holding \\ud83d: v1–v4 answer 200 as before', async () => {
+    await rewritePayment();
     const after = await readAll();
     for (const path of reports) {
       expect(after[path], path).toEqual(before[path]);
       expect(after[`${path} register`], `${path} register`).toEqual(before[`${path} register`]);
+    }
+  });
+
+  it('S7: S1\'s refund without tallyMethod reads its method through the sale\'s stored tender, escape and all: v1–v4 as before', async () => {
+    await rewriteRefund();
+    await rewritePayment();
+    // A dashboard refund has no tallyMethod, so REFUND_METHOD falls to payment.metadata, whose reference holds the escape (S2).
+    await rewrite(Refund, refundId(), metadata => {
+      expect(metadata.tallyMethod).toBe('external');
+      delete metadata.tallyMethod;
+    });
+    try {
+      for (const path of reports) {
+        expect(await read(path), path).toEqual(before[path]);
+        expect(await read(path, { registerId: session.registerId }), `${path} register`).toEqual(before[`${path} register`]);
+      }
+    } finally {
+      // The session read (S3) counts the refund by its tallyMethod, so later rows see it as S1 left it.
+      await rewrite(Refund, refundId(), metadata => { metadata.tallyMethod = 'external'; });
     }
   });
 
@@ -204,20 +231,38 @@ describe('#515: lone surrogates', () => {
       expect(await value(text)).toBe(expected);
     });
 
+    it('S6: the pattern is an escape-string literal: with standard_conforming_strings off, a\\ud83d still reads as a�', async () => {
+      const runner = connection.rawConnection.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      try {
+        await runner.query('SET LOCAL standard_conforming_strings = off');
+        expect((await runner.query(`SHOW standard_conforming_strings`))[0].standard_conforming_strings).toBe('off');
+        const [{ k }] = await runner.query(`SELECT ${jsonbOf('$1')} ->> 'k' AS k`, [String.raw`{"k":"a\ud83d"}`]);
+        expect(k).toBe('a�');
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
+    });
+
     it('S6: a plain cast refuses the lone escape, so the rows above test the replacement', async () => {
       await expect(connection.rawConnection.query(`SELECT CAST($1 AS jsonb) ->> 'k' AS k`, [String.raw`{"k":"a\ud83d"}`]))
         .rejects.toThrow('invalid input syntax for type json');
     });
   });
 
-  describe('L1–L5: the envelope refuses a lone surrogate before any database access', () => {
+  describe('L1–L6: a lone surrogate is refused after the replay read, U+0000 before any database access', () => {
     const route = async () => markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom' }));
     const refusal = (id: string, message: string) => ({ id, status: 'rejected', error: { code: 'invalid_payload', message } });
     const counts = async () => ({
       ledger: await connection.rawConnection.getRepository(TallyCommand).count(),
       refunds: await connection.rawConnection.getRepository(Refund).count(),
     });
-    // Each refusal runs with getRepository spied on, as ledger.e2e.ts review 4: nothing reads or writes the database.
+    // Nothing of a refused command is stored: no ledger row has its id.
+    const unrecorded = async (id: string) =>
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id }), `ledger row ${id}`).toBeNull();
+    // L5's U+0000 refusals run with getRepository spied on, as ledger.e2e.ts review 4: nothing reads or writes the database.
     async function untouched<T>(work: () => Promise<T>) {
       const repositories = vi.spyOn(connection, 'getRepository');
       let calls: number;
@@ -230,37 +275,41 @@ describe('#515: lone surrogates', () => {
       }
     }
 
-    it('L1: order.create with a lone high in payload.registerId, and a lone low ending a line title', async () => {
+    it('L1: order.create with a lone high in payload.registerId, or a lone low ending a line title, is refused after the replay read; nothing stored', async () => {
       const at = new Date().toISOString();
       const register = saleCommand(at);
       register.payload.registerId = 'till\ud83d';
       const title = saleCommand(at, 'Mug \udc00');
       const stored = await counts();
-      expect(await untouched(() => run(register))).toEqual(refusal(register.id, 'payload.registerId: must not contain a lone surrogate'));
-      expect(await untouched(() => run(title))).toEqual(refusal(title.id, 'payload.lines.0.title: must not contain a lone surrogate'));
+      expect(await run(register)).toEqual(refusal(register.id, 'payload.registerId: must not contain a lone surrogate'));
+      expect(await run(title)).toEqual(refusal(title.id, 'payload.lines.0.title: must not contain a lone surrogate'));
       expect(await counts()).toEqual(stored);
+      await unrecorded(register.id);
+      await unrecorded(title.id);
     });
 
-    it('L2: order.refund with payload.cashierRef a lone high; nothing stored', async () => {
+    it('L2: order.refund with payload.cashierRef a lone high is refused after the replay read; nothing stored', async () => {
       const command = refundOf(order, 1, '\ud83d');
       const stored = await counts();
       const ctx = await route();
-      expect(await untouched(() => server.app.get(RefundService).apply(ctx, command as never)))
+      expect(await server.app.get(RefundService).apply(ctx, command as never))
         .toEqual(refusal(command.id, 'payload.cashierRef: must not contain a lone surrogate'));
       expect(await post(command)).toEqual(refusal(command.id, 'payload.cashierRef: must not contain a lone surrogate'));
       expect(await counts()).toEqual(stored);
+      await unrecorded(command.id);
     });
 
-    it('L3: a register command with a lone surrogate in payload.registerId', async () => {
+    it('L3: a register command with a lone surrogate in payload.registerId is refused after the replay read; nothing stored', async () => {
       const command = envelope('register.session.open', {
         registerId: 'reg\ud83d', sessionId: randomUUID(), openedAt: new Date().toISOString(), countedFloatMinor: 0,
       }) as RegisterEnvelope;
       const stored = await counts();
       const ctx = await route();
-      expect(await untouched(() => server.app.get(RegisterService).apply(ctx, command)))
+      expect(await server.app.get(RegisterService).apply(ctx, command))
         .toEqual(refusal(command.id, 'payload.registerId: must not contain a lone surrogate'));
       expect(await post(command)).toEqual(refusal(command.id, 'payload.registerId: must not contain a lone surrogate'));
       expect(await counts()).toEqual(stored);
+      await unrecorded(command.id);
     });
 
     it('L5: a string holding both U+0000 and a lone surrogate is refused with the U+0000 message, unchanged', async () => {
@@ -287,6 +336,44 @@ describe('#515: lone surrogates', () => {
       expect(refunded).toMatchObject({ id: refund.id, status: 'applied' });
       const stored = await connection.rawConnection.getRepository(Refund).findOneByOrFail({ id: decode(refunded.refund!.refunds[0].id) });
       expect(stored.metadata.tallyCashierRef).toBe('😀');
+    });
+
+    // ADR 0002 §2: a committed command replays its recorded answer, whatever its values would now fail. A row recorded
+    // before #515 for a command holding a lone surrogate cannot be written through the envelope any more, so the command
+    // is applied with a placeholder string, and its ledger row's fingerprint is then set, in raw SQL, to the plugin's own
+    // fingerprint of the surrogate version: the row reads as that command's, as it would have been stored before #515.
+    async function replaysRecorded<C extends { id: string; type: string; version: number; payload: unknown }>(first: C, surrogate: C) {
+      expect(surrogate.id).toBe(first.id);
+      const applied = await post(first);
+      expect(applied, JSON.stringify(applied)).toMatchObject({ id: first.id, status: 'applied' });
+      const table = connection.rawConnection.getRepository(TallyCommand).metadata.tableName;
+      await connection.rawConnection.query(`UPDATE "${table}" SET "fingerprint" = $1 WHERE "id" = $2`, [commandFingerprint(surrogate), first.id]);
+      expect(await post(surrogate)).toEqual({ ...applied, status: 'duplicate' });
+    }
+
+    it('L6: order.create recorded before #515 with a lone surrogate in a line title replays its recorded answer', async () => {
+      const first = saleCommand(new Date().toISOString(), 'Mug x');
+      const surrogate = structuredClone(first);
+      surrogate.payload.lines[0].title = 'Mug \ud83d';
+      await replaysRecorded(first, surrogate);
+    });
+
+    it('L6: order.refund recorded before #515 with a lone surrogate in payload.cashierRef replays its recorded answer', async () => {
+      const created = await post(saleCommand(new Date().toISOString()));
+      expect(created, JSON.stringify(created)).toMatchObject({ status: 'applied' });
+      const first = refundOf(await readOrder(created.serverRefs!.orderId), 1, 'cashier-x');
+      const surrogate = structuredClone(first);
+      surrogate.payload.cashierRef = '\ud83d';
+      await replaysRecorded(first, surrogate);
+    });
+
+    it('L6: register.session.open recorded before #515 with a lone surrogate in payload.registerId replays its recorded answer', async () => {
+      const first = envelope('register.session.open', {
+        registerId: 'till-x', sessionId: randomUUID(), openedAt: new Date().toISOString(), countedFloatMinor: 0,
+      });
+      const surrogate = structuredClone(first);
+      surrogate.payload.registerId = 'till-\ud83d';
+      await replaysRecorded(first, surrogate);
     });
   });
 });

@@ -5,7 +5,8 @@
  * backslash after an even run of backslashes, none included) reads as U+FFFD. An escaped valid pair from a foreign
  * writer reads as two U+FFFD, which is acceptable for the ids we read.
  */
-const SURROGATE_ESCAPE = String.raw`'(?<=(?:^|[^\\])(?:\\\\)*)\\u[dD][89a-fA-F][0-9a-fA-F]{2}'`;
+// An escape-string literal, every backslash doubled, so the pattern never depends on standard_conforming_strings.
+const SURROGATE_ESCAPE = String.raw`E'(?<=(?:^|[^\\\\])(?:\\\\\\\\)*)\\\\u[dD][89a-fA-F][0-9a-fA-F]{2}'`;
 
 /** The SQL that reads a JSON text expression as jsonb, with every surrogate escape read as U+FFFD. */
 export const jsonbOf = (expression: string): string =>
