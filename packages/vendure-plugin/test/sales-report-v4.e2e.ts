@@ -87,8 +87,13 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
       // orderCommand figures the 100 in the line's (inclusive) mode; from v4 the wire discountMinor is net, 80 at 25 %.
       into: earlyResults, edit: payload => {
         payload.discountMinor = payload.lines[0].discountMinor = 80;
-        payload.display.lines[0].discounts[0].label = 'Staff \ud83d';
+        payload.display.lines[0].discounts[0].label = 'Staff X';
       } });
+    // #515: the envelope now refuses a lone surrogate, so U1's stored snapshot gets the escape directly, as a sale stored before #515 holds it.
+    const u1 = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: environment.decode(orders.U1.id) });
+    await connection.rawConnection.getRepository(Order).update(u1.id, { customFields: {
+      tallySnapshot: (u1.customFields.tallySnapshot as string).replace('"label":"Staff X"', String.raw`"label":"Staff \ud83d"`),
+    } });
     await sellRounded('U2', earlySale(1), [{ unitPriceMinor: 1000 }], 0, 0, [{ methodId: 'card', method: 'external', amountMinor: 495, minor: -3 },
       { methodId: 'cash-5', method: 'cash', amountMinor: 505, minor: 3 }], { into: earlyResults });
     await sellRounded('U3', earlySale(2), [{ unitPriceMinor: 1002, discountMinor: 100 }], -2, 0, undefined, {
