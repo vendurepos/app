@@ -44,6 +44,18 @@ it('a cash refund leaves as cash, and no cashier key without a cashierRef', asyn
   expect('tallyCashierRef' in result.metadata).toBe(false);
 });
 
+it('a refund returning cash rounding records it after tallyLines, and none when it is 0 (TallyUI ADR-094)', async () => {
+  withTallyRefund(markTallyRoute(ctx), { ...refund, cashRoundingMinor: -2 });
+  const result = await tallyPaymentHandler.createRefund(ctx, input, 500, order, payment, [], method);
+  assert(result && result.metadata);
+  expect(result.metadata.tallyCashRoundingMinor).toBe(-2);
+  expect(Object.keys(result.metadata).slice(-2)).toEqual(['tallyLines', 'tallyCashRoundingMinor']);
+  withTallyRefund(markTallyRoute(ctx), { ...refund, cashRoundingMinor: 0 });
+  const none = await tallyPaymentHandler.createRefund(ctx, input, 500, order, payment, [], method);
+  assert(none && none.metadata);
+  expect('tallyCashRoundingMinor' in none.metadata).toBe(false);
+});
+
 it('outside a till refund, createRefund settles without metadata', async () => {
   const refundOnly = withTallyRefund(ctx.copy(), { ...refund, lines: [] });
   const routeOnly = markTallyRoute(ctx.copy());

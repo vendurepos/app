@@ -4,7 +4,7 @@ import type { ID } from '@vendure/core';
 import { In } from 'typeorm';
 import type { SelectQueryBuilder } from 'typeorm';
 import { channelRefunds } from './channel-refunds';
-import { TALLY_DISCOUNT_SKU } from './constants';
+import { TALLY_CASH_ROUNDING_SKU, TALLY_DISCOUNT_SKU } from './constants';
 import { OrderCreateService } from './order-create.service';
 
 /** The plugin's own sales report shape, versioned; it moves into TallyUI once TallyUI has a report contract. */
@@ -48,6 +48,20 @@ export type TallySalesReportV3 = Omit<TallySalesReportV2, 'version' | 'orders'> 
   // Products' line basis, added to every collection of the variant in the channel (a variant in several counts in each,
   // one in none in none). salesMinor descending, then name.
   categories: Array<{ collectionId: string; name: string; quantity: number; salesMinor: number }>;
+};
+
+/** GET /tally/v1/reports/sales/v4: v3's report plus how much of it was cash rounding (TallyUI ADR-094). A breakdown only:
+ * salesMinor is inside orders.salesMinor and refundedMinor inside refunds.totalMinor, never added again. Signed integer minor units. */
+export type TallySalesReportV4 = Omit<TallySalesReportV3, 'version'> & {
+  version: 4;
+  cashRounding: {
+    salesMinor: number;            // Σ TALLY_CASH_ROUNDING_SKU surcharges on the counted orders (order.create writes one only when non-zero)
+    orderCount: number;            // counted orders carrying one
+    unexplainedOrderCount: number; // counted orders stored with a cash_rounding_unexplained warning (tallySnapshot.cashRoundingUnexplained)
+    refundedMinor: number;         // Σ metadata.tallyCashRoundingMinor over the counted refunds, dated by the refund
+    refundCount: number;           // counted refunds carrying it
+    netMinor: number;              // salesMinor − refundedMinor
+  };
 };
 const hourKey = (instant: string) => `to_char(${instant} AT TIME ZONE :timezone, 'YYYY-MM-DD"T"HH24')`;
 const MAX_PRODUCTS = 100;
@@ -189,6 +203,30 @@ export class ReportService {
       ...report, version: 3, orders: { ...report.orders, medianMinor, largestMinor },
       categories: await this.categories(ctx, sold),
     };
+  }
+
+  /** GET /tally/v1/reports/sales/v4: v3's report unchanged, plus its cash rounding through v3's own builders, so every filter applies. */
+  async salesV4(ctx: RequestContext, query: SalesQueryV2): Promise<TallySalesReportV4> {
+    const report = await this.salesV3(ctx, query);
+    // As discountsOf: the surcharges of the orders v3 counts, summed by Vendure's priceWithTax getter (the surcharge is untaxed).
+    const orders = this.posOrdersV2(ctx, query).select('o.id');
+    const surcharges = await this.connection.getRepository(ctx, Surcharge).createQueryBuilder('s').innerJoin('s.order', 'roundingOrder').addSelect('roundingOrder.id')
+      .where(`roundingOrder.id IN (${orders.getQuery()}) AND s.sku = :cashRoundingSku`, { ...orders.getParameters(), cashRoundingSku: TALLY_CASH_ROUNDING_SKU })
+      .getMany();
+    const salesMinor = surcharges.reduce((sum, s) => sum + s.priceWithTax, 0);
+    const [unexplained] = await this.posOrdersV2(ctx, query)
+      .andWhere("CAST(o.customFields.tallySnapshot AS jsonb) -> 'cashRoundingUnexplained' IS NOT NULL")
+      .select('COUNT(*)', 'orders').getRawMany<{ orders: string }>();
+    // Only the refund's own record: a refund without the key (a partial one, a later Refund of the command, a dashboard refund) returned none.
+    const ROUNDING = "CAST(CAST(refund.metadata AS jsonb) ->> 'tallyCashRoundingMinor' AS integer)";
+    const [refunded] = await this.posRefundsV2(ctx, query)
+      .andWhere(`${ROUNDING} IS NOT NULL`)
+      .select(`SUM(${ROUNDING})`, 'total').addSelect('COUNT(*)', 'count').getRawMany<{ total: string | null; count: string }>();
+    const cashRounding = {
+      salesMinor, orderCount: new Set(surcharges.map(s => String(s.order.id))).size, unexplainedOrderCount: minor(unexplained?.orders),
+      refundedMinor: minor(refunded?.total), refundCount: minor(refunded?.count), netMinor: salesMinor - minor(refunded?.total),
+    };
+    return { ...report, version: 4, cashRounding };
   }
 
   /** Sold lines by collection: each variant's quantity and amount added to every collection of it in the channel. */
