@@ -1,15 +1,14 @@
 import {
-  Channel, ConfigService, Customer, EventBus, InsufficientStockOnHandError, Logger, Order, OrderLine, OrderService,
+  Channel, ConfigService, Customer, EventBus, Logger, Order, OrderLine, OrderService,
   Payment, PaymentMethod, ShippingMethod,
   ProductVariantService, ShippingLine, StockMovement, Surcharge, TaxRate, TransactionalConnection, defaultOrderProcess,
 } from '@vendure/core';
 import type { OrderProcess, OrderState } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { OrderCreateService, PLATFORM_ERROR_CODE, TallyCommand, TransientCommandError } from '../src';
+import { OrderCreateService, TallyCommand, TransientCommandError } from '../src';
 import * as bridgeBound from '../src/service/bridge-bound';
-import { classify } from '../src/service/classification';
-import { ErrorResultThrown, transientKind } from '../src/service/errors';
+import { transientKind } from '../src/service/errors';
 import type { CommandEnvelope } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -66,22 +65,6 @@ describe('error classes (ADR 0002 §2)', () => {
     };
   }
   const ledgerFor = (input: CommandEnvelope) => connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: input.id });
-  // Asserts a stored rejection: only the ledger row is written, and a replay returns it without the recipe.
-  async function expectStored(input: ReturnType<typeof orderCommand>, expected: object) {
-    const before = await counts();
-    const createDraft = vi.spyOn(server.app.get(OrderService), 'createDraft'); // Calls Vendure unchanged.
-    try {
-      const result = await run(input);
-      expect(result).toEqual({ id: input.id, status: 'rejected', error: expected });
-      expect(await counts()).toEqual({ ...before, ledger: before.ledger + 1 });
-      expect(await ledgerFor(input)).toMatchObject({ status: 'rejected', result });
-      expect(await run(input)).toEqual(result);
-      expect(createDraft).toHaveBeenCalledTimes(1);
-      return result;
-    } finally {
-      createDraft.mockRestore();
-    }
-  }
 
   it('TallyUI #219: every deterministic refusal is answered before the recipe writes anything, per-sale facts stored and setup not: no event at all', async () => {
     const config = server.app.get(ConfigService);

@@ -3,7 +3,7 @@ import {
   OrderLine, ShippingCalculator, ShippingEligibilityChecker, StockLevel, StockLocationService, TransactionalConnection, idsAreEqual,
 } from '@vendure/core';
 import type { Injector, Order, OrderItemPriceCalculationStrategy, Payment, PaymentMethod, ProductVariant, RequestContext, StockLocationStrategy } from '@vendure/core';
-import { MAX_CASH_ROUNDING_INCREMENT_MINOR } from '../service/constants';
+import { IN_STORE_COLLECTION, MAX_CASH_ROUNDING_INCREMENT_MINOR } from '../service/constants';
 import { loggerCtx } from '../service/errors';
 
 export const TALLY_PAYMENT_METHOD_CODE = 'tally-pos';
@@ -244,7 +244,7 @@ export const tallyShippingChecker = new ShippingEligibilityChecker({
 
 export const tallyShippingCalculator = new ShippingCalculator({
   code: TALLY_SHIPPING_METHOD_CODE,
-  description: [{ languageCode: LanguageCode.en, value: 'In-store collection' }],
+  description: [{ languageCode: LanguageCode.en, value: IN_STORE_COLLECTION }],
   args: {},
   calculate: (ctx, order) => {
     try {

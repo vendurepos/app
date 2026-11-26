@@ -9,7 +9,7 @@ import {
   TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingCalculator, tallyShippingChecker,
 } from '../config/strategies';
-import { SETUP_LOCK_NAMESPACE, TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY, WALK_IN_EMAIL } from './constants';
+import { IN_STORE_COLLECTION, SETUP_LOCK_NAMESPACE, TALLY_CUSTOM_ITEM_SKU, TALLY_NO_TAX_CATEGORY, WALK_IN_EMAIL } from './constants';
 import { unwrap } from './errors';
 
 @Injectable()
@@ -35,7 +35,7 @@ export class StoreSetupService {
     if (!shipping) {
       await this.shippingMethods.create(ctx, {
         code: TALLY_SHIPPING_METHOD_CODE, fulfillmentHandler: manualFulfillmentHandler.code,
-        translations: [{ languageCode: LanguageCode.en, name: 'In-store collection', description: '' }],
+        translations: [{ languageCode: LanguageCode.en, name: IN_STORE_COLLECTION, description: '' }],
         checker: { code: tallyShippingChecker.code, arguments: [] },
         calculator: { code: tallyShippingCalculator.code, arguments: [] },
       });

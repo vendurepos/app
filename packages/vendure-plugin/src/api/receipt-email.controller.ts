@@ -3,6 +3,7 @@ import { Allow, Ctx, EventBus, Logger, OrderService, Permission, RequestContext 
 import { tallyPosSell } from '../config/permissions';
 import { TallyReceiptEmailEvent } from '../events/receipt-email.event';
 import { WALK_IN_EMAIL } from '../service/constants';
+import { loggerCtx } from '../service/errors';
 import { ReceiptEmailLimits, TALLY_RECEIPT_EMAIL } from '../service/receipt-email-limits.service';
 
 export { TALLY_RECEIPT_EMAIL };
@@ -61,7 +62,7 @@ export class TallyReceiptEmailController {
       return refuse(429, limited.code, `${who} ${limited.cap} receipt emails${today}; another can be sent after ${retryAt}`, { retryAt });
     }
     await this.eventBus.publish(new TallyReceiptEmailEvent(ctx, order, recipient));
-    Logger.info(`Receipt email queued for order ${order.code} by user ${user}`, 'TallyPosPlugin');
+    Logger.info(`Receipt email queued for order ${order.code} by user ${user}`, loggerCtx);
     return { queued: true, emailAddress: recipient };
   }
 }
