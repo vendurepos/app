@@ -20,15 +20,30 @@ export const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
 const CREATED_AT_FLOOR = '2020-01-01T00:00:00Z';
 const CREATED_AT_FLOOR_MS = Date.parse(CREATED_AT_FLOOR);
 
-/** The path of the first string holding U+0000 in an envelope, or undefined. */
-export function nulPath(value: unknown, path: string): string | undefined {
-  if (typeof value === 'string') return value.includes('\u0000') ? path : undefined;
+/** The path of the first string in an envelope that the pattern matches, or undefined. */
+function stringPath(value: unknown, path: string, pattern: RegExp): string | undefined {
+  if (typeof value === 'string') return pattern.test(value) ? path : undefined;
   if (value === null || typeof value !== 'object') return undefined;
   for (const [key, item] of Object.entries(value)) {
-    const found = nulPath(item, path ? `${path}.${key}` : key);
+    const found = stringPath(item, path ? `${path}.${key}` : key, pattern);
     if (found) return found;
   }
   return undefined;
+}
+
+/** The path of the first string holding U+0000 in an envelope, or undefined. */
+export const nulPath = (value: unknown, path: string) => stringPath(value, path, /\u0000/);
+
+// #515: a high surrogate with no low after it, or a low with no high before it. No u flag, so it reads code units.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * #515: jsonb refuses the escape JSON.stringify writes for a lone surrogate. Checked after the replay read, as ADR 0002 §2
+ * replays a committed command whatever its values would now fail; the path never echoes the value.
+ */
+export function loneSurrogateRefusal(id: string, command: unknown) {
+  const lone = stringPath(command, '', LONE_SURROGATE);
+  return lone ? refuse(id, 'invalid_payload', `${lone}: must not contain a lone surrogate`) : undefined;
 }
 
 // Front desk, 2026-09-30: RFC 3339 with Z or an offset, strict form.

@@ -525,4 +525,29 @@ describe('register approval (contract 3)', () => {
     expect(await ask({ closureId, variance: { cash: 600 } })).toMatchObject(BOTH);
     expect(await ask({})).toMatchObject(BOTH);
   });
+
+  // #515 S5: the closure lookup casts the result of every rejected row in the channel, so one stored lone-surrogate escape
+  // broke every approval by closureId there. The envelope now refuses such a string, so the stored text is written directly.
+  it('S5: a rejected ledger row whose stored result holds \\ud83d in its error message: an approval by closureId answers as before', async () => {
+    const target = await blindRefusal();
+    const other = await blindRefusal();
+    const ask = () => approve({ sessionId: target.s, closureId: target.closureId, username: manager.email, password: 'secret-password' }, target.auth);
+    const shape = ({ status, body }: { status: number; body: Record<string, unknown> }) =>
+      ({ status, body: { ...body, approval: typeof body.approval, expiresAt: typeof body.expiresAt } });
+    const earlier = await ask();
+    expect(earlier.status).toBe(200);
+    const table = connection.rawConnection.getRepository(TallyCommand).metadata.tableName;
+    for (const command of [other.command, target.command]) {
+      const [{ result }] = await connection.rawConnection.query(`SELECT "result" FROM "${table}" WHERE "id" = $1`, [command.id]);
+      const stored = JSON.parse(result);
+      expect(stored.error.code).toBe('register_approval_required');
+      stored.error.message = `${stored.error.message} \ud83d`;
+      await connection.rawConnection.query(`UPDATE "${table}" SET "result" = $1 WHERE "id" = $2`, [JSON.stringify(stored), command.id]);
+      const [rewritten] = await connection.rawConnection.query(`SELECT "result" FROM "${table}" WHERE "id" = $1`, [command.id]);
+      expect(rewritten.result).toContain(String.raw`\ud83d`);
+    }
+    const later = await ask();
+    expect(shape(later)).toEqual(shape(earlier));
+    expect((await approvals().findOneByOrFail({ tokenHash: sha256(later.body.approval) })).variance).toEqual({ cash: 600 });
+  });
 });

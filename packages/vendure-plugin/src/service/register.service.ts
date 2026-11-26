@@ -23,6 +23,7 @@ import {
 import * as ledger from './command-ledger';
 import { REGISTER_LOCK_NAMESPACE, REGISTER_VERSIONS } from './constants';
 import { TEST_HOOKS_ENV } from './order-create.service';
+import { jsonbOf } from './sql-json';
 import { registerStrictErrors } from './strict-shape';
 
 // Each type's client-time payload fields, in the order of its table in TallyUI's field-kinds.md.
@@ -95,7 +96,9 @@ export class RegisterService {
       // 2. The replay read: a committed id answers as recorded.
       const replay = await ledger.replayRead(this.connection, ctx, command);
       if (replay) return replay;
-      // 3. Unknown fields and map keys (ADR-070 d1), then the client-time stage (field-kinds.md): unstored.
+      // 3. A lone surrogate (#515), unknown fields and map keys (ADR-070 d1), then the client-time stage (field-kinds.md): unstored.
+      const lone = ledger.loneSurrogateRefusal(id, command);
+      if (lone) return lone;
       const strict = registerStrictErrors(command as unknown as Record<string, unknown>, type, command.version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
       const timeRefusal = clientTimeRefusal(id, [['createdAt', command.createdAt], ...CLIENT_TIMES[type].map(
@@ -450,7 +453,7 @@ export class RegisterService {
 
   private async sessionRefunds(tx: RequestContext, sessionId: string): Promise<{ byMethod: Record<string, number> }[]> {
     const refunds = await channelRefunds(this.connection, tx)
-      .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallySessionId' = :sessionId", { sessionId })
+      .andWhere(`${jsonbOf('refund.metadata')} ->> 'tallySessionId' = :sessionId`, { sessionId })
       .orderBy('refund.id', 'ASC').getMany();
     return refunds.flatMap(refund => {
       const method = refund.metadata.tallyMethod;

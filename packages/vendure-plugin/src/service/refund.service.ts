@@ -10,7 +10,7 @@ import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload, OrderRefun
 import { refundPayloadErrors } from '../vendored/refund-payload-shape';
 import { channelRefunds } from './channel-refunds';
 import {
-  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeRefusal, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
+  CREATED_AT_SKEW_MS, Unstored, claim, clientTimeRefusal, loneSurrogateRefusal, nulRefusal, refuse, replayRead, storeRejection, transientAfterClaim, versionRefusal,
 } from './command-ledger';
 import { ORDER_REFUND_VERSIONS } from './constants';
 import { ErrorResultThrown, unwrap } from './errors';
@@ -18,6 +18,7 @@ import { OrderCreateService } from './order-create.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
 import { REFUND_DISCOUNT_UNLINKED_MESSAGE, cashRoundingForRefund, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
+import { jsonbOf } from './sql-json';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
 /** ADR 0007: one till refund, with the register lock before the order lock. */
@@ -44,6 +45,8 @@ export class RefundService {
     try {
       const replay = await replayRead(this.connection, ctx, command);
       if (replay) return replay;
+      const lone = loneSurrogateRefusal(id, command);
+      if (lone) return lone;
       const strict = refundEnvelopeStrictErrors(command as unknown as Record<string, unknown>, version);
       if (strict.length) return refuse(id, 'invalid_payload', strict.join('; '));
       const timeRefusal = clientTimeRefusal(id, [['createdAt', command.createdAt], ['payload.createdAt', payload.createdAt]],
@@ -74,7 +77,7 @@ export class RefundService {
           throw new Unstored(refuse(id, 'invalid_payload', `clientOrderId: order ${payload.orderId} is ${order.customFields.tallyClientOrderId}`));
         }
         const earlier = await channelRefunds(this.connection, tx)
-          .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallyClientRefundId' = :clientRefundId", { clientRefundId: payload.clientRefundId })
+          .andWhere(`${jsonbOf('refund.metadata')} ->> 'tallyClientRefundId' = :clientRefundId`, { clientRefundId: payload.clientRefundId })
           .orderBy('refund.id', 'ASC').getOne();
         if (earlier) throw new Unstored(refuse(id, 'invalid_payload',
           `clientRefundId: ${payload.clientRefundId} is already refund ${this.orders.encodeId(earlier.id)}`));

@@ -26,7 +26,7 @@ import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRo
 import { classify } from './classification';
 import { bridgeBoundMinor } from './bridge-bound';
 import {
-  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, nulPath, refuse, replayRead,
+  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, loneSurrogateRefusal, nulPath, refuse, replayRead,
 } from './command-ledger';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
@@ -160,11 +160,12 @@ export class OrderCreateService {
       if (replay) return replay;
       // 3. The collision lookup: a sale already recorded is answered by the collision guard after the claim.
       const recorded = await this.recordedAnywhere(ctx, payload.clientOrderId);
-      // 4. The value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal figures): unstored. Then the
-      // client-time stage (TallyUI #337): the envelope's createdAt, then the payload's; its own refusal with only time
-      // messages; the clock is the request's, read once.
+      // 4. A lone surrogate (#515), then the value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal
+      // figures): unstored. Then the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's; its own
+      // refusal with only time messages; the clock is the request's, read once. A recorded sale skips all three: the
+      // collision guard answers it, and the claim stores only the fingerprint.
       const invalidValue = recorded ? undefined
-        : this.valueRefusal(command) ?? clientTimeRefusal(command.id,
+        : loneSurrogateRefusal(command.id, command) ?? this.valueRefusal(command) ?? clientTimeRefusal(command.id,
           [['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]],
           (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
       if (invalidValue) return invalidValue;

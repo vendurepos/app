@@ -150,7 +150,7 @@ medusapos, and calls the two parts at this server's own stages.
 
 1. It first validates every envelope in the batch (`validateBatch`).
 2. Each command then goes through exactly these steps (ADR-038 #220):
-   1. **shape validation**: types, presence, versions and U+0000 in any
+   1. **shape validation**: types, presence, versions, U+0000 in any
       string (which Postgres cannot hold, even for the lookup), with no
       database access: `invalid_payload` or `unsupported_version`, not
       stored. The deliberate exceptions are the envelope `id` bound (≤ 64), because the id is
@@ -170,7 +170,10 @@ medusapos, and calls the two parts at this server's own stages.
       whatever its values would now fail;
    3. **the collision lookup** on `clientOrderId`; a sale already recorded
       goes to the collision guard after the claim;
-   4. **the value refusals**, `invalid_payload`, not stored: every field
+   4. **the value refusals**, `invalid_payload`, not stored: first a lone
+      UTF-16 surrogate in any string (whose `JSON.stringify` escape jsonb
+      refuses, #515; here and not at step 1, so a sale recorded before
+      #515 still replays), then every field
       against the command's own version (ruling 17, §5), the amounts, the
       pure quantity checks (at or below 0, fractional, above int4), the v3
       fiscal figures, the length bounds (`customer.email` 254; refs, ids
