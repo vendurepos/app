@@ -40,7 +40,7 @@ export class TallyStockEditController {
     const input = body as { expectedSaleable?: unknown; saleable?: unknown } | null;
     if (typeof input !== 'object' || input === null || Array.isArray(input)
       || Object.keys(input).sort().join() !== 'expectedSaleable,saleable' || !count(input.expectedSaleable) || !count(input.saleable)) {
-      return refusal(400, 'invalid_payload', 'Expected a body of { expectedSaleable, saleable }, both whole numbers from 0 to 2147483647');
+      return refusal(400, 'invalid_payload', `Expected a body of { expectedSaleable, saleable }, both whole numbers from 0 to ${MAX_INT4}`);
     }
     const expectedSaleable = input.expectedSaleable as number, saleable = input.saleable as number;
     const variantId = this.recipe.decodeId(id);
@@ -69,7 +69,7 @@ export class TallyStockEditController {
         // An unchanged figure writes nothing: oversold, current clamps to 0, and 0 + allocated + threshold is not the stored on-hand.
         if (saleable === current) return { status: 200, body: { saleable, stockOnHand } };
         const next = saleable + stockAllocated + threshold;
-        if (next > MAX_INT4) return refusal(400, 'invalid_payload', `The on-hand figure ${next} would be over 2147483647`);
+        if (next > MAX_INT4) return refusal(400, 'invalid_payload', `The on-hand figure ${next} would be over ${MAX_INT4}`);
         if (next !== stockOnHand) await this.stockMovements.adjustProductVariantStock(tx, variantId, [{ stockLocationId, stockOnHand: next }]);
         return { status: 200, body: { saleable, stockOnHand: next } };
       });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Controller, Post } from '@nestjs/common';
 import {
-  Allow, Ctx, Logger, Order, OrderService, Payment, PaymentMethod, PaymentService, Permission, PluginCommonModule, ProductVariantService, RequestContext,
+  Allow, Ctx, Logger, Order, OrderService, Payment, PaymentMethod, PaymentService, Permission, PluginCommonModule, RequestContext,
   RequestContextService, ShippingMethod, StockLevel, StockMovement, StockMovementService, TransactionalConnection, VendurePlugin,
   defaultOrderProcess,
 } from '@vendure/core';

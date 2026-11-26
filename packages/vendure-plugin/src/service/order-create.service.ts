@@ -19,7 +19,7 @@ import { fiscalFiguresErrors } from '../vendored/fiscal-figures';
 import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import {
-  CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
+  IN_STORE_COLLECTION, CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
   TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
 } from './constants';
 import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRoundingUnexplained, withoutCashRounding } from './cash-rounding';
@@ -959,7 +959,7 @@ export class OrderCreateService {
       lines: order.lines.map(line => ({ orderLineId: line.id, quantity: line.quantity })),
       handler: {
         code: manualFulfillmentHandler.code,
-        arguments: [{ name: 'method', value: 'In-store collection' }, { name: 'trackingCode', value: '' }],
+        arguments: [{ name: 'method', value: IN_STORE_COLLECTION }, { name: 'trackingCode', value: '' }],
       },
     }));
     unwrap(await this.orders.transitionFulfillmentToState(ctx, fulfillment.id, 'Delivered'));

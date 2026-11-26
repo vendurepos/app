@@ -2,6 +2,10 @@
 // OrderCreateService share it without importing each other.
 export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
 
+// The name of the plugin's in-store shipping method (TALLY_SHIPPING_METHOD_CODE), also its calculator's description and the
+// fulfilment method recorded on every till order.
+export const IN_STORE_COLLECTION = 'In-store collection';
+
 // ADR 0005 ruling (a): the plugin-owned variant for custom till lines.
 export const TALLY_CUSTOM_ITEM_SKU = 'TALLY-CUSTOM-ITEM';
 // ADR 0005 ruling (a): the plugin-owned category for untaxed custom lines.
