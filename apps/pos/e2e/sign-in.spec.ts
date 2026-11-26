@@ -2211,6 +2211,7 @@ test('fees, a shipping charge and a custom item, one with a tax class, are appli
 
 // Two TALLY-FEE surcharges and no TALLY-ROUNDING (packages/vendure-plugin/src/service/constants.ts), which bridges a drift.
 const ORDER_ON_STORE = 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { total totalWithTax surcharges { sku } } } }';
+const ORDER_SURCHARGES_ON_STORE = 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax surcharges { sku priceWithTax } } } }';
 type SentOrder = { payload: { clientOrderId: string; fees: Record<string, unknown>[]; shipping?: Record<string, unknown>[] } };
 
 test('a percent fee and a tax-exclusive fee reach the store in its own mode, and the order is accepted a cent-exact', async ({ page }) => {
@@ -2341,7 +2342,7 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
   }
 });
 
-test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel reaches the store as entered, a cent-exact', async ({ page }) => {
+test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel reaches the store as entered, its gross kept', async ({ page }) => {
   const sent: (SentOrder & { payload: { totalMinor: number } })[] = [];
   await page.route('**/tally/v1/commands', (route) => {
     if (route.request().method() === 'POST') {
@@ -2365,7 +2366,8 @@ test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel
   await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Standard DE', exact: true }).click();
   await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   await expect(form).toHaveCount(0);
-  // 9.99 gross at 19 % has no net cent that re-taxes to it (839 → 9.98, 840 → 10.00): converted, Vendure would drift a cent and the plugin bridge it.
+  // 9.99 gross at 19 % has no net cent that re-taxes to it (839 → 9.98, 840 → 10.00). Sent as entered, the fee keeps its gross 9.99 on the store;
+  // the store's order-level strategy re-taxes the rate group from nets ((800 + 839) × 19 % = 311.41 → 311), and the plugin bridges that cent.
   const cartTotal = await cart.getByTestId('cart-total').textContent();
   await checkout(page);
   await page.getByTestId('tender-method-external').click();
@@ -2377,9 +2379,10 @@ test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel
   const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
   const onStore = async () => (await (await page.request.post(`${STORE_URL}/admin-api`, {
     headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
-    data: { query: ORDER_ON_STORE, variables: { id: sent[0].payload.clientOrderId } },
+    data: { query: ORDER_SURCHARGES_ON_STORE, variables: { id: sent[0].payload.clientOrderId } },
   })).json()).data.orders.items;
-  await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ total: expect.any(Number), totalWithTax: sent[0].payload.totalMinor, surcharges: [{ sku: 'TALLY-FEE' }] }]);
+  await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: sent[0].payload.totalMinor,
+    surcharges: [{ sku: 'TALLY-FEE', priceWithTax: 999 }, { sku: 'TALLY-ROUNDING', priceWithTax: 1 }] }]);
   expect(cartTotal).toEqual(`€${(sent[0].payload.totalMinor / 100).toFixed(2)}`);
 });
 
