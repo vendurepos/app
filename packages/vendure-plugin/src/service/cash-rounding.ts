@@ -1,5 +1,6 @@
 // TallyUI ADR-094: order.create's `cashRoundings`, the till's cash rounding per payment. The plugin checks the entries
 // against the channel's own rounding cash methods and never takes the till's figure on trust.
+import type { CashRounding } from '../config/strategies';
 import { CASH_ROUNDING_BOUND_FACTOR, MAX_CASH_ROUNDINGS } from './constants';
 import type { TenderMethod, TenderPayment } from './payment-methods.service';
 
@@ -50,6 +51,15 @@ export function withoutCashRounding<P extends CashPayload>(payload: P): P {
     ...(payload.display ? { display: { ...payload.display, totalMinor: payload.display.totalMinor - sum } } : {}) };
 }
 
+// A payment's rounding leg: its own method's, or, for an unnamed cash leg (a content version below 10), every rounder's.
+function roundingLegs(payload: CashPayload, codes: string[], listed: TenderMethod[], rounders: TenderMethod[]): CashRounding[][] {
+  return payload.payments.map(({ method, methodId }, index) => {
+    const own = listed.find(tally => tally.code === codes[index])?.rounding;
+    if (own) return [own];
+    return methodId === undefined && method === 'cash' ? rounders.map(tally => tally.rounding!) : [];
+  });
+}
+
 /**
  * The store-config checks against the channel's methods, after resolve: F3 (a rounding leg is a multiple of one of its
  * increments), F4 (an entry on any other payment is a single negative write-off) and F5 (every entry is under
@@ -60,12 +70,7 @@ export function cashRoundingRefusal(payload: CashPayload, codes: string[], liste
   if (!entries.length) return undefined;
   const rounders = listed.filter(method => method.rounding);
   if (!rounders.length) return { code: 'invalid_payload', message: 'cashRoundings: no enabled cash method of this channel rounds' };
-  // A payment's increments: its own method's, or, for an unnamed cash leg (a content version below 10), every rounder's.
-  const increments = payload.payments.map(({ method, methodId }, index) => {
-    const own = listed.find(tally => tally.code === codes[index])?.rounding;
-    if (own) return [own.incrementMinor];
-    return methodId === undefined && method === 'cash' ? rounders.map(tally => tally.rounding!.incrementMinor) : [];
-  });
+  const increments = roundingLegs(payload, codes, listed, rounders).map(leg => leg.map(rounding => rounding.incrementMinor));
   for (const [index, payment] of payload.payments.entries()) {
     if (increments[index].length && !increments[index].some(increment => payment.amountMinor % increment === 0)) {
       return { code: 'invalid_payload', message: `payments[${index}].amountMinor: a cash rounding leg must be a multiple of its increment` };
@@ -90,4 +95,30 @@ export function cashRoundingRefusal(payload: CashPayload, codes: string[], liste
         + 'Reopen the sale on the till and take the payment again.' };
   }
   return undefined;
+}
+
+/**
+ * The largest cash rounding a till produces without voiding a tender (front desk rulings 4 and 5, 2026-11-26), for an
+ * increment inc. entryMax is for any entry on a rounding leg, writeOffMax for a write-off on any other leg:
+ *   nearest: entryMax 2(ceil(inc/2) − 1), writeOffMax ceil(inc/2) − 1
+ *   up:      entryMax inc − 1,            writeOffMax 0
+ *   down:    entryMax 2(inc − 1),         writeOffMax inc − 1
+ * Until TallyUI#1364 puts voided legs and units on the wire; then the exact re-derive replaces this threshold.
+ */
+export function voidFreeMaxMinor(rounding: { incrementMinor: number; mode: 'nearest' | 'up' | 'down' }, writeOff: boolean): number {
+  const { incrementMinor: inc, mode } = rounding;
+  const writeOffMax = { nearest: Math.ceil(inc / 2) - 1, up: 0, down: inc - 1 }[mode];
+  return writeOff ? writeOffMax : mode === 'up' ? inc - 1 : 2 * writeOffMax;
+}
+
+/** The entries above voidFreeMaxMinor for their leg, in the order sent ([] when none); only after cashRoundingRefusal passed. */
+export function cashRoundingUnexplained(payload: CashPayload, codes: string[], listed: TenderMethod[]): Array<CashRoundingEntry & { maxMinor: number }> {
+  const rounders = listed.filter(method => method.rounding);
+  const legs = roundingLegs(payload, codes, listed, rounders);
+  return entriesOf(payload).flatMap(({ paymentId, minor }) => {
+    const leg = legs[payload.payments.findIndex(payment => payment.clientPaymentId === paymentId)];
+    const maxMinor = leg.length ? Math.max(...leg.map(rounding => voidFreeMaxMinor(rounding, false)))
+      : Math.max(...rounders.map(tally => voidFreeMaxMinor(tally.rounding!, true)));
+    return Math.abs(minor) > maxMinor ? [{ paymentId, minor, maxMinor }] : [];
+  });
 }

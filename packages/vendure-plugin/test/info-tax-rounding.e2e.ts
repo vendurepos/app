@@ -41,11 +41,11 @@ for (const [name, override, taxRounding] of cases) {
       expect(response.status).toBe(200);
       const body = await response.json();
       // Never absent, and `custom` carries no mode: exact keys, not just a matching shape.
-      expect(Object.keys(body)).toEqual(['contracts', 'taxRounding', 'taxZone', 'maxShippingLines', 'lineTax', 'customerDisplay', 'paymentMethods', 'permissions']);
+      expect(Object.keys(body)).toEqual(['contracts', 'taxRounding', 'taxZone', 'maxShippingLines', 'lineTax', 'customerDisplay', 'paymentMethods', 'cashRounding', 'permissions']);
       expect(Object.keys(body.taxRounding).sort()).toEqual(Object.keys(taxRounding).sort());
       expect(body).toEqual({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], register: [1, 2, 3], 'order.refund': [1] }, taxRounding,
         taxZone: { byAddress: false, countries: ['DK'] }, // env.ts: the default strategy, and the zone Denmark holds only DK.
-        maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 }, paymentMethods: [],
+        maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 }, paymentMethods: [], cashRounding: { v: 1 },
         permissions: expect.arrayContaining(['SuperAdmin', 'TallyPosSell']) });
     });
   });

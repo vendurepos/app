@@ -17,7 +17,8 @@ type RefusalCode = 'invalid_payload' | 'total_mismatch';
 
 const cash5 = (amountMinor: number): Tender => ({ methodId: 'cash-5', method: 'cash', amountMinor });
 const card = (amountMinor: number): Tender => ({ methodId: 'card', method: 'external', amountMinor });
-const DEFAULTS = { 'cash-5': true, 'cash-10': false, 'cash-5-up': false };
+const cash5down = (amountMinor: number): Tender => ({ methodId: 'cash-5-down', method: 'cash', amountMinor });
+const DEFAULTS = { 'cash-5': true, 'cash-10': false, 'cash-5-up': false, 'cash-5-down': false };
 
 // TallyUI ADR-094 P1b: order.create's cashRoundings, checked against the channel's rounding cash methods and stored as
 // one untaxed TALLY-CASH-ROUNDING surcharge, so Vendure's total is what the till took.
@@ -32,6 +33,7 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
     await createMethod('cash-5', true, { tender: 'cash', roundingIncrement: '5', roundingMode: 'nearest' });
     await createMethod('cash-10', false, { tender: 'cash', roundingIncrement: '10', roundingMode: 'nearest' });
     await createMethod('cash-5-up', false, { tender: 'cash', roundingIncrement: '5', roundingMode: 'up' });
+    await createMethod('cash-5-down', false, { tender: 'cash', roundingIncrement: '5', roundingMode: 'down' });
     await createMethod('card', true, { tender: 'card' });
   });
   afterAll(() => server.destroy());
@@ -263,6 +265,106 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
 
     it('row 26: an unnamed cash leg not a multiple of any enabled increment is refused', async () => {
       await expectRefused(roundedSale(1003, [cash5(1004)], [{ index: 0, minor: 1 }], 5), 'invalid_payload', 'payments[0].amountMinor');
+    });
+  });
+
+  // ADR-094 P1c: an entry above the void-free maximum (front desk rulings 4 and 5) is applied as P1b stores it, with a
+  // cash_rounding_unexplained warning, the same entries in tallySnapshot and one private order note.
+  describe('(h) cash_rounding_unexplained (P1c)', () => {
+    const snapshotOf = async (orderId: string) => JSON.parse((await connection.rawConnection.getRepository(Order)
+      .findOneByOrFail({ id: environment.decode(orderId) })).customFields.tallySnapshot!);
+    async function notesOf(orderId: string) {
+      const { order } = await adminClient.query<{ order: { history: { items: Array<{ type: string; isPublic: boolean; data: { note?: string } }> } } }>(
+        parse('query Notes($id: ID!) { order(id: $id) { history { items { type isPublic data } } } }'), { id: orderId });
+      return order.history.items.filter(item => item.type === 'ORDER_NOTE');
+    }
+    async function expectUnexplained(command: ReturnType<typeof roundedSale>, cashMinor: number,
+      expected: Array<{ index: number; minor: number; maxMinor: number }>) {
+      const { result } = await expectApplied(command, cashMinor);
+      const payments = payloadOf(command).payments as Array<{ clientPaymentId: string }>;
+      const entries = expected.map(({ index, minor, maxMinor }) => ({ paymentId: payments[index].clientPaymentId, minor, maxMinor }));
+      expect(result.warnings).toEqual(entries.length ? entries.map(entry => ({ code: 'cash_rounding_unexplained', ...entry })) : undefined);
+      const orderId = result.serverRefs!.orderId;
+      const snapshot = await snapshotOf(orderId);
+      const notes = await notesOf(orderId);
+      if (!entries.length) {
+        expect(snapshot).not.toHaveProperty('cashRoundingUnexplained');
+        expect(notes).toEqual([]);
+      } else {
+        expect(snapshot.cashRoundingUnexplained).toEqual(entries);
+        expect(notes).toHaveLength(1);
+        expect(notes[0].isPublic).toBe(false);
+      }
+      return { entries, notes };
+    }
+
+    it('W1: an ordinary round up raises nothing', async () => {
+      await expectUnexplained(roundedSale(1003, [cash5(1005)], [{ index: 0, minor: 2 }]), 2, []);
+    });
+
+    it('W2: a write-off within nearest\'s maximum raises nothing', async () => {
+      await expectUnexplained(roundedSale(1002, [card(1000)], [{ index: 0, minor: -2 }]), -2, []);
+    });
+
+    it('W3: any write-off under an up-only rounder is unexplained (max 0)', async () => {
+      await withMethods({ 'cash-5': false, 'cash-5-up': true }, async () => {
+        await expectUnexplained(roundedSale(1002, [card(1000)], [{ index: 0, minor: -2 }]), -2, [{ index: 0, minor: -2, maxMinor: 0 }]);
+      });
+    });
+
+    it('W4: a half-increment write-off under cash-10 is unexplained (max 4)', async () => {
+      await withMethods({ 'cash-5': false, 'cash-10': true }, async () => {
+        await expectUnexplained(roundedSale(1005, [card(1000)], [{ index: 0, minor: -5 }]), -5, [{ index: 0, minor: -5, maxMinor: 4 }]);
+      });
+    });
+
+    it('W5: the #1295 sale warns once, on the card entry only', async () => {
+      await expectUnexplained(roundedSale(1008, [card(497), cash5(510)], [{ index: 0, minor: -3 }, { index: 1, minor: 2 }]), -1,
+        [{ index: 0, minor: -3, maxMinor: 2 }]);
+    });
+
+    it('W6: a pick and a write-off merged on one cash leg raises nothing (max 4)', async () => {
+      await expectUnexplained(roundedSale(503, [cash5(500)], [{ index: 0, minor: -3 }]), -3, []);
+    });
+
+    it('W7: an entry inside the bound but above the maximum is unexplained', async () => {
+      await expectUnexplained(roundedSale(1009, [cash5(1000)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 4 }]);
+    });
+
+    it('W8: a write-off with two rounders enabled takes the larger maximum', async () => {
+      await withMethods({ 'cash-10': true }, async () => {
+        await expectUnexplained(roundedSale(1003, [card(1000)], [{ index: 0, minor: -3 }]), -3, []);
+      });
+    });
+
+    it('W9: down mode allows a write-off of inc − 1 and an entry of 2(inc − 1)', async () => {
+      await withMethods({ 'cash-5': false, 'cash-5-down': true }, async () => {
+        await expectUnexplained(roundedSale(1004, [card(1000)], [{ index: 0, minor: -4 }]), -4, []);
+        await expectUnexplained(roundedSale(1008, [cash5down(1000)], [{ index: 0, minor: -8 }]), -8, []);
+        await expectUnexplained(roundedSale(1009, [cash5down(1000)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 8 }]);
+      });
+    });
+
+    it('W10: an unnamed cash leg takes the largest rounder\'s entry maximum', async () => {
+      await expectUnexplained(roundedSale(1004, [cash5(1000)], [{ index: 0, minor: -4 }], 5), -4, []);
+      await expectUnexplained(roundedSale(1006, [cash5(1000)], [{ index: 0, minor: -6 }], 5), -6, [{ index: 0, minor: -6, maxMinor: 4 }]);
+    });
+
+    it('W11: the warning is stored in tallySnapshot and as one private order note', async () => {
+      const command = roundedSale(1008, [card(497), cash5(510)], [{ index: 0, minor: -3 }, { index: 1, minor: 2 }]);
+      const { entries, notes } = await expectUnexplained(command, -1, [{ index: 0, minor: -3, maxMinor: 2 }]);
+      expect(notes).toEqual([{ type: 'ORDER_NOTE', isPublic: false, data: { note: 'Cash rounding above what a till takes without voiding '
+        + `a tender (TallyUI#1364): -3 on payment ${entries[0].paymentId} (at most 2). Check this sale's payments before relying on its total.` } }]);
+      expect(notes[0].data.note).toContain('-3');
+      expect(notes[0].data.note).toContain('2');
+    });
+
+    it('W12: an old till\'s sale without cashRoundings raises nothing', async () => {
+      for (const version of [5, 10]) {
+        const command = roundedSale(1003, [card(1003)], [], version);
+        expect(payloadOf(command).cashRoundings).toBeUndefined();
+        await expectUnexplained(command, 0, []);
+      }
     });
   });
 });
