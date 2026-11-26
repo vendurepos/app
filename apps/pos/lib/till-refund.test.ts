@@ -193,6 +193,35 @@ describe("the cash rounding goes with the refund that takes everything left on t
   });
 });
 
+describe('#525: a refund total below 0 is refused at the till', () => {
+  const shipped = { ...order([refundOf('L1', 2)]), lines: [line('L1', 2, 1904), line('L2', 1, 1)], shippingWithTax: 6,
+    surcharges: [{ description: 'Cash rounding', sku: TALLY_CASH_ROUNDING_SKU, price: -2, priceWithTax: -2 }] };
+
+  it('keeps the negative figure and explains the refusal without storing or sending the refund', async () => {
+    const quantities = { L1: 0, L2: 1 };
+    expect(refundTotalMinor(shipped, quantities)).toBe(-1);
+    const envelope = buildRefundEnvelope(shipped, { quantities, reason: 'Returned', restock: true }, till, ids);
+    expect(envelope.payload.totalMinor).toBe(-1);
+    const fake = transport();
+    const attempt = await sendTillRefund(refunds, fake, envelope);
+    expect(attempt).toEqual({ kind: 'not_sent', code: 'rounding_exceeds_rest' });
+    expect(fake.send).not.toHaveBeenCalled();
+    expect(await refunds.find().exec()).toHaveLength(0);
+    expect(refundMessage(attempt, 'EUR')).toEqual({ text: REFUND_ROUNDING_EXCEEDS_TEXT, sendAgain: false, signInAgain: false, done: false });
+  });
+
+  it('still sends a zero total for the store to answer', async () => {
+    const sale = { ...shipped, lines: [line('L1', 2, 1904), line('L2', 2, 2)] };
+    const quantities = { L1: 0, L2: 2 };
+    expect(refundTotalMinor(sale, quantities)).toBe(0);
+    const envelope = buildRefundEnvelope(sale, { quantities, reason: 'Returned', restock: true }, till, ids);
+    const fake = transport(applied(envelope.id));
+    const attempt = await sendTillRefund(refunds, fake, envelope);
+    expect(fake.send).toHaveBeenCalledOnce();
+    expect(attempt.kind).toBe('answered');
+  });
+});
+
 it('an empty refund of a bridged order sends nothing, not the bridge', () => {
   const sale = {
     ...order(order().lines.map(line => refundOf(line.id, line.quantity))),
@@ -298,7 +327,7 @@ it('keeps an unanswered refund pending and sends the same envelope again', async
   const again = await sendTillRefund(refunds, fake, envelope);
   expect(fake.send.mock.calls[1][0][0].id).toBe('command-1');
   expect(again.kind === 'answered' && again.outcome.kind).toBe('applied');
-  expect(again.record.status).toBe('applied');
+  expect(again.kind === 'answered' && again.record.status).toBe('applied');
 });
 
 it('answers a new attempt while one is pending with the pending record', async () => {
@@ -390,7 +419,7 @@ it('a refused resend after an unknown answer stays pending and says the answer i
   expect(refundMessage(first, 'EUR').text).toBe(REFUND_UNKNOWN_TEXT);
   const again = await sendTillRefund(refunds, fake, envelope);
   expect(again.kind === 'answered' && again.outcome.kind).toBe('refused');
-  expect(again.record.status).toBe('pending');
+  expect(again.kind === 'answered' && again.record.status).toBe('pending');
   expect(refundMessage(again, 'EUR')).toEqual({ text: REFUND_UNKNOWN_TEXT, sendAgain: true, signInAgain: false, done: false });
 });
 

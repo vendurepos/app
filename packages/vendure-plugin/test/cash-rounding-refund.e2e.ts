@@ -238,4 +238,13 @@ describe('cash rounding: order.refund (ADR-094 P1c)', () => {
       { roundingMinor: -3, restMinor: 3 });
     expect(await refundedOf(order.id)).toBe(paid);
   });
+
+  it('R11 (vendurepos/app#525): a negative refund total is refused invalid_payload, the backstop behind the till', async () => {
+    const session = await openSession();
+    const { order, paid, a, b } = await sellRounded([{ unitPriceMinor: 1000 }, { unitPriceMinor: 2 }], -2);
+    expect(paid).toBe(1000);
+    await applied(refundFor(order, session, [{ line: a }], 1000), 1000);
+    await refused(refundFor(order, session, [{ line: b }], -1), order.id, 'invalid_payload', 'totalMinor: expected a safe integer >= 0');
+    expect(await refundedOf(order.id)).toBe(paid);
+  });
 });

@@ -124,10 +124,15 @@ export async function pendingRefund(refunds: PosRefundCollection, orderId: strin
 
 export type RefundAttempt =
   | { kind: 'answered'; outcome: OrderRefundOutcome; record: PosRefund }
-  | { kind: 'pending'; record: PosRefund };
+  | { kind: 'pending'; record: PosRefund }
+  // #525: the till's own refusal; nothing stored, nothing sent.
+  | { kind: 'not_sent'; code: 'rounding_exceeds_rest' };
 /** submitOrderRefund, with RefundAnswerPendingError as { kind: 'pending' }; any other error is rethrown. */
 export async function sendTillRefund(refunds: PosRefundCollection, transport: CommandTransport<OrderRefundEnvelope>,
   envelope: OrderRefundEnvelope): Promise<RefundAttempt> {
+  // #525, desk ruling 2026-11-26: a total below 0 is the order's negative rounding taking more than the lines left
+  // (shipping still on the order). The till never sends it; the plugin's invalid_payload stays the backstop.
+  if (envelope.payload.totalMinor < 0) return { kind: 'not_sent', code: 'rounding_exceeds_rest' };
   try {
     const { outcome, record } = await submitOrderRefund({ refunds, transport, envelope });
     return { kind: 'answered', outcome, record };
@@ -150,6 +155,7 @@ function parkedNeedsAdminLine(record: PosRefund): string | null {
 export function refundMessage(attempt: RefundAttempt, currency: string): RefundMessage {
   const message = (text: string, flags: Partial<Omit<RefundMessage, 'text'>> = {}): RefundMessage =>
     ({ text, sendAgain: false, signInAgain: false, done: false, ...flags });
+  if (attempt.kind === 'not_sent') return message(REFUND_ROUNDING_EXCEEDS_TEXT);
   const parked = parkedNeedsAdminLine(attempt.record);
   if (attempt.kind === 'pending') return message(parked ?? REFUND_PENDING_TEXT, { sendAgain: true });
   const { outcome } = attempt;
