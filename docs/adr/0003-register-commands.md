@@ -36,14 +36,15 @@ Three things the contract leaves to a plugin, or that core does not do yet:
 `order.create`'s step order (ADR 0002 §2):
 
 1. **Shape**, before any database access: a string holding U+0000, then
-   one holding a lone surrogate (#515), then
    the version (`unsupported_version` with core's message and
    `data: { register: 1 }`), then core's `registerPayloadErrors`.
 2. **The replay read.** A committed id answers as recorded: `duplicate`
    with the result recorded at apply (never the current state), or
    `rejected` for a stored refusal. Another channel's id, or another
    payload's fingerprint, is `idempotency_mismatch`.
-3. **Strict fields and map keys** (§4), then the **client-time stage**:
+3. **A lone surrogate** in any string (#515; after the replay read, so a
+   command recorded before #515 still replays), then **strict fields and
+   map keys** (§4), then the **client-time stage**:
    the envelope's `createdAt`, then the payload's time fields in
    field-kinds.md table order (`openedAt`; `at`; `createdAt`;
    `openedAt`, `closedAt`), with the same messages, bounds, clock and cap
