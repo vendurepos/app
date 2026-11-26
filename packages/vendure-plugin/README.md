@@ -176,7 +176,7 @@ The plugin checks the rounding against the channel's own methods and refuses it,
 - the payments do not add up to the total;
 - a non-cash payment carries anything but a single write-off;
 - no rounding method is enabled;
-- an entry reaches twice the largest enabled increment. This is `total_mismatch`: a till that voided tenders after a cash write-off can produce it (TallyUI#1365), and the sale stays in its outbox to be taken again.
+- an entry reaches twice the largest enabled increment, and so does the running sum of entries through it (a reopened sale's settle may carry back its earlier picks, TallyUI#1367). This is `total_mismatch`: a till that voided tenders after a cash write-off can produce it (TallyUI#1365), and the sale stays in its outbox to be taken again.
 
 An entry larger than a till makes without voiding a tender is stored with a `cash_rounding_unexplained` warning and a
 private order note, so an admin can check that sale's payments.

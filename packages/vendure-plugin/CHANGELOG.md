@@ -13,7 +13,7 @@
     - a rounding cash leg that is not a multiple of its increment;
     - more than one entry, or a non-negative one, on any other payment;
     - no enabled rounding cash method;
-    - an entry of 2 × the largest enabled increment or more. This one is refused `total_mismatch` with `cashRoundingMinor` and `boundMinor`, and its message names void cycles (TallyUI#1365).
+    - an entry of 2 × the largest enabled increment or more, unless the running sum of entries through it is under that (a reopened sale's settle, TallyUI#1367). This one is refused `total_mismatch` with `cashRoundingMinor` and `boundMinor`, and its message names void cycles (TallyUI#1365).
   - An entry above what a till produces without voiding a tender is applied, and it raises `cash_rounding_unexplained`: a result warning, `tallySnapshot.cashRoundingUnexplained` and a private order note.
   - The refund that takes everything left on an order's lines returns its cash rounding, as it returns the bridge; no other refund returns any of it.
 

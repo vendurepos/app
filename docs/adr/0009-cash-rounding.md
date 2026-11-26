@@ -15,7 +15,8 @@ The plugin re-derives the rounding from its own payment-method increment and ref
 
 So the same payload can come from different sales whose correct entries differ. Three findings from replays on TallyUI's real order builder (2026-11-26):
 
-- **Without voids**, a single entry is bounded. The bound is 2(ceil(inc/2) − 1) under nearest, inc − 1 under up, and 2(inc − 1) under down, all below 2 × inc. A write-off's own remainder is at most ceil(inc/2) − 1 under nearest and inc − 1 under down; up never writes one off.
+- **Without voids**, a single entry is bounded. For a rounding m of increment inc, a pick or settle moves the amount by at most posMax(m) up (nearest floor(inc/2), since TallyUI rounds a half up; up inc − 1; down 0) and negMax(m) down (nearest ceil(inc/2) − 1; up 0; down inc − 1). A write-off is at most W, the largest negMax among the enabled methods, and TallyUI merges it into the last counted leg's own entry whatever that leg's method, so an entry on a rounding leg is at most max(posMax(m), negMax(m) + W). Every one of these is below 2 × the largest increment.
+- **A reopened sale** re-adds its legs without `units` (TallyUI#1367), so its next settle entry carries every earlier pick entry back: four cash-10 picks of −4, then a settle of +21. The sale's total is correct; only the single entry is past anything a till makes in one step, and the running sum of entries through it is not.
 - **With voids**, the #1295 sale `[card 497 {−3}, cash 510 {+2}]` finishes even though no rule on the payload alone explains its −3.
 - **With voids, a write-off can grow without limit** (TallyUI#1365, a money bug). A write-off ignores entries on pick legs, so each "void a card, tap cash" cycle writes off another remainder.
 
@@ -29,13 +30,13 @@ So the same payload can come from different sales whose correct entries differ. 
    - a goods total outside the bridge bound;
    - a rounding cash leg that is not a multiple of its increment;
    - more than one entry, or a non-negative entry, on a payment that is not a rounding cash method;
-   - an entry with |minor| ≥ 2 × the largest enabled increment. This is refused as `total_mismatch`, which the till can reopen, with a message naming void cycles and TallyUI#1365;
+   - an entry with |minor| ≥ 2 × the largest enabled increment whose running sum (the entries through it, in payload order) is at that bound too. This is refused as `total_mismatch`, which the till can reopen, with a message naming void cycles and TallyUI#1365. The running-sum acceptance is front desk ruling 6 (2026-11-26): a large entry passes only when it cancels what came before it, as a reopened sale's settle does (TallyUI#1367);
    - entries on a channel with no enabled rounding cash method.
 4. **Loosened because voided legs are not on the wire.** A write-off on a non-rounding leg is accepted in any position, under any mode, and whatever its remainder rounds to. The #1295 sale, a write-off under an up-only channel and a half-increment write-off under nearest are therefore accepted. Each one carries the warning below.
-5. **Warning, not refusal.** `cash_rounding_unexplained` (`{ paymentId, minor, maxMinor }`) is raised when an entry's |minor| exceeds the void-free maximum for its leg (`voidFreeMaxMinor` in `src/service/cash-rounding.ts`):
-   - on a rounding leg, the entry maximum of its method's mode;
-   - on an unnamed cash leg, the largest entry maximum among the enabled rounding methods;
-   - on any other leg (a write-off), the largest write-off maximum among them.
+5. **Warning, not refusal.** `cash_rounding_unexplained` (`{ paymentId, minor, maxMinor }`) is raised when an entry's |minor| and the running sum through it both exceed the void-free maximum for its leg (`voidFreeMaxMinor` in `src/service/cash-rounding.ts`):
+   - on a rounding leg, the largest max(posMax(m), negMax(m) + W) over its method's rounding;
+   - on an unnamed cash leg, the same over every enabled rounding method;
+   - on any other leg (a write-off), W.
 
    The sale is still applied with its total unchanged. The warning is returned in the order.create result, stored in the order's `tallySnapshot` as `cashRoundingUnexplained`, and written as one private order note that the Vendure admin shows. The report's cash-rounding figure counts it in its note (a later PR). Below those maxima it stays silent: a pick sale is normal and is not flagged.
 6. **Refunds.** A full refund returns the rounding. A partial refund returns none of it, except the refund that takes everything left on the lines, which carries all of it, as it carries the TALLY-ROUNDING bridge. A negative rounding larger than the last line, or a partial refund of a line above what was paid, is refused there as for the bridge (#469, accepted: that last line is refunded in the Vendure admin). The report's cash-rounding figure nets refunds (a later PR).
@@ -49,5 +50,5 @@ So the same payload can come from different sales whose correct entries differ. 
   - the plugin's exact in-order re-derive replaces the warning threshold;
   - the write-off rule returns to the desk's original shape: the remainder rounds to 0 under an enabled method, and the entry sits on the last counted leg.
 
-  When TallyUI#1365 is fixed, the hard bound can tighten to the void-free maximum.
+  When reopen carries `units` (TallyUI#1367), the running-sum acceptance in items 3 and 5 tightens back to the per-entry rule. When TallyUI#1365 is fixed, the hard bound can tighten to the void-free maximum.
 - Medusa and the Woo fork face the same limit and can take the same invariants.
