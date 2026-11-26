@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-11-26)
+
+**0.4.0 was never published to npm.** Its version and changelog were merged on 2026-11-23, but it was not tagged. The first version on npm after 0.3.0 is 0.5.0, and it includes everything listed under 0.4.0 below.
+
+**Version pairing:** the VendurePOS app on @tallyui 5.1.0 or later rounds cash only against a plugin whose `/tally/v1/info` advertises `cashRounding`, which needs 0.5.0. Against 0.4.0 or older, the till takes exact cash and keeps no local-only rounding (ADR 0009 item 7). The 0.4.0 pairing still applies: the app from vendurepos/app#466 on needs 0.4.0 or later.
+
+### Upgrading
+
+- **From 0.4.0:** no migrations and no new permissions. The behaviour changes below apply as soon as 0.5.0 serves.
+- **From 0.3.0:** run the six migrations listed under 0.4.0, in its order, before serving 0.5.0. 0.5.0 adds none of its own. The 0.4.0 permissions and its handler behaviour change apply too.
 
 ### Added
 
