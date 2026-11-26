@@ -92,7 +92,7 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
           const perRate = [...new Set([...posRates.keys(), ...serverRates.keys()])].map(ratePpm => ({
             ratePpm, diff: (serverRates.get(ratePpm) ?? 0) - (posRates.get(ratePpm) ?? 0),
           }));
-          // Independently check rateToleranceMinor against the payload's row count.
+          // T from the payload's rows, written out here independently of rateToleranceMinor (which this file never calls).
           const T = Math.ceil((command.payload.lines.length + (command.payload.fees?.length ?? 0) + (command.payload.shipping?.length ?? 0)
             + command.payload.lines.filter(line => (line.discountMinor ?? 0) > 0).length) / 2);
           const bridges = order.surcharges.filter(row => row.sku === 'TALLY-ROUNDING');
