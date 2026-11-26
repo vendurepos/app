@@ -115,38 +115,29 @@ export function cashRoundingRefusal(payload: CashPayload, codes: string[], liste
 }
 
 /**
- * The largest cash rounding a till produces without voiding a tender (front desk rulings 4 and 5, 2026-11-26), for an
- * entry on `leg` (a payment's roundings; [] for any other leg) with the channel's enabled `rounders`. For a rounding m
- * of increment inc:
- *   posMax(m): nearest floor(inc/2) (TallyUI rounds a half up), up inc − 1, down 0
- *   negMax(m): nearest ceil(inc/2) − 1,                         up 0,       down inc − 1
- * W is the largest negMax over the rounders. A write-off on a non-rounding leg may be W. TallyUI merges a write-off into
- * the last counted leg's own entry, whatever its method, so an entry on a rounding leg may be the largest, over its
- * roundings m, of max(posMax(m), negMax(m) + W). Until TallyUI#1364 puts voided legs and units on the wire and
- * TallyUI#1367's reopen carries units; then the exact re-derive replaces this threshold, per entry again.
+ * The hull of the leg's ranges R in minor units: nearest (−inc/2, inc/2], up [0, inc), down (−inc, 0].
+ * For a write-off, take the hull over all enabled rounders (front desk ruling, 2026-11-26).
  */
-export function voidFreeMaxMinor(leg: CashRounding[], rounders: CashRounding[]): number {
+function roundingRange(roundings: CashRounding[]) {
   const posMax = ({ incrementMinor: inc, mode }: CashRounding) => ({ nearest: Math.floor(inc / 2), up: inc - 1, down: 0 }[mode]);
   const negMax = ({ incrementMinor: inc, mode }: CashRounding) => ({ nearest: Math.ceil(inc / 2) - 1, up: 0, down: inc - 1 }[mode]);
-  const writeOffMax = Math.max(...rounders.map(negMax));
-  return leg.length ? Math.max(...leg.map(rounding => Math.max(posMax(rounding), negMax(rounding) + writeOffMax))) : writeOffMax;
+  return { low: -Math.max(...roundings.map(negMax)), high: Math.max(...roundings.map(posMax)) };
 }
 
 /**
- * The entries above voidFreeMaxMinor for their leg whose running sum (in payload order) is above it too, in the order
- * sent ([] when none); only after cashRoundingRefusal passed. The last entry may also cancel a prefix: it is silent
- * when it plus some prefix sum before it is within its maximum (front desk ruling 7, 2026-11-26). Both acceptances go
- * at order.create v13 (a per-entry rounding basis, TallyUI#1367) for the exact per-entry check.
+ * After cashRoundingRefusal passes, warn on entries whose running sum in payload order is outside their leg's R.
+ * maxMinor is the magnitude of the bound crossed by the sum; minor remains the entry's own amount.
  */
 export function cashRoundingUnexplained(payload: CashPayload, codes: string[], listed: TenderMethod[]): Array<CashRoundingEntry & { maxMinor: number }> {
   const rounders = listed.filter(method => method.rounding);
   const legs = roundingLegs(payload, codes, listed, rounders);
   const roundings = rounders.map(tally => tally.rounding!);
   const entries = entriesOf(payload);
-  const figures = explainingFigures(entries);
-  return entries.flatMap(({ paymentId, minor }, index) => {
+  let sum = 0;
+  return entries.flatMap(({ paymentId, minor }) => {
     const leg = legs[payload.payments.findIndex(payment => payment.clientPaymentId === paymentId)];
-    const maxMinor = voidFreeMaxMinor(leg, roundings);
-    return figures[index].every(figure => Math.abs(figure) > maxMinor) ? [{ paymentId, minor, maxMinor }] : [];
+    const { low, high } = roundingRange(leg.length ? leg : roundings);
+    sum += minor;
+    return sum < low || sum > high ? [{ paymentId, minor, maxMinor: sum < low ? -low : high }] : [];
   });
 }

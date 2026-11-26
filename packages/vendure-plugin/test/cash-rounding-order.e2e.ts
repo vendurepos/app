@@ -238,10 +238,13 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
     // Front desk ruling 6, 2026-11-26 (TallyUI#1367): an entry past the bound passes when the running sum through it is
     // inside, as when a reopened sale's settle carries back its earlier picks.
 
-    it('F6: the reopen replay (four picks of −4, a settle of +21) is applied, surcharge +5, no warnings', async () => {
+    it('F6: the reopen replay (four picks of −4, a settle of +21) is applied, surcharge +5, three running sums below R', async () => {
       await withMethods({ 'cash-5': false, 'cash-10': true }, async () => {
         const { result } = await expectApplied(roundedSale(105, replay, [...picks, { index: 4, minor: 21 }]), 5);
-        expect(result.warnings).toBeUndefined();
+        const payments = JSON.parse((await connection.rawConnection.getRepository(Order)
+          .findOneByOrFail({ id: environment.decode(result.serverRefs!.orderId) })).customFields.tallyPayments!);
+        expect(result.warnings).toEqual([1, 2, 3].map(index => ({ code: 'cash_rounding_unexplained',
+          paymentId: payments[index].clientPaymentId, minor: -4, maxMinor: 4 })));
         expect(result.totalWarnings).toBeUndefined();
       });
     });
@@ -260,10 +263,13 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
       });
     });
 
-    it('F9: small entries whose sum reaches the bound are applied, surcharge −10, no warnings', async () => {
+    it('F9: small entries whose sum reaches the bound are applied, surcharge −10, four running sums below R', async () => {
       const { result } = await expectApplied(roundedSale(5010, Array.from({ length: 5 }, () => cash5(1000)),
         [0, 1, 2, 3, 4].map(index => ({ index, minor: -2 }))), -10);
-      expect(result.warnings).toBeUndefined();
+      const payments = JSON.parse((await connection.rawConnection.getRepository(Order)
+        .findOneByOrFail({ id: environment.decode(result.serverRefs!.orderId) })).customFields.tallyPayments!);
+      expect(result.warnings).toEqual([1, 2, 3, 4].map(index => ({ code: 'cash_rounding_unexplained',
+        paymentId: payments[index].clientPaymentId, minor: -2, maxMinor: 2 })));
       expect(result.totalWarnings).toBeUndefined();
     });
 
@@ -358,8 +364,8 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
     });
   });
 
-  // ADR-094 P1c: an entry above the void-free maximum (front desk rulings 4 and 5) is applied as P1b stores it, with a
-  // cash_rounding_unexplained warning, the same entries in tallySnapshot and one private order note.
+  // ADR-094 P1c (front desk ruling, 2026-11-26): warn exactly when the running sum through an entry in payload order
+  // is outside its leg's range R. The warning entries also go in tallySnapshot and one private order note.
   describe('(h) cash_rounding_unexplained (P1c)', () => {
     const snapshotOf = async (orderId: string) => JSON.parse((await connection.rawConnection.getRepository(Order)
       .findOneByOrFail({ id: environment.decode(orderId) })).customFields.tallySnapshot!);
@@ -396,7 +402,7 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
       await expectUnexplained(roundedSale(1002, [card(1000)], [{ index: 0, minor: -2 }]), -2, []);
     });
 
-    it('W3: any write-off under an up-only rounder is unexplained (max 0)', async () => {
+    it('W3: the write-off warns when its running sum is below the up-only range R', async () => {
       await withMethods({ 'cash-5': false, 'cash-5-up': true }, async () => {
         await expectUnexplained(roundedSale(1002, [card(1000)], [{ index: 0, minor: -2 }]), -2, [{ index: 0, minor: -2, maxMinor: 0 }]);
       });
@@ -413,31 +419,31 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
         [{ index: 0, minor: -3, maxMinor: 2 }]);
     });
 
-    it('W6: a pick and a write-off merged on one cash leg raises nothing (max 4)', async () => {
-      await expectUnexplained(roundedSale(503, [cash5(500)], [{ index: 0, minor: -3 }]), -3, []);
+    it('W6: a merged entry warns when its running sum is below the cash-5 range R', async () => {
+      await expectUnexplained(roundedSale(503, [cash5(500)], [{ index: 0, minor: -3 }]), -3, [{ index: 0, minor: -3, maxMinor: 2 }]);
     });
 
-    it('W7: an entry inside the bound but above the maximum is unexplained', async () => {
-      await expectUnexplained(roundedSale(1009, [cash5(1000)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 4 }]);
+    it('W7: an entry inside the refusal bound warns when its running sum is below the cash-5 range R', async () => {
+      await expectUnexplained(roundedSale(1009, [cash5(1000)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 2 }]);
     });
 
-    it('W8: a write-off with two rounders enabled takes the larger maximum', async () => {
+    it('W8: a write-off is silent when its running sum is inside the hull of the enabled ranges R', async () => {
       await withMethods({ 'cash-10': true }, async () => {
         await expectUnexplained(roundedSale(1003, [card(1000)], [{ index: 0, minor: -3 }]), -3, []);
       });
     });
 
-    it('W9: down mode allows a write-off of inc − 1 and an entry of 2(inc − 1)', async () => {
+    it('W9: down-5 warns below its range R, not when the running sum is at its low edge', async () => {
       await withMethods({ 'cash-5': false, 'cash-5-down': true }, async () => {
         await expectUnexplained(roundedSale(1004, [card(1000)], [{ index: 0, minor: -4 }]), -4, []);
-        await expectUnexplained(roundedSale(1008, [cash5down(1000)], [{ index: 0, minor: -8 }]), -8, []);
-        await expectUnexplained(roundedSale(1009, [cash5down(1000)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 8 }]);
+        await expectUnexplained(roundedSale(1008, [cash5down(1000)], [{ index: 0, minor: -8 }]), -8, [{ index: 0, minor: -8, maxMinor: 4 }]);
+        await expectUnexplained(roundedSale(1009, [cash5down(1000)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 4 }]);
       });
     });
 
-    it('W10: an unnamed cash leg takes the largest rounder\'s entry maximum', async () => {
-      await expectUnexplained(roundedSale(1004, [cash5(1000)], [{ index: 0, minor: -4 }], 5), -4, []);
-      await expectUnexplained(roundedSale(1006, [cash5(1000)], [{ index: 0, minor: -6 }], 5), -6, [{ index: 0, minor: -6, maxMinor: 4 }]);
+    it('W10: an unnamed cash leg warns when its running sum is outside the enabled range R', async () => {
+      await expectUnexplained(roundedSale(1004, [cash5(1000)], [{ index: 0, minor: -4 }], 5), -4, [{ index: 0, minor: -4, maxMinor: 2 }]);
+      await expectUnexplained(roundedSale(1006, [cash5(1000)], [{ index: 0, minor: -6 }], 5), -6, [{ index: 0, minor: -6, maxMinor: 2 }]);
     });
 
     it('W11: the warning is stored in tallySnapshot and as one private order note', async () => {
@@ -462,12 +468,12 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
       });
     });
 
-    it('W14: a cash-5 leg may carry cash-10\'s merged write-off (max 6); a cash-10 leg max 8', async () => {
+    it('W14: a named cash leg warns when its running sum is outside its own range R', async () => {
       await withMethods({ 'cash-10': true }, async () => {
-        await expectUnexplained(roundedSale(1016, [cash5(1010)], [{ index: 0, minor: -6 }]), -6, []);
-        await expectUnexplained(roundedSale(1017, [cash5(1010)], [{ index: 0, minor: -7 }]), -7, [{ index: 0, minor: -7, maxMinor: 6 }]);
-        await expectUnexplained(roundedSale(1018, [cash10(1010)], [{ index: 0, minor: -8 }]), -8, []);
-        await expectUnexplained(roundedSale(1019, [cash10(1010)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 8 }]);
+        await expectUnexplained(roundedSale(1016, [cash5(1010)], [{ index: 0, minor: -6 }]), -6, [{ index: 0, minor: -6, maxMinor: 2 }]);
+        await expectUnexplained(roundedSale(1017, [cash5(1010)], [{ index: 0, minor: -7 }]), -7, [{ index: 0, minor: -7, maxMinor: 2 }]);
+        await expectUnexplained(roundedSale(1018, [cash10(1010)], [{ index: 0, minor: -8 }]), -8, [{ index: 0, minor: -8, maxMinor: 4 }]);
+        await expectUnexplained(roundedSale(1019, [cash10(1010)], [{ index: 0, minor: -9 }]), -9, [{ index: 0, minor: -9, maxMinor: 4 }]);
       });
     });
 
@@ -478,41 +484,91 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
       });
     });
 
-    it('W16: an entry above its maximum warns only when the running sum through it is above it too', async () => {
+    it('W16: payload order determines whether the running sum through the entry is outside its range R', async () => {
       await withMethods({ 'cash-5': false, 'cash-10': true }, async () => {
         const payments = [cash10(1010), cash10(10)];
         await expectUnexplained(roundedSale(1024, payments, [{ index: 0, minor: 5 }, { index: 1, minor: -9 }]), -4, []);
         await expectUnexplained(roundedSale(1024, payments, [{ index: 1, minor: -9 }, { index: 0, minor: 5 }]), -4,
-          [{ index: 1, minor: -9, maxMinor: 8 }]);
+          [{ index: 1, minor: -9, maxMinor: 4 }]);
       });
     });
 
-    it('W17: the F6 replay raises nothing, in the result, the snapshot or the notes', async () => {
+    it('W17: the F6 replay warns on the three picks whose running sum falls below the cash-10 range R', async () => {
       await withMethods(cash10only, async () => {
-        await expectUnexplained(replaySale(), 5, []);
+        await expectUnexplained(replaySale(), 5, [1, 2, 3].map(index => ({ index, minor: -4, maxMinor: 4 })));
       });
     });
 
-    it('W18: the F10 sale is silent, since its last +21 plus the −16 prefix is 5 (max 8)', async () => {
+    it('W18: the reopened sale warns on each running sum outside the cash-10 range R, including the settle', async () => {
       await withMethods(cash10only, async () => {
-        await expectUnexplained(reopenSale(), 20, []);
+        await expectUnexplained(reopenSale(), 20, [
+          ...[1, 2, 3].map(index => ({ index, minor: -4, maxMinor: 4 })),
+          ...[4, 5].map(index => ({ index, minor: 5, maxMinor: 4 })), { index: 7, minor: 21, maxMinor: 5 },
+        ]);
       });
     });
 
-    it('W19: the F14 sale is silent, since its last −25 plus the +20 prefix is −5 (max 8)', async () => {
+    it('W19: the mirrored sale warns on running sums above and then below the cash-10 range R', async () => {
       await withMethods(cash10only, async () => {
-        await expectUnexplained(mirrorSale(), -17, []);
+        await expectUnexplained(mirrorSale(), -17, [
+          ...[1, 2, 3].map(index => ({ index, minor: 5, maxMinor: 5 })),
+          ...[4, 5, 6].map(index => ({ index, minor: -4, maxMinor: 5 })), { index: 7, minor: -25, maxMinor: 4 },
+        ]);
       });
     });
 
-    it('W20: only the last entry may cancel a prefix: +15 warns when not last, and is silent when last', async () => {
+    it('W20: running sums outside the cash-10 range R warn, whether the entry is last or not', async () => {
       await withMethods(cash10only, async () => {
         const payments = [cash10(20), cash10(20), cash10(30), cash10(30), cash10(30), cash10(10)];
         const head = [{ index: 0, minor: -4 }, { index: 1, minor: -4 }, { index: 2, minor: 5 }, { index: 3, minor: 5 }];
         await expectUnexplained(roundedSale(122, payments, [...head, { index: 4, minor: 15 }, { index: 5, minor: 1 }]), 18,
-          [{ index: 4, minor: 15, maxMinor: 8 }]);
-        await expectUnexplained(roundedSale(122, payments, [...head, { index: 4, minor: 1 }, { index: 5, minor: 15 }]), 18, []);
+          [{ index: 1, minor: -4, maxMinor: 4 }, { index: 4, minor: 15, maxMinor: 5 }, { index: 5, minor: 1, maxMinor: 5 }]);
+        await expectUnexplained(roundedSale(122, payments, [...head, { index: 4, minor: 1 }, { index: 5, minor: 15 }]), 18,
+          [{ index: 1, minor: -4, maxMinor: 4 }, { index: 5, minor: 15, maxMinor: 5 }]);
       });
+    });
+
+    it('W21: carried picks are silent when the running sum stays inside the range for each mode', async () => {
+      await expectUnexplained(roundedSale(667, [cash5(335), cash5(330)], [{ index: 0, minor: 2 }, { index: 1, minor: -4 }]), -2, []);
+      await withMethods(cash10only, async () => {
+        await expectUnexplained(roundedSale(666, [cash10(330), cash10(340)], [{ index: 0, minor: -3 }, { index: 1, minor: 7 }]), 4, []);
+      });
+      await withMethods({ 'cash-5': false, 'cash-5-up': true }, async () => {
+        await expectUnexplained(roundedSale(202, [cash5up(105), cash5up(100)], [{ index: 0, minor: 4 }, { index: 1, minor: -1 }]), 3, []);
+      });
+      await withMethods({ 'cash-5': false, 'cash-5-down': true }, async () => {
+        await expectUnexplained(roundedSale(666, [cash5down(330), cash5down(335)], [{ index: 0, minor: -3 }, { index: 1, minor: 2 }]), -1, []);
+      });
+    });
+
+    it('W22: nearest-10 includes +5 but warns at +6', async () => {
+      await withMethods(cash10only, async () => {
+        await expectUnexplained(roundedSale(1005, [cash10(1010)], [{ index: 0, minor: 5 }]), 5, []);
+        await expectUnexplained(roundedSale(1004, [cash10(1010)], [{ index: 0, minor: 6 }]), 6, [{ index: 0, minor: 6, maxMinor: 5 }]);
+      });
+    });
+
+    it('W23: +1 is above the down-5 range', async () => {
+      await withMethods({ 'cash-5': false, 'cash-5-down': true }, async () => {
+        await expectUnexplained(roundedSale(999, [cash5down(1000)], [{ index: 0, minor: 1 }]), 1, [{ index: 0, minor: 1, maxMinor: 0 }]);
+      });
+    });
+
+    it('W24: −1 is below the nearest-2 range', async () => {
+      await withMethods({ 'cash-5': false, 'cash-2': true }, async () => {
+        await expectUnexplained(roundedSale(1001, [cash2(1000)], [{ index: 0, minor: -1 }]), -1, [{ index: 0, minor: -1, maxMinor: 0 }]);
+      });
+    });
+
+    it('W25: a write-off of −4 is inside the hull of up-5 and down-5', async () => {
+      await withMethods({ 'cash-5': false, 'cash-5-up': true, 'cash-5-down': true }, async () => {
+        await expectUnexplained(roundedSale(1004, [card(1000)], [{ index: 0, minor: -4 }]), -4, []);
+      });
+    });
+
+    it('W26: the running sum leaves the cash-5 range and returns; only the first entry warns', async () => {
+      await expectUnexplained(roundedSale(1001, [cash5(500), cash5(500)], [{ index: 0, minor: -3 }, { index: 1, minor: 2 }]), -1,
+        [{ index: 0, minor: -3, maxMinor: 2 }]);
     });
   });
 });
