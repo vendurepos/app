@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- Cash rounding (TallyUI ADR-094, docs/adr/0009-cash-rounding.md).
+  - A Tally cash payment method takes a rounding increment (minor units) and a mode: nearest, up or down. The method's `/tally/v1/info` entry lists both, and `/info` advertises `cashRounding: { v: 1 }`.
+  - `order.create` accepts `payload.cashRoundings` (`{ paymentId, minor }[]`) at every content version. It checks the entries against the channel's enabled rounding cash methods and stores their sum as one untaxed `POS cash rounding` surcharge (SKU `TALLY-CASH-ROUNDING`), so the order total is what the till took. The TALLY-ROUNDING bridge reconciles the goods total only.
+  - Refused, unstored:
+    - a malformed entry;
+    - payments that do not add up to `totalMinor`;
+    - a rounding cash leg that is not a multiple of its increment;
+    - more than one entry, or a non-negative one, on any other payment;
+    - no enabled rounding cash method;
+    - an entry of 2 × the largest enabled increment or more. This one is refused `total_mismatch` with `cashRoundingMinor` and `boundMinor`, and its message names void cycles (TallyUI#1365).
+  - An entry above what a till produces without voiding a tender is applied, and it raises `cash_rounding_unexplained`: a result warning, `tallySnapshot.cashRoundingUnexplained` and a private order note.
+  - The refund that takes everything left on an order's lines returns its cash rounding, as it returns the bridge; no other refund returns any of it.
+
 ### Behaviour change
 
 - The sales report's `orders.discountsMinor` (v1, v2 and v3 routes) is now gross: the tax-inclusive amount taken off the receipt, as `salesMinor` is. It is computed when the report is read, from each POS discount's tax lines; no stored data changes. Past ranges change on stores with tax-exclusive prices and for every sale from a v4+ till, where the figure was net before. Lines a v2/v3 till sent tax-inclusive are unchanged. On a store using Vendure's `OrderLevelTaxCalculationStrategy`, which rounds tax once per rate group, Discounts can differ from what came off the order total by up to 1 minor unit per tax rate in the order.

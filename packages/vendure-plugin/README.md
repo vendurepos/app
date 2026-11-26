@@ -162,6 +162,27 @@ Once a Tally method with code `cash` (or `external`) is enabled on the channel, 
 recorded under it, even from older tills. Orders taken before then stay under `tally-pos`. Nothing is rewritten.
 Reports count both.
 
+### Cash rounding
+
+For a store whose smallest coin is larger than its smallest price unit, give a `cash` tender method a
+**rounding increment** (minor units, for example `5`) and a **mode**: `nearest`, `up` or `down`. `/tally/v1/info` lists
+both on the method, and advertises `cashRounding: { v: 1 }`. The till then rounds what it asks for in cash. It sends
+the rounding in `order.create`'s `cashRoundings`, which the plugin stores as one untaxed `POS cash rounding`
+surcharge, so the order's total is what the till took (docs/adr/0009-cash-rounding.md).
+
+The plugin checks the rounding against the channel's own methods and refuses it, unstored, when:
+
+- a cash leg is not a multiple of its increment;
+- the payments do not add up to the total;
+- a non-cash payment carries anything but a single write-off;
+- no rounding method is enabled;
+- an entry reaches twice the largest enabled increment. This is `total_mismatch`: a till that voided tenders after a cash write-off can produce it (TallyUI#1365), and the sale stays in its outbox to be taken again.
+
+An entry larger than a till makes without voiding a tender is stored with a `cash_rounding_unexplained` warning and a
+private order note, so an admin can check that sale's payments.
+
+The refund that takes everything left on the order's lines returns the rounding; no partial refund does.
+
 ### Merchant code inside the recipe
 
 Each command runs in one database transaction. A refusal found inside it (`underpaid`,
