@@ -1887,7 +1887,8 @@ test('an applied sale with a tax_rate_mismatch warning shows its till notice (ap
   await page.getByTestId('new-sale').click();
   await orderEntries(page);
   const panel = page.getByTestId('orders-panel');
-  await expect(panel.getByText('Tax at 19%: store €1.47 vs POS €1.52', { exact: true })).toBeVisible();
+  // The order is listed under "Needs attention" and again under "Recent", each with its notice.
+  await expect(panel.getByText('Tax at 19%: store €1.47 vs POS €1.52', { exact: true })).toHaveCount(2);
   await expect(panel.getByText('Needs attention', { exact: true })).toBeVisible();
 });
 
