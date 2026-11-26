@@ -48,14 +48,14 @@ So the same payload can come from different sales whose correct entries differ. 
 
 ## Consequences
 
-- An order's stored total always equals what the till took. Anything above the void-free maximum is visible to the merchant.
+- An order's stored total always equals what the till took. Any sale whose running cash rounding leaves its mode's range R is visible to the merchant.
 - **What F5 guarantees.** With B = 2 × the largest enabled increment, every accepted sale has |Σ minor| ≤ 16 × (B − 1), 16 being the entry cap: 3.04 in a 2-decimal currency with cash-10 enabled (B 20), 1.44 with cash-5 only (B 10). That is all the discount a till can disguise as rounding in one sale. The proof: by induction every prefix sum is at most i × (B − 1), since each entry is either under B or brings the running sum under B; a last entry that cancels prefix k adds at most (B − 1) + |P_k| over the last point the running sum was under B. `test/cash-rounding-bound.e2e.ts` searches the accepted payloads and asserts 304 and 144.
 - **Why B − 1 per entry and not one increment.** A void-free entry already reaches max(posMax(m), negMax(m) + W): −6 on a cash-5 leg with cash-10 on, −8 or +5 on cash-10, inc − 1 + W under up. Voids and the reopened settles go past that, and no refusal may hit a sale a till makes without voids (front desk ruling 5). The wire does not say which amount an entry rounded, so the plugin can only bound its size, not check it.
 - **These rules are a stopgap for order.create below v13** (the plugin accepts up to v11 today). TallyUI is adding a per-entry rounding basis at order.create v13, which replaces `units` on the wire. When vendurepos raises its cap to v13, F5 becomes the exact per-entry check (each entry is its basis rounded under its method, minus the basis), and the running-sum and last-entry prefix rules are deleted.
 - A sale hit by TallyUI#1365 stays in the till's outbox as a reopenable `total_mismatch` instead of storing an undercharge.
-- **Tightening back.** Item 4 and the threshold warning in item 5 exist only because TallyUI 5.0.0 does not send voided legs or `units`. When TallyUI#1364 puts them on the wire:
-  - the plugin's exact in-order re-derive replaces the warning threshold;
+- **Tightening back.** Item 4 and the running-sum range in item 5 exist only because TallyUI 5.0.0 does not send voided legs or `units`. When TallyUI#1364 puts them on the wire:
+  - the plugin's exact in-order re-derive replaces the range check;
   - the write-off rule returns to the desk's original shape: the remainder rounds to 0 under an enabled method, and the entry sits on the last counted leg.
 
-  The running-sum and last-entry prefix acceptances in items 3 and 5 go with the v13 per-entry check above (TallyUI#1367). When TallyUI#1365 is fixed, the hard bound can tighten to the void-free maximum.
+  F5's running-sum and last-entry prefix acceptances in item 3 go with the v13 per-entry check above (TallyUI#1367). When TallyUI#1365 is fixed, the hard bound can tighten to the void-free maximum.
 - Medusa and the Woo fork face the same limit and can take the same invariants.
