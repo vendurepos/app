@@ -116,7 +116,8 @@ From this amendment:
 - `/tally/v1/info` advertises `chargeTaxMode: { v: 1 }`. The field is gated by that capability, not by a new order.create version (front desk ruling, 2026-11-26; the TallyUI ADR-094 precedent).
 - No migration: Vendure stores each charge's own `listPriceIncludesTax`, and every past order keeps the mode it was stored in.
 - Known limits:
-  - The total is exact by construction. At an exact half cent of net, the per-rate tax can differ by one cent from the till's, as it can for an inclusive product line.
-  - Under `per_rate_group_items`, `compareTax` still looks only at lines (vendurepos/app#522).
+  - Under Vendure's default per-line strategy the total is exact by construction. At an exact half cent of net, the per-rate tax can differ by one cent from the till's, as it can for an inclusive product line.
+  - Under `per_rate_group_items` (`OrderLevelTaxCalculationStrategy`) the total is **not** exact by construction. Vendure re-taxes each rate group's net, so an inclusive charge's gross is not kept. Example at 25%: line net 800 plus a fee of 1002 inclusive (net 802) gives group net 1602 and tax `Math.round(400.5)` = 401, total 2003 against the till's 2002, so the plugin adds a −1 `TALLY-ROUNDING` bridge and returns `total_mismatch`. That is what an inclusive product line that nets to a half cent already does there.
+  - An inclusive charge is treated exactly like an inclusive line under TallyUI #310's per-rate rule: one rule for all inclusive amounts (front desk ruling, 2026-11-26). `compareTax` still looks only at lines until that lands with TallyUI job T (vendurepos/app#522).
 
 Spec: `~/agent/handoff/vendurepos-2.10b-charge-tax-mode/SPEC.md`.
