@@ -66,9 +66,9 @@ This file is the screen-by-screen, flow-by-flow list behind that goal. `AUDIT.md
 
   Done (2.10b): each fee and shipping charge keeps the tax mode the cashier entered it in.
   - TallyUI 5.2.0 sends `amountIncludesTax` (pinned in #531).
-  - Plugin 0.5.0 takes it and advertises `/info` `chargeTaxMode` (#523; ADR 0005 amendment).
+  - The plugin takes it and advertises `/info` `chargeTaxMode` (#523; ADR 0005 amendment). This is unreleased, after 0.5.0, so a store gets it with the next plugin release.
   - The app maps the capability and offers the switch in a tax-exclusive store too, starting off (#534).
-  - Without the capability (an older plugin), the till sends exactly what it sent before. The switch then shows only in a tax-inclusive store, as in the demo, whose store does not advertise it.
+  - Without the capability (plugin 0.5.0 or older), the till sends exactly what it sent before, and the switch shows only in a tax-inclusive store. The demo store does not advertise it, so the demo's tax-exclusive till shows no switch.
   - Smoke e2e: "with chargeTaxMode, a fee entered including tax in a tax-exclusive channel reaches the store as entered, its gross kept", and "with chargeTaxMode, in a tax-inclusive channel, a fee and shipping entered without tax reach the store as entered, a cent-exact".
 
   *Left:* none for fees and shipping.
