@@ -46,15 +46,15 @@ export class PaymentMethodsService {
       });
   }
 
-  /** R2: each payment's method code (a methodId naming no Tally method falls back at payment time, R3), and the shared codes. */
-  async resolve(ctx: RequestContext, payments: TenderPayment[]): Promise<{ codes: string[]; shared: Set<string> }> {
+  /** R2: each payment's method code (a methodId naming no Tally method falls back at payment time, R3), the shared codes and the listed methods. */
+  async resolve(ctx: RequestContext, payments: TenderPayment[]): Promise<{ codes: string[]; shared: Set<string>; listed: TenderMethod[] }> {
     const methods = await this.tallyMethods(ctx);
     const listed = await this.listed(ctx, methods);
     const codes: string[] = [];
     for (const { method, methodId } of payments) {
       codes.push(methodId ?? (listed.some(tally => tally.code === method) ? method : TALLY_PAYMENT_METHOD_CODE));
     }
-    return { codes, shared: methods.shared };
+    return { codes, shared: methods.shared, listed };
   }
 
   /**

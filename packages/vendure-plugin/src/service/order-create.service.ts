@@ -20,8 +20,9 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import {
   CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
-  TALLY_NO_TAX_CATEGORY, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
+  TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
 } from './constants';
+import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, withoutCashRounding } from './cash-rounding';
 import { classify } from './classification';
 import { bridgeBoundMinor } from './bridge-bound';
 import {
@@ -379,7 +380,9 @@ export class OrderCreateService {
     // Ruling 17: strict per version, by path; here, not in step 1, so a stored answer always wins (#36 review).
     const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
     errors.push(...valueRangeErrors(command.payload, maxMoney, command.version));
-    if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
+    // TallyUI ADR-094: the vendored fiscal check predates cashRoundings, so it checks the goods figures.
+    errors.push(...cashRoundingPayloadErrors(command.payload));
+    if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(withoutCashRounding(command.payload)));
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
 
@@ -432,6 +435,9 @@ export class OrderCreateService {
     const resolved = await this.tenderMethods.resolve(ctx, payments);
     if (resolved.shared.has(TALLY_PAYMENT_METHOD_CODE)) throw new SetupRefusal(storeConfiguration(command.id));
     codes.push(...resolved.codes);
+    // TallyUI ADR-094: the cash rounding against the channel's own rounding methods (store configuration: unstored).
+    const cash = cashRoundingRefusal(command.payload, resolved.codes, resolved.listed);
+    if (cash) throw new SetupRefusal(refuse(command.id, cash.code, cash.message, cash.data));
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines. The limits are store-wide
@@ -796,18 +802,21 @@ export class OrderCreateService {
     order = await this.calculator.applyPriceAdjustments(ctx, order, []);
     const totalWarnings: TotalWarning[] = [];
     const serverMinor = order.totalWithTax;
-    const bridgeMinor = payload.totalMinor - serverMinor;
+    // TallyUI ADR-094: the bridge reaches the goods total; the cash rounding is its own surcharge, saved below.
+    const cashMinor = cashRoundingSum(payload);
+    const goodsMinor = payload.totalMinor - cashMinor;
+    const bridgeMinor = goodsMinor - serverMinor;
     // Money P3 #7 (Front desk ruling, 2026-11-23): a bridge over the bound is not rounding. Refused, not stored: the
     // sale rolls back with its claim (re-ruling 3: nothing raised after the first write is stored), so a resend checks
     // again. A command already in the ledger replays its recorded answer before this point.
     const boundMinor = bridgeBoundMinor(order);
     if (Math.abs(bridgeMinor) > boundMinor) {
-      const figures = { expectedMinor: payload.totalMinor, serverMinor, bridgeMinor, boundMinor };
+      const figures = { expectedMinor: goodsMinor, serverMinor, bridgeMinor, boundMinor };
       Logger.warn(`order.create ${command.id} refused total_mismatch: ${JSON.stringify({
         clientOrderId: payload.clientOrderId, version: command.version, ...figures,
       })}`, loggerCtx);
       throw new SetupRefusal(refuse(command.id, 'total_mismatch',
-        `The POS total ${payload.totalMinor} differs from the server's ${serverMinor} by ${bridgeMinor}, `
+        `The POS total ${goodsMinor} differs from the server's ${serverMinor} by ${bridgeMinor}, `
         + `more than the ${boundMinor} allowed for rounding`, figures));
     }
     if (bridgeMinor !== 0) {
@@ -817,7 +826,7 @@ export class OrderCreateService {
       }));
       order.surcharges.push(bridge);
       this.calculator.calculateOrderTotals(order);
-      totalWarnings.push({ code: 'total_mismatch', expectedMinor: payload.totalMinor, serverMinor, bridgeMinor });
+      totalWarnings.push({ code: 'total_mismatch', expectedMinor: goodsMinor, serverMinor, bridgeMinor });
     }
     if (command.version >= 3) {
       // For an integer count, half-away rounding of count/2 equals ceil(count/2).
@@ -858,6 +867,17 @@ export class OrderCreateService {
         if ((field === 'discountMinor' || compareTax) && tillMinor !== serverMinor) fields.push({ field, tillMinor, serverMinor });
       }
       if (fields.length) figureWarnings.push({ code: 'figures_mismatch', fields });
+    }
+    if (cashMinor !== 0) {
+      const cash = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
+        order, description: 'POS cash rounding', sku: TALLY_CASH_ROUNDING_SKU, listPrice: cashMinor,
+        listPriceIncludesTax: true, taxLines: [],
+      }));
+      order.surcharges.push(cash);
+      this.calculator.calculateOrderTotals(order);
+      if (order.totalWithTax !== payload.totalMinor) {
+        pluginBug(`Order total ${order.totalWithTax} after cash rounding ${cashMinor} is not the POS total ${payload.totalMinor}`);
+      }
     }
     await this.connection.getRepository(ctx, Order).save(order);
     await this.connection.getRepository(ctx, OrderLine).save(order.lines);

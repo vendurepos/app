@@ -41,11 +41,20 @@ export const MAX_SHIPPING_LINES = 1;
 // in minor units), since a write-off's size is bounded by the increment.
 export const MAX_CASH_ROUNDING_INCREMENT_MINOR = 100000;
 
-// The SKUs of the surcharges order.create writes (ADR 0005): a fee, a line discount and the tax rounding bridge.
+// The SKUs of the surcharges order.create writes (ADR 0005): a fee, a line discount, the tax rounding bridge, and
+// the till's cash rounding (TallyUI ADR-094), untaxed, never part of the bridge.
 // They are stored on orders, and order.create's fiscal check reads the fee and discount back, so they never change.
 export const TALLY_FEE_SKU = 'TALLY-FEE';
 export const TALLY_DISCOUNT_SKU = 'TALLY-DISCOUNT';
 export const TALLY_ROUNDING_SKU = 'TALLY-ROUNDING';
+export const TALLY_CASH_ROUNDING_SKU = 'TALLY-CASH-ROUNDING';
+
+// TallyUI ADR-094: core's limit on order.create's cashRoundings entries, from the @tallyui/core server shape check.
+export const MAX_CASH_ROUNDINGS = 16;
+// Front desk ruling 2026-11-26. In a void-free TallyUI 5.0.0 sale, the largest single entry is 2(ceil(inc/2)−1) under
+// nearest, inc−1 under up, and 2(inc−1) under down; all are below 2·inc. Voids can grow an entry without limit
+// (TallyUI#1365), so an entry at or over 2 × the largest enabled increment is refused.
+export const CASH_ROUNDING_BOUND_FACTOR = 2;
 
 // Postgres two-int advisory lock namespaces: (namespace, key) keys stay apart from other plugins' single-bigint keys,
 // and these three must stay distinct from each other.
