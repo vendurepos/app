@@ -402,9 +402,9 @@ describe('error classes (ADR 0002 §2)', () => {
     const second = await run(beyond);
     const mismatch = { code: 'tax_rate_mismatch', ratePpm: 250000, expectedMinor: 202, serverMinor: 200 };
     expect(second.status).toBe('applied');
-    expect(second.totalWarnings).toEqual(expect.arrayContaining([
+    expect(second.totalWarnings).toEqual([
       { code: 'total_mismatch', expectedMinor: 1002, serverMinor: 1000, bridgeMinor: 2 }, mismatch,
-    ]));
+    ]);
     expect(second.warnings).toContainEqual(mismatch);
   });
 

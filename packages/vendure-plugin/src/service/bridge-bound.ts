@@ -15,7 +15,8 @@ export function bridgeBoundMinor(order: Pick<Order, 'lines' | 'surcharges' | 'sh
   return Math.max(BRIDGE_FLOOR_MINOR, order.lines.length + order.surcharges.length + order.shippingLines.length);
 }
 
-/** Per-rate tolerance T uses TallyUI ADR-048's count, the same as @tallyui/pos needsAttention's rounding-bridge tolerance.
+/** Per-rate tolerance T = ⌈(payload lines + fees + shipping rows) / 2⌉ minor units.
+ * Per-rate tolerance T uses TallyUI ADR-048's count, the same as @tallyui/pos needsAttention's rounding-bridge tolerance.
  * Only payload rows count: POS discounts, the bridge and Vendure's always-present shipping line do not widen T
  * (Front desk ruling, 2026-11-26).
  */
