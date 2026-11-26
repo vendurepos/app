@@ -2211,6 +2211,7 @@ test('fees, a shipping charge and a custom item, one with a tax class, are appli
 
 // Two TALLY-FEE surcharges and no TALLY-ROUNDING (packages/vendure-plugin/src/service/constants.ts), which bridges a drift.
 const ORDER_ON_STORE = 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { total totalWithTax surcharges { sku } } } }';
+const ORDER_SURCHARGES_ON_STORE = 'query ($id: String!) { orders(options: { filter: { tallyClientOrderId: { eq: $id } } }) { items { totalWithTax surcharges { sku priceWithTax } } } }';
 type SentOrder = { payload: { clientOrderId: string; fees: Record<string, unknown>[]; shipping?: Record<string, unknown>[] } };
 
 test('a percent fee and a tax-exclusive fee reach the store in its own mode, and the order is accepted a cent-exact', async ({ page }) => {
@@ -2233,8 +2234,9 @@ test('a percent fee and a tax-exclusive fee reach the store in its own mode, and
   const form = cart.getByRole('group', { name: 'Add charge' });
   for (const [name, amount, taxClass] of [['Service', '10', 'Standard DE'], ['Gift wrap', '2.00', 'Reduced DE']]) {
     await cart.getByTestId('add-charge').click();
-    // lib/sale-cart.tsx: the seeded channel excludes tax, so no Amount Includes Tax switch.
-    await expect(form.getByRole('switch', { name: 'Amount Includes Tax' })).toHaveCount(0);
+    // lib/sale-cart.tsx: the plugin advertises chargeTaxMode, so the switch shows, starting at the store's mode (off). Left off,
+    // nothing differs from the store's mode, and the wire below carries no amountIncludesTax.
+    await expect(form.getByRole('switch', { name: 'Amount Includes Tax' })).not.toBeChecked();
     await form.getByLabel('Name', { exact: true }).fill(name);
     if (name === 'Service') await form.getByTestId('charge-form-unit-percent').click();
     await form.getByLabel('Amount', { exact: true }).fill(amount);
@@ -2270,7 +2272,9 @@ test('a percent fee and a tax-exclusive fee reach the store in its own mode, and
   await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ total: 1080, totalWithTax: 1261, surcharges: [{ sku: 'TALLY-FEE' }, { sku: 'TALLY-FEE' }] }]);
 });
 
-test('in a tax-inclusive channel, a fee and shipping entered without tax reach the store a cent-exact', async ({ browser, page }) => {
+for (const withCapability of [false, true]) { test(withCapability
+  ? 'with chargeTaxMode, in a tax-inclusive channel, a fee and shipping entered without tax reach the store as entered, a cent-exact'
+  : 'in a tax-inclusive channel, a fee and shipping entered without tax reach the store a cent-exact', async ({ browser, page }) => {
   test.setTimeout(3 * 60_000);
   const admin = await superadmin(page);
   const { activeChannel: channel } = await admin('{ activeChannel { id pricesIncludeTax } }');
@@ -2286,6 +2290,14 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
           sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
         }
         return route.continue();
+      });
+      // Only the capability-absent variant strips chargeTaxMode from /info to simulate a plugin before app#523.
+      const advertised: unknown[] = [];
+      if (!withCapability) await till.route('**/tally/v1/info', async (route) => {
+        const response = await route.fetch();
+        const { chargeTaxMode, ...body } = await response.json();
+        advertised.push(chargeTaxMode);
+        await route.fulfill({ response, json: body });
       });
       await signIn(till);
       await openRegister(till);
@@ -2314,8 +2326,22 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
       await till.getByTestId('tender-pane').getByTestId('tender-complete').click();
       await expect(till.getByTestId('receipt').getByTestId('receipt-total')).toHaveText('€15.00');
       await expect.poll(() => sent.length).toBeGreaterThan(0);
-      for (const { payload } of sent) {
-        expect([payload.fees.map((fee) => fee.amountMinor), payload.shipping?.map((line) => line.amountMinor)]).toEqual([[106], [594]]);
+      if (withCapability) {
+        // Sent as entered (nets 99 and 499, amountIncludesTax false); Vendure grosses them to the same 106 and 594.
+        for (const { payload } of sent) {
+          expect([payload.fees.map(({ amountMinor, amountIncludesTax }) => ({ amountMinor, amountIncludesTax })),
+            payload.shipping?.map(({ amountMinor, amountIncludesTax }) => ({ amountMinor, amountIncludesTax }))])
+            .toEqual([[{ amountMinor: 99, amountIncludesTax: false }], [{ amountMinor: 499, amountIncludesTax: false }]]);
+        }
+      } else {
+        for (const { payload } of sent) {
+          expect([payload.fees.map((fee) => fee.amountMinor), payload.shipping?.map((line) => line.amountMinor)]).toEqual([[106], [594]]);
+        }
+        expect(advertised.length).toBeGreaterThan(0);
+        expect(advertised.every((value) => JSON.stringify(value) === '{"v":1}')).toBe(true);
+        for (const { payload } of sent) {
+          for (const charge of [...payload.fees, ...(payload.shipping ?? [])]) expect(charge).not.toHaveProperty('amountIncludesTax');
+        }
       }
       const onStore = async () => (await admin(ORDER_ON_STORE, { id: sent[0].payload.clientOrderId })).orders.items;
       await expect.poll(onStore, { timeout: 30_000 }).toMatchObject([{ totalWithTax: 1500, surcharges: [{ sku: 'TALLY-FEE' }] }]);
@@ -2325,6 +2351,51 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
   } finally {
     await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: channel.pricesIncludeTax } });
   }
+}); }
+
+test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel reaches the store as entered, its gross kept', async ({ page }) => {
+  const sent: (SentOrder & { payload: { totalMinor: number } })[] = [];
+  await page.route('**/tally/v1/commands', (route) => {
+    if (route.request().method() === 'POST') {
+      sent.push(...route.request().postDataJSON().commands.filter(({ type }: { type: string }) => type === 'order.create'));
+    }
+    return route.continue();
+  });
+  await signIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  const cart = page.getByTestId('cart');
+  const form = cart.getByRole('group', { name: 'Add charge' });
+  await cart.getByTestId('add-charge').click();
+  await form.getByRole('button', { name: 'Fee', exact: true }).click();
+  await form.getByLabel('Name', { exact: true }).fill('Service');
+  await form.getByLabel('Amount', { exact: true }).fill('9.99');
+  const includesTax = form.getByRole('switch', { name: 'Amount Includes Tax' });
+  await expect(includesTax).not.toBeChecked();
+  await includesTax.click();
+  await expect(includesTax).toBeChecked();
+  await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Standard DE', exact: true }).click();
+  await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
+  await expect(form).toHaveCount(0);
+  // 9.99 gross at 19 % has no net cent that re-taxes to it (839 → 9.98, 840 → 10.00). Sent as entered, the fee keeps its gross 9.99 on the store;
+  // the store's order-level strategy re-taxes the rate group from nets ((800 + 839) × 19 % = 311.41 → 311), and the plugin bridges that cent.
+  const cartTotal = await cart.getByTestId('cart-total').textContent();
+  await checkout(page);
+  await page.getByTestId('tender-method-external').click();
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toHaveText(cartTotal!);
+  await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toHaveText('€19.51');
+  await expect.poll(() => sent.length).toBeGreaterThan(0);
+  for (const { payload } of sent) expect(payload.fees).toEqual([expect.objectContaining({ amountMinor: 999, amountIncludesTax: true })]);
+  const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
+  const onStore = async () => (await (await page.request.post(`${STORE_URL}/admin-api`, {
+    headers: { Authorization: `Bearer ${token}`, 'vendure-token': CHANNEL_TOKEN },
+    data: { query: ORDER_SURCHARGES_ON_STORE, variables: { id: sent[0].payload.clientOrderId } },
+  })).json()).data.orders.items;
+  await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ totalWithTax: sent[0].payload.totalMinor,
+    surcharges: [{ sku: 'TALLY-FEE', priceWithTax: 999 }, { sku: 'TALLY-ROUNDING', priceWithTax: 1 }] }]);
+  expect(cartTotal).toEqual(`€${(sent[0].payload.totalMinor / 100).toFixed(2)}`);
 });
 
 test.describe('register v2 (docs/adr/0006-register-v2.md)', () => {

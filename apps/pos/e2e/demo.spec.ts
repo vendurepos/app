@@ -5273,7 +5273,7 @@ test('A demo cashier adds a 10% fee, and a tax-exclusive store offers no Amount 
   await form.getByRole('group', { name: 'Tax class' }).getByRole('button', { name: 'Standard DE', exact: true }).click();
   await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   await cart.getByTestId('add-charge').click();
-  // lib/sale-cart.tsx: no switch in a tax-exclusive store, on a fee or on shipping.
+  // lib/sale-cart.tsx: the demo's /info has no chargeTaxMode, so a tax-exclusive store shows no switch, on a fee or on shipping.
   await expect(form.getByRole('switch', { name: 'Amount Includes Tax' })).toHaveCount(0);
   await form.getByRole('button', { name: 'Shipping', exact: true }).click();
   await expect(form.getByRole('switch', { name: 'Amount Includes Tax' })).toHaveCount(0);

@@ -1,7 +1,7 @@
 import { ConnectorUnauthorizedError, parseInfoCapabilities, type ServerCapabilities, type SyncContext } from '@tallyui/core';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { catalogueConnector, withCashRounding } from './catalogue';
+import { catalogueConnector, withCashRounding, withChargeTaxMode } from './catalogue';
 import type { Session } from './session';
 
 // The connector's own /info reader, replaced by a spy so a delegated read is seen exactly.
@@ -154,5 +154,31 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     expect(Object.keys(wrapped).sort()).toEqual(Object.keys(plain).sort());
     expect(wrapped.auth).toBe(plain.auth);
     expect(wrapped.capabilities).not.toBe(original);
+  });
+});
+
+describe('withChargeTaxMode (C6)', () => {
+  const parsed = parseInfoCapabilities(INFO);
+  it.each([1, 2])('maps advertised version %i', (v) => {
+    expect(withChargeTaxMode({ chargeTaxMode: { v } }, parsed)).toEqual({ ...parsed, chargeTaxMode: true });
+  });
+
+  it('preserves the parsed capabilities when chargeTaxMode is absent or malformed', () => {
+    for (const body of [{}, ...[{ v: 0 }, { v: 1.5 }, { v: '1' }, true, null, [], {}].map((chargeTaxMode) => ({ chargeTaxMode }))]) {
+      const capabilities = withChargeTaxMode(body, parsed);
+      expect(capabilities).toBe(parsed);
+      expect(capabilities).not.toHaveProperty('chargeTaxMode');
+    }
+  });
+
+  it('leaves an undefined parse result undefined', () => {
+    expect(withChargeTaxMode({ chargeTaxMode: { v: 1 } }, undefined)).toBeUndefined();
+  });
+
+  it('maps both advertised capabilities and omits chargeTaxMode when absent', async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ ...INFO, cashRounding: { v: 1 }, chargeTaxMode: { v: 1 } }));
+    expect(await read()).toEqual({ ...parsed, cashRounding: true, chargeTaxMode: true });
+    fetchMock.mockResolvedValueOnce(Response.json(INFO));
+    expect(await read()).not.toHaveProperty('chargeTaxMode');
   });
 });

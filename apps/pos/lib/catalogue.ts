@@ -36,6 +36,13 @@ export function withCashRounding(body: unknown, parsed: ServerCapabilities | und
   return parsed && typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 ? { ...parsed, cashRounding: true } : parsed;
 }
 
+/** `parsed` plus `chargeTaxMode: true` when /info advertises it at a version (vendurepos 2.10b, app#523): the till then sends a charge's own tax mode. */
+export function withChargeTaxMode(body: unknown, parsed: ServerCapabilities | undefined): ServerCapabilities | undefined {
+  const advertised = (body as { chargeTaxMode?: unknown } | null | undefined)?.chargeTaxMode;
+  const v = typeof advertised === 'object' && advertised !== null ? (advertised as { v?: unknown }).v : undefined;
+  return parsed && typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 ? { ...parsed, chargeTaxMode: true } : parsed;
+}
+
 // One /info read per call, answered as readVendureCapabilities would: a second read could succeed where this one failed and drop cashRounding (#517).
 // 404 is the connector's { orderCreate: 1 }. 401/403 call it only for its signed-out check (signedOut is not exported), which throws or answers
 // undefined; any other answer came from a second read, so this read is inconclusive. A throw, non-ok status or non-JSON body is undefined.
@@ -46,7 +53,7 @@ async function readInfo(context: SyncContext, original: NonNullable<TallyConnect
   } catch {
     return undefined;
   }
-  // readVendureCapabilities' own answer to a 404 (connector-vendure 5.0.0): an old plugin without /info takes order.create 1.
+  // readVendureCapabilities' own answer to a 404 (connector-vendure 5.2.0): an old plugin without /info takes order.create 1.
   if (response.status === 404) return { orderCreate: 1 };
   if (response.status === 401 || response.status === 403) {
     await original(context);
@@ -59,7 +66,7 @@ async function readInfo(context: SyncContext, original: NonNullable<TallyConnect
   } catch {
     return undefined;
   }
-  return withCashRounding(body, parseInfoCapabilities(body, warnInfo));
+  return withChargeTaxMode(body, withCashRounding(body, parseInfoCapabilities(body, warnInfo)));
 }
 
 export function catalogueConnector(session: Session): TallyConnector {
@@ -71,7 +78,7 @@ export function catalogueConnector(session: Session): TallyConnector {
   });
   const original = connector.capabilities;
   if (!original) return connector;
-  // connector-vendure 5.0.0 drops /info's cashRounding, so the app reads it; this goes when the connector maps it itself.
+  // This read replaces connector-vendure 5.2.0's, which drops /info's cashRounding, so the app maps cashRounding and chargeTaxMode itself; this goes when the connector maps both.
   // The connector is a plain object of closures (none reads `this`), so a spread keeps every other method as it is.
   return {
     ...connector,
