@@ -84,6 +84,18 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
     .count({ where: { customFields: { tallyClientOrderId: payloadOf(command).clientOrderId } } });
   const stored = (id: string) => connection.rawConnection.getRepository(TallyCommand).countBy({ id });
 
+  // The TallyUI#1367 replays under cash-10 only: F6's (four picks of −4, a settle of +21), F10's reopen plus new picks,
+  // and F14's real-builder mirror with a write-off of −21 merged into the last pick's entry.
+  const cash10only = { 'cash-5': false, 'cash-10': true };
+  const replay = [cash10(20), cash10(20), cash10(20), cash10(20), cash10(30)];
+  const picks = [0, 1, 2, 3].map(index => ({ index, minor: -4 }));
+  const replaySale = () => roundedSale(105, replay, [...picks, { index: 4, minor: 21 }]);
+  const reopenLegs = [...[0, 1, 2, 3].map(() => cash10(20)), ...[4, 5, 6].map(() => cash10(30)), cash10(40)];
+  const reopenEntries = [...picks, ...[4, 5, 6].map(index => ({ index, minor: 5 })), { index: 7, minor: 21 }];
+  const reopenSale = () => roundedSale(190, reopenLegs, reopenEntries);
+  const mirrorSale = () => roundedSale(217, [...[0, 1, 2, 3].map(() => cash10(30)), ...[4, 5, 6, 7].map(() => cash10(20))],
+    [...[0, 1, 2, 3].map(index => ({ index, minor: 5 })), ...[4, 5, 6].map(index => ({ index, minor: -4 })), { index: 7, minor: -25 }]);
+
   // Refused, unstored and with no order; a second send gets the same answer.
   async function expectRefused(command: ReturnType<typeof roundedSale>, code: RefusalCode, message?: string) {
     let first: unknown;
@@ -225,8 +237,6 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
 
     // Front desk ruling 6, 2026-11-26 (TallyUI#1367): an entry past the bound passes when the running sum through it is
     // inside, as when a reopened sale's settle carries back its earlier picks.
-    const replay = [cash10(20), cash10(20), cash10(20), cash10(20), cash10(30)];
-    const picks = [0, 1, 2, 3].map(index => ({ index, minor: -4 }));
 
     it('F6: the reopen replay (four picks of −4, a settle of +21) is applied, surcharge +5, no warnings', async () => {
       await withMethods({ 'cash-5': false, 'cash-10': true }, async () => {
@@ -255,6 +265,48 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
         [0, 1, 2, 3, 4].map(index => ({ index, minor: -2 }))), -10);
       expect(result.warnings).toBeUndefined();
       expect(result.totalWarnings).toBeUndefined();
+    });
+
+    // Front desk ruling 7, 2026-11-26 (TallyUI#1367): the last entry also passes when it plus some prefix sum before it
+    // is inside, as when a reopened sale's settle carries back the reopened entries but not the new picks'.
+    it('F10: reopen plus new picks, the last +21 cancelling the −16 prefix, is applied, surcharge +20', async () => {
+      await withMethods(cash10only, async () => {
+        await expectApplied(reopenSale(), 20);
+      });
+    });
+
+    it('F11: F10 with one more pick after the +21 is refused, since the +21 is no longer last', async () => {
+      await withMethods(cash10only, async () => {
+        const error = await expectRefused(roundedSale(215, [...reopenLegs, cash10(30)], [...reopenEntries, { index: 8, minor: 5 }]),
+          'total_mismatch');
+        expect(error.data).toEqual({ cashRoundingMinor: 21, boundMinor: 20 });
+      });
+    });
+
+    it('F12: the any-entry chain is refused at index 2 (running −57, not last)', async () => {
+      await withMethods(cash10only, async () => {
+        const chain = [19, -38, -38, -38, 114, 114, 114, 114, -380, -380, -380, -380, 1178, 1178, 1178, 1178];
+        const error = await expectRefused(roundedSale(28447, chain.map(() => cash10(2000)), chain.map((minor, index) => ({ index, minor }))),
+          'total_mismatch');
+        expect(error.data).toEqual({ cashRoundingMinor: -38, boundMinor: 20 });
+      });
+    });
+
+    it('F13: the desk\'s mirror, −21 after four +4, is applied through the running sum, surcharge −5', async () => {
+      await withMethods(cash10only, async () => {
+        await expectApplied(roundedSale(95, [...[0, 1, 2, 3].map(() => cash10(20)), cash10(10)],
+          [...[0, 1, 2, 3].map(index => ({ index, minor: 4 })), { index: 4, minor: -21 }]), -5);
+      });
+    });
+
+    it('F14: the real-builder mirror with a merged write-off of −21 on the last pick is applied, surcharge −17', async () => {
+      await withMethods(cash10only, async () => {
+        await expectApplied(mirrorSale(), -17);
+      });
+    });
+
+    it('F15: the TallyUI#1366 write-off on an earlier plain cash leg after a later pick\'s entry, surcharge +1', async () => {
+      await expectApplied(roundedSale(1004, [cash5(500), cash5(505)], [{ index: 1, minor: 2 }, { index: 0, minor: -1 }]), 1);
     });
   });
 
@@ -432,6 +484,34 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
         await expectUnexplained(roundedSale(1024, payments, [{ index: 0, minor: 5 }, { index: 1, minor: -9 }]), -4, []);
         await expectUnexplained(roundedSale(1024, payments, [{ index: 1, minor: -9 }, { index: 0, minor: 5 }]), -4,
           [{ index: 1, minor: -9, maxMinor: 8 }]);
+      });
+    });
+
+    it('W17: the F6 replay raises nothing, in the result, the snapshot or the notes', async () => {
+      await withMethods(cash10only, async () => {
+        await expectUnexplained(replaySale(), 5, []);
+      });
+    });
+
+    it('W18: the F10 sale is silent, since its last +21 plus the −16 prefix is 5 (max 8)', async () => {
+      await withMethods(cash10only, async () => {
+        await expectUnexplained(reopenSale(), 20, []);
+      });
+    });
+
+    it('W19: the F14 sale is silent, since its last −25 plus the +20 prefix is −5 (max 8)', async () => {
+      await withMethods(cash10only, async () => {
+        await expectUnexplained(mirrorSale(), -17, []);
+      });
+    });
+
+    it('W20: only the last entry may cancel a prefix: +15 warns when not last, and is silent when last', async () => {
+      await withMethods(cash10only, async () => {
+        const payments = [cash10(20), cash10(20), cash10(30), cash10(30), cash10(30), cash10(10)];
+        const head = [{ index: 0, minor: -4 }, { index: 1, minor: -4 }, { index: 2, minor: 5 }, { index: 3, minor: 5 }];
+        await expectUnexplained(roundedSale(122, payments, [...head, { index: 4, minor: 15 }, { index: 5, minor: 1 }]), 18,
+          [{ index: 4, minor: 15, maxMinor: 8 }]);
+        await expectUnexplained(roundedSale(122, payments, [...head, { index: 4, minor: 1 }, { index: 5, minor: 15 }]), 18, []);
       });
     });
   });

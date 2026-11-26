@@ -51,6 +51,15 @@ export function withoutCashRounding<P extends CashPayload>(payload: P): P {
     ...(payload.display ? { display: { ...payload.display, totalMinor: payload.display.totalMinor - sum } } : {}) };
 }
 
+// Per entry, in payload order, the figures any one of which inside a limit explains it: the entry and the running sum
+// through it (ruling 6) and, for the last entry only, itself plus each prefix sum before it (ruling 7).
+function explainingFigures(entries: CashRoundingEntry[]): number[][] {
+  const prefixes = [0];
+  for (const { minor } of entries) prefixes.push(prefixes[prefixes.length - 1] + minor);
+  return entries.map(({ minor }, index) => index < entries.length - 1 ? [minor, prefixes[index + 1]]
+    : [minor, prefixes[index + 1], ...prefixes.slice(0, index + 1).map(prefix => minor + prefix)]);
+}
+
 // A payment's rounding leg: its own method's, or, for an unnamed cash leg (a content version below 10), every rounder's.
 function roundingLegs(payload: CashPayload, codes: string[], listed: TenderMethod[], rounders: TenderMethod[]): CashRounding[][] {
   return payload.payments.map(({ method, methodId }, index) => {
@@ -89,12 +98,13 @@ export function cashRoundingRefusal(payload: CashPayload, codes: string[], liste
   // F5: an entry is over only when it and the running sum through it (in payload order) are both at the bound or above.
   // The running-sum acceptance is front desk ruling 6 of 2026-11-26 (TallyUI#1367: a reopened sale's settle carries back
   // the earlier picks).
+  // The last entry also passes when it plus some prefix sum before it is inside: front desk ruling 7 of 2026-11-26
+  // (TallyUI#1367: a reopened sale's settle carries back the reopened entries but not the new picks'). So F5 keeps
+  // |Σ| ≤ 16 × (B − 1), B the bound. Both acceptances go at order.create v13 (a per-entry rounding basis, TallyUI#1367)
+  // for the exact per-entry check.
   const boundMinor = CASH_ROUNDING_BOUND_FACTOR * Math.max(...rounders.map(tally => tally.rounding!.incrementMinor));
-  let running = 0;
-  const over = entries.find(entry => {
-    running += entry.minor;
-    return Math.abs(entry.minor) >= boundMinor && Math.abs(running) >= boundMinor;
-  });
+  const figures = explainingFigures(entries);
+  const over = entries.find((_, index) => figures[index].every(figure => Math.abs(figure) >= boundMinor));
   if (over) {
     return { code: 'total_mismatch', data: { cashRoundingMinor: over.minor, boundMinor },
       message: `Cash rounding of ${over.minor} on payment ${over.paymentId} is more than this channel allows (under ${boundMinor}, `
@@ -124,17 +134,19 @@ export function voidFreeMaxMinor(leg: CashRounding[], rounders: CashRounding[]):
 
 /**
  * The entries above voidFreeMaxMinor for their leg whose running sum (in payload order) is above it too, in the order
- * sent ([] when none); only after cashRoundingRefusal passed.
+ * sent ([] when none); only after cashRoundingRefusal passed. The last entry may also cancel a prefix: it is silent
+ * when it plus some prefix sum before it is within its maximum (front desk ruling 7, 2026-11-26). Both acceptances go
+ * at order.create v13 (a per-entry rounding basis, TallyUI#1367) for the exact per-entry check.
  */
 export function cashRoundingUnexplained(payload: CashPayload, codes: string[], listed: TenderMethod[]): Array<CashRoundingEntry & { maxMinor: number }> {
   const rounders = listed.filter(method => method.rounding);
   const legs = roundingLegs(payload, codes, listed, rounders);
   const roundings = rounders.map(tally => tally.rounding!);
-  let running = 0;
-  return entriesOf(payload).flatMap(({ paymentId, minor }) => {
-    running += minor;
+  const entries = entriesOf(payload);
+  const figures = explainingFigures(entries);
+  return entries.flatMap(({ paymentId, minor }, index) => {
     const leg = legs[payload.payments.findIndex(payment => payment.clientPaymentId === paymentId)];
     const maxMinor = voidFreeMaxMinor(leg, roundings);
-    return Math.abs(minor) > maxMinor && Math.abs(running) > maxMinor ? [{ paymentId, minor, maxMinor }] : [];
+    return figures[index].every(figure => Math.abs(figure) > maxMinor) ? [{ paymentId, minor, maxMinor }] : [];
   });
 }
