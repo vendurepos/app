@@ -105,6 +105,7 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
           for (const rate of perRate) expect(Math.abs(rate.diff), JSON.stringify(rate)).toBeLessThanOrEqual(T);
           expect(result.totalWarnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
           expect(result.warnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
+          expect(result.warnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual([]);
           expect(bridges).toHaveLength(bridge === 0 ? 0 : 1);
           expect(result.totalWarnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual(
             bridge === 0 ? [] : [{ code: 'total_mismatch', expectedMinor: command.payload.totalMinor,
