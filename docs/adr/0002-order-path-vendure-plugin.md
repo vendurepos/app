@@ -150,8 +150,10 @@ medusapos, and calls the two parts at this server's own stages.
 
 1. It first validates every envelope in the batch (`validateBatch`).
 2. Each command then goes through exactly these steps (ADR-038 #220):
-   1. **shape validation**: types, presence, versions and U+0000 in any
-      string (which Postgres cannot hold, even for the lookup), with no
+   1. **shape validation**: types, presence, versions, U+0000 in any
+      string (which Postgres cannot hold, even for the lookup) and a lone
+      UTF-16 surrogate in any string (whose `JSON.stringify` escape jsonb
+      refuses, #515; U+0000 is checked first), with no
       database access: `invalid_payload` or `unsupported_version`, not
       stored. The deliberate exceptions are the envelope `id` bound (≤ 64), because the id is
       the replay key itself, so no stored row can have a longer id and a replay can

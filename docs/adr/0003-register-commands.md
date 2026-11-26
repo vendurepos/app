@@ -36,6 +36,7 @@ Three things the contract leaves to a plugin, or that core does not do yet:
 `order.create`'s step order (ADR 0002 §2):
 
 1. **Shape**, before any database access: a string holding U+0000, then
+   one holding a lone surrogate (#515), then
    the version (`unsupported_version` with core's message and
    `data: { register: 1 }`), then core's `registerPayloadErrors`.
 2. **The replay read.** A committed id answers as recorded: `duplicate`
