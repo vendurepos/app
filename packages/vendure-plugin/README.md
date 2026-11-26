@@ -178,8 +178,9 @@ The plugin checks the rounding against the channel's own methods and refuses it,
 - no rounding method is enabled;
 - an entry reaches twice the largest enabled increment, and so does the running sum of entries through it, and, for the last entry, the entry plus every prefix of the entries before it (a reopened sale's settle may carry back its earlier picks, TallyUI#1367). An accepted sale's net rounding is at most 16 × (B − 1), with B twice the largest increment: 3.04 with cash-10, 1.44 with cash-5 only. This is `total_mismatch`: a till that voided tenders after a cash write-off can produce it (TallyUI#1365), and the sale stays in its outbox to be taken again.
 
-An entry larger than a till makes without voiding a tender is stored with a `cash_rounding_unexplained` warning and a
-private order note, so an admin can check that sale's payments.
+A sale whose running cash rounding goes outside what its rounding mode produces (nearest (−inc/2, inc/2], up [0, inc),
+down (−inc, 0]) is stored with a `cash_rounding_unexplained` warning and a private order note, so an admin can check
+that sale's payments.
 
 The refund that takes everything left on the order's lines returns the rounding; no partial refund does.
 
