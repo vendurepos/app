@@ -374,12 +374,14 @@ describe('error classes (ADR 0002 §2)', () => {
     expect(await counts()).toEqual(afterApplied);
   });
 
-  it('per-rate T is ⌈(payload lines + fees + shipping) / 2⌉', () => {
-    for (const [lines, fees, shipping, expected] of [
-      [1, undefined, undefined, 1], [2, undefined, undefined, 1], [3, undefined, undefined, 2],
-      [1, 1, 1, 2], [2, 2, 1, 3], [4, 0, 0, 2],
+  it('per-rate T is ⌈(payload lines + fees + shipping + discounted lines) / 2⌉', () => {
+    for (const [lines, discounted, fees, shipping, expected] of [
+      [1, 0, undefined, undefined, 1], [2, 0, undefined, undefined, 1], [3, 0, undefined, undefined, 2],
+      [1, 1, undefined, undefined, 1], [2, 1, undefined, undefined, 2], [2, 2, undefined, undefined, 2],
+      [5, 5, undefined, undefined, 5], [1, 0, 1, 1, 2], [2, 2, 2, 1, 4], [4, 0, 0, 0, 2],
     ] as const) {
-      expect(bridgeBound.rateToleranceMinor({ lines: Array(lines),
+      expect(bridgeBound.rateToleranceMinor({
+        lines: Array.from({ length: lines }, (_, index) => ({ discountMinor: index < discounted ? 1 : 0 })),
         ...(fees === undefined ? {} : { fees: Array(fees) }),
         ...(shipping === undefined ? {} : { shipping: Array(shipping) }),
       } as never)).toBe(expected);
@@ -406,6 +408,24 @@ describe('error classes (ADR 0002 §2)', () => {
       { code: 'total_mismatch', expectedMinor: 1002, serverMinor: 1000, bridgeMinor: 2 }, mismatch,
     ]);
     expect(second.warnings).toContainEqual(mismatch);
+  });
+
+  it('per-rate T counts discounted lines: 2 discounted lines, a 2-cent rate shift is within T and a 3-cent one is a tax_rate_mismatch', async () => {
+    // 2 lines + 2 discounted lines: T 2. Without the discount rows (T 1), (a) would be a tax_rate_mismatch.
+    const within = shiftTaxBy(orderCommand([{ ...mug(), discountMinor: 100 }, { ...mug(), discountMinor: 100 }]), 2);
+    expect(fiscalFiguresErrors(within.payload)).toEqual([]);
+    expect(payloadShapeErrors(within.payload)).toEqual([]);
+    const first = await run(within);
+    expect(first.status).toBe('applied');
+    const { totalMinor } = within.payload;
+    expect(first.totalWarnings).toEqual([{ code: 'total_mismatch', expectedMinor: totalMinor, serverMinor: totalMinor - 2, bridgeMinor: 2 }]);
+    expect(first.warnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
+
+    const beyond = shiftTaxBy(orderCommand([{ ...mug(), discountMinor: 100 }, { ...mug(), discountMinor: 100 }]), 3);
+    const second = await run(beyond);
+    const { taxMinor } = beyond.payload.taxByRate![0];
+    expect(second.status).toBe('applied');
+    expect(second.warnings).toContainEqual({ code: 'tax_rate_mismatch', ratePpm: 250000, expectedMinor: taxMinor, serverMinor: taxMinor - 3 });
   });
 
   it('money P3 #7: the bound is max(2, product lines + surcharges + shipping lines)', () => {

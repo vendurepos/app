@@ -15,12 +15,12 @@ export function bridgeBoundMinor(order: Pick<Order, 'lines' | 'surcharges' | 'sh
   return Math.max(BRIDGE_FLOOR_MINOR, order.lines.length + order.surcharges.length + order.shippingLines.length);
 }
 
-/** Per-rate tolerance T = ⌈(payload lines + fees + shipping rows) / 2⌉ minor units.
- * Per-rate tolerance T uses TallyUI ADR-048's count, the same as @tallyui/pos needsAttention's rounding-bridge tolerance.
- * Only payload rows count: POS discounts, the bridge and Vendure's always-present shipping line do not widen T
- * (Front desk ruling, 2026-11-26).
+/** Per-rate tolerance T = ⌈(payload lines + fees + shipping rows + payload lines with discountMinor > 0) / 2⌉ minor units.
+ * Each discounted line becomes one taxed TALLY-DISCOUNT surcharge with its own Vendure rounding, so it counts as a row.
+ * Only payload rows count: the bridge and Vendure's always-present shipping line never widen T (Front desk ruling, 2026-11-26).
  */
 export function rateToleranceMinor(payload: Pick<OrderCreatePayload, 'lines' | 'fees' | 'shipping'>): number {
-  const rows = payload.lines.length + (payload.fees?.length ?? 0) + (payload.shipping?.length ?? 0);
+  const rows = payload.lines.length + (payload.fees?.length ?? 0) + (payload.shipping?.length ?? 0)
+    + payload.lines.filter(line => (line.discountMinor ?? 0) > 0).length;
   return Number(roundHalfAwayFromZero(BigInt(rows), 2n));
 }
