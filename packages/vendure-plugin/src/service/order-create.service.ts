@@ -24,7 +24,7 @@ import {
 } from './constants';
 import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRoundingUnexplained, withoutCashRounding } from './cash-rounding';
 import { classify } from './classification';
-import { bridgeBoundMinor } from './bridge-bound';
+import { bridgeBoundMinor, rateToleranceMinor } from './bridge-bound';
 import {
   CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, loneSurrogateRefusal, nulPath, refuse, replayRead,
 } from './command-ledger';
@@ -35,7 +35,6 @@ import {
 import { PaymentMethodsService } from './payment-methods.service';
 import type { MethodFallback } from './payment-methods.service';
 import { StoreSetupService } from './store-setup.service';
-import { roundHalfAwayFromZero } from './rounding';
 import { strictShapeErrors } from './strict-shape';
 import { resolveTaxCategory } from './tax-class';
 import { taxRoundingFor, type TaxRounding } from './tax-rounding';
@@ -842,8 +841,7 @@ export class OrderCreateService {
       totalWarnings.push({ code: 'total_mismatch', expectedMinor: goodsMinor, serverMinor, bridgeMinor });
     }
     if (command.version >= 3) {
-      // For an integer count, half-away rounding of count/2 equals ceil(count/2).
-      const T = Number(roundHalfAwayFromZero(BigInt(order.lines.length + order.surcharges.length + order.shippingLines.length), 2n));
+      const T = rateToleranceMinor(payload);
       const pos = new Map<number, number>();
       const vendure = new Map<number, number>();
       for (const rate of payload.taxByRate!) {

@@ -65,7 +65,7 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
    - **Strict shape:** `strict-shape.ts` gains `fees`/`shipping` at version 5, `FEE`/`SHIPPING` field tables, and `lines[].custom` at version 5.
    - **Payload shape:** `payload-shape.ts` requires `variantId` only on a non-custom line, and forbids it on a custom one.
    - **Lines still must not be empty.** A fees-only order is refused, because Vendure can't pay an order with no lines.
-   - **`taxByRate`, `total_mismatch` and `figures_mismatch`** cover the new charges: `taxSummary` already includes surcharges and shipping lines, and the tolerance count gains the ShippingLine.
+   - **`taxByRate`, `total_mismatch` and `figures_mismatch`** cover the new charges: `taxSummary` already includes surcharges and shipping lines, and the tolerance counts the payload's fees and shipping rows (amended 2026-11-26).
    - **Idempotency** needs no change: the fingerprint covers the whole payload.
    - **Golden pairs:** both pairs in the handoff (§3.1, §3.2) become plugin e2e tests, and so do §3.3's four refusals.
 

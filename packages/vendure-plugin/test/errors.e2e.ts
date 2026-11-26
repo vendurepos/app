@@ -10,6 +10,8 @@ import { OrderCreateService, TallyCommand, TransientCommandError } from '../src'
 import * as bridgeBound from '../src/service/bridge-bound';
 import { transientKind } from '../src/service/errors';
 import type { CommandEnvelope } from '../src/vendored/commands';
+import { fiscalFiguresErrors } from '../src/vendored/fiscal-figures';
+import { payloadShapeErrors } from '../src/vendored/payload-shape';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
@@ -50,6 +52,17 @@ describe('error classes (ADR 0002 §2)', () => {
       command.payload.display.lines.at(-1)!.amountMinor += offset;
     }
     command.payload.payments[0].amountMinor += offset;
+    return command;
+  }
+  function shiftTaxBy(command: ReturnType<typeof orderCommand>, n: number) {
+    const { payload } = command;
+    payload.taxMinor += n;
+    payload.totalMinor += n;
+    payload.display!.taxMinor += n;
+    payload.display!.totalMinor += n;
+    payload.taxByRate![0].taxMinor += n;
+    payload.taxByRate![0].grossMinor += n;
+    payload.payments[0].amountMinor += n;
     return command;
   }
   async function counts() {
@@ -359,6 +372,40 @@ describe('error classes (ADR 0002 §2)', () => {
     const afterApplied = await counts();
     expect(await run(input)).toEqual({ ...result, status: 'duplicate' });
     expect(await counts()).toEqual(afterApplied);
+  });
+
+  it('per-rate T is ⌈(payload lines + fees + shipping) / 2⌉', () => {
+    for (const [lines, fees, shipping, expected] of [
+      [1, undefined, undefined, 1], [2, undefined, undefined, 1], [3, undefined, undefined, 2],
+      [1, 1, 1, 2], [2, 2, 1, 3], [4, 0, 0, 2],
+    ] as const) {
+      expect(bridgeBound.rateToleranceMinor({ lines: Array(lines),
+        ...(fees === undefined ? {} : { fees: Array(fees) }),
+        ...(shipping === undefined ? {} : { shipping: Array(shipping) }),
+      } as never)).toBe(expected);
+    }
+  });
+
+  it('per-rate T counts the payload: 1 line, a 1-cent rate shift is within T and a 2-cent one is a tax_rate_mismatch', async () => {
+    const within = shiftTaxBy(orderCommand([mug()]), 1);
+    expect(fiscalFiguresErrors(within.payload)).toEqual([]);
+    expect(payloadShapeErrors(within.payload)).toEqual([]);
+    const first = await run(within);
+    expect(first.status).toBe('applied');
+    expect(first.totalWarnings).toEqual([{ code: 'total_mismatch', expectedMinor: 1001, serverMinor: 1000, bridgeMinor: 1 }]);
+    expect(first.warnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
+
+    // Under the old count (1 line + bridge surcharge + shipping line = 3, T 2), this had no tax_rate_mismatch.
+    const beyond = shiftTaxBy(orderCommand([mug()]), 2);
+    expect(fiscalFiguresErrors(beyond.payload)).toEqual([]);
+    expect(payloadShapeErrors(beyond.payload)).toEqual([]);
+    const second = await run(beyond);
+    const mismatch = { code: 'tax_rate_mismatch', ratePpm: 250000, expectedMinor: 202, serverMinor: 200 };
+    expect(second.status).toBe('applied');
+    expect(second.totalWarnings).toEqual(expect.arrayContaining([
+      { code: 'total_mismatch', expectedMinor: 1002, serverMinor: 1000, bridgeMinor: 2 }, mismatch,
+    ]));
+    expect(second.warnings).toContainEqual(mismatch);
   });
 
   it('money P3 #7: the bound is max(2, product lines + surcharges + shipping lines)', () => {
