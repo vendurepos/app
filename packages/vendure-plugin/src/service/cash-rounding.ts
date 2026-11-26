@@ -63,7 +63,7 @@ function roundingLegs(payload: CashPayload, codes: string[], listed: TenderMetho
 /**
  * The store-config checks against the channel's methods, after resolve: F3 (a rounding leg is a multiple of one of its
  * increments), F4 (an entry on any other payment is a single negative write-off) and F5 (every entry is under
- * CASH_ROUNDING_BOUND_FACTOR × the largest enabled increment). The first failure, or undefined.
+ * CASH_ROUNDING_BOUND_FACTOR × the largest enabled increment, or its running sum is). The first failure, or undefined.
  */
 export function cashRoundingRefusal(payload: CashPayload, codes: string[], listed: TenderMethod[]): CashRoundingRefusal | undefined {
   const entries = entriesOf(payload);
@@ -86,8 +86,15 @@ export function cashRoundingRefusal(payload: CashPayload, codes: string[], liste
         message: `cashRoundings[${index}]: an entry on a payment that is not a rounding cash method must be a single negative write-off` };
     }
   }
+  // F5: an entry is over only when it and the running sum through it (in payload order) are both at the bound or above.
+  // The running-sum acceptance is front desk ruling 6 of 2026-11-26 (TallyUI#1367: a reopened sale's settle carries back
+  // the earlier picks).
   const boundMinor = CASH_ROUNDING_BOUND_FACTOR * Math.max(...rounders.map(tally => tally.rounding!.incrementMinor));
-  const over = entries.find(entry => Math.abs(entry.minor) >= boundMinor);
+  let running = 0;
+  const over = entries.find(entry => {
+    running += entry.minor;
+    return Math.abs(entry.minor) >= boundMinor && Math.abs(running) >= boundMinor;
+  });
   if (over) {
     return { code: 'total_mismatch', data: { cashRoundingMinor: over.minor, boundMinor },
       message: `Cash rounding of ${over.minor} on payment ${over.paymentId} is more than this channel allows (under ${boundMinor}, `
@@ -99,26 +106,35 @@ export function cashRoundingRefusal(payload: CashPayload, codes: string[], liste
 
 /**
  * The largest cash rounding a till produces without voiding a tender (front desk rulings 4 and 5, 2026-11-26), for an
- * increment inc. entryMax is for any entry on a rounding leg, writeOffMax for a write-off on any other leg:
- *   nearest: entryMax 2(ceil(inc/2) − 1), writeOffMax ceil(inc/2) − 1
- *   up:      entryMax inc − 1,            writeOffMax 0
- *   down:    entryMax 2(inc − 1),         writeOffMax inc − 1
- * Until TallyUI#1364 puts voided legs and units on the wire; then the exact re-derive replaces this threshold.
+ * entry on `leg` (a payment's roundings; [] for any other leg) with the channel's enabled `rounders`. For a rounding m
+ * of increment inc:
+ *   posMax(m): nearest floor(inc/2) (TallyUI rounds a half up), up inc − 1, down 0
+ *   negMax(m): nearest ceil(inc/2) − 1,                         up 0,       down inc − 1
+ * W is the largest negMax over the rounders. A write-off on a non-rounding leg may be W. TallyUI merges a write-off into
+ * the last counted leg's own entry, whatever its method, so an entry on a rounding leg may be the largest, over its
+ * roundings m, of max(posMax(m), negMax(m) + W). Until TallyUI#1364 puts voided legs and units on the wire and
+ * TallyUI#1367's reopen carries units; then the exact re-derive replaces this threshold, per entry again.
  */
-export function voidFreeMaxMinor(rounding: { incrementMinor: number; mode: 'nearest' | 'up' | 'down' }, writeOff: boolean): number {
-  const { incrementMinor: inc, mode } = rounding;
-  const writeOffMax = { nearest: Math.ceil(inc / 2) - 1, up: 0, down: inc - 1 }[mode];
-  return writeOff ? writeOffMax : mode === 'up' ? inc - 1 : 2 * writeOffMax;
+export function voidFreeMaxMinor(leg: CashRounding[], rounders: CashRounding[]): number {
+  const posMax = ({ incrementMinor: inc, mode }: CashRounding) => ({ nearest: Math.floor(inc / 2), up: inc - 1, down: 0 }[mode]);
+  const negMax = ({ incrementMinor: inc, mode }: CashRounding) => ({ nearest: Math.ceil(inc / 2) - 1, up: 0, down: inc - 1 }[mode]);
+  const writeOffMax = Math.max(...rounders.map(negMax));
+  return leg.length ? Math.max(...leg.map(rounding => Math.max(posMax(rounding), negMax(rounding) + writeOffMax))) : writeOffMax;
 }
 
-/** The entries above voidFreeMaxMinor for their leg, in the order sent ([] when none); only after cashRoundingRefusal passed. */
+/**
+ * The entries above voidFreeMaxMinor for their leg whose running sum (in payload order) is above it too, in the order
+ * sent ([] when none); only after cashRoundingRefusal passed.
+ */
 export function cashRoundingUnexplained(payload: CashPayload, codes: string[], listed: TenderMethod[]): Array<CashRoundingEntry & { maxMinor: number }> {
   const rounders = listed.filter(method => method.rounding);
   const legs = roundingLegs(payload, codes, listed, rounders);
+  const roundings = rounders.map(tally => tally.rounding!);
+  let running = 0;
   return entriesOf(payload).flatMap(({ paymentId, minor }) => {
+    running += minor;
     const leg = legs[payload.payments.findIndex(payment => payment.clientPaymentId === paymentId)];
-    const maxMinor = leg.length ? Math.max(...leg.map(rounding => voidFreeMaxMinor(rounding, false)))
-      : Math.max(...rounders.map(tally => voidFreeMaxMinor(tally.rounding!, true)));
-    return Math.abs(minor) > maxMinor ? [{ paymentId, minor, maxMinor }] : [];
+    const maxMinor = voidFreeMaxMinor(leg, roundings);
+    return Math.abs(minor) > maxMinor && Math.abs(running) > maxMinor ? [{ paymentId, minor, maxMinor }] : [];
   });
 }
