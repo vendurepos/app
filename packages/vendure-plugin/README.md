@@ -315,6 +315,13 @@ The active channel's POS sales and refunds in a time range, every figure but dis
 - The answer's top-level keys are `version` (1), `from`, `to`, `timezone`, `currencyCode`, `registerId`, `orders` (count, sales, tax, discounts), `refunds` (count, total), `byMethod` and `byDay`.
 - `discounts` is gross, the tax-inclusive amount the till took off, summed per POS discount from its tax lines. On a store using Vendure's `OrderLevelTaxCalculationStrategy`, which rounds tax once per rate group, Discounts can differ from what came off the order total by up to 1 minor unit per tax rate in the order.
 - `/tally/v1/info` does not list the route. Its shape is this plugin's own until TallyUI has a report contract.
+- `GET /tally/v1/reports/sales/v4` (same permissions; v2's query, which adds `cashierId`) answers v3's report with `version` 4 and `cashRounding` (TallyUI ADR-094, docs/adr/0009-cash-rounding.md):
+  - `salesMinor` and `orderCount`: the cash rounding on the range's sales and how many carry one;
+  - `unexplainedOrderCount`: those stored with a `cash_rounding_unexplained` warning;
+  - `refundedMinor` and `refundCount`: the cash rounding returned by the range's refunds, read from each refund's `tallyCashRoundingMinor` metadata, so a dashboard refund returns none;
+  - `netMinor`: `salesMinor − refundedMinor`.
+
+  All are signed minor units, and already inside `orders.salesMinor` and `refunds.totalMinor`.
 
 ### Receipt email: POST /tally/v1/orders/:code/receipt-email
 

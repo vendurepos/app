@@ -15,7 +15,8 @@
     - no enabled rounding cash method;
     - an entry of 2 × the largest enabled increment or more, unless the running sum of entries through it is under that or, for the last entry, the entry plus some prefix of the entries before it is (a reopened sale's settle, TallyUI#1367). An accepted sale's net rounding is at most 16 × (B − 1), with B twice the largest increment. This one is refused `total_mismatch` with `cashRoundingMinor` and `boundMinor`, and its message names void cycles (TallyUI#1365).
   - An entry above what a till produces without voiding a tender is applied, and it raises `cash_rounding_unexplained`: a result warning, `tallySnapshot.cashRoundingUnexplained` and a private order note.
-  - The refund that takes everything left on an order's lines returns its cash rounding, as it returns the bridge; no other refund returns any of it.
+  - The refund that takes everything left on an order's lines returns its cash rounding, as it returns the bridge; no other refund returns any of it. That refund command records the cash part (never the bridge) as `tallyCashRoundingMinor` in its first Vendure Refund's metadata; the key is absent when there is none.
+  - `GET /tally/v1/reports/sales/v4`, beside the unchanged v1, v2 and v3: v3's report plus `cashRounding` with `salesMinor`, `orderCount`, `unexplainedOrderCount` (sales stored with `cash_rounding_unexplained`), `refundedMinor`, `refundCount` and `netMinor`. Every v3 filter applies, and refunds are dated by the refund. It is a breakdown: the amounts are already inside `orders.salesMinor` and `refunds.totalMinor`.
 
 ### Behaviour change
 
