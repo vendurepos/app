@@ -17,7 +17,7 @@ import { ErrorResultThrown, unwrap } from './errors';
 import { OrderCreateService } from './order-create.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
-import { REFUND_DISCOUNT_UNLINKED_MESSAGE, cashRoundingForRefund, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
+import { REFUND_DISCOUNT_UNLINKED_MESSAGE, REFUND_ROUNDING_EXCEEDS_MESSAGE, cashRoundingForRefund, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
 import { jsonbOf } from './sql-json';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
@@ -127,11 +127,17 @@ export class RefundService {
         const tenders = payments.filter(payment => payment.metadata?.tender && payment.state === 'Settled');
         const moneyRemainder = tenders.reduce((sum, payment) => sum + remainderOf(payment), 0);
         // Money P2 #2: the refund taking everything left on the lines also takes the order's rounding bridge.
+        const roundingMinor = roundingForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf);
         const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor
-          + roundingForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf);
+          + roundingMinor;
         // TallyUI ADR-094: the cash rounding part of that, recorded on the command's first Refund for the v4 sales report.
         const cashRoundingMinor = cashRoundingForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf);
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
+        // #469: a final refund consumed by negative rounding must be handled in Vendure admin.
+        if (roundingMinor < 0 && raw <= 0 && shippingMinor <= refundableShipping) {
+          throw new Unstored(refuse(id, 'rounding_exceeds_rest', REFUND_ROUNDING_EXCEEDS_MESSAGE,
+            { roundingMinor, restMinor: raw - roundingMinor }));
+        }
         if (shippingMinor > refundableShipping || raw !== server || server !== totalMinor) {
           throw new Unstored(refuse(id, 'amount_mismatch', `Refund total ${totalMinor} does not match the server's ${server}`,
             { expectedMinor: totalMinor, serverMinor: server }));

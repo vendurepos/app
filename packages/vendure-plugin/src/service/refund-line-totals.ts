@@ -4,6 +4,9 @@ import { TALLY_CASH_ROUNDING_SKU, TALLY_DISCOUNT_SKU, TALLY_ROUNDING_SKU } from 
 // #460, desk ruling 2: an order whose discounts have no line link, refunded one line at a time, is refused, never guessed.
 export const REFUND_DISCOUNT_UNLINKED_MESSAGE =
   "This order's discounts were recorded before they were linked to its lines, so one line of it can't be refunded at the till. Refund everything left on the order, or refund it in Vendure.";
+// #469, desk ruling 2026-11-26 (direction b): the order's negative rounding is more than what is left; refused, never spread.
+export const REFUND_ROUNDING_EXCEEDS_MESSAGE =
+  "This order's rounding is more than what is left to refund on it, so the rest can't be refunded at the till. Refund the rest in Vendure admin, by amount.";
 
 type RefundLine = { id: ID; quantity: number; proratedLinePriceWithTax: number };
 type RefundOrder<L> = {

@@ -3,6 +3,7 @@ import { TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
+import { REFUND_ROUNDING_EXCEEDS_MESSAGE } from '../src/service/refund-line-totals';
 import type { CommandResult, OrderRefundEnvelope, OrderRefundPayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -207,23 +208,34 @@ describe('cash rounding: order.refund (ADR-094 P1c)', () => {
     expect(await refundedOf(order.id)).toBe(paid);
   });
 
-  it('R8 (known gap, vendurepos/app#469): when the last line nets to 0, its refund is nothing_to_refund and its quantity stays unrefunded', async () => {
+  it('R8 (vendurepos/app#469): when the last line nets to 0, its refund is rounding_exceeds_rest and its quantity stays unrefunded', async () => {
     const session = await openSession();
     const { order, paid, a, b } = await sellRounded([{ unitPriceMinor: 1000 }, { unitPriceMinor: 2 }], -2);
     expect(paid).toBe(1000);
     await applied(refundFor(order, session, [{ line: a }], 1000), 1000);
-    await refused(refundFor(order, session, [{ line: b }], 0), order.id, 'nothing_to_refund', 'Nothing to refund');
+    await refused(refundFor(order, session, [{ line: b }], 0), order.id, 'rounding_exceeds_rest', REFUND_ROUNDING_EXCEEDS_MESSAGE,
+      { roundingMinor: -2, restMinor: 2 });
     expect(await refundedOf(order.id)).toBe(paid);
     expect((await readOrder(order.id)).payments.flatMap(payment => payment.refunds).flatMap(refund => refund.lines)
       .filter(line => line.orderLineId === b.id)).toEqual([]);
   });
 
-  it('R9 (known gap, vendurepos/app#469): a partial refund above what was paid is refused, and everything is then refundable', async () => {
+  it('R9: a partial refund above what was paid is refused amount_mismatch, and everything is then refundable', async () => {
     const session = await openSession();
     const { order, paid, b } = await sellRounded([{ unitPriceMinor: 1 }, { unitPriceMinor: 1001 }], -2);
     expect(paid).toBe(1000);
     await mismatch(refundFor(order, session, [{ line: b }], 1001), order.id, 1000);
     await applied(everything(order, session, 1000), 1000);
+    expect(await refundedOf(order.id)).toBe(paid);
+  });
+
+  it('R10: the bridge and cash rounding together consume the last line and its refund is refused rounding_exceeds_rest', async () => {
+    const session = await openSession();
+    const { order, paid, a, b } = await sellRounded([{ unitPriceMinor: 1000 }, { unitPriceMinor: 3 }], -1, -2);
+    expect(paid).toBe(1000);
+    await applied(refundFor(order, session, [{ line: a }], 1000), 1000);
+    await refused(refundFor(order, session, [{ line: b }], 0), order.id, 'rounding_exceeds_rest', REFUND_ROUNDING_EXCEEDS_MESSAGE,
+      { roundingMinor: -3, restMinor: 3 });
     expect(await refundedOf(order.id)).toBe(paid);
   });
 });
