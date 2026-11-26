@@ -104,3 +104,19 @@ How the plugin builds an order today (`order-create.service.ts` `recipe()`), and
   - it is listed in the Admin product list, as every product is;
   - Admin `productVariants` counts include it.
 - **`/tally/v1/info`** also carries `lineTax: { none: true, classes: true }`, from the v5 contract §1b.
+
+## Amendment: each charge's own tax mode (2.10b, 2026-11-26)
+
+Points 1 and 2 wrote every fee and shipping charge in the order's mode (`payload.pricesIncludeTax`). In a tax-exclusive store, a charge the cashier entered including tax reached the plugin as a converted net. Vendure then taxed that net again, and the two roundings could land one cent off. For example, at 25% a 10.02 fee becomes an 8.02 net, which Vendure grosses up to 10.03. The TALLY-ROUNDING bridge covered the cent, with a `total_mismatch` warning.
+
+From this amendment:
+- `fees[]` and `shipping[]` entries may carry `amountIncludesTax: boolean`, with `amountMinor` in that mode. When the field is absent, the order's mode applies, as before.
+- The fee Surcharge's `listPriceIncludesTax` and the `tallyShipping` field's `includesTax` are `amountIncludesTax ?? payload.pricesIncludeTax`.
+- A non-boolean value is refused `invalid_payload`.
+- `/tally/v1/info` advertises `chargeTaxMode: { v: 1 }`. The field is gated by that capability, not by a new order.create version (front desk ruling, 2026-11-26; the TallyUI ADR-094 precedent).
+- No migration: Vendure stores each charge's own `listPriceIncludesTax`, and every past order keeps the mode it was stored in.
+- Known limits:
+  - The total is exact by construction. At an exact half cent of net, the per-rate tax can differ by one cent from the till's, as it can for an inclusive product line.
+  - Under `per_rate_group_items`, `compareTax` still looks only at lines (vendurepos/app#522).
+
+Spec: `~/agent/handoff/vendurepos-2.10b-charge-tax-mode/SPEC.md`.

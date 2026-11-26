@@ -764,7 +764,8 @@ export class OrderCreateService {
         const category = await resolveTaxCategory(ctx, this.connection, taxClass);
         taxRate = (await this.taxRateService.getApplicableTaxRate(ctx, zone!, category!)).value;
       }
-      order.customFields.tallyShipping = JSON.stringify({ clientShippingId, name, methodId, amountMinor, includesTax: payload.pricesIncludeTax, taxRate });
+      const includesTax = (payload.shipping[0] as { amountIncludesTax?: boolean }).amountIncludesTax ?? payload.pricesIncludeTax;
+      order.customFields.tallyShipping = JSON.stringify({ clientShippingId, name, methodId, amountMinor, includesTax, taxRate });
       await this.connection.getRepository(ctx, Order).save(order);
     }
     order = unwrap(await this.orders.setShippingMethod(ctx, order.id, [shipping.id]));
@@ -798,7 +799,7 @@ export class OrderCreateService {
         }
         const surcharge = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
           order, description: fee.name, sku: TALLY_FEE_SKU, listPrice: fee.amountMinor,
-          listPriceIncludesTax: payload.pricesIncludeTax, taxLines,
+          listPriceIncludesTax: (fee as { amountIncludesTax?: boolean }).amountIncludesTax ?? payload.pricesIncludeTax, taxLines,
         }));
         order.surcharges.push(surcharge);
         await this.testObserver?.('surchargeSave', ctx, order);
