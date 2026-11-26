@@ -2272,7 +2272,9 @@ test('a percent fee and a tax-exclusive fee reach the store in its own mode, and
   await expect.poll(onStore, { timeout: 30_000 }).toEqual([{ total: 1080, totalWithTax: 1261, surcharges: [{ sku: 'TALLY-FEE' }, { sku: 'TALLY-FEE' }] }]);
 });
 
-test('in a tax-inclusive channel, a fee and shipping entered without tax reach the store a cent-exact', async ({ browser, page }) => {
+for (const withCapability of [false, true]) { test(withCapability
+  ? 'with chargeTaxMode, in a tax-inclusive channel, a fee and shipping entered without tax reach the store as entered, a cent-exact'
+  : 'in a tax-inclusive channel, a fee and shipping entered without tax reach the store a cent-exact', async ({ browser, page }) => {
   test.setTimeout(3 * 60_000);
   const admin = await superadmin(page);
   const { activeChannel: channel } = await admin('{ activeChannel { id pricesIncludeTax } }');
@@ -2289,9 +2291,9 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
         }
         return route.continue();
       });
-      // The capability absent, as a plugin before app#523 answers: the till converts each charge to the channel's mode, as before.
+      // Only the capability-absent variant strips chargeTaxMode from /info to simulate a plugin before app#523.
       const advertised: unknown[] = [];
-      await till.route('**/tally/v1/info', async (route) => {
+      if (!withCapability) await till.route('**/tally/v1/info', async (route) => {
         const response = await route.fetch();
         const { chargeTaxMode, ...body } = await response.json();
         advertised.push(chargeTaxMode);
@@ -2324,13 +2326,22 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
       await till.getByTestId('tender-pane').getByTestId('tender-complete').click();
       await expect(till.getByTestId('receipt').getByTestId('receipt-total')).toHaveText('€15.00');
       await expect.poll(() => sent.length).toBeGreaterThan(0);
-      for (const { payload } of sent) {
-        expect([payload.fees.map((fee) => fee.amountMinor), payload.shipping?.map((line) => line.amountMinor)]).toEqual([[106], [594]]);
-      }
-      expect(advertised.length).toBeGreaterThan(0);
-      expect(advertised.every((value) => JSON.stringify(value) === '{"v":1}')).toBe(true);
-      for (const { payload } of sent) {
-        for (const charge of [...payload.fees, ...(payload.shipping ?? [])]) expect(charge).not.toHaveProperty('amountIncludesTax');
+      if (withCapability) {
+        // Sent as entered (nets 99 and 499, amountIncludesTax false); Vendure grosses them to the same 106 and 594.
+        for (const { payload } of sent) {
+          expect([payload.fees.map(({ amountMinor, amountIncludesTax }) => ({ amountMinor, amountIncludesTax })),
+            payload.shipping?.map(({ amountMinor, amountIncludesTax }) => ({ amountMinor, amountIncludesTax }))])
+            .toEqual([[{ amountMinor: 99, amountIncludesTax: false }], [{ amountMinor: 499, amountIncludesTax: false }]]);
+        }
+      } else {
+        for (const { payload } of sent) {
+          expect([payload.fees.map((fee) => fee.amountMinor), payload.shipping?.map((line) => line.amountMinor)]).toEqual([[106], [594]]);
+        }
+        expect(advertised.length).toBeGreaterThan(0);
+        expect(advertised.every((value) => JSON.stringify(value) === '{"v":1}')).toBe(true);
+        for (const { payload } of sent) {
+          for (const charge of [...payload.fees, ...(payload.shipping ?? [])]) expect(charge).not.toHaveProperty('amountIncludesTax');
+        }
       }
       const onStore = async () => (await admin(ORDER_ON_STORE, { id: sent[0].payload.clientOrderId })).orders.items;
       await expect.poll(onStore, { timeout: 30_000 }).toMatchObject([{ totalWithTax: 1500, surcharges: [{ sku: 'TALLY-FEE' }] }]);
@@ -2340,7 +2351,7 @@ test('in a tax-inclusive channel, a fee and shipping entered without tax reach t
   } finally {
     await admin(UPDATE_CHANNEL, { input: { id: channel.id, pricesIncludeTax: channel.pricesIncludeTax } });
   }
-});
+}); }
 
 test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel reaches the store as entered, its gross kept', async ({ page }) => {
   const sent: (SentOrder & { payload: { totalMinor: number } })[] = [];
@@ -2374,6 +2385,7 @@ test('with chargeTaxMode, a fee entered including tax in a tax-exclusive channel
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
   await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toHaveText(cartTotal!);
+  await expect(page.getByTestId('receipt').getByTestId('receipt-total')).toHaveText('€19.51');
   await expect.poll(() => sent.length).toBeGreaterThan(0);
   for (const { payload } of sent) expect(payload.fees).toEqual([expect.objectContaining({ amountMinor: 999, amountIncludesTax: true })]);
   const token = JSON.parse((await page.evaluate(() => localStorage.getItem('vendurepos.session')))!).token;
