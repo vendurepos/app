@@ -248,10 +248,12 @@ export class ReportService {
       .select(`SUM(${ROUNDING})`, 'total').addSelect('COUNT(*)', 'count').getRawMany<{ total: string | null; count: string }>();
     let refundedMinor = minor(refunded?.total), refundCount = minor(refunded?.count);
     const candidates = await this.posRefundsV2(ctx, query).andWhere(`${ROUNDING} IS NULL`)
+      .andWhere(qb => `EXISTS ${qb.subQuery().select('1').from(Surcharge, 's')
+        .where('s.order = sale.id AND s.sku = :roundingSku').getQuery()}`, { roundingSku: TALLY_CASH_ROUNDING_SKU })
       .select('CAST(refund.id AS text)', 'id').addSelect('sale.id', 'saleId').getRawMany<{ id: string; saleId: ID }>();
     if (candidates.length) {
-      const candidateIds = new Set(candidates.map(row => row.id));
-      const saleIds = [...new Set(candidates.map(row => row.saleId))];
+      const candidateIds = new Set(candidates.map(row => String(row.id)));
+      const saleIds = [...new Set(candidates.map(row => String(row.saleId)))];
       const rows = await channelRefunds(this.connection, ctx).andWhere('sale.id IN (:...saleIds)', { saleIds })
         .select('sale.id', 'saleId').addSelect('CAST(refund.id AS text)', 'id').addSelect(REFUND_AT, 'createdAt')
         .addSelect('refund.total', 'total').addSelect(`${ROUNDING} IS NOT NULL`, 'keyed')
@@ -261,19 +263,20 @@ export class ReportService {
         .select('sale.id', 'saleId').addSelect('SUM(p.amount)', 'total').groupBy('sale.id').getRawMany<{ saleId: ID; total: string }>();
       const rounding = await this.connection.getRepository(ctx, Surcharge).createQueryBuilder('s').innerJoin('s.order', 'sale').addSelect('sale.id')
         .where('sale.id IN (:...saleIds) AND s.sku = :sku', { saleIds, sku: TALLY_CASH_ROUNDING_SKU }).getMany();
-      const history = rows.map(row => ({ ...row, total: Number(row.total) }));
-      const historyBySale = new Map<ID, typeof history>();
+      const history = rows.map(row => ({ ...row, saleId: String(row.saleId), id: String(row.id), total: Number(row.total) }));
+      const historyBySale = new Map<string, typeof history>();
       for (const row of history) {
         const group = historyBySale.get(row.saleId);
         if (group) group.push(row);
         else historyBySale.set(row.saleId, [row]);
       }
-      const roundingBySale = new Map<ID, number>();
+      const roundingBySale = new Map<string, number>();
       for (const surcharge of rounding) {
-        const saleId = surcharge.order.id;
+        const saleId = String(surcharge.order.id);
         roundingBySale.set(saleId, (roundingBySale.get(saleId) ?? 0) + surcharge.priceWithTax);
       }
-      for (const { saleId, total } of paid) {
+      for (const { saleId: rawSaleId, total } of paid) {
+        const saleId = String(rawSaleId);
         const amount = roundingBySale.get(saleId);
         if (!amount) continue;
         const id = inferredRoundingReturnId(historyBySale.get(saleId)!, minor(total));
