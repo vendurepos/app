@@ -317,7 +317,7 @@ The active channel's POS sales and refunds in a time range, every figure but dis
 - `/tally/v1/info` does not list the route. Its shape is this plugin's own until TallyUI has a report contract.
 - `GET /tally/v1/reports/sales/v4` (same permissions; v2's query, which adds `cashierId`) answers v3's report with `version` 4 and `cashRounding` (TallyUI ADR-094, docs/adr/0009-cash-rounding.md):
   - `salesMinor` and `orderCount`: the cash rounding on the range's sales and how many carry one;
-  - `unexplainedOrderCount`: those stored with a `cash_rounding_unexplained` warning;
+  - `unexplainedOrderCount`: the range's sales stored with a `cash_rounding_unexplained` warning. This includes a sale whose entries net to 0 and so carries no rounding, so it can exceed `orderCount`;
   - `refundedMinor` and `refundCount`: the cash rounding returned by the range's refunds, read from each refund's `tallyCashRoundingMinor` metadata, so a dashboard refund returns none;
   - `netMinor`: `salesMinor − refundedMinor`.
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Order, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TallySalesReportV3, TallySalesReportV4 } from '../src/service/report.service';
@@ -29,6 +30,8 @@ const ZERO: CashRounding = { salesMinor: 0, orderCount: 0, unexplainedOrderCount
  * TallyUI ADR-094 P2: the v4 sales report's cash rounding, and the refund metadata (tallyCashRoundingMinor) it reads.
  * Six sales over four registers (S3 has no cashRoundings, S5 a cash_rounding_unexplained write-off, S6 a TALLY-ROUNDING
  * bridge too) and five refunds (RF2 then RF3 is the partial-then-final case).
+ * Two early sales on register E, outside every other range (#514): U1 has a discount label cut mid-emoji (a lone surrogate,
+ * stored as the escape \ud83d), U2 card −3 and cash +3, a cash_rounding_unexplained warning with no surcharge.
  * Known not covered:
  * - a Failed refund: a Tally refund is always Settled, and posRefunds already excludes Failed;
  * - a Vendure-dashboard refund: it has no Tally context, so it never carries the key, and its rounding is not counted as returned.
@@ -39,14 +42,17 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
   let base: string;
   let till: Record<string, string>;
   let reporter: Record<string, string>;
-  const [A, B, C, D] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  const [A, B, C, D, E] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   const sessions: Record<string, Session> = {};
   let all: { from: string; to: string };
   let salesOnly: { from: string; to: string };
   let refundsOnly: { from: string; to: string };
+  let early: { from: string; to: string };
+  let connection: TransactionalConnection;
   const results: Record<string, CommandResult> = {};
   const orders: Record<string, ReadOrder> = {};
   const refundResults: Record<string, CommandResult> = {};
+  const earlyResults: Record<string, CommandResult> = {};
 
   beforeAll(async () => {
     await environment.init();
@@ -56,9 +62,10 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
     await createMethod('cash-5', { tender: 'cash', roundingIncrement: '5', roundingMode: 'nearest' });
     await createMethod('card', { tender: 'card' });
     base = await server.app.getUrl();
+    connection = server.app.get(TransactionalConnection);
     till = await tokenWith(['TallyPosSell', 'TallyPosRefund']);
     reporter = await tokenWith(['TallyPosSell', 'ReadOrder']);
-    for (const registerId of [A, B, C, D]) sessions[registerId] = await openSession(registerId);
+    for (const registerId of [A, B, C, D, E]) sessions[registerId] = await openSession(registerId);
 
     const now = Date.now();
     all = { from: new Date(now - 3 * HOUR).toISOString(), to: new Date(now + HOUR).toISOString() };
@@ -73,6 +80,16 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
     await sellRounded('S5', sale(4, B, 'cashier-2'), [{ unitPriceMinor: 1003 }], -3, 0,
       [{ methodId: 'card', method: 'external', amountMinor: 1000, minor: -3 }]);
     await sellRounded('S6', sale(5, C, 'cashier-2'), [{ unitPriceMinor: 1000 }, { unitPriceMinor: 503 }], -2, -1);
+    early = { from: new Date(now - 31 * HOUR).toISOString(), to: new Date(now - 29 * HOUR).toISOString() };
+    const earlySale = (minutes: number): Sale => ({ at: new Date(now - 30 * HOUR + minutes * MINUTE).toISOString(), registerId: E, cashierRef: 'cashier-3' });
+    await sellRounded('U1', earlySale(0), [{ unitPriceMinor: 1002, discountMinor: 100 }], -2, 0, undefined, {
+      // orderCommand figures the 100 in the line's (inclusive) mode; from v4 the wire discountMinor is net, 80 at 25 %.
+      into: earlyResults, edit: payload => {
+        payload.discountMinor = payload.lines[0].discountMinor = 80;
+        payload.display.lines[0].discounts[0].label = 'Staff \ud83d';
+      } });
+    await sellRounded('U2', earlySale(1), [{ unitPriceMinor: 1000 }], 0, 0, [{ methodId: 'card', method: 'external', amountMinor: 495, minor: -3 },
+      { methodId: 'cash-5', method: 'cash', amountMinor: 505, minor: 3 }], { into: earlyResults });
 
     // The refunds are made now, after the sales; the refund window opens a minute before RF1, well after the last sale,
     // so a small clock difference between Node and the Postgres container cannot drop a refund from it.
@@ -156,14 +173,18 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
    * line total with tax is exactly its gross price. Without `legs`, it is paid in full on one cash-5 leg carrying one
    * cashRoundings entry of `cashMinor` (none when 0); with `legs`, by those, each with its own entry when it names `minor`.
    * `offset` moves the goods figures off the server's, as order-refund's sellBridged does, for a TALLY-ROUNDING bridge.
+   * `more.edit` changes the payload before it is sent; `more.into` keeps the result out of `results` (S1–S6).
    */
-  async function sellRounded(name: string, sale: Sale, lines: Array<{ unitPriceMinor: number; quantity?: number }>, cashMinor: number,
-    offset = 0, legs?: Leg[]) {
-    const command = { ...orderCommand(lines.map(({ unitPriceMinor, quantity }, index) => ({
+  async function sellRounded(name: string, sale: Sale, lines: Array<{ unitPriceMinor: number; quantity?: number; discountMinor?: number }>,
+    cashMinor: number, offset = 0, legs?: Leg[],
+    more: { edit?: (payload: Record<string, any>) => void; into?: Record<string, CommandResult> } = {}) {
+    const command = { ...orderCommand(lines.map(({ unitPriceMinor, quantity, discountMinor }, index) => ({
       variantId: index ? variantIds.beans[0] : variantIds.mug[0], quantity: quantity ?? 1, unitPriceMinor, taxInclusive: true,
+      ...(discountMinor ? { discountMinor } : {}),
     }))), version: 10, createdAt: sale.at };
     const payload = command.payload as unknown as Record<string, any>;
     Object.assign(payload, { createdAt: sale.at, registerId: sale.registerId, cashierRef: sale.cashierRef });
+    more.edit?.(payload);
     if (offset) {
       payload.totalMinor += offset;
       payload.subtotalMinor += offset;
@@ -189,7 +210,7 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
     expect(order.surcharges.filter(surcharge => surcharge.sku === 'TALLY-ROUNDING').map(surcharge => surcharge.priceWithTax))
       .toEqual(offset ? [offset] : []);
     expect(order.payments.reduce((sum, payment) => sum + payment.amount, 0)).toBe(payload.totalMinor);
-    results[name] = result;
+    (more.into ?? results)[name] = result;
     orders[name] = order;
   }
 
@@ -290,6 +311,31 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
       expect(cashRounding).toBeDefined();
       expect(four, JSON.stringify(filter)).toEqual(rest);
     }
+  });
+
+  it('U1: the lone-surrogate sale is applied, and its stored snapshot keeps the escape \\ud83d', async () => {
+    expect(earlyResults.U1.status).toBe('applied');
+    const { customFields } = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: environment.decode(orders.U1.id) });
+    expect(customFields.tallySnapshot).toContain('\\ud83d');
+  });
+
+  it('U2: card −3 and cash +3 net to 0: applied, one cash_rounding_unexplained warning, no TALLY-CASH-ROUNDING surcharge', () => {
+    expect(earlyResults.U2.status).toBe('applied');
+    expect(((earlyResults.U2.warnings ?? []) as Array<{ code: string }>).filter(warning => warning.code === 'cash_rounding_unexplained'))
+      .toHaveLength(1);
+    expect(orders.U2.surcharges.filter(surcharge => surcharge.sku === 'TALLY-CASH-ROUNDING')).toEqual([]);
+  });
+
+  it('T12: the early range, U1 and U2: v4 answers 200 with U2 unexplained, and is v3 plus cashRounding', async () => {
+    const expected: CashRounding = { salesMinor: -2, orderCount: 1, unexplainedOrderCount: 1, refundedMinor: 0, refundCount: 0, netMinor: -2 };
+    expect((await v4(early)).cashRounding).toEqual(expected);
+    expect((await v4(early, { registerId: E })).cashRounding).toEqual(expected);
+    const three = await report('reports/sales/v3', early);
+    expect(three.status, JSON.stringify(three.body)).toBe(200);
+    const { version, cashRounding, ...four } = await v4(early);
+    const { version: threeVersion, ...rest } = three.body as TallySalesReportV3;
+    expect([version, threeVersion, cashRounding]).toEqual([4, 3, expected]);
+    expect(four).toEqual(rest);
   });
 
   it('T11: has v3\'s permission and query answers', async () => {

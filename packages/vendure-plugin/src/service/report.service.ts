@@ -57,7 +57,8 @@ export type TallySalesReportV4 = Omit<TallySalesReportV3, 'version'> & {
   cashRounding: {
     salesMinor: number;            // Σ TALLY_CASH_ROUNDING_SKU surcharges on the counted orders (order.create writes one only when non-zero)
     orderCount: number;            // counted orders carrying one
-    unexplainedOrderCount: number; // counted orders stored with a cash_rounding_unexplained warning (tallySnapshot.cashRoundingUnexplained)
+    unexplainedOrderCount: number; // counted orders stored with a cash_rounding_unexplained warning (tallySnapshot.cashRoundingUnexplained),
+                                   // a sale whose entries net to 0 too (it stores no surcharge), so not a subset of orderCount
     refundedMinor: number;         // Σ metadata.tallyCashRoundingMinor over the counted refunds, dated by the refund
     refundCount: number;           // counted refunds carrying it
     netMinor: number;              // salesMinor − refundedMinor
@@ -214,16 +215,25 @@ export class ReportService {
       .where(`roundingOrder.id IN (${orders.getQuery()}) AND s.sku = :cashRoundingSku`, { ...orders.getParameters(), cashRoundingSku: TALLY_CASH_ROUNDING_SKU })
       .getMany();
     const salesMinor = surcharges.reduce((sum, s) => sum + s.priceWithTax, 0);
-    const [unexplained] = await this.posOrdersV2(ctx, query)
-      .andWhere("CAST(o.customFields.tallySnapshot AS jsonb) -> 'cashRoundingUnexplained' IS NOT NULL")
-      .select('COUNT(*)', 'orders').getRawMany<{ orders: string }>();
+    // Parsed here, never cast to jsonb: JSON.stringify keeps a lone surrogate as \ud83d, which jsonb rejects (#514). LIKE only
+    // pre-filters (a label may contain the words); a snapshot that does not parse is not unexplained, as refund-line-totals.
+    const snapshots = await this.posOrdersV2(ctx, query)
+      .andWhere('o.customFields.tallySnapshot LIKE :unexplainedKey', { unexplainedKey: '%"cashRoundingUnexplained"%' })
+      .select('o.customFields.tallySnapshot', 'snapshot').getRawMany<{ snapshot: string }>();
+    const unexplained = snapshots.filter(({ snapshot }) => {
+      try {
+        const parsed: unknown = JSON.parse(snapshot);
+        return typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, 'cashRoundingUnexplained')
+          && (parsed as { cashRoundingUnexplained: unknown }).cashRoundingUnexplained != null;
+      } catch { return false; }
+    }).length;
     // Only the refund's own record: a refund without the key (a partial one, a later Refund of the command, a dashboard refund) returned none.
     const ROUNDING = "CAST(CAST(refund.metadata AS jsonb) ->> 'tallyCashRoundingMinor' AS integer)";
     const [refunded] = await this.posRefundsV2(ctx, query)
       .andWhere(`${ROUNDING} IS NOT NULL`)
       .select(`SUM(${ROUNDING})`, 'total').addSelect('COUNT(*)', 'count').getRawMany<{ total: string | null; count: string }>();
     const cashRounding = {
-      salesMinor, orderCount: new Set(surcharges.map(s => String(s.order.id))).size, unexplainedOrderCount: minor(unexplained?.orders),
+      salesMinor, orderCount: new Set(surcharges.map(s => String(s.order.id))).size, unexplainedOrderCount: unexplained,
       refundedMinor: minor(refunded?.total), refundCount: minor(refunded?.count), netMinor: salesMinor - minor(refunded?.total),
     };
     return { ...report, version: 4, cashRounding };
