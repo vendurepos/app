@@ -20,15 +20,29 @@ export const CREATED_AT_SKEW_MS = 24 * 60 * 60 * 1000;
 const CREATED_AT_FLOOR = '2020-01-01T00:00:00Z';
 const CREATED_AT_FLOOR_MS = Date.parse(CREATED_AT_FLOOR);
 
-/** The path of the first string holding U+0000 in an envelope, or undefined. */
-export function nulPath(value: unknown, path: string): string | undefined {
-  if (typeof value === 'string') return value.includes('\u0000') ? path : undefined;
+/** The path of the first string in an envelope that the pattern matches, or undefined. */
+function stringPath(value: unknown, path: string, pattern: RegExp): string | undefined {
+  if (typeof value === 'string') return pattern.test(value) ? path : undefined;
   if (value === null || typeof value !== 'object') return undefined;
   for (const [key, item] of Object.entries(value)) {
-    const found = nulPath(item, path ? `${path}.${key}` : key);
+    const found = stringPath(item, path ? `${path}.${key}` : key, pattern);
     if (found) return found;
   }
   return undefined;
+}
+
+// #515: a high surrogate with no low after it, or a low with no high before it. No u flag, so it reads code units.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * Review: Postgres text cannot hold U+0000, and #515: jsonb refuses the escape JSON.stringify writes for a lone
+ * surrogate. A string carrying either is refused before any database access, U+0000 first; the path never echoes the value.
+ */
+export function envelopeTextRefusal(id: string, command: unknown) {
+  const nul = stringPath(command, '', /\u0000/);
+  if (nul) return refuse(id, 'invalid_payload', `${nul}: must not contain U+0000`);
+  const lone = stringPath(command, '', LONE_SURROGATE);
+  return lone ? refuse(id, 'invalid_payload', `${lone}: must not contain a lone surrogate`) : undefined;
 }
 
 // Front desk, 2026-09-30: RFC 3339 with Z or an offset, strict form.
@@ -73,11 +87,8 @@ export function clientTimeRefusal(id: string, fields: [path: string, value: unkn
   return errors.length ? refuse(id, 'invalid_payload', errors.slice(0, MAX_CLIENT_TIME_ERRORS).join('; ')) : undefined;
 }
 
-/** Review: Postgres text cannot hold U+0000, so a string carrying it is refused before any database access. */
-export function nulRefusal(command: { id: string }) {
-  const nul = nulPath(command, '');
-  return nul ? refuse(command.id, 'invalid_payload', `${nul}: must not contain U+0000`) : undefined;
-}
+/** The envelope text refusal of a command whose id is a string (order.refund, the register commands). */
+export const nulRefusal = (command: { id: string }) => envelopeTextRefusal(command.id, command);
 
 /** ADR-068 d5 and core's precheckCommand: the message and data name this server's own list. */
 export function versionRefusal(id: string, version: number, label: string, key: string, versions: readonly number[]) {

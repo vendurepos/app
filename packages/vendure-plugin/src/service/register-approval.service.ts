@@ -9,6 +9,7 @@ import { TallyRegisterApproval } from '../entities/register.entities';
 import { TallyCommand } from '../entities/tally-command.entity';
 import { APPROVAL_FAILURE_WINDOW_MS, APPROVAL_TTL_MS, MAX_APPROVAL_FAILURES_PER_ACTOR, MAX_APPROVAL_FAILURES_PER_IDENTIFIER, REGISTER_LOCK_NAMESPACE } from './constants';
 import { RegisterService } from './register.service';
+import { jsonbOf } from './sql-json';
 
 export const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -68,9 +69,9 @@ export class RegisterApprovalService {
       if (body.closureId !== undefined) {
         const refusal = await this.connection.getRepository(tx, TallyCommand).createQueryBuilder('c')
           .where(`c."channelId" = :channelId AND c."status" = 'rejected'
-            AND CAST(c."result" AS jsonb) -> 'error' ->> 'code' = 'register_approval_required'
-            AND CAST(c."result" AS jsonb) -> 'error' -> 'data' ->> 'sessionId' = :sessionId
-            AND CAST(c."result" AS jsonb) -> 'error' -> 'data' ->> 'closureId' = :closureId`,
+            AND ${jsonbOf('c."result"')} -> 'error' ->> 'code' = 'register_approval_required'
+            AND ${jsonbOf('c."result"')} -> 'error' -> 'data' ->> 'sessionId' = :sessionId
+            AND ${jsonbOf('c."result"')} -> 'error' -> 'data' ->> 'closureId' = :closureId`,
           { channelId, sessionId: body.sessionId, closureId: body.closureId })
           .orderBy('c.createdAt', 'DESC').getOne();
         const data = (refusal?.result?.error as { data?: { variance?: Record<string, number> } } | undefined)?.data;

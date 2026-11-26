@@ -26,7 +26,7 @@ import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRo
 import { classify } from './classification';
 import { bridgeBoundMinor } from './bridge-bound';
 import {
-  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, nulPath, refuse, replayRead,
+  CLAIM_LOCK_TIMEOUT, CREATED_AT_SKEW_MS, RECIPE_LOCK_TIMEOUT, claim as claimCommand, clientTimeRefusal, envelopeTextRefusal, refuse, replayRead,
 } from './command-ledger';
 import {
   BusinessRejection, PLATFORM_ERROR_CODE, StoreConfigurationRefusal, TransientCommandError, internalErrorFor, loggerCtx, pluginBug,
@@ -344,9 +344,9 @@ export class OrderCreateService {
     if (!command || typeof command !== 'object' || Array.isArray(command)) {
       return refuse(id, 'invalid_payload', 'Expected command object');
     }
-    // Review: Postgres text cannot hold U+0000, so a string carrying it is refused before any database access.
-    const nul = nulPath(command, '');
-    if (nul) return refuse(id, 'invalid_payload', `${nul}: must not contain U+0000`);
+    // Review and #515: U+0000 and lone surrogates are refused before any database access.
+    const text = envelopeTextRefusal(id, command);
+    if (text) return text;
     const errors: string[] = [];
     if (!id.length || id.length > 64) errors.push('Invalid id');
     if (command.type !== 'order.create') errors.push('type: expected order.create');

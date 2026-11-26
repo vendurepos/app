@@ -18,6 +18,7 @@ import { OrderCreateService } from './order-create.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
 import { REFUND_DISCOUNT_UNLINKED_MESSAGE, cashRoundingForRefund, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
+import { jsonbOf } from './sql-json';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
 /** ADR 0007: one till refund, with the register lock before the order lock. */
@@ -74,7 +75,7 @@ export class RefundService {
           throw new Unstored(refuse(id, 'invalid_payload', `clientOrderId: order ${payload.orderId} is ${order.customFields.tallyClientOrderId}`));
         }
         const earlier = await channelRefunds(this.connection, tx)
-          .andWhere("CAST(refund.metadata AS jsonb) ->> 'tallyClientRefundId' = :clientRefundId", { clientRefundId: payload.clientRefundId })
+          .andWhere(`${jsonbOf('refund.metadata')} ->> 'tallyClientRefundId' = :clientRefundId`, { clientRefundId: payload.clientRefundId })
           .orderBy('refund.id', 'ASC').getOne();
         if (earlier) throw new Unstored(refuse(id, 'invalid_payload',
           `clientRefundId: ${payload.clientRefundId} is already refund ${this.orders.encodeId(earlier.id)}`));

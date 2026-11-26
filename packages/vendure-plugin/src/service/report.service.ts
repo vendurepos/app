@@ -6,6 +6,7 @@ import type { SelectQueryBuilder } from 'typeorm';
 import { channelRefunds } from './channel-refunds';
 import { TALLY_CASH_ROUNDING_SKU, TALLY_DISCOUNT_SKU } from './constants';
 import { OrderCreateService } from './order-create.service';
+import { jsonbOf } from './sql-json';
 
 /** The plugin's own sales report shape, versioned; it moves into TallyUI once TallyUI has a report contract. */
 export type TallySalesReport = {
@@ -83,8 +84,8 @@ const RAW_KEYS = {
 const SALE_AT = '(o.customFields.tallySaleAt AT TIME ZONE :writerZone)';
 const REFUND_AT = "(refund.createdAt AT TIME ZONE current_setting('TimeZone'))";
 const dayKey = (instant: string) => `to_char(${instant} AT TIME ZONE :timezone, 'YYYY-MM-DD')`;
-const SALE_METHOD = "COALESCE(CAST(p.metadata AS jsonb) -> 'tender' ->> 'method', p.method)";
-const REFUND_METHOD = "COALESCE(CAST(refund.metadata AS jsonb) ->> 'tallyMethod', CAST(payment.metadata AS jsonb) -> 'tender' ->> 'method', payment.method)";
+const SALE_METHOD = `COALESCE(${jsonbOf('p.metadata')} -> 'tender' ->> 'method', p.method)`;
+const REFUND_METHOD = `COALESCE(${jsonbOf('refund.metadata')} ->> 'tallyMethod', ${jsonbOf('payment.metadata')} -> 'tender' ->> 'method', payment.method)`;
 // SUM and COUNT come back from Postgres as strings (bigint/numeric); money stays integer minor units.
 const minor = (value: string | null | undefined) => Number(value ?? 0);
 
@@ -184,7 +185,7 @@ export class ReportService {
       .andWhere(`${REFUND_AT} < CAST(:to AS timestamptz)`, { to: query.to });
     // A dashboard refund carries no register id, so it counts under its sale's register.
     return query.registerId === undefined ? builder : builder.andWhere(
-      "COALESCE(CAST(refund.metadata AS jsonb) ->> 'tallyRegisterId', sale.customFields.tallyRegisterId) = :registerId",
+      `COALESCE(${jsonbOf('refund.metadata')} ->> 'tallyRegisterId', sale.customFields.tallyRegisterId) = :registerId`,
       { registerId: query.registerId });
   }
 
@@ -228,7 +229,7 @@ export class ReportService {
       } catch { return false; }
     }).length;
     // Only the refund's own record: a refund without the key (a partial one, a later Refund of the command, a dashboard refund) returned none.
-    const ROUNDING = "CAST(CAST(refund.metadata AS jsonb) ->> 'tallyCashRoundingMinor' AS integer)";
+    const ROUNDING = `CAST(${jsonbOf('refund.metadata')} ->> 'tallyCashRoundingMinor' AS integer)`;
     const [refunded] = await this.posRefundsV2(ctx, query)
       .andWhere(`${ROUNDING} IS NOT NULL`)
       .select(`SUM(${ROUNDING})`, 'total').addSelect('COUNT(*)', 'count').getRawMany<{ total: string | null; count: string }>();
@@ -463,7 +464,7 @@ export class ReportService {
   private posRefundsV2(ctx: RequestContext, query: SalesQueryV2) {
     const builder = this.posRefunds(ctx, query);
     return query.cashierId === undefined ? builder : builder.andWhere(
-      "COALESCE(CAST(refund.metadata AS jsonb) ->> 'tallyCashierRef', sale.customFields.tallyCashierRef) = :cashierId",
+      `COALESCE(${jsonbOf('refund.metadata')} ->> 'tallyCashierRef', sale.customFields.tallyCashierRef) = :cashierId`,
       { cashierId: query.cashierId });
   }
 }
