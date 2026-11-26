@@ -194,7 +194,8 @@ describe("the cash rounding goes with the refund that takes everything left on t
 });
 
 describe('#525: a refund total below 0 is refused at the till', () => {
-  const shipped = { ...order([refundOf('L1', 2)]), lines: [line('L1', 2, 1904), line('L2', 1, 1)], shippingWithTax: 6,
+  // 1904 + 1 + 7 = 1912, cash-5 nearest -2 (paid 1910): a sale the plugin produces.
+  const shipped = { ...order([refundOf('L1', 2)]), lines: [line('L1', 2, 1904), line('L2', 1, 1)], shippingWithTax: 7,
     surcharges: [{ description: 'Cash rounding', sku: TALLY_CASH_ROUNDING_SKU, price: -2, priceWithTax: -2 }] };
 
   it('keeps the negative figure and explains the refusal without storing or sending the refund', async () => {
