@@ -13,7 +13,7 @@ import {
   buildRefundEnvelope, fetchTillDiscounts, pendingRefund, refundLineTotals, refundMessage, refundTotalMinor, sendTillRefund,
   REFUND_AMOUNT_MISMATCH_TEXT, REFUND_DISCOUNT_UNLINKED_TEXT,
   REFUND_FORBIDDEN_TEXT, REFUND_NO_SESSION_TEXT, REFUND_NOT_TILL_ORDER_TEXT, REFUND_NOTHING_TEXT, REFUND_PENDING_TEXT,
-  REFUND_QUANTITY_EXCEEDS_TEXT, REFUND_UNAUTHORIZED_TEXT, REFUND_UNKNOWN_TEXT, type RefundAttempt, type RefundDiscount, type RefundTill,
+  REFUND_QUANTITY_EXCEEDS_TEXT, REFUND_UNAUTHORIZED_TEXT, REFUND_UNKNOWN_TEXT, TALLY_CASH_ROUNDING_SKU, type RefundAttempt, type RefundDiscount, type RefundTill,
   type TillOrder,
 } from './till-refund';
 
@@ -165,6 +165,32 @@ it('the refund that takes everything left on the lines takes the rounding bridge
   expect(refundTotalMinor(sale, { L1: 1, L2: 0 })).toBe(952);
   expect(refundTotalMinor({ ...order([refundOf('L1', 1)]), surcharges }, { L1: 1, L2: 3 })).toBe(1950);
   expect(refundTotalMinor({ ...sale, surcharges: [{ ...surcharges[0], priceWithTax: 3 }] }, { L1: 2, L2: 3 })).toBe(2907);
+});
+
+describe("the cash rounding goes with the refund that takes everything left on the lines (the plugin's roundingForRefund)", () => {
+  const cashRounding = { description: 'Cash rounding', sku: TALLY_CASH_ROUNDING_SKU, price: -2, priceWithTax: -2 };
+  const bridge = { description: 'POS rounding', sku: 'TALLY-ROUNDING', price: -1, priceWithTax: -1 };
+
+  it('R1: the refund of all lines of a cash-rounded order is the line totals − 2', () => {
+    expect(TALLY_CASH_ROUNDING_SKU).toBe('TALLY-CASH-ROUNDING');
+    expect(refundTotalMinor({ ...order(), surcharges: [cashRounding] }, { L1: 2, L2: 3 })).toBe(2904 - 2);
+  });
+
+  it('R2: a partial refund of the same order is the line totals, without the −2', () => {
+    expect(refundTotalMinor({ ...order(), surcharges: [cashRounding] }, { L1: 1, L2: 0 })).toBe(952);
+  });
+
+  it("R3: after R2's refund, the refund of everything left includes the −2", () => {
+    expect(refundTotalMinor({ ...order([refundOf('L1', 1)]), surcharges: [cashRounding] }, { L1: 1, L2: 3 })).toBe(952 + 1000 - 2);
+  });
+
+  it('R4: an order with the bridge −1 and the cash rounding −2 refunds −3 with everything left', () => {
+    expect(refundTotalMinor({ ...order(), surcharges: [bridge, cashRounding] }, { L1: 2, L2: 3 })).toBe(2904 - 3);
+  });
+
+  it('R5: an order with neither refunds the line totals, as before (also pinned by "sums each line\'s share …")', () => {
+    expect(refundTotalMinor(order(), { L1: 2, L2: 3 })).toBe(2904);
+  });
 });
 
 it('an empty refund of a bridged order sends nothing, not the bridge', () => {

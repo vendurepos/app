@@ -1,4 +1,4 @@
-import { wireMethodOf } from '@tallyui/core';
+import { paymentMethodOf, wireMethodOf } from '@tallyui/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEMO_INFO } from './demo/store';
 import { MIN_ORDER_CREATE_METHOD_ID, parseTenderMethods, tenderMethodsLogger } from './tender-methods';
@@ -56,5 +56,40 @@ describe('parseTenderMethods', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain('5');
     expect(JSON.stringify(warn.mock.calls)).not.toMatch(/bank|blank|nul|noname/i);
+  });
+
+  it('T1: a cash entry with a valid rounding gives its descriptor that rounding', () => {
+    const rounding = { incrementMinor: 5, mode: 'nearest' as const };
+    const [cash] = parseTenderMethods({ paymentMethods: [{ code: 'cash', name: 'Cash', kind: 'cash', rounding }] }, 10)!;
+    expect(cash.defaults.rounding).toEqual(rounding);
+    expect(cash.defaults.openDrawer).toBe(true);
+    for (const mode of ['up', 'down'] as const) {
+      const edge = { incrementMinor: mode === 'up' ? 2 : 100_000, mode };
+      expect(parseTenderMethods({ paymentMethods: [{ code: 'cash', name: 'Cash', kind: 'cash', rounding: edge }] }, 10)![0].defaults.rounding).toEqual(edge);
+    }
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['increment 1', { incrementMinor: 1, mode: 'nearest' }], ['increment 100001', { incrementMinor: 100_001, mode: 'nearest' }],
+    ['increment 5.5', { incrementMinor: 5.5, mode: 'nearest' }], ["increment '5'", { incrementMinor: '5', mode: 'nearest' }],
+    ["mode 'half'", { incrementMinor: 5, mode: 'half' }],
+  ])("T2: a cash entry with %s keeps paymentMethodOf's rounding and is still listed, logging only the count", (_, rounding) => {
+    const methods = parseTenderMethods({ paymentMethods: [
+      { code: 'cash', name: 'Cash', kind: 'cash', rounding }, { code: 'till-cash', name: 'Till cash', kind: 'cash' },
+    ] }, 10)!;
+    expect(methods.map((method) => method.id)).toEqual(['cash', 'till-cash']);
+    expect(methods.map((method) => method.defaults.rounding)).toEqual([paymentMethodOf('cash').defaults.rounding, paymentMethodOf('cash').defaults.rounding]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('1');
+  });
+
+  it("T3: a card or other entry with a valid rounding keeps paymentMethodOf's rounding, unlogged", () => {
+    const rounding = { incrementMinor: 5, mode: 'nearest' };
+    const methods = parseTenderMethods({ paymentMethods: [
+      { code: 'card-terminal', name: 'Card terminal', kind: 'card', rounding }, { code: 'voucher', name: 'Gift voucher', kind: 'other', rounding },
+    ] }, 10)!;
+    expect(methods.map((method) => method.defaults.rounding)).toEqual([paymentMethodOf('external').defaults.rounding, paymentMethodOf('external').defaults.rounding]);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

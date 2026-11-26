@@ -1,5 +1,5 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
-import type { TallyConnector } from '@tallyui/core';
+import { parseInfoCapabilities, type ServerCapabilities, type SyncContext, type TallyConnector } from '@tallyui/core';
 import type { TallyDatabase, TallyReplicationState, STOCK_LEVELS_COLLECTION, getStorageHealth } from '@tallyui/database';
 import { sessionContext, storeKeyHash, type Session } from './session';
 import { appStorage } from './app-storage';
@@ -25,13 +25,58 @@ function enqueue<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+// The plugin's /info route, as connector-vendure reads it (CAPABILITIES_PATH).
+const INFO_PATH = '/tally/v1/info';
+const warnInfo = (reason: string) => console.warn(`@tallyui/connector-vendure: ${reason}`);
+
+/** parseInfoCapabilities' answer, plus `cashRounding: true` when /info advertises it at a version (ADR-094, plugin ADR 0009). */
+export function withCashRounding(body: unknown, parsed: ServerCapabilities | undefined): ServerCapabilities | undefined {
+  const advertised = (body as { cashRounding?: unknown } | null | undefined)?.cashRounding;
+  const v = typeof advertised === 'object' && advertised !== null ? (advertised as { v?: unknown }).v : undefined;
+  return parsed && typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 ? { ...parsed, cashRounding: true } : parsed;
+}
+
+// One /info read per call, answered as readVendureCapabilities would: a second read could succeed where this one failed and drop cashRounding (#517).
+// 404 is the connector's { orderCreate: 1 }. 401/403 call it only for its signed-out check (signedOut is not exported), which throws or answers
+// undefined; any other answer came from a second read, so this read is inconclusive. A throw, non-ok status or non-JSON body is undefined.
+async function readInfo(context: SyncContext, original: NonNullable<TallyConnector['capabilities']>): Promise<ServerCapabilities | undefined> {
+  let response: Response;
+  try {
+    response = await fetch(`${context.baseUrl}${INFO_PATH}`, { method: 'GET', headers: context.headers, signal: context.signal });
+  } catch {
+    return undefined;
+  }
+  // readVendureCapabilities' own answer to a 404 (connector-vendure 5.0.0): an old plugin without /info takes order.create 1.
+  if (response.status === 404) return { orderCreate: 1 };
+  if (response.status === 401 || response.status === 403) {
+    await original(context);
+    return undefined;
+  }
+  if (!response.ok) return undefined;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  return withCashRounding(body, parseInfoCapabilities(body, warnInfo));
+}
+
 export function catalogueConnector(session: Session): TallyConnector {
-  return createVendureConnector({
+  const connector = createVendureConnector({
     barcodeField: session.barcodeField,
     pricesIncludeTax: session.settings.pricesIncludeTax,
     globalTrackInventory: session.stock.trackInventory,
     globalOutOfStockThreshold: session.stock.outOfStockThreshold,
   });
+  const original = connector.capabilities;
+  if (!original) return connector;
+  // connector-vendure 5.0.0 drops /info's cashRounding, so the app reads it; this goes when the connector maps it itself.
+  // The connector is a plain object of closures (none reads `this`), so a spread keeps every other method as it is.
+  return {
+    ...connector,
+    capabilities: (context) => readInfo(context, original),
+  };
 }
 
 export async function startCatalogueSync(session: Session, connector: TallyConnector): Promise<{
