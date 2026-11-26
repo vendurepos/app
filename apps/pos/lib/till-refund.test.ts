@@ -13,7 +13,7 @@ import {
   buildRefundEnvelope, fetchTillDiscounts, pendingRefund, refundLineTotals, refundMessage, refundTotalMinor, sendTillRefund,
   REFUND_AMOUNT_MISMATCH_TEXT, REFUND_DISCOUNT_UNLINKED_TEXT,
   REFUND_FORBIDDEN_TEXT, REFUND_NO_SESSION_TEXT, REFUND_NOT_TILL_ORDER_TEXT, REFUND_NOTHING_TEXT, REFUND_PENDING_TEXT,
-  REFUND_QUANTITY_EXCEEDS_TEXT, REFUND_UNAUTHORIZED_TEXT, REFUND_UNKNOWN_TEXT, TALLY_CASH_ROUNDING_SKU, type RefundAttempt, type RefundDiscount, type RefundTill,
+  REFUND_QUANTITY_EXCEEDS_TEXT, REFUND_ROUNDING_EXCEEDS_TEXT, REFUND_UNAUTHORIZED_TEXT, REFUND_UNKNOWN_TEXT, TALLY_CASH_ROUNDING_SKU, type RefundAttempt, type RefundDiscount, type RefundTill,
   type TillOrder,
 } from './till-refund';
 
@@ -328,6 +328,8 @@ it('says every rejection code and outcome in words', () => {
   expect(rejected('quantity_exceeds')).toEqual(words(REFUND_QUANTITY_EXCEEDS_TEXT));
   expect(rejected('amount_mismatch')).toEqual(words(REFUND_AMOUNT_MISMATCH_TEXT));
   expect(rejected('discount_unlinked')).toEqual(words(REFUND_DISCOUNT_UNLINKED_TEXT));
+  expect(rejected('rounding_exceeds_rest')).toEqual(words(REFUND_ROUNDING_EXCEEDS_TEXT));
+  expect(REFUND_ROUNDING_EXCEEDS_TEXT).toBe("This order's rounding is more than what is left to refund on it, so the rest can't be refunded at the till. Refund the rest in Vendure admin, by amount.");
   expect(rejected('order_state', { state: 'PaymentAuthorized' }))
     .toEqual(words("The store can't refund an order that is Payment authorized."));
   expect(rejected('not_till_order')).toEqual(words(REFUND_NOT_TILL_ORDER_TEXT));

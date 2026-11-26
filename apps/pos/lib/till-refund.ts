@@ -21,6 +21,9 @@ export const REFUND_UNAUTHORIZED_TEXT = 'Your session has ended. Sign in again, 
 // The plugin's REFUND_DISCOUNT_UNLINKED_MESSAGE (#460), word for word.
 export const REFUND_DISCOUNT_UNLINKED_TEXT =
   "This order's discounts were recorded before they were linked to its lines, so one line of it can't be refunded at the till. Refund everything left on the order, or refund it in Vendure.";
+// The plugin's REFUND_ROUNDING_EXCEEDS_MESSAGE (#469), word for word.
+export const REFUND_ROUNDING_EXCEEDS_TEXT =
+  "This order's rounding is more than what is left to refund on it, so the rest can't be refunded at the till. Refund the rest in Vendure admin, by amount.";
 export const REFUND_PENDING_TEXT = "The store hasn't answered the last refund for this order yet. Don't hand back cash until it confirms. Send it again before starting a new one.";
 
 export type RefundDiscount = { id: string; priceWithTax: number };
@@ -164,6 +167,7 @@ export function refundMessage(attempt: RefundAttempt, currency: string): RefundM
         case 'forbidden': return message(REFUND_FORBIDDEN_TEXT);
         case 'no_open_session': return message(REFUND_NO_SESSION_TEXT);
         case 'discount_unlinked': return message(REFUND_DISCOUNT_UNLINKED_TEXT);
+        case 'rounding_exceeds_rest': return message(REFUND_ROUNDING_EXCEEDS_TEXT);
         default: return message(`The store refused this refund (${error.code}). Nothing was refunded.`);
       }
     }
