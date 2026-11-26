@@ -105,44 +105,49 @@ describe('readServerTotals variants', () => {
 
 describe('attentionRows', () => {
   it('offers Retry for a refused sale with a requeueable code', () => {
-    const order = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected',
+    const order = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected', lines: [] as PosOrder['lines'],
       syncStatus: 'rejected', error: { code: 'platform_error' } } as PosOrder;
     expect(attentionRows([order], undefined)).toEqual([{ order, reason: 'Refused by the store — platform_error', retry: true, rescue: false }]);
   });
 
   it('does not offer Retry for an idempotency mismatch', () => {
-    const order = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected',
+    const order = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected', lines: [] as PosOrder['lines'],
       syncStatus: 'rejected', error: { code: 'idempotency_mismatch' } } as PosOrder;
     expect(attentionRows([order], undefined)).toEqual([{ order, reason: 'Refused by the store — idempotency_mismatch', retry: false, rescue: false }]);
   });
 
   it('shows the stuck reason for a pending order without Retry', () => {
-    const order = { id: 'pending', saleId: 'pending', createdAt: '2026-11-17T11:00:00Z', commandId: 'cmd-pending', syncStatus: 'pending' } as PosOrder;
+    const order = { id: 'pending', saleId: 'pending', createdAt: '2026-11-17T11:00:00Z', commandId: 'cmd-pending', lines: [] as PosOrder['lines'],
+      syncStatus: 'pending' } as PosOrder;
     const stuck = { commandIds: ['cmd-pending'], since: 1, reason: 'HTTP 500', orders: [{ commandId: 'cmd-pending', since: 1, reason: 'HTTP 500' }] };
     expect(attentionRows([order], stuck)).toEqual([{ order, reason: "Can't reach the store — HTTP 500", retry: false, rescue: false }]);
   });
 
   it('omits pending orders that are not stuck and applied orders without warnings', () => {
-    const pending = { id: 'pending', saleId: 'pending', createdAt: '2026-11-17T11:00:00Z', commandId: 'cmd-pending', syncStatus: 'pending' } as PosOrder;
-    const applied = { id: 'applied', saleId: 'applied', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-applied', syncStatus: 'applied' } as PosOrder;
+    const pending = { id: 'pending', saleId: 'pending', createdAt: '2026-11-17T11:00:00Z', commandId: 'cmd-pending', lines: [] as PosOrder['lines'],
+      syncStatus: 'pending' } as PosOrder;
+    const applied = { id: 'applied', saleId: 'applied', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-applied', lines: [] as PosOrder['lines'],
+      syncStatus: 'applied' } as PosOrder;
     expect(attentionRows([pending, applied], undefined)).toEqual([]);
   });
 
   it('shows an applied sale taken after the register closed without Retry', () => {
-    const order = { id: 'late', saleId: 'late', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-late',
+    const order = { id: 'late', saleId: 'late', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-late', lines: [] as PosOrder['lines'],
       syncStatus: 'applied', lateSessionId: 's1' } as PosOrder;
     expect(attentionRows([order], undefined)).toEqual([{ order, reason: 'Taken after the register closed', retry: false, rescue: false }]);
   });
 
   it('keeps the newest-first order from needsAttention', () => {
-    const rejected = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected', syncStatus: 'rejected' } as PosOrder;
-    const pending = { id: 'pending', saleId: 'pending', createdAt: '2026-11-17T11:00:00Z', commandId: 'cmd-pending', syncStatus: 'pending' } as PosOrder;
+    const rejected = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected', lines: [] as PosOrder['lines'],
+      syncStatus: 'rejected' } as PosOrder;
+    const pending = { id: 'pending', saleId: 'pending', createdAt: '2026-11-17T11:00:00Z', commandId: 'cmd-pending', lines: [] as PosOrder['lines'],
+      syncStatus: 'pending' } as PosOrder;
     const stuck = { commandIds: ['cmd-pending'], since: 1, reason: 'HTTP 500', orders: [{ commandId: 'cmd-pending', since: 1, reason: 'HTTP 500' }] };
     expect(attentionRows([rejected, pending], stuck).map(row => row.order)).toEqual([pending, rejected]);
   });
 
   it('offers Send without the address, not Retry, for a tax_zone_mismatch refusal (u6)', () => {
-    const order = { id: 'zone', saleId: 'zone', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-zone',
+    const order = { id: 'zone', saleId: 'zone', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-zone', lines: [] as PosOrder['lines'],
       syncStatus: 'rejected', error: { code: 'tax_zone_mismatch', message: "The sale's address puts it in tax zone Denmark" } } as PosOrder;
     expect(attentionRows([order], undefined)).toEqual([{ order, reason: TAX_ZONE_REFUSED_TEXT, retry: false, rescue: true }]);
   });
