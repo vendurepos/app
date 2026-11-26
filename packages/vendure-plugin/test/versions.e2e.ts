@@ -24,7 +24,7 @@ describe('the order.create versions are the plugin\'s own, not the vendored list
     expect(await response.json()).toEqual({
       contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], register: [1, 2, 3], 'order.refund': [1] }, taxRounding: { granularity: 'per_line_items', mode: 'half_up' },
       taxZone: { byAddress: false, countries: ['DK'] },
-      maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 }, paymentMethods: [], cashRounding: { v: 1 },
+      maxShippingLines: 1, lineTax: { none: true, classes: true }, customerDisplay: { v: 1, snapshot: 1 }, paymentMethods: [], cashRounding: { v: 1 }, chargeTaxMode: { v: 1 },
       permissions: expect.arrayContaining(['SuperAdmin', 'TallyPosSell']),
     });
   });

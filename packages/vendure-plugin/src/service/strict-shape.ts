@@ -22,8 +22,8 @@ const PAYLOAD = {
 };
 const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5,
   ...since(6, 'regularUnitPriceMinor attributes anyAttributes') };
-const FEE = since(1, 'clientFeeId name amountMinor taxStatus taxClass taxMinor');
-const SHIPPING = since(1, 'clientShippingId name methodId amountMinor taxStatus taxClass taxMinor');
+const FEE = since(1, 'clientFeeId name amountMinor amountIncludesTax taxStatus taxClass taxMinor');
+const SHIPPING = since(1, 'clientShippingId name methodId amountMinor amountIncludesTax taxStatus taxClass taxMinor');
 const LINE_CUSTOM = since(1, 'name sku taxClass taxStatus');
 const PAYMENT = { ...since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference'), methodId: 10 };
 // TallyUI ADR-094: core has no version gate on cashRoundings, so it is accepted at every version.

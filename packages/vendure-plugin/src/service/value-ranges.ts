@@ -84,6 +84,7 @@ export function valueRangeErrors(payload: OrderCreatePayload, maxMoney: number, 
     if ('sku' in item) text(item.sku, `${path}.sku`, 64);
     if ('methodId' in item) text(item.methodId, `${path}.methodId`, 64);
     if ('amountMinor' in item) minor(item.amountMinor, `${path}.amountMinor`, maxMoney);
+    if ('amountIncludesTax' in item && typeof item.amountIncludesTax !== 'boolean') errors.push(`${path}.amountIncludesTax: expected a boolean`);
     if ('taxMinor' in item) minor(item.taxMinor, `${path}.taxMinor`, maxMoney);
   }
   payload.lines.forEach((line, index) => {
