@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchSalesReport, fetchSalesReportV2, type SalesReportV2, type SalesReportV3 } from './sales-report';
+import { fetchSalesReport, fetchSalesReportV2, type SalesReportV2, type SalesReportV3, type SalesReportV4 } from './sales-report';
 import type { Session } from './session';
 import { NO_MARGIN, reportsView, storeAnswer, storeSalesFigures } from './store-sales';
 
@@ -91,14 +91,35 @@ describe('fetchSalesReport', () => {
   const params = (call: number) => Object.fromEntries(new URL(String(fetchMock.mock.calls[call][0])).searchParams);
   const neverTill = () => { throw new Error('the store view never reads the till'); };
 
-  it('asks v3 first, and maps its median, largest and categories as products map', async () => {
+  // v3's figures plus the cash roundings: tax rows of 100 and a sales rounding of −2 inside the 1000 gross.
+  const v4: SalesReportV4 = {
+    ...v3, version: 4, taxes: [{ description: 'Standard', ratePercent: 10, baseMinor: 900, taxMinor: 100 }],
+    cashRounding: { salesMinor: -2, orderCount: 1, unexplainedOrderCount: 0, refundedMinor: 0, refundCount: 0, netMinor: -2 },
+  };
+  const notFound = () => new Response('Not Found', { status: 404 });
+
+  it('P1: asks v4 first, and maps its rounding into net, with median, largest and categories as for v3', async () => {
+    fetchMock.mockResolvedValue(Response.json(v4));
+    const outcome = await fetchSalesReport(session, query);
+    expect(outcome).toEqual({ status: 'ok', report: v4 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(path(0)).toBe('/tally/v1/reports/sales/v4');
+    const figures = storeSalesFigures(v4, null, day, day);
+    expect(figures.totals).toMatchObject({ grossMinor: 1000, taxMinor: 100, roundingMinor: -2, netMinor: 902, medianMinor: 500, largestMinor: 600 });
+    expect(figures.categories).toEqual(storeSalesFigures(v3, null, day, day).categories);
+    expect(figures.categories).toHaveLength(2);
+    expect(reportsView(storeAnswer(outcome, outcome, day, day, true), neverTill, []).hide).toEqual([]);
+  });
+
+  it('P2: falls back to v3 on a v4 404, and maps its median, largest and categories as products map, with no rounding', async () => {
+    fetchMock.mockResolvedValueOnce(notFound());
     fetchMock.mockResolvedValue(Response.json(v3));
     const outcome = await fetchSalesReport(session, query);
     expect(outcome).toEqual({ status: 'ok', report: v3 });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(path(0)).toBe('/tally/v1/reports/sales/v3');
+    expect([path(0), path(1)]).toEqual(['/tally/v1/reports/sales/v4', '/tally/v1/reports/sales/v3']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const figures = storeSalesFigures(v3, null, day, day);
-    expect(figures.totals).toMatchObject({ medianMinor: 500, largestMinor: 600 });
+    expect(figures.totals).toMatchObject({ medianMinor: 500, largestMinor: 600, roundingMinor: 0, grossMinor: 1000, netMinor: 1000 - 200 });
     // Equal sales and quantity fall back to the name, as products do.
     expect(figures.categories).toEqual([
       { key: 'T_1', name: 'Drinkware', quantity: 2, netMinor: 1000, margin: NO_MARGIN },
@@ -109,29 +130,45 @@ describe('fetchSalesReport', () => {
     expect(reportsView(storeAnswer(outcome, outcome, day, day, true), neverTill, []).hide).toEqual([]);
   });
 
-  it('falls back to v2 on a v3 404, without median, largest or categories', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
+  it('P3: falls back to v2 on a v4 and v3 404, without median, largest or categories', async () => {
+    fetchMock.mockResolvedValueOnce(notFound());
+    fetchMock.mockResolvedValueOnce(notFound());
     fetchMock.mockResolvedValueOnce(Response.json(report));
     const signal = new AbortController().signal;
     const outcome = await fetchSalesReport(session, { ...query, cashierId: 'cashier-1' }, { signal });
     expect(outcome).toEqual({ status: 'ok', report });
-    expect([path(0), path(1)]).toEqual(['/tally/v1/reports/sales/v3', '/tally/v1/reports/sales/v2']);
-    expect(params(1)).toEqual({ ...query, cashierId: 'cashier-1' });
-    expect(fetchMock.mock.calls[1][1]).toMatchObject({ signal });
+    expect([path(0), path(1), path(2)]).toEqual(['/tally/v1/reports/sales/v4', '/tally/v1/reports/sales/v3', '/tally/v1/reports/sales/v2']);
+    expect(params(0)).toEqual({ ...query, cashierId: 'cashier-1' });
+    expect(params(2)).toEqual({ ...query, cashierId: 'cashier-1' });
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ signal });
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ signal });
     const figures = storeSalesFigures(report, null, day, day);
     expect(figures.totals.medianMinor).toBeUndefined();
     expect(figures.totals.largestMinor).toBeUndefined();
+    expect(figures.totals).toMatchObject({ roundingMinor: 0, netMinor: 800 });
     expect(figures.categories).toEqual([]);
     expect(reportsView(storeAnswer(outcome, outcome, day, day, true), neverTill, []).hide).toEqual(['categories']);
   });
 
-  it('answers unsupported when v2 is missing too, and never falls back from a refusal', async () => {
-    fetchMock.mockResolvedValue(new Response('Not Found', { status: 404 }));
+  it('P4: answers unsupported when v4, v3 and v2 are all missing', async () => {
+    fetchMock.mockImplementation(async () => notFound());
     expect(await fetchSalesReport(session, query)).toEqual({ status: 'unsupported' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    fetchMock.mockReset();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('P5: never falls back from a v4 refusal (403): no v3 or v2 request', async () => {
     fetchMock.mockResolvedValue(Response.json({ code: 'forbidden', message: 'The sales report needs TallyPosSell and ReadOrder' }, { status: 403 }));
     expect(await fetchSalesReport(session, query)).toEqual({ status: 'forbidden' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(path(0)).toBe('/tally/v1/reports/sales/v4');
+  });
+
+  it('P6: a v4 body without cashRounding is a failed answer', async () => {
+    const { cashRounding: _missing, ...broken } = v4;
+    fetchMock.mockResolvedValue(Response.json(broken));
+    const outcome = await fetchSalesReport(session, query);
+    expect(outcome).toEqual({ status: 'ok', report: broken });
+    expect(storeAnswer(outcome, outcome, day, day, true)).toEqual({ status: 'error' });
+    expect(storeAnswer({ status: 'ok', report: v4 }, outcome, day, day, true)).toEqual({ status: 'error' });
   });
 });

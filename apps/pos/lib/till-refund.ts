@@ -30,6 +30,8 @@ export type TillOrder = VendureOrder & { tallyDiscounts?: RefundDiscount[] };
 export const TALLY_DISCOUNT_SKU = 'TALLY-DISCOUNT';
 // The plugin's TALLY_ROUNDING_SKU (packages/vendure-plugin/src/service/constants.ts): the "POS rounding" bridge.
 export const TALLY_ROUNDING_SKU = 'TALLY-ROUNDING';
+// The plugin's TALLY_CASH_ROUNDING_SKU (packages/vendure-plugin/src/service/constants.ts): a cash leg's rounding (ADR-094).
+export const TALLY_CASH_ROUNDING_SKU = 'TALLY-CASH-ROUNDING';
 
 /** The order's TALLY-DISCOUNT surcharges with their ids; [] for no order. */
 export async function fetchTillDiscounts(context: SyncContext, orderId: string): Promise<RefundDiscount[]> {
@@ -78,10 +80,11 @@ export function refundTotalMinor(order: TillOrder, quantities: RefundDraft['quan
     // The plugin's own line-share rule, so partial refunds add up to the line and never trip amount_mismatch.
     if (quantity > 0) total += vendureLineRefundWithTax({ ...line, lineTotalWithTax: totals[line.orderLineId] }, quantity);
   }
-  // The plugin's roundingForRefund adds the bridge only when this refund takes everything left on the lines.
+  // The plugin's roundingForRefund adds the bridge and the cash rounding only when this refund takes everything left on the lines.
   if (Object.values(quantities).some(quantity => quantity > 0)
     && vendureRefundable(order).lines.every(line => (quantities[line.orderLineId] ?? 0) === line.refundableQuantity))
-    total += order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU).reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
+    total += order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU || surcharge.sku === TALLY_CASH_ROUNDING_SKU)
+      .reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
   return total;
 }
 

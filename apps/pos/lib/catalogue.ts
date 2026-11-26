@@ -1,5 +1,5 @@
 import { createVendureConnector } from '@tallyui/connector-vendure';
-import type { TallyConnector } from '@tallyui/core';
+import { parseInfoCapabilities, type ServerCapabilities, type SyncContext, type TallyConnector } from '@tallyui/core';
 import type { TallyDatabase, TallyReplicationState, STOCK_LEVELS_COLLECTION, getStorageHealth } from '@tallyui/database';
 import { sessionContext, storeKeyHash, type Session } from './session';
 import { appStorage } from './app-storage';
@@ -25,13 +25,47 @@ function enqueue<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+// The plugin's /info route, as connector-vendure reads it (CAPABILITIES_PATH).
+const INFO_PATH = '/tally/v1/info';
+const warnInfo = (reason: string) => console.warn(`@tallyui/connector-vendure: ${reason}`);
+
+/** parseInfoCapabilities' answer, plus `cashRounding: true` when /info advertises it at a version (ADR-094, plugin ADR 0009). */
+export function withCashRounding(body: unknown, parsed: ServerCapabilities | undefined): ServerCapabilities | undefined {
+  const advertised = (body as { cashRounding?: unknown } | null | undefined)?.cashRounding;
+  const v = typeof advertised === 'object' && advertised !== null ? (advertised as { v?: unknown }).v : undefined;
+  return parsed && typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 ? { ...parsed, cashRounding: true } : parsed;
+}
+
+// /info's body on a 200 that is a JSON object; undefined for anything else, which the connector's own reader answers.
+async function infoObject(context: SyncContext): Promise<object | undefined> {
+  try {
+    const response = await fetch(`${context.baseUrl}${INFO_PATH}`, { method: 'GET', headers: context.headers, signal: context.signal });
+    if (response.status !== 200) return undefined;
+    const body: unknown = await response.json();
+    return typeof body === 'object' && body !== null && !Array.isArray(body) ? body : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function catalogueConnector(session: Session): TallyConnector {
-  return createVendureConnector({
+  const connector = createVendureConnector({
     barcodeField: session.barcodeField,
     pricesIncludeTax: session.settings.pricesIncludeTax,
     globalTrackInventory: session.stock.trackInventory,
     globalOutOfStockThreshold: session.stock.outOfStockThreshold,
   });
+  const original = connector.capabilities;
+  if (!original) return connector;
+  // connector-vendure 5.0.0 drops /info's cashRounding, so the app reads it; this goes when the connector maps it itself.
+  // The connector is a plain object of closures (none reads `this`), so a spread keeps every other method as it is.
+  return {
+    ...connector,
+    capabilities: async (context) => {
+      const body = await infoObject(context);
+      return body ? withCashRounding(body, parseInfoCapabilities(body, warnInfo)) : original(context);
+    },
+  };
 }
 
 export async function startCatalogueSync(session: Session, connector: TallyConnector): Promise<{

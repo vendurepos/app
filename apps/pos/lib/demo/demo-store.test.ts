@@ -177,6 +177,17 @@ it('filters the v3 report by register and cashier, and answers 403 under the rep
   expect(await fetchSalesReport(session, SEED_DAYS)).toEqual({ status: 'forbidden' });
 });
 
+it('P7: answers 404 for the v4 report and advertises no cashRounding, so the app reads its v3 report', async () => {
+  const session = await signedIn();
+  const v4 = await fetch(`${session.url}/tally/v1/reports/sales/v4?${new URLSearchParams(SEED_DAYS)}`, { headers: sessionContext(session).headers });
+  expect(v4.status).toBe(404);
+  const outcome = await fetchSalesReport(session, SEED_DAYS);
+  expect(outcome).toMatchObject({ status: 'ok', report: { version: 3 } });
+  expect(outcome.status === 'ok' && 'cashRounding' in outcome.report).toBe(false);
+  expect(DEMO_INFO).not.toHaveProperty('cashRounding');
+  expect(original).not.toHaveBeenCalled();
+});
+
 it('reads the plugin versions and tax rounding through the app and real connector', async () => {
   expect(DEMO_INFO).toMatchObject({ contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'order.refund': [1] }, maxShippingLines: 1, lineTax: { none: true, classes: true }, receiptEmail: { v: 1 } });
   expect(await readCapabilities(await signedIn(), createVendureConnector())).toEqual({

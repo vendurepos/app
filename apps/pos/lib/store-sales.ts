@@ -1,6 +1,6 @@
 import type { SalesCardId, SalesOption } from '@tallyui/components';
 import { daysOf, type DayRange, type SalesFigures } from '@tallyui/pos';
-import type { SalesReportOutcome, SalesReportV2, SalesReportV3 } from './sales-report';
+import type { SalesReport, SalesReportOutcome } from './sales-report';
 import type { OrderSpread } from './till-reports';
 
 export type Hourly = { hours: number[]; compareHours: number[] };
@@ -12,9 +12,11 @@ export const TILL_ONLY = 'This till only';
 export const TILL_ONLY_OFFLINE = 'This till only, offline';
 export type StoreSales =
   | { status: 'loading' | 'offline' | 'forbidden' | 'unsupported' | 'error' }
-  // categories: the report was v3, so the Categories card has the store's figures (v2 has none, and hides it).
+  // categories: the report was v3 or later, so the Categories card has the store's figures (v2 has none, and hides it).
   | { status: 'ok'; figures: SalesFigures; hourly: Hourly | null; categories?: true };
-type Report = SalesReportV2 | SalesReportV3;
+type Report = SalesReport;
+// v3 and later carry the median, largest and categories.
+const fromV3 = (r: Report): r is Exclude<Report, { version: 2 }> => r.version >= 3;
 export type ReportsView = {
   storeWide: boolean; figures: SalesFigures; hourly: Hourly | null; spread: Spread | null;
   hide: SalesCardId[]; statusOptions: SalesOption[]; tillOnly: string | null;
@@ -30,19 +32,22 @@ const codeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * The report's totals on salesFigures' basis. The tax headline is the sum of the tax rows (the #289 ruling), never
- * orders.taxMinor. Median and largest come from v3 only; v2 has no per-order totals, so they stay out and TallyUI hides them.
+ * orders.taxMinor. Median and largest come from v3 and later; v2 has no per-order totals, so they stay out and TallyUI hides them.
+ * Rounding is v4's sales' cash rounding, inside gross, so net is gross − tax − rounding (SalesTotals.roundingMinor).
  */
 function totals(r: Report): SalesFigures['totals'] {
   const grossMinor = r.orders.salesMinor;
   const taxMinor = r.taxes.reduce((sum, row) => sum + row.taxMinor, 0);
   const count = r.orders.count;
-  // The plugin's report dates refunds by their own date, and a Vendure order carries no cash rounding.
+  // Below v4 the report has no rounding figure. A refund's returned rounding stays in refundsMinor, as TallyUI's local figures.
+  const roundingMinor = r.version === 4 ? r.cashRounding.salesMinor : 0;
+  // The plugin's report dates refunds by their own date.
   return {
-    grossMinor, netMinor: grossMinor - taxMinor, taxMinor, discountMinor: r.orders.discountsMinor,
-    refundsMinor: r.refunds.totalMinor, embeddedRefundsMinor: 0, roundingMinor: 0, refundBasis: 'dated',
+    grossMinor, netMinor: grossMinor - taxMinor - roundingMinor, taxMinor, discountMinor: r.orders.discountsMinor,
+    refundsMinor: r.refunds.totalMinor, embeddedRefundsMinor: 0, roundingMinor, refundBasis: 'dated',
     grossAfterRefundsMinor: grossMinor - r.refunds.totalMinor, orderCount: count,
     averageMinor: count > 0 ? Math.round(grossMinor / count) : 0, items: r.orders.itemCount, margin: NO_MARGIN,
-    ...(r.version === 3 ? { medianMinor: r.orders.medianMinor, largestMinor: r.orders.largestMinor } : {}),
+    ...(fromV3(r) ? { medianMinor: r.orders.medianMinor, largestMinor: r.orders.largestMinor } : {}),
   };
 }
 
@@ -60,14 +65,14 @@ function series(r: Report, range: DayRange): SalesFigures['series'] {
   });
 }
 
-/** The sales report (and its comparison period's) as the SalesFigures the hero and cards read. Categories are v3's, else empty. */
+/** The sales report (and its comparison period's) as the SalesFigures the hero and cards read. Categories are v3's and later, else empty. */
 export function storeSalesFigures(report: Report, compareReport: Report | null, range: DayRange, compare: DayRange): SalesFigures {
   // A refund-only method (orderCount 0) took no sale money, so it is not a payment row.
   const rows = report.byMethod.filter((row) => row.orderCount > 0)
     .map((row) => ({ method: row.method, label: '', amountMinor: row.salesMinor, orders: row.orderCount }))
     .sort((a, b) => b.amountMinor - a.amountMinor || codeUnit(a.method, b.method));
   const products = groupRows(report.products.map((row) => ({ ...row, key: row.productVariantId || row.sku || row.name })));
-  const categories = report.version === 3 ? groupRows(report.categories.map((row) => ({ ...row, key: row.collectionId || row.name }))) : [];
+  const categories = fromV3(report) ? groupRows(report.categories.map((row) => ({ ...row, key: row.collectionId || row.name }))) : [];
   const taxes = report.taxes.map((row) => {
     const ratePpm = Math.round(row.ratePercent * PPM_PER_PERCENT);
     return { key: JSON.stringify([ratePpm, row.description]), ratePpm, label: row.description, taxMinor: row.taxMinor, netMinor: row.baseMinor };
@@ -126,7 +131,7 @@ export function storeAnswer(a: SalesReportOutcome, b: SalesReportOutcome, range:
     // fetchSalesReport accepts any JSON object, so a report missing a field throws here: that is a failed answer.
     try {
       return { status: 'ok', figures: storeSalesFigures(a.report, b.report, range, compare), hourly: storeHourly(a.report, b.report, range, compare, oneDay),
-        ...(a.report.version === 3 ? { categories: true as const } : {}) };
+        ...(fromV3(a.report) ? { categories: true as const } : {}) };
     } catch {
       return { status: 'error' };
     }
