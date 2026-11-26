@@ -43,12 +43,27 @@ export function lineTotalsForRefund<L extends RefundLine>(order: RefundOrder<L>,
   return { totals: totals.set(last.id, last.proratedLinePriceWithTax + discountSum) };
 }
 
+/** The refund takes everything left on the order's lines: the one gate both rounding figures below share, so they cannot drift. */
+function takesEverythingLeft<L extends RefundLine>(order: Pick<RefundOrder<L>, 'lines'>,
+  payloadLines: Array<{ line: L; quantity: number }>, refundedOf: (line: L) => number): boolean {
+  return payloadLines.length > 0 && !order.lines.some(line => Math.max(0, line.quantity - refundedOf(line))
+    !== payloadLines.filter(item => String(item.line.id) === String(line.id)).reduce((sum, item) => sum + item.quantity, 0));
+}
+
 /** Money P2 #2: the order's TALLY_ROUNDING_SKU bridge and TALLY_CASH_ROUNDING_SKU cash rounding both go with the refund that takes
  * everything left on its lines (TallyUI ADR-094, desk ruling 1, 2026-11-26); else 0. */
 export function roundingForRefund<L extends RefundLine>(order: Pick<RefundOrder<L>, 'lines' | 'surcharges'>,
   payloadLines: Array<{ line: L; quantity: number }>, refundedOf: (line: L) => number): number {
-  if (!payloadLines.length || order.lines.some(line => Math.max(0, line.quantity - refundedOf(line))
-    !== payloadLines.filter(item => String(item.line.id) === String(line.id)).reduce((sum, item) => sum + item.quantity, 0))) return 0;
+  if (!takesEverythingLeft(order, payloadLines, refundedOf)) return 0;
   return order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU || surcharge.sku === TALLY_CASH_ROUNDING_SKU)
+    .reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
+}
+
+/** TallyUI ADR-094: the cash rounding part of roundingForRefund alone (never the TALLY_ROUNDING_SKU bridge), which the refund
+ * records as metadata.tallyCashRoundingMinor for the v4 sales report; else 0. */
+export function cashRoundingForRefund<L extends RefundLine>(order: Pick<RefundOrder<L>, 'lines' | 'surcharges'>,
+  payloadLines: Array<{ line: L; quantity: number }>, refundedOf: (line: L) => number): number {
+  if (!takesEverythingLeft(order, payloadLines, refundedOf)) return 0;
+  return order.surcharges.filter(surcharge => surcharge.sku === TALLY_CASH_ROUNDING_SKU)
     .reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
 }

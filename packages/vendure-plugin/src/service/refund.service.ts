@@ -17,7 +17,7 @@ import { ErrorResultThrown, unwrap } from './errors';
 import { OrderCreateService } from './order-create.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { RegisterService } from './register.service';
-import { REFUND_DISCOUNT_UNLINKED_MESSAGE, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
+import { REFUND_DISCOUNT_UNLINKED_MESSAGE, cashRoundingForRefund, lineTotalsForRefund, roundingForRefund } from './refund-line-totals';
 import { refundEnvelopeStrictErrors } from './strict-shape';
 
 /** ADR 0007: one till refund, with the register lock before the order lock. */
@@ -126,6 +126,8 @@ export class RefundService {
         // Money P2 #2: the refund taking everything left on the lines also takes the order's rounding bridge.
         const raw = lines.reduce((sum, { input, line }) => sum + shareOf(line, input.quantity), 0) + shippingMinor + adjustmentMinor
           + roundingForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf);
+        // TallyUI ADR-094: the cash rounding part of that, recorded on the command's first Refund for the v4 sales report.
+        const cashRoundingMinor = cashRoundingForRefund(order, lines.map(({ input, line }) => ({ line, quantity: input.quantity })), refundedOf);
         const server = Math.min(Math.max(raw, 0), moneyRemainder);
         if (shippingMinor > refundableShipping || raw !== server || server !== totalMinor) {
           throw new Unstored(refuse(id, 'amount_mismatch', `Refund total ${totalMinor} does not match the server's ${server}`,
@@ -150,6 +152,7 @@ export class RefundService {
             unknown: `no longer exists in this channel; add a Tally POS payment method with code ${payment.method}, then refund again` }[unusable]}`);
           withTallyRefund(tx, { ...tallyRefund,
             lines: refunds.length ? [] : lines.map(({ input, line }) => ({ orderLineId: String(line.id), quantity: input.quantity })),
+            cashRoundingMinor: refunds.length ? 0 : cashRoundingMinor,
           });
           const refund = unwrap(await this.orderService.refundOrder(tx, {
             paymentId: payment.id, amount: share, reason: payload.reason,

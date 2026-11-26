@@ -131,10 +131,12 @@ export function isTallyRoute(ctx: RequestContext): boolean {
 
 /** ADR 0007 decision 6: the till refund RefundService is applying, read by the tally-pos handler's createRefund.
  * lines are the line quantities on the Refund being created ([] after the command's first Refund); kept as metadata in case Vendure drops RefundOrderInput.lines.
+ * cashRoundingMinor is the TallyUI ADR-094 cash rounding the command returns, on its first Refund only (0 or absent on the rest).
  */
 export type TallyRefundContext = {
   clientRefundId: string; registerId: string; sessionId: string; cashierRef?: string; destination: 'original_method' | 'cash';
   lines: Array<{ orderLineId: string; quantity: number }>;
+  cashRoundingMinor?: number;
 };
 const TALLY_REFUND = Symbol('vendurepos.tallyRefund');
 
@@ -183,12 +185,14 @@ export const tallyPaymentHandler = new PaymentMethodHandler({
   createRefund: (ctx, input, amount, order, payment) => {
     const refund = tallyRefundOf(ctx);
     if (isTallyRoute(ctx) && refund) {
-      const { clientRefundId, registerId, sessionId, cashierRef, destination, lines } = refund;
+      const { clientRefundId, registerId, sessionId, cashierRef, destination, lines, cashRoundingMinor } = refund;
       return { state: 'Settled', metadata: {
         tallyClientRefundId: clientRefundId, tallyRegisterId: registerId, tallySessionId: sessionId,
         ...(cashierRef ? { tallyCashierRef: cashierRef } : {}),
         tallyDestination: destination, tallyMethod: tallyRefundMethod(destination, payment),
         tallyLines: lines,
+        // TallyUI ADR-094: the only record of the cash rounding a refund returned, read by the v4 sales report.
+        ...(typeof cashRoundingMinor === 'number' && cashRoundingMinor !== 0 ? { tallyCashRoundingMinor: cashRoundingMinor } : {}),
       } };
     }
     return { state: 'Settled' };

@@ -113,4 +113,20 @@ export class TallyReportsController {
     }
     return await this.reports.salesV3(ctx, query);
   }
+
+  /** `GET /tally/v1/reports/sales/v4`: v3's figures plus the cash rounding in them (TallyUI ADR-094); v2's query and answers. */
+  @Get('reports/sales/v4')
+  @Allow(tallyPosSell.Permission)
+  async salesV4(@Ctx() ctx: RequestContext, @Query() raw: Record<string, unknown>, @Res({ passthrough: true }) res: StatusResponse) {
+    if (!ctx.userHasAllPermissions([tallyPosSell.Permission as Permission, Permission.ReadOrder])) {
+      res.status(403);
+      return { code: 'forbidden', message: 'The sales report needs TallyPosSell and ReadOrder' };
+    }
+    const query = validateSalesQueryV2(raw);
+    if ('message' in query) {
+      res.status(400);
+      return { code: 'invalid_query', message: query.message };
+    }
+    return await this.reports.salesV4(ctx, query);
+  }
 }
