@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Each fee and shipping charge can carry its own tax mode (v2 parity 2.10b, ADR 0005 amendment).
+  - `order.create`'s `fees[]` and `shipping[]` entries accept an optional `amountIncludesTax: boolean`, with `amountMinor` in that mode. A non-boolean value is refused `invalid_payload`.
+  - The plugin stores the charge in that mode, so a charge entered including tax in a tax-exclusive store totals to the cent with Vendure. Before, it was re-taxed from a converted net, and the TALLY-ROUNDING bridge covered a one-cent drift with a `total_mismatch` warning.
+  - `/tally/v1/info` advertises `chargeTaxMode: { v: 1 }`.
+  - Without the field, behaviour is unchanged. No migration.
+
 ## 0.5.0 (2026-11-26)
 
 **0.4.0 was never published to npm.** Its version and changelog were merged on 2026-11-23, but it was not tagged. The first version on npm after 0.3.0 is 0.5.0, and it includes everything listed under 0.4.0 below.
