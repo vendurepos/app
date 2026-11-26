@@ -1,5 +1,5 @@
 import type { ID } from '@vendure/core';
-import { TALLY_DISCOUNT_SKU, TALLY_ROUNDING_SKU } from './constants';
+import { TALLY_CASH_ROUNDING_SKU, TALLY_DISCOUNT_SKU, TALLY_ROUNDING_SKU } from './constants';
 
 // #460, desk ruling 2: an order whose discounts have no line link, refunded one line at a time, is refused, never guessed.
 export const REFUND_DISCOUNT_UNLINKED_MESSAGE =
@@ -43,10 +43,12 @@ export function lineTotalsForRefund<L extends RefundLine>(order: RefundOrder<L>,
   return { totals: totals.set(last.id, last.proratedLinePriceWithTax + discountSum) };
 }
 
-/** Money P2 #2: the order's TALLY_ROUNDING_SKU bridge, which goes with the refund that takes everything left on its lines; else 0. */
+/** Money P2 #2: the order's TALLY_ROUNDING_SKU bridge and TALLY_CASH_ROUNDING_SKU cash rounding both go with the refund that takes
+ * everything left on its lines (TallyUI ADR-094, desk ruling 1, 2026-11-26); else 0. */
 export function roundingForRefund<L extends RefundLine>(order: Pick<RefundOrder<L>, 'lines' | 'surcharges'>,
   payloadLines: Array<{ line: L; quantity: number }>, refundedOf: (line: L) => number): number {
   if (!payloadLines.length || order.lines.some(line => Math.max(0, line.quantity - refundedOf(line))
     !== payloadLines.filter(item => String(item.line.id) === String(line.id)).reduce((sum, item) => sum + item.quantity, 0))) return 0;
-  return order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU).reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
+  return order.surcharges.filter(surcharge => surcharge.sku === TALLY_ROUNDING_SKU || surcharge.sku === TALLY_CASH_ROUNDING_SKU)
+    .reduce((sum, surcharge) => sum + surcharge.priceWithTax, 0);
 }

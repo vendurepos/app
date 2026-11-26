@@ -18,6 +18,7 @@ export function refundEnvelopeStrictErrors(command: Record<string, unknown>, ver
 const PAYLOAD = {
   ...since(1, 'clientOrderId createdAt currency pricesIncludeTax lines subtotalMinor taxMinor totalMinor payments customer registerId cashierRef locationId'),
   discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'), ...since(6, 'coupons'), note: 7, taxAddress: 8,
+  cashRoundings: 1,
 };
 const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5,
   ...since(6, 'regularUnitPriceMinor attributes anyAttributes') };
@@ -25,6 +26,8 @@ const FEE = since(1, 'clientFeeId name amountMinor taxStatus taxClass taxMinor')
 const SHIPPING = since(1, 'clientShippingId name methodId amountMinor taxStatus taxClass taxMinor');
 const LINE_CUSTOM = since(1, 'name sku taxClass taxStatus');
 const PAYMENT = { ...since(1, 'clientPaymentId method amountMinor tenderedMinor changeMinor reference'), methodId: 10 };
+// TallyUI ADR-094: core has no version gate on cashRoundings, so it is accepted at every version.
+const CASH_ROUNDING = since(1, 'paymentId minor');
 const CUSTOMER = { email: 1, customerId: 3, billing: 8, shipping: 8 };
 // v11 (5.2a): the fields of customer.billing and customer.shipping, declared with the addresses at version 8.
 const ADDRESS = since(8, 'firstName lastName company address1 address2 city state postcode country phone');
@@ -87,6 +90,7 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   each(payload.shipping, SHIPPING, 'shipping');
   each(payload.coupons, COUPON, 'coupons');
   each(payload.payments, PAYMENT, 'payments');
+  each(payload.cashRoundings, CASH_ROUNDING, 'cashRoundings');
   check(payload.customer, CUSTOMER, 'customer');
   if (check(payload.display, DISPLAY, 'display')) {
     each(payload.display.lines, DISPLAY_LINE, 'display.lines', (line, at) => each(line.discounts, DISPLAY_DISCOUNT, `${at}.discounts`));

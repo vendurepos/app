@@ -20,8 +20,9 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import {
   CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
-  TALLY_NO_TAX_CATEGORY, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
+  TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
 } from './constants';
+import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRoundingUnexplained, withoutCashRounding } from './cash-rounding';
 import { classify } from './classification';
 import { bridgeBoundMinor } from './bridge-bound';
 import {
@@ -54,8 +55,12 @@ export type FiguresMismatch = Extract<CommandWarning, { code: 'figures_mismatch'
 /** ADR-078 d7: an unknown register session warns without refusing the sale. */
 type SessionUnknown = Extract<CommandWarning, { code: 'register_session_unknown' }>;
 
+/** TallyUI ADR-094: a cash rounding entry above what a till takes without voiding a tender; the sale is still applied. */
+export type CashRoundingUnexplained = { code: 'cash_rounding_unexplained'; paymentId: string; minor: number; maxMinor: number };
+type Unexplained = Omit<CashRoundingUnexplained, 'code'>;
+
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
-  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown | MethodFallback>; totalWarnings?: TotalWarning[] };
+  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown | MethodFallback | CashRoundingUnexplained>; totalWarnings?: TotalWarning[] };
 
 /** Where a sale's stock top-up was made, kept on the ledger row for an admin's take-back. */
 export type TopUp = { variantId: string; stockLocationId: string; quantity: number };
@@ -180,14 +185,15 @@ export class OrderCreateService {
         if (recorded) throw new Rerun();
         // 6. The stored and unstored checks: nothing of the sale is written, no event fires.
         const codes: string[] = []; // 3.2a: each payment's resolved method code, filled by the checks.
-        const refusal = await this.deterministicRefusal(txCtx, command, codes);
+        const unexplained: Unexplained[] = []; // TallyUI ADR-094: filled by the checks, from the same resolve.
+        const refusal = await this.deterministicRefusal(txCtx, command, codes, unexplained);
         if (refusal) {
           await this.runTestHook('beforeStoringRejection', command.id);
           await this.connection.getRepository(txCtx, TallyCommand).update(command.id, { status: 'rejected', result: { ...refusal } });
           return { result: refusal };
         }
         // 7. The recipe.
-        return await this.runSale(txCtx, command, codes);
+        return await this.runSale(txCtx, command, codes, unexplained);
       });
     } catch (error) {
       // A collision after the recipe's first event: everything rolled back (its events with it), so start again.
@@ -223,10 +229,10 @@ export class OrderCreateService {
    * then dropped), a clientOrderId collision starts the command again, and a plugin bug with part of
    * the sale written is kept for an admin (needs_admin).
    */
-  private async runSale(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, codes: string[]): Promise<SaleOutcome> {
+  private async runSale(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, codes: string[], unexplained: Unexplained[]): Promise<SaleOutcome> {
     const progress: SaleProgress = { topUps: [] };
     try {
-      return await this.recipe(ctx, command, progress, codes);
+      return await this.recipe(ctx, command, progress, codes, unexplained);
     } catch (error) {
       if (error instanceof TransientCommandError || error instanceof RepairStoreSetup || error instanceof SetupRefusal) throw error;
       const verdict = classify(error, this.clientOrderIdIndex());
@@ -379,7 +385,9 @@ export class OrderCreateService {
     // Ruling 17: strict per version, by path; here, not in step 1, so a stored answer always wins (#36 review).
     const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
     errors.push(...valueRangeErrors(command.payload, maxMoney, command.version));
-    if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(command.payload));
+    // TallyUI ADR-094: the vendored fiscal check predates cashRoundings, so it checks the goods figures.
+    errors.push(...cashRoundingPayloadErrors(command.payload));
+    if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(withoutCashRounding(command.payload)));
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
 
@@ -413,7 +421,7 @@ export class OrderCreateService {
    * (currency, configuration, order limits) rolls the claim back unstored; the state-dependent per-sale
    * facts (unknown_variant, underpaid) are stored on the claim. The recipe keeps the checks for races.
    */
-  private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, codes: string[]) {
+  private async deterministicRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, codes: string[], unexplained: Unexplained[]) {
     const { lines, payments, totalMinor, currency } = command.payload;
     // TallyUI #219: store-wide setup is never stored; the caller rolls the claim back (SetupRefusal).
     if (!ctx.channel.availableCurrencyCodes.includes(currency as CurrencyCode)) {
@@ -432,6 +440,10 @@ export class OrderCreateService {
     const resolved = await this.tenderMethods.resolve(ctx, payments);
     if (resolved.shared.has(TALLY_PAYMENT_METHOD_CODE)) throw new SetupRefusal(storeConfiguration(command.id));
     codes.push(...resolved.codes);
+    // TallyUI ADR-094: the cash rounding against the channel's own rounding methods (store configuration: unstored).
+    const cash = cashRoundingRefusal(command.payload, resolved.codes, resolved.listed);
+    if (cash) throw new SetupRefusal(refuse(command.id, cash.code, cash.message, cash.data));
+    unexplained.push(...cashRoundingUnexplained(command.payload, resolved.codes, resolved.listed));
     const { orderItemsLimit, orderLineItemsLimit } = this.config.orderOptions;
     const items = lines.reduce((sum, line) => sum + line.quantity, 0);
     // Vendure's OrderLimitError conditions; POS lines stay 1:1 with order lines. The limits are store-wide
@@ -580,7 +592,7 @@ export class OrderCreateService {
 
   // The S1 recipe (docs/spikes/s1-order-recipe.md). Its money and tax logic is unchanged; VP1 adds
   // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
-  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress, codes: string[]): Promise<SaleOutcome> {
+  private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress, codes: string[], unexplained: Unexplained[]): Promise<SaleOutcome> {
     const payload = command.payload;
     // ADR 0002 "Customer": a customerId unknown here is treated as absent, with a warning.
     // #43: one over CUSTOMER_ID_MAX never gets here; step 4 refuses it as invalid_payload.
@@ -796,18 +808,21 @@ export class OrderCreateService {
     order = await this.calculator.applyPriceAdjustments(ctx, order, []);
     const totalWarnings: TotalWarning[] = [];
     const serverMinor = order.totalWithTax;
-    const bridgeMinor = payload.totalMinor - serverMinor;
+    // TallyUI ADR-094: the bridge reaches the goods total; the cash rounding is its own surcharge, saved below.
+    const cashMinor = cashRoundingSum(payload);
+    const goodsMinor = payload.totalMinor - cashMinor;
+    const bridgeMinor = goodsMinor - serverMinor;
     // Money P3 #7 (Front desk ruling, 2026-11-23): a bridge over the bound is not rounding. Refused, not stored: the
     // sale rolls back with its claim (re-ruling 3: nothing raised after the first write is stored), so a resend checks
     // again. A command already in the ledger replays its recorded answer before this point.
     const boundMinor = bridgeBoundMinor(order);
     if (Math.abs(bridgeMinor) > boundMinor) {
-      const figures = { expectedMinor: payload.totalMinor, serverMinor, bridgeMinor, boundMinor };
+      const figures = { expectedMinor: goodsMinor, serverMinor, bridgeMinor, boundMinor };
       Logger.warn(`order.create ${command.id} refused total_mismatch: ${JSON.stringify({
         clientOrderId: payload.clientOrderId, version: command.version, ...figures,
       })}`, loggerCtx);
       throw new SetupRefusal(refuse(command.id, 'total_mismatch',
-        `The POS total ${payload.totalMinor} differs from the server's ${serverMinor} by ${bridgeMinor}, `
+        `The POS total ${goodsMinor} differs from the server's ${serverMinor} by ${bridgeMinor}, `
         + `more than the ${boundMinor} allowed for rounding`, figures));
     }
     if (bridgeMinor !== 0) {
@@ -817,7 +832,7 @@ export class OrderCreateService {
       }));
       order.surcharges.push(bridge);
       this.calculator.calculateOrderTotals(order);
-      totalWarnings.push({ code: 'total_mismatch', expectedMinor: payload.totalMinor, serverMinor, bridgeMinor });
+      totalWarnings.push({ code: 'total_mismatch', expectedMinor: goodsMinor, serverMinor, bridgeMinor });
     }
     if (command.version >= 3) {
       // For an integer count, half-away rounding of count/2 equals ceil(count/2).
@@ -858,6 +873,17 @@ export class OrderCreateService {
         if ((field === 'discountMinor' || compareTax) && tillMinor !== serverMinor) fields.push({ field, tillMinor, serverMinor });
       }
       if (fields.length) figureWarnings.push({ code: 'figures_mismatch', fields });
+    }
+    if (cashMinor !== 0) {
+      const cash = await this.connection.getRepository(ctx, Surcharge).save(new Surcharge({
+        order, description: 'POS cash rounding', sku: TALLY_CASH_ROUNDING_SKU, listPrice: cashMinor,
+        listPriceIncludesTax: true, taxLines: [],
+      }));
+      order.surcharges.push(cash);
+      this.calculator.calculateOrderTotals(order);
+      if (order.totalWithTax !== payload.totalMinor) {
+        pluginBug(`Order total ${order.totalWithTax} after cash rounding ${cashMinor} is not the POS total ${payload.totalMinor}`);
+      }
     }
     await this.connection.getRepository(ctx, Order).save(order);
     await this.connection.getRepository(ctx, OrderLine).save(order.lines);
@@ -910,16 +936,21 @@ export class OrderCreateService {
     // #460: lineDiscounts is the link from each order line id to its TALLY_DISCOUNT_SKU surcharge id, which refunds read.
     // An empty map is an order with no line discounts; no lineDiscounts key at all means the order was sold before links.
     // totalMinor is the total the tender cap used (ADR-039), and the register reads it.
+    const unexplainedKey = unexplained.length ? { cashRoundingUnexplained: unexplained } : {}; // TallyUI ADR-094: only when warned.
     if (command.version >= 3) {
-      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts, totalMinor: payload.totalMinor });
+      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts, totalMinor: payload.totalMinor, ...unexplainedKey });
     } else {
-      order.customFields.tallySnapshot = JSON.stringify({ ...(Object.keys(lineDiscounts).length ? { lineDiscounts } : {}), totalMinor: payload.totalMinor });
+      order.customFields.tallySnapshot = JSON.stringify({ ...(Object.keys(lineDiscounts).length ? { lineDiscounts } : {}), totalMinor: payload.totalMinor, ...unexplainedKey });
     }
     await this.connection.getRepository(ctx, Order).save(order);
     // P2.11a: order.create 7's sale note, as Vendure's own public order note, in the sale's transaction. A replay never
     // reaches the recipe (the replay read answers it), and a rerun rolls this back with the rest, so it is written once.
     const note = (payload as OrderCreatePayload & { note?: string }).note;
     if (command.version >= 7 && note !== undefined) await this.orders.addNoteToOrder(ctx, { id: order.id, note, isPublic: true });
+    // TallyUI ADR-094: one private note for the admin, in the same transaction, so it too is written once.
+    if (unexplained.length) await this.orders.addNoteToOrder(ctx, { id: order.id, isPublic: false, note: 'Cash rounding above what a till takes without '
+      + `voiding a tender (TallyUI#1364): ${unexplained.map(({ paymentId, minor, maxMinor }) => `${minor} on payment ${paymentId} (at most ${maxMinor})`)
+        .join('; ')}. Check this sale's payments before relying on its total.` });
 
     const fulfillment = unwrap(await this.orders.createFulfillment(ctx, {
       lines: order.lines.map(line => ({ orderLineId: line.id, quantity: line.quantity })),
@@ -943,6 +974,7 @@ export class OrderCreateService {
     }
     const warnings: NonNullable<OrderCreateResult['warnings']> = [
       ...stockWarnings, ...ignored, ...figureWarnings, ...fallbacks,
+      ...unexplained.map(entry => ({ code: 'cash_rounding_unexplained' as const, ...entry })),
     ];
     if (command.version >= 3 && payload.sessionId !== undefined) {
       const where = { channelId: String(ctx.channelId), id: payload.sessionId };
