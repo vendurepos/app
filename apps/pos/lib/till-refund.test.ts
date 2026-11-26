@@ -212,7 +212,8 @@ describe('#525: a refund total below 0 is refused at the till', () => {
   });
 
   it('still sends a zero total for the store to answer', async () => {
-    const sale = { ...shipped, lines: [line('L1', 2, 1904), line('L2', 2, 2)] };
+    // 1904 + 2 + 6 = 1912, cash-5 nearest -2: a sale the plugin produces.
+    const sale = { ...shipped, lines: [line('L1', 2, 1904), line('L2', 2, 2)], shippingWithTax: 6 };
     const quantities = { L1: 0, L2: 2 };
     expect(refundTotalMinor(sale, quantities)).toBe(0);
     const envelope = buildRefundEnvelope(sale, { quantities, reason: 'Returned', restock: true }, till, ids);
