@@ -163,7 +163,7 @@ export class OrderCreateService {
       // 4. A lone surrogate (#515), then the value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal
       // figures): unstored. Then the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's; its own
       // refusal with only time messages; the clock is the request's, read once. A recorded sale skips all three: the
-      // collision guard answers it, and the claim stores only the fingerprint.
+      // collision guard answers it, and its claim row holds only the id, channel, clientOrderId, fingerprint and status.
       const invalidValue = recorded ? undefined
         : loneSurrogateRefusal(command.id, command) ?? this.valueRefusal(command) ?? clientTimeRefusal(command.id,
           [['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]],

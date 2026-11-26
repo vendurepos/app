@@ -342,6 +342,7 @@ describe('#515: lone surrogates', () => {
     // before #515 for a command holding a lone surrogate cannot be written through the envelope any more, so the command
     // is applied with a placeholder string, and its ledger row's fingerprint is then set, in raw SQL, to the plugin's own
     // fingerprint of the surrogate version: the row reads as that command's, as it would have been stored before #515.
+    // Replay reads only that row's channel, fingerprint, status and recorded result, never the placeholder's order or other side data.
     async function replaysRecorded<C extends { id: string; type: string; version: number; payload: unknown }>(first: C, surrogate: C) {
       expect(surrogate.id).toBe(first.id);
       const applied = await post(first);
