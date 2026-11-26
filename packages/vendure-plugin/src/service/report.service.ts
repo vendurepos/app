@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Collection, Order, OrderLine, ProductVariant, RequestContext, ShippingLine, Surcharge, TransactionalConnection, translateEntity } from '@vendure/core';
+import { Collection, Order, OrderLine, Payment, ProductVariant, RequestContext, ShippingLine, Surcharge, TransactionalConnection, translateEntity } from '@vendure/core';
 import type { ID } from '@vendure/core';
 import { In } from 'typeorm';
 import type { SelectQueryBuilder } from 'typeorm';
@@ -60,8 +60,8 @@ export type TallySalesReportV4 = Omit<TallySalesReportV3, 'version'> & {
     orderCount: number;            // counted orders carrying one
     unexplainedOrderCount: number; // counted orders stored with a cash_rounding_unexplained warning (tallySnapshot.cashRoundingUnexplained),
                                    // a sale whose entries net to 0 too (it stores no surcharge), so not a subset of orderCount
-    refundedMinor: number;         // Σ metadata.tallyCashRoundingMinor over the counted refunds, dated by the refund
-    refundCount: number;           // counted refunds carrying it
+    refundedMinor: number;         // explicit rounding plus non-zero sale rounding returned by an inferred completing refund, dated by the refund
+    refundCount: number;           // counted refunds carrying the key or completing a non-zero rounded sale with no keyed refund
     netMinor: number;              // salesMinor − refundedMinor
   };
 };
@@ -88,6 +88,19 @@ const SALE_METHOD = `COALESCE(${jsonbOf('p.metadata')} -> 'tender' ->> 'method',
 const REFUND_METHOD = `COALESCE(${jsonbOf('refund.metadata')} ->> 'tallyMethod', ${jsonbOf('payment.metadata')} -> 'tender' ->> 'method', payment.method)`;
 // SUM and COUNT come back from Postgres as strings (bigint/numeric); money stays integer minor units.
 const minor = (value: string | null | undefined) => Number(value ?? 0);
+
+/** #513: In a sale's whole non-failed refund history, any keyed refund or non-positive settled payment sum rules out inference.
+ * Otherwise return the first id (by createdAt, then numeric id) whose running total reaches the settled sum, or null if none does. */
+export function inferredRoundingReturnId(refunds: ReadonlyArray<{ id: string; createdAt: Date; total: number; keyed: boolean }>,
+  paidMinor: number): string | null {
+  if (paidMinor <= 0 || refunds.some(refund => refund.keyed)) return null;
+  let returned = 0;
+  for (const refund of [...refunds].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || Number(left.id) - Number(right.id))) {
+    returned += refund.total;
+    if (returned >= paidMinor) return refund.id;
+  }
+  return null;
+}
 
 /** GET /tally/v1/reports/sales: the channel's POS sales and refunds in a range, every figure but discounts a SQL aggregate. */
 @Injectable()
@@ -228,14 +241,51 @@ export class ReportService {
           && (parsed as { cashRoundingUnexplained: unknown }).cashRoundingUnexplained != null;
       } catch { return false; }
     }).length;
-    // Only the refund's own record: a refund without the key (a partial one, a later Refund of the command, a dashboard refund) returned none.
+    // Count explicit rounding, or for a sale with no keyed non-failed refund, its non-zero rounding on the first refund to reach the settled sum.
     const ROUNDING = `CAST(${jsonbOf('refund.metadata')} ->> 'tallyCashRoundingMinor' AS integer)`;
     const [refunded] = await this.posRefundsV2(ctx, query)
       .andWhere(`${ROUNDING} IS NOT NULL`)
       .select(`SUM(${ROUNDING})`, 'total').addSelect('COUNT(*)', 'count').getRawMany<{ total: string | null; count: string }>();
+    let refundedMinor = minor(refunded?.total), refundCount = minor(refunded?.count);
+    const candidates = await this.posRefundsV2(ctx, query).andWhere(`${ROUNDING} IS NULL`)
+      .select('CAST(refund.id AS text)', 'id').addSelect('sale.id', 'saleId').getRawMany<{ id: string; saleId: ID }>();
+    if (candidates.length) {
+      const candidateIds = new Set(candidates.map(row => row.id));
+      const saleIds = [...new Set(candidates.map(row => row.saleId))];
+      const rows = await channelRefunds(this.connection, ctx).andWhere('sale.id IN (:...saleIds)', { saleIds })
+        .select('sale.id', 'saleId').addSelect('CAST(refund.id AS text)', 'id').addSelect(REFUND_AT, 'createdAt')
+        .addSelect('refund.total', 'total').addSelect(`${ROUNDING} IS NOT NULL`, 'keyed')
+        .getRawMany<{ saleId: ID; id: string; createdAt: Date; total: number | string; keyed: boolean }>();
+      const paid = await this.connection.getRepository(ctx, Payment).createQueryBuilder('p').innerJoin('p.order', 'sale')
+        .where('sale.id IN (:...saleIds) AND p.state = :state', { saleIds, state: 'Settled' })
+        .select('sale.id', 'saleId').addSelect('SUM(p.amount)', 'total').groupBy('sale.id').getRawMany<{ saleId: ID; total: string }>();
+      const rounding = await this.connection.getRepository(ctx, Surcharge).createQueryBuilder('s').innerJoin('s.order', 'sale').addSelect('sale.id')
+        .where('sale.id IN (:...saleIds) AND s.sku = :sku', { saleIds, sku: TALLY_CASH_ROUNDING_SKU }).getMany();
+      const history = rows.map(row => ({ ...row, total: Number(row.total) }));
+      const historyBySale = new Map<ID, typeof history>();
+      for (const row of history) {
+        const group = historyBySale.get(row.saleId);
+        if (group) group.push(row);
+        else historyBySale.set(row.saleId, [row]);
+      }
+      const roundingBySale = new Map<ID, number>();
+      for (const surcharge of rounding) {
+        const saleId = surcharge.order.id;
+        roundingBySale.set(saleId, (roundingBySale.get(saleId) ?? 0) + surcharge.priceWithTax);
+      }
+      for (const { saleId, total } of paid) {
+        const amount = roundingBySale.get(saleId);
+        if (!amount) continue;
+        const id = inferredRoundingReturnId(historyBySale.get(saleId)!, minor(total));
+        if (id !== null && candidateIds.has(id)) {
+          refundedMinor += amount;
+          refundCount++;
+        }
+      }
+    }
     const cashRounding = {
       salesMinor, orderCount: new Set(surcharges.map(s => String(s.order.id))).size, unexplainedOrderCount: unexplained,
-      refundedMinor: minor(refunded?.total), refundCount: minor(refunded?.count), netMinor: salesMinor - minor(refunded?.total),
+      refundedMinor, refundCount, netMinor: salesMinor - refundedMinor,
     };
     return { ...report, version: 4, cashRounding };
   }
