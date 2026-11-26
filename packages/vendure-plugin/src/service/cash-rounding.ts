@@ -126,9 +126,10 @@ function roundingRange(roundings: CashRounding[]) {
 
 /**
  * After cashRoundingRefusal passes, warn on entries whose running sum in payload order is outside their leg's R.
- * maxMinor is the magnitude of the bound crossed by the sum; minor remains the entry's own amount.
+ * sumMinor is the running sum judged against [lowMinor, highMinor]; maxMinor is the magnitude of the crossed bound, and minor is the entry's own amount.
  */
-export function cashRoundingUnexplained(payload: CashPayload, codes: string[], listed: TenderMethod[]): Array<CashRoundingEntry & { maxMinor: number }> {
+export function cashRoundingUnexplained(payload: CashPayload, codes: string[], listed: TenderMethod[]): Array<
+  CashRoundingEntry & { maxMinor: number; sumMinor: number; lowMinor: number; highMinor: number }> {
   const rounders = listed.filter(method => method.rounding);
   const legs = roundingLegs(payload, codes, listed, rounders);
   const roundings = rounders.map(tally => tally.rounding!);
@@ -138,6 +139,6 @@ export function cashRoundingUnexplained(payload: CashPayload, codes: string[], l
     const leg = legs[payload.payments.findIndex(payment => payment.clientPaymentId === paymentId)];
     const { low, high } = roundingRange(leg.length ? leg : roundings);
     sum += minor;
-    return sum < low || sum > high ? [{ paymentId, minor, maxMinor: sum < low ? -low : high }] : [];
+    return sum < low || sum > high ? [{ paymentId, minor, maxMinor: sum < low ? -low : high, sumMinor: sum, lowMinor: low, highMinor: high }] : [];
   });
 }

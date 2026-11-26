@@ -449,8 +449,30 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
     it('W11: the warning is stored in tallySnapshot and as one private order note', async () => {
       const command = roundedSale(1008, [card(497), cash5(510)], [{ index: 0, minor: -3 }, { index: 1, minor: 2 }]);
       const { entries, notes } = await expectUnexplained(command, -1, [{ index: 0, minor: -3, maxMinor: 2 }]);
-      expect(notes).toEqual([{ type: 'ORDER_NOTE', isPublic: false, data: { note: 'Cash rounding above what a till takes without voiding '
-        + `a tender (TallyUI#1364): -3 on payment ${entries[0].paymentId} (at most 2). Check this sale's payments before relying on its total.` } }]);
+      const prefix = 'Cash rounding out of range: the roundings on this sale add up to ';
+      const suffix = ". Check this sale's payments before relying on its total.";
+      expect(notes).toEqual([{ type: 'ORDER_NOTE', isPublic: false, data: { note: prefix
+        + `-3 at payment ${entries[0].paymentId}, outside the allowed -2 to 2` + suffix } }]);
+
+      await withMethods({ 'cash-5': false, 'cash-5-up': true }, async () => {
+        const { entries, notes } = await expectUnexplained(roundedSale(1002, [card(1000)], [{ index: 0, minor: -2 }]), -2,
+          [{ index: 0, minor: -2, maxMinor: 0 }]);
+        expect(notes).toEqual([{ type: 'ORDER_NOTE', isPublic: false, data: { note: prefix
+          + `-2 at payment ${entries[0].paymentId}, outside the allowed 0 to 4` + suffix } }]);
+      });
+      await withMethods({ 'cash-5': false, 'cash-5-down': true }, async () => {
+        const { entries, notes } = await expectUnexplained(roundedSale(1009, [cash5down(1000)], [{ index: 0, minor: -9 }]), -9,
+          [{ index: 0, minor: -9, maxMinor: 4 }]);
+        expect(notes).toEqual([{ type: 'ORDER_NOTE', isPublic: false, data: { note: prefix
+          + `-9 at payment ${entries[0].paymentId}, outside the allowed -4 to 0` + suffix } }]);
+      });
+      await withMethods(cash10only, async () => {
+        const { entries, notes } = await expectUnexplained(replaySale(), 5, [1, 2, 3].map(index => ({ index, minor: -4, maxMinor: 4 })));
+        expect(notes).toEqual([{ type: 'ORDER_NOTE', isPublic: false, data: { note: prefix
+          + `-8 at payment ${entries[0].paymentId}, outside the allowed -4 to 5; `
+          + `-12 at payment ${entries[1].paymentId}, outside the allowed -4 to 5; `
+          + `-16 at payment ${entries[2].paymentId}, outside the allowed -4 to 5` + suffix } }]);
+      });
     });
 
     it('W12: an old till\'s sale without cashRoundings raises nothing', async () => {
@@ -569,6 +591,13 @@ describe('cash rounding: order.create (ADR-094 P1b)', () => {
     it('W26: the running sum leaves the cash-5 range and returns; only the first entry warns', async () => {
       await expectUnexplained(roundedSale(1001, [cash5(500), cash5(500)], [{ index: 0, minor: -3 }, { index: 1, minor: 2 }]), -1,
         [{ index: 0, minor: -3, maxMinor: 2 }]);
+    });
+
+    it("W27: each entry is judged by its own leg's range R, not an earlier entry's", async () => {
+      await withMethods({ 'cash-10': true }, async () => {
+        await expectUnexplained(roundedSale(1506, [cash10(1010), cash5(500)], [{ index: 0, minor: 5 }, { index: 1, minor: -1 }]), 4,
+          [{ index: 1, minor: -1, maxMinor: 2 }]);
+      });
     });
   });
 });
