@@ -30,8 +30,9 @@ const ZERO: CashRounding = { salesMinor: 0, orderCount: 0, unexplainedOrderCount
  * TallyUI ADR-094 P2: the v4 sales report's cash rounding, and the refund metadata (tallyCashRoundingMinor) it reads.
  * Six sales over four registers (S3 has no cashRoundings, S5 a cash_rounding_unexplained write-off, S6 a TALLY-ROUNDING
  * bridge too) and five refunds (RF2 then RF3 is the partial-then-final case).
- * Two early sales on register E, outside every other range (#514): U1 has a discount label cut mid-emoji (a lone surrogate,
- * stored as the escape \ud83d), U2 card −3 and cash +3, a cash_rounding_unexplained warning with no surcharge.
+ * Three early sales on register E, outside every other range (#514): U1 has a discount label cut mid-emoji (a lone surrogate,
+ * stored as the escape \ud83d), U2 card −3 and cash +3, a cash_rounding_unexplained warning with no surcharge, U3 a discount
+ * labelled exactly cashRoundingUnexplained, which passes the LIKE pre-filter but is not a top-level key.
  * Known not covered:
  * - a Failed refund: a Tally refund is always Settled, and posRefunds already excludes Failed;
  * - a Vendure-dashboard refund: it has no Tally context, so it never carries the key, and its rounding is not counted as returned.
@@ -90,6 +91,11 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
       } });
     await sellRounded('U2', earlySale(1), [{ unitPriceMinor: 1000 }], 0, 0, [{ methodId: 'card', method: 'external', amountMinor: 495, minor: -3 },
       { methodId: 'cash-5', method: 'cash', amountMinor: 505, minor: 3 }], { into: earlyResults });
+    await sellRounded('U3', earlySale(2), [{ unitPriceMinor: 1002, discountMinor: 100 }], -2, 0, undefined, {
+      into: earlyResults, edit: payload => {
+        payload.discountMinor = payload.lines[0].discountMinor = 80;
+        payload.display.lines[0].discounts[0].label = 'cashRoundingUnexplained';
+      } });
 
     // The refunds are made now, after the sales; the refund window opens a minute before RF1, well after the last sale,
     // so a small clock difference between Node and the Postgres container cannot drop a refund from it.
@@ -326,8 +332,17 @@ describe('GET /tally/v1/reports/sales/v4 (ADR-094 P2)', () => {
     expect(orders.U2.surcharges.filter(surcharge => surcharge.sku === 'TALLY-CASH-ROUNDING')).toEqual([]);
   });
 
-  it('T12: the early range, U1 and U2: v4 answers 200 with U2 unexplained, and is v3 plus cashRounding', async () => {
-    const expected: CashRounding = { salesMinor: -2, orderCount: 1, unexplainedOrderCount: 1, refundedMinor: 0, refundCount: 0, netMinor: -2 };
+  it('U3: the label cashRoundingUnexplained is applied with no warning, passes the LIKE, and is no top-level key', async () => {
+    expect(earlyResults.U3.status).toBe('applied');
+    expect(((earlyResults.U3.warnings ?? []) as Array<{ code: string }>).filter(warning => warning.code === 'cash_rounding_unexplained'))
+      .toEqual([]);
+    const { customFields } = await connection.rawConnection.getRepository(Order).findOneByOrFail({ id: environment.decode(orders.U3.id) });
+    expect(customFields.tallySnapshot).toContain('"cashRoundingUnexplained"');
+    expect(Object.hasOwn(JSON.parse(customFields.tallySnapshot as string), 'cashRoundingUnexplained')).toBe(false);
+  });
+
+  it('T12: the early range, U1, U2 and U3: v4 answers 200 with only U2 unexplained, and is v3 plus cashRounding', async () => {
+    const expected: CashRounding = { salesMinor: -4, orderCount: 2, unexplainedOrderCount: 1, refundedMinor: 0, refundCount: 0, netMinor: -4 };
     expect((await v4(early)).cashRounding).toEqual(expected);
     expect((await v4(early, { registerId: E })).cashRounding).toEqual(expected);
     const three = await report('reports/sales/v3', early);
