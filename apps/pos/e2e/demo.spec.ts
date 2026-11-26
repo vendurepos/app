@@ -1863,6 +1863,34 @@ test("a demo cashier reprints a finished sale's receipt from the order sheet and
   await expect(page.getByTestId('order-receipt').getByTestId('order-receipt-total')).toHaveText('€23.52');
 });
 
+test('an applied sale with a tax_rate_mismatch warning shows its till notice (app#528)', async ({ page }) => {
+  await page.goto('/demo');
+  // The plugin's per-rate warning on the store's result, as order-create.service.ts sends it in `warnings`. Wrapped
+  // before sign-in: @tallyui/pos's createHttpCommandTransport reads globalThis.fetch once, when it is made.
+  await page.evaluate(() => {
+    const inner = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const response = await inner(input, init);
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (init?.method !== 'POST' || !url.endsWith('/tally/v1/commands') || !String(init.body).includes('"order.create"')) return response;
+      const body = await response.json();
+      for (const result of body.results) {
+        if (result.status === 'applied') result.warnings = [...result.warnings ?? [], { code: 'tax_rate_mismatch', ratePpm: 190000, expectedMinor: 152, serverMinor: 147 }];
+      }
+      return new Response(JSON.stringify(body), { status: response.status, headers: response.headers });
+    };
+  });
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await sellMug(page);
+  await page.getByTestId('new-sale').click();
+  await orderEntries(page);
+  const panel = page.getByTestId('orders-panel');
+  await expect(panel.getByText('Tax at 19%: store €1.47 vs POS €1.52', { exact: true })).toBeVisible();
+  await expect(panel.getByText('Needs attention', { exact: true })).toBeVisible();
+});
+
 test('a demo cashier emails the receipt after a sale', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();

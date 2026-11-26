@@ -41,7 +41,10 @@ import { resolveTaxCategory } from './tax-class';
 import { taxRoundingFor, type TaxRounding } from './tax-rounding';
 import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
-/** Additive warnings (S1 finding 5) until TallyUI's CommandWarning carries them (2.2.0). */
+/**
+ * @deprecated Read `warnings`. `tax_rate_mismatch` is also sent there (app#528); `total_mismatch` moves there once
+ * @tallyui/pos treats a bridged total as a notice, and `totalWarnings` is removed in a later release.
+ */
 export type TotalWarning =
   | { code: 'total_mismatch'; expectedMinor: number; serverMinor: number; bridgeMinor: number }
   | { code: 'tax_rate_mismatch'; ratePpm: number; expectedMinor: number; serverMinor: number };
@@ -60,7 +63,9 @@ export type CashRoundingUnexplained = { code: 'cash_rounding_unexplained'; payme
 type Unexplained = Omit<CashRoundingUnexplained, 'code'> & { sumMinor: number; lowMinor: number; highMinor: number };
 
 export type OrderCreateResult = Omit<CommandResult, 'warnings'>
-  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown | MethodFallback | CashRoundingUnexplained>; totalWarnings?: TotalWarning[] };
+  & { warnings?: Array<CommandWarning | CustomerIgnored | FiguresMismatch | SessionUnknown | MethodFallback | CashRoundingUnexplained>;
+    /** @deprecated see TotalWarning. */
+    totalWarnings?: TotalWarning[] };
 
 /** Where a sale's stock top-up was made, kept on the ledger row for an admin's take-back. */
 export type TopUp = { variantId: string; stockLocationId: string; quantity: number };
@@ -976,7 +981,7 @@ export class OrderCreateService {
       }
     }
     const warnings: NonNullable<OrderCreateResult['warnings']> = [
-      ...stockWarnings, ...ignored, ...figureWarnings, ...fallbacks,
+      ...stockWarnings, ...ignored, ...figureWarnings, ...totalWarnings.filter(warning => warning.code === 'tax_rate_mismatch'), ...fallbacks,
       ...wireEntries.map(entry => ({ code: 'cash_rounding_unexplained' as const, ...entry })),
     ];
     if (command.version >= 3 && payload.sessionId !== undefined) {
