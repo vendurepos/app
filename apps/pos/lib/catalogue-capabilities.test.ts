@@ -80,16 +80,27 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     expect(original).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['401', () => new Response('', { status: 401 })], ['403', () => new Response('', { status: 403 })],
-    ['404', () => new Response('Not Found', { status: 404 })],
-  ])('C4a: %s answers exactly what the connector reader answers, read once', async (_, response) => {
-    const sentinel = { orderCreate: 1 } as ServerCapabilities;
-    fetchMock.mockImplementation(async () => response());
-    original.mockResolvedValue(sentinel);
-    expect(await read()).toBe(sentinel);
+  it("C4a: 404 answers the connector reader's { orderCreate: 1 }, read once, without calling the connector reader", async () => {
+    fetchMock.mockResolvedValue(new Response('Not Found', { status: 404 }));
+    original.mockResolvedValue({ orderCreate: 11 });
+    expect(await read()).toEqual({ orderCreate: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403])('C4d: %s answers undefined when the connector reader answers undefined, calling it once with the context', async (status) => {
+    fetchMock.mockResolvedValue(new Response('', { status }));
+    original.mockResolvedValue(undefined);
+    expect(await read()).toBeUndefined();
     expect(original).toHaveBeenCalledTimes(1);
     expect(original).toHaveBeenCalledWith(context);
+  });
+
+  it.each([401, 403])('C4d: %s answers undefined even when the connector reader answers a ready read with cashRounding', async (status) => {
+    fetchMock.mockResolvedValue(new Response('', { status }));
+    original.mockResolvedValue(parseInfoCapabilities({ ...INFO, cashRounding: { v: 1 } }));
+    expect(await read()).toBeUndefined();
+    expect(original).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -113,7 +124,7 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     original.mockResolvedValue({ orderCreate: 1 });
     const capabilities = await read();
     expect(capabilities).toEqual(parseInfoCapabilities(body));
-    expect(capabilities ?? {}).not.toHaveProperty('cashRounding');
+    expect(capabilities).toBeUndefined();
     expect(original).not.toHaveBeenCalled();
   });
 
@@ -129,9 +140,9 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     expect(original).not.toHaveBeenCalled();
   });
 
-  it("C4: the connector reader's sign-out on 401 reaches the caller unchanged", async () => {
+  it.each([401, 403])("C4: the connector reader's sign-out on %s reaches the caller unchanged", async (status) => {
     const signedOut = new ConnectorUnauthorizedError('signed out', 401);
-    fetchMock.mockResolvedValue(new Response('', { status: 401 }));
+    fetchMock.mockResolvedValue(new Response('', { status }));
     original.mockRejectedValue(signedOut);
     await expect(read()).rejects.toBe(signedOut);
   });

@@ -37,7 +37,8 @@ export function withCashRounding(body: unknown, parsed: ServerCapabilities | und
 }
 
 // One /info read per call, answered as readVendureCapabilities would: a second read could succeed where this one failed and drop cashRounding (#517).
-// Only 401/403 (the connector's signed-out check) and 404 (its { orderCreate: 1 }) delegate; a throw, non-ok status or non-JSON body is undefined.
+// 404 is the connector's { orderCreate: 1 }. 401/403 call it only for its signed-out check (signedOut is not exported), which throws or answers
+// undefined; any other answer came from a second read, so this read is inconclusive. A throw, non-ok status or non-JSON body is undefined.
 async function readInfo(context: SyncContext, original: NonNullable<TallyConnector['capabilities']>): Promise<ServerCapabilities | undefined> {
   let response: Response;
   try {
@@ -45,7 +46,12 @@ async function readInfo(context: SyncContext, original: NonNullable<TallyConnect
   } catch {
     return undefined;
   }
-  if (response.status === 401 || response.status === 403 || response.status === 404) return original(context);
+  // readVendureCapabilities' own answer to a 404 (connector-vendure 5.0.0): an old plugin without /info takes order.create 1.
+  if (response.status === 404) return { orderCreate: 1 };
+  if (response.status === 401 || response.status === 403) {
+    await original(context);
+    return undefined;
+  }
   if (!response.ok) return undefined;
   let body: unknown;
   try {
