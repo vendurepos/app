@@ -180,6 +180,8 @@ describe('order.create per-charge tax mode', () => {
     expect(result).toMatchObject({ status: 'applied', serverRefs: { totalMinor: 2002 }, totalWarnings: [
       { code: 'total_mismatch', expectedMinor: 2002, serverMinor: 2003, bridgeMinor: -1 },
     ] });
+    // app#528: a bridged total stays out of `warnings` until @tallyui/pos treats it as a notice.
+    expect(result.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'total_mismatch' }));
     const order = await readOrder(result.serverRefs!.orderId);
     expectFee(order, 802, false, 802, 1003);
     expect(order.surcharges.filter(charge => charge.sku === 'TALLY-ROUNDING')).toMatchObject([{ priceWithTax: -1 }]);

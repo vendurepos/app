@@ -104,6 +104,8 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
           expect(order.fulfillments.map(item => item.state)).toEqual(['Delivered']);
           for (const rate of perRate) expect(Math.abs(rate.diff), JSON.stringify(rate)).toBeLessThanOrEqual(T);
           expect(result.totalWarnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
+          expect(result.warnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
+          expect(result.warnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual([]);
           expect(bridges).toHaveLength(bridge === 0 ? 0 : 1);
           expect(result.totalWarnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual(
             bridge === 0 ? [] : [{ code: 'total_mismatch', expectedMinor: command.payload.totalMinor,
@@ -173,6 +175,11 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
       expect(order.state).toBe('Delivered');
       expect(order.totalWithTax).toBe(command.payload.totalMinor);
       expect(result.totalWarnings).toEqual([
+        { code: 'tax_rate_mismatch', ratePpm: 190000, expectedMinor: 24, serverMinor: 19 },
+        { code: 'tax_rate_mismatch', ratePpm: 70000, expectedMinor: 2, serverMinor: 7 },
+      ]);
+      // app#528: the same per-rate warnings in `warnings`, which the till reads.
+      expect(result.warnings).toEqual([
         { code: 'tax_rate_mismatch', ratePpm: 190000, expectedMinor: 24, serverMinor: 19 },
         { code: 'tax_rate_mismatch', ratePpm: 70000, expectedMinor: 2, serverMinor: 7 },
       ]);
