@@ -423,9 +423,12 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
             receipt={(order, back) => <OrderReceipt order={order} store={storeLabel(session)} pricesIncludeTax={session.settings.pricesIncludeTax} onBack={back}
               capabilities={readSettingsCapabilities} context={sessionContext(session)} />} /> : null}
           <View className="flex-1" style={openOrder ? { display: 'none' } : undefined}>
-            <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
-              till={{ orders: outbox.recent, onRetry: retry, stuck: outbox.state.stuck }}
-              registerId={boundRegisterId} cashier={identity} onOpen={setOpenOrder} />
+            {/* OrdersList and the panel's count read the connector's discountsAreTaxedRows from this provider. */}
+            <ConnectorProvider connector={connector}>
+              <OrdersPanel session={session} timezone={TIMEZONE} scope={ordersScope} onScopeChange={setOrdersScope}
+                till={{ orders: outbox.recent, onRetry: retry, stuck: outbox.state.stuck }}
+                registerId={boundRegisterId} cashier={identity} onOpen={setOpenOrder} />
+            </ConnectorProvider>
           </View>
         </VStack>
       ) : null}
@@ -440,7 +443,7 @@ function SignedInCatalogue({ session, signOut }: { session: Session; signOut(): 
       {productsOpen ? <ProductsPanel products={catalogue.products} traits={connector.traits.product} currency={currency} session={session} /> : null}
       {healthOpen ? <StoreHealthPanel
         session={session}
-        attention={attentionRows(outbox.recent, outbox.state.stuck)}
+        attention={attentionRows(outbox.recent, outbox.state.stuck, connector.discountsAreTaxedRows === true)}
         onRetry={retry}
         onOpen={(order) => { setHealthOpen(false); setOrdersOpen(true); setOpenOrder(order); }}
         onViewLog={() => { setHealthOpen(false); setSettingsSection('sync-log'); setSettingsOpen(true); }}

@@ -153,6 +153,7 @@ describe('catalogueConnector capabilities (cash rounding)', () => {
     const wrapped = catalogueConnector(session);
     expect(Object.keys(wrapped).sort()).toEqual(Object.keys(plain).sort());
     expect(wrapped.auth).toBe(plain.auth);
+    expect(wrapped.discountsAreTaxedRows).toBe(true);
     expect(wrapped.capabilities).not.toBe(original);
   });
 });

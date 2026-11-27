@@ -28,8 +28,9 @@ TallyUI command. The client side is already built and platform-neutral:
   `insufficient_stock`, `invalid_payload`, `store_configuration`,
   `unsupported_version`, …). Warnings come back in `warnings`. `totalWarnings`
   is deprecated: it still carries `total_mismatch` and `tax_rate_mismatch`,
-  `tax_rate_mismatch` is also in `warnings` (app#528), and `total_mismatch`
-  moves there once @tallyui/pos treats a bridged total as a notice. HTTP 409
+  and both are also in `warnings` (`tax_rate_mismatch` since app#528,
+  `total_mismatch` since app#528 half 2, once @tallyui/pos 5.3.0 treats a
+  bridged total within the tolerance as a notice). HTTP 409
   `in_progress` stops the batch; 503 means a transient failure.
 - **Versions.** v2 adds pre-tax discounts, allocated per line in each
   line's own tax mode (ADR-062). v3 adds the frozen `display` and

@@ -114,9 +114,10 @@ export function attentionReason(order: PosOrder, stuck?: OutboxState['stuck']): 
 }
 
 /** Store health's "needs attention" records (CHECKLIST 10.3): the orders the Orders panel counts (needsAttention), each with
- * the outbox's reason, and Retry exactly where TallyUI's OrdersList offers it (a refused sale with a requeueable code). */
-export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck']): AttentionRow[] {
-  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order), rescue: canSendWithoutAddress(order) }));
+ * the outbox's reason, and Retry exactly where TallyUI's OrdersList offers it (a refused sale with a requeueable code).
+ * As in needsAttention, the connector's discountsAreTaxedRows flag tells ADR-048's T to count discounted lines. */
+export function attentionRows(orders: PosOrder[], stuck: OutboxState['stuck'], discountsAreTaxedRows = false): AttentionRow[] {
+  return needsAttention(orders, { stuckCommandIds: stuck?.commandIds, discountsAreTaxedRows }).map(order => ({ order, reason: attentionReason(order, stuck), retry: canSendAgain(order), rescue: canSendWithoutAddress(order) }));
 }
 
 /** Clear & re-download's confirm (CHECKLIST 10.3): how many products leave this device and download again from the store. */

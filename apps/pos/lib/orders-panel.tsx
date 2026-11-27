@@ -6,7 +6,7 @@ import {
   type OrderFilterOption, type OrderHistoryRow,
 } from '@tallyui/components';
 import { searchVendureCustomers } from '@tallyui/connector-vendure';
-import { formatMoney } from '@tallyui/core';
+import { formatMoney, useOptionalConnector } from '@tallyui/core';
 import { needsAttention, type OrderFilterValue, type OutboxState, type PosOrder } from '@tallyui/pos';
 import { isWalkIn } from './customer-list';
 import { RefreshIcon } from './nav-icons';
@@ -42,7 +42,8 @@ export function OrdersPanel({ session, timezone, scope, onScopeChange, till, reg
   const { orders, totalItems, notice, loading, loadMore, reload } = useOrderList(session, scope === 'store', query, timezone);
   const rows = useMemo(() => orders.map(order => toOrderTableRow(order, timezone)), [orders, timezone]);
   const groups = groupOrdersByDay(rows, storeDayOf(new Date().toISOString(), timezone));
-  const attention = needsAttention(till.orders, { stuckCommandIds: till.stuck?.commandIds }).length;
+  const discountsAreTaxedRows = useOptionalConnector()?.discountsAreTaxedRows === true;
+  const attention = needsAttention(till.orders, { stuckCommandIds: till.stuck?.commandIds, discountsAreTaxedRows }).length;
   const [customers, setCustomers] = useState<OrderFilterOption[]>([]);
   const [pickedCustomer, setPickedCustomer] = useState<OrderFilterOption>();
   useEffect(() => {

@@ -408,6 +408,9 @@ describe('error classes (ADR 0002 §2)', () => {
       { code: 'total_mismatch', expectedMinor: 1002, serverMinor: 1000, bridgeMinor: 2 }, mismatch,
     ]);
     expect(second.warnings).toContainEqual(mismatch);
+    expect(second.warnings).toEqual([
+      { code: 'total_mismatch', expectedMinor: 1002, serverMinor: 1000, bridgeMinor: 2 }, mismatch,
+    ]);
   });
 
   it('per-rate T counts discounted lines: 2 discounted lines, a 2-cent rate shift is within T and a 3-cent one is a tax_rate_mismatch', async () => {

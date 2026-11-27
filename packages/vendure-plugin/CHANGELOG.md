@@ -10,6 +10,11 @@
   - `/tally/v1/info` advertises `chargeTaxMode: { v: 1 }`.
   - Without the field, behaviour is unchanged. No migration.
 
+### Changed
+
+- `order.create` sends a bridged `total_mismatch` in `warnings` as well as in the deprecated `totalWarnings` (vendurepos/app#528). It has the same figures, and it comes before any `tax_rate_mismatch`, as in `totalWarnings`. `totalWarnings` is unchanged and will be removed in a later release.
+  - **Version pairing:** deploy the VendurePOS app from vendurepos/app#528 half 2 on (@tallyui 5.3.0, which forwards connector-vendure's `discountsAreTaxedRows`) before serving this release. That till lists a bridge only when it is over ADR-048's tolerance. An older till lists every bridged sale under "Needs attention".
+
 ## 0.5.0 (2026-11-26)
 
 **0.4.0 was never published to npm.** Its version and changelog were merged on 2026-11-23, but it was not tagged. The first version on npm after 0.3.0 is 0.5.0, and it includes everything listed under 0.4.0 below.
