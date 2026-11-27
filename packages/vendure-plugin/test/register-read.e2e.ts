@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { TransactionalConnection } from '@vendure/core';
+import { RequestContextService, TransactionalConnection } from '@vendure/core';
 import { parse } from 'graphql';
 import { Repository, type FindOptionsWhere } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { TallyRegister, TallyRegisterMovement } from '../src/entities/register.entities';
+import { TallyRegister, TallyRegisterMovement, TallyRegisterSession } from '../src/entities/register.entities';
 import type { CommandResult } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
@@ -80,10 +80,25 @@ describe('GET /tally/v1/registers/:id', () => {
       register: { id: r, receivedAt: expect.any(String) },
       counters: { lastClosureNumber: 0, perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0 },
       session: { id: s, status: 'open', openedAt: opening.payload.openedAt, openedBy: null, deviceId: 'read-till', deviceName: 'Front till',
-        countedFloatMinor: 10000, expected: { cash: 10000 }, salesCount: 0, paidInMinor: 0, paidOutMinor: 0, movements: [] },
+        openVersion: 2, countedFloatMinor: 10000, expected: { cash: 10000 }, salesCount: 0, paidInMinor: 0, paidOutMinor: 0, movements: [] },
       closures: { items: [], totalItems: 0, skip: 0, take: 20 },
     });
     expect(isIso(body.register.receivedAt)).toBe(true);
+  });
+
+  it('#332: the live session carries the version that opened it, null for a session stored without one', async () => {
+    const [registerA, registerB, registerC, legacySession] = [uuid(), uuid(), uuid(), uuid()];
+    await applied(open(uuid(), registerA, {}, 3));
+    await applied(open(uuid(), registerB, {}, 1));
+    await applied(open(legacySession, registerC, {}, 2));
+    const channelId = String((await server.app.get(RequestContextService).create({ apiType: 'custom' })).channelId);
+    await server.app.get(TransactionalConnection).rawConnection.getRepository(TallyRegisterSession)
+      .update({ channelId, id: legacySession }, { openVersion: null });
+
+    expect((await get(registerA)).body.session.openVersion).toBe(3);
+    expect((await get(registerB)).body.session.openVersion).toBe(1);
+    expect((await get(registerC)).body.session).toHaveProperty('openVersion', null);
+    expect((await get(registerA, await tokenWith(['TallyPosSell']))).body.session.openVersion).toBe(3);
   });
 
   it('lists closures newest first with their frozen figures and pages them', async () => {
@@ -288,13 +303,28 @@ describe('GET /tally/v1/registers/:id', () => {
       expect(status).toBe(200);
       const item = (id: string, name: string, opening: ReturnType<typeof open>) => ({
         id, receivedAt: expect.any(String), lastDeviceName: name,
-        session: { status: 'open', openedAt: opening.payload.openedAt, openedBy: null, deviceName: name },
+        session: { status: 'open', openedAt: opening.payload.openedAt, openedBy: null, deviceName: name, openVersion: 2 },
       });
       expect(body.items.slice(0, 2)).toEqual([item(r2, 'Till two', second), item(r1, 'Till one', first)]);
       expect(body.items.map((entry: { id: string }) => entry.id)).not.toContain(foreign);
       expect(body.items.length).toBeLessThanOrEqual(100);
       expect((await list({})).status).toBe(403);
       expect((await list(await tokenWith(['TallyPosSell']))).status).toBe(200);
+    });
+
+    it('#332: each live session carries its open version, null for a session stored without one', async () => {
+      const [registerA, registerB, registerC, legacySession] = [uuid(), uuid(), uuid(), uuid()];
+      await applied(open(uuid(), registerA, {}, 3));
+      await applied(open(uuid(), registerB, {}, 1));
+      await applied(open(legacySession, registerC, {}, 2));
+      const channelId = String((await server.app.get(RequestContextService).create({ apiType: 'custom' })).channelId);
+      await server.app.get(TransactionalConnection).rawConnection.getRepository(TallyRegisterSession)
+        .update({ channelId, id: legacySession }, { openVersion: null });
+
+      const { body } = await list();
+      expect(body.items.find((item: { id: string }) => item.id === registerA).session.openVersion).toBe(3);
+      expect(body.items.find((item: { id: string }) => item.id === registerB).session.openVersion).toBe(1);
+      expect(body.items.find((item: { id: string }) => item.id === registerC).session).toHaveProperty('openVersion', null);
     });
   });
 });
