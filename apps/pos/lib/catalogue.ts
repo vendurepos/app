@@ -53,7 +53,7 @@ async function readInfo(context: SyncContext, original: NonNullable<TallyConnect
   } catch {
     return undefined;
   }
-  // readVendureCapabilities' own answer to a 404 (connector-vendure 5.2.0): an old plugin without /info takes order.create 1.
+  // readVendureCapabilities' own answer to a 404 (connector-vendure 5.3.0): an old plugin without /info takes order.create 1.
   if (response.status === 404) return { orderCreate: 1 };
   if (response.status === 401 || response.status === 403) {
     await original(context);
@@ -78,7 +78,7 @@ export function catalogueConnector(session: Session): TallyConnector {
   });
   const original = connector.capabilities;
   if (!original) return connector;
-  // This read replaces connector-vendure 5.2.0's, which drops /info's cashRounding, so the app maps cashRounding and chargeTaxMode itself; this goes when the connector maps both.
+  // This read replaces connector-vendure 5.3.0's, which drops /info's cashRounding, so the app maps cashRounding and chargeTaxMode itself; this goes when the connector maps both.
   // The connector is a plain object of closures (none reads `this`), so a spread keeps every other method as it is.
   return {
     ...connector,

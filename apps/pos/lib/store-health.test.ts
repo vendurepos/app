@@ -104,6 +104,31 @@ describe('readServerTotals variants', () => {
 });
 
 describe('attentionRows', () => {
+  const order = {
+    id: 'applied', createdAt: '2026-11-17T10:00:00Z', updatedAt: '2026-11-17T10:00:00Z', commandId: 'cmd-applied',
+    syncStatus: 'applied', currency: 'EUR', pricesIncludeTax: false,
+    subtotalMinor: 1200, discountMinor: 200, taxMinor: 0, totalMinor: 1000, payments: [], customer: null,
+    taxRounding: { granularity: 'per_rate_group_items', mode: 'half_up' },
+    lines: [
+      { id: 'mug', productId: 'mug', name: 'Mug', sku: 'MUG', quantity: 1, unitPriceMinor: 600, discountMinor: 100, netMinor: 500, taxLines: [] },
+      { id: 'apron', productId: 'apron', name: 'Apron', sku: 'APRON', quantity: 1, unitPriceMinor: 600, discountMinor: 100, netMinor: 500, taxLines: [] },
+    ],
+    warnings: [{ code: 'total_mismatch', expectedMinor: 1000, serverMinor: 998, bridgeMinor: 2 }],
+  } as PosOrder;
+
+  it('lists a bridge of 2 when the two discounted lines count only once by default', () => {
+    expect(attentionRows([order], undefined)).toEqual([{ order, reason: 'Synced with a warning', retry: false, rescue: false }]);
+  });
+
+  it('omits a bridge of 2 when both discounts count as taxed rows', () => {
+    expect(attentionRows([order], undefined, true)).toEqual([]);
+  });
+
+  it('still lists a bridge of 3 when both discounts count as taxed rows', () => {
+    const largerBridge = { ...order, warnings: [{ code: 'total_mismatch', expectedMinor: 1000, serverMinor: 997, bridgeMinor: 3 }] } as PosOrder;
+    expect(attentionRows([largerBridge], undefined, true)).toEqual([{ order: largerBridge, reason: 'Synced with a warning', retry: false, rescue: false }]);
+  });
+
   it('offers Retry for a refused sale with a requeueable code', () => {
     const order = { id: 'rejected', saleId: 'rejected', createdAt: '2026-11-17T10:00:00Z', commandId: 'cmd-rejected', lines: [] as PosOrder['lines'],
       syncStatus: 'rejected', error: { code: 'platform_error' } } as PosOrder;

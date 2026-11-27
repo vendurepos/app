@@ -1892,6 +1892,48 @@ test('an applied sale with a tax_rate_mismatch warning shows its till notice (ap
   await expect(panel.getByText('Needs attention', { exact: true })).toBeVisible();
 });
 
+test('a discounted sale whose rounding line is inside the tolerance is not listed as needing attention (app#528)', async ({ page }) => {
+  await page.goto('/demo');
+  // Wrap before sign-in: @tallyui/pos's createHttpCommandTransport reads globalThis.fetch once, when it is made.
+  await page.evaluate(() => {
+    const inner = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const response = await inner(input, init);
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (init?.method !== 'POST' || !url.endsWith('/tally/v1/commands') || !String(init.body).includes('"order.create"')) return response;
+      const body = await response.json();
+      for (const result of body.results) {
+        if (result.status === 'applied') result.warnings = [...result.warnings ?? [], { code: 'total_mismatch', expectedMinor: 4604, serverMinor: 4602, bridgeMinor: 2 }];
+      }
+      return new Response(JSON.stringify(body), { status: response.status, headers: response.headers });
+    };
+  });
+  await page.getByTestId('demo-enter').click();
+  await expectSignedIn(page);
+  await openRegister(page);
+  await page.getByTestId('product-tile-Tally Fixture Mug').click();
+  await page.getByTestId('cart-line-TALLY-MUG').getByTestId('price-popover-trigger').click();
+  await page.getByTestId('price-discount-10').click();
+  await page.getByTestId('price-popover-apply').click();
+  await page.getByTestId('product-tile-Canvas Apron').click();
+  await page.getByTestId('cart-line-APP-APRON').getByTestId('price-popover-trigger').click();
+  await page.getByTestId('price-discount-10').click();
+  await page.getByTestId('price-popover-apply').click();
+  await checkout(page);
+  await typeAmount(page, '50.00');
+  await takePayment(page);
+  await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
+  await expectSaleStored(page);
+  await page.getByTestId('new-sale').click();
+  await orderEntries(page);
+  const panel = page.getByTestId('orders-panel');
+  // Two discounted lines make T = ⌈(2 + 2)/2⌉ = 2 with the connector's discountsAreTaxedRows, against ⌈2/2⌉ = 1
+  // without it, so a bridge of 2 is a notice only when the flag reaches the panel.
+  await expect(panel.getByText('Store calculated €46.02; a rounding line of +€0.02 brought it to €46.04', { exact: true })).toHaveCount(1);
+  await expect(panel.getByText('Needs attention', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('orders-scope-till-count')).toHaveCount(0);
+});
+
 test('a demo cashier emails the receipt after a sale', async ({ page }) => {
   await page.goto('/demo');
   await page.getByTestId('demo-enter').click();
