@@ -41,8 +41,8 @@ import { taxRoundingFor, type TaxRounding } from './tax-rounding';
 import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
 /**
- * @deprecated Read `warnings`. `tax_rate_mismatch` is also sent there (app#528); `total_mismatch` moves there once the
- * till (@tallyui/pos) treats a bridged total as a notice, and `totalWarnings` is removed in a later release.
+ * @deprecated Read `warnings`. It carries `tax_rate_mismatch` since app#528 and `total_mismatch` since app#528 half 2.
+ * `totalWarnings` will be removed in a later release.
  */
 export type TotalWarning =
   | { code: 'total_mismatch'; expectedMinor: number; serverMinor: number; bridgeMinor: number }
@@ -980,7 +980,7 @@ export class OrderCreateService {
     }
     const warnings: NonNullable<OrderCreateResult['warnings']> = [
       ...stockWarnings, ...ignored, ...figureWarnings,
-      ...totalWarnings.filter((warning): warning is Extract<TotalWarning, { code: 'tax_rate_mismatch' }> => warning.code === 'tax_rate_mismatch'),
+      ...totalWarnings,
       ...fallbacks,
       ...wireEntries.map(entry => ({ code: 'cash_rounding_unexplained' as const, ...entry })),
     ];

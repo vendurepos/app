@@ -107,12 +107,11 @@ export function taxCases(strategy: string, override: Parameters<typeof createPlu
           for (const rate of perRate) expect(Math.abs(rate.diff), JSON.stringify(rate)).toBeLessThanOrEqual(T);
           expect(result.totalWarnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
           expect(result.warnings?.filter(warning => warning.code === 'tax_rate_mismatch') ?? []).toEqual([]);
-          expect(result.warnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual([]);
           expect(bridges).toHaveLength(bridge === 0 ? 0 : 1);
-          expect(result.totalWarnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual(
-            bridge === 0 ? [] : [{ code: 'total_mismatch', expectedMinor: command.payload.totalMinor,
-              serverMinor: command.payload.totalMinor - bridge, bridgeMinor: bridge }],
-          );
+          const expectedTotalWarnings = bridge === 0 ? [] : [{ code: 'total_mismatch', expectedMinor: command.payload.totalMinor,
+            serverMinor: command.payload.totalMinor - bridge, bridgeMinor: bridge }];
+          expect(result.totalWarnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual(expectedTotalWarnings);
+          expect(result.warnings?.filter(warning => warning.code === 'total_mismatch') ?? []).toEqual(expectedTotalWarnings);
           if (bridge !== 0) expect(bridges[0]).toMatchObject({
             description: 'POS rounding', listPriceIncludesTax: true, taxLines: [],
           });
