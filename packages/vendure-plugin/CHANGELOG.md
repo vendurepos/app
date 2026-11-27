@@ -4,7 +4,7 @@
 
 ### Added
 
-- Register reads carry the live session's `openVersion` (VP-B). `GET /tally/v1/registers/:id` and `GET /tally/v1/registers` return it: the register contract version of the open that created the session, or `null` for a session stored before the plugin kept it, which the store treats as 1. Before you set `registerApproval`, close or take over every live session below 3 or `null`. This removes the #332 known limit "the register read does not show which live sessions opened below version 3". Additive at read version 1. No migration: the column has existed since `TallyPosRegisterOpenVersion`.
+- Register reads carry the live session's `openVersion` (VP-B). `GET /tally/v1/registers/:id` and `GET /tally/v1/registers` return it: the register contract version of the open that created the session, or `null` for a session stored before the plugin kept it, which the store treats as 1. After you set `registerApproval`, read it and take over every live session below 3 or `null` from a version 3 till. The README's #332 known limit gives the order and what the reads cannot show: the list's cap of 100 registers, and a `closed` session whose closure is not yet submitted. This replaces the #332 limit "the register read does not show which live sessions opened below version 3". Additive at read version 1. No migration: the column has existed since `TallyPosRegisterOpenVersion`.
 
 ## 0.6.0 (2026-11-27)
 
