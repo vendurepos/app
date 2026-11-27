@@ -3,8 +3,8 @@
 ## 0.6.0 (2026-11-27)
 
 **Version pairing:** serve 0.6.0 only once the VendurePOS app from vendurepos/app#537 on is deployed. That app is on @tallyui 5.3.0 and forwards connector-vendure's `discountsAreTaxedRows` to every "Needs attention" reader, so it lists a bridged sale only when the bridge is over ADR-048's tolerance T, with discounted lines counted.
-- A till on @tallyui 5.3.0 without app#537 lists every bridge over the T without discounted lines, ⌈(lines + fees + shipping)/2⌉.
-- A till on an older @tallyui lists every bridged sale under "Needs attention".
+- A till on @tallyui 5.2.0, or on 5.3.0 without app#537, lists every bridge over the T without discounted lines, ⌈(lines + fees + shipping)/2⌉.
+- A till on a @tallyui older than 5.2.0 lists every bridged sale under "Needs attention".
 - The plugin cannot tell which till is calling, so it cannot gate this. A till still running an older bundle sees the new `warnings` until it reloads the deployed app.
 - `order.create` replays from the ledger return the stored answer. A sale applied before the upgrade replays with its old `warnings`.
 
@@ -26,7 +26,7 @@
 - `order.create` sends a bridged `total_mismatch` in `warnings` as well as in `totalWarnings` (vendurepos/app#537). It has the same figures, and it comes before any `tax_rate_mismatch`, as in `totalWarnings`. See the version pairing above.
 - The per-rate tolerance T for `tax_rate_mismatch` is now counted from the payload: ⌈(lines + fees + shipping + lines with `discountMinor` > 0)/2⌉ (vendurepos/app#532). This is the same T as TallyUI ADR-048 and @tallyui/pos `needsAttention`.
   - Before, T counted the saved order's lines and surcharges. That added the TALLY-ROUNDING bridge row and Vendure's always-present shipping line.
-  - T is now lower on those orders, so a per-rate drift that used to pass silently can raise `tax_rate_mismatch`.
+  - T is now lower or equal on those orders, so a per-rate drift that used to pass silently can raise `tax_rate_mismatch`.
   - The bridge bound (money P3 #7) keeps its own count.
 
 ### Deprecated
@@ -35,7 +35,11 @@
 
 ### Fixed
 
-- A refund that takes everything left on the lines is now refused, unstored, as `rounding_exceeds_rest` with `{ roundingMinor, restMinor }` when the order's negative rounding (TALLY-ROUNDING plus TALLY-CASH-ROUNDING) brings it to 0 or less (vendurepos/app#526, #469). Before, it was refused as `nothing_to_refund`, and the till told the cashier to pick an item. The till now says to refund the rest in Vendure admin. No figure changes.
+- A refund that takes everything left on the lines is now refused, unstored, as `rounding_exceeds_rest` when the order's negative rounding (TALLY-ROUNDING plus TALLY-CASH-ROUNDING) brings it to 0 or less (vendurepos/app#526, #469).
+  - It carries `{ roundingMinor, restMinor }`. `restMinor` is the refund's total before that rounding, shipping and adjustment included.
+  - Before, a sum of exactly 0 was refused `nothing_to_refund`, and the till told the cashier to pick an item. A sum below 0 was refused `amount_mismatch`.
+  - The app from vendurepos/app#526 on says to refund the rest in Vendure admin. An older till shows its generic refusal with the code.
+  - No figure changes.
 
 ## 0.5.0 (2026-11-26)
 
