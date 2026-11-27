@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Register reads carry the live session's `openVersion` (VP-B). `GET /tally/v1/registers/:id` and `GET /tally/v1/registers` return it: the register contract version of the open that created the session, or `null` for a session stored before the plugin kept it, which the store treats as 1. Before you set `registerApproval`, close or take over every live session below 3 or `null`. This removes the #332 known limit "the register read does not show which live sessions opened below version 3". Additive at read version 1. No migration: the column has existed since `TallyPosRegisterOpenVersion`.
+
 ## 0.6.0 (2026-11-27)
 
 **Version pairing:** serve 0.6.0 only once the VendurePOS app from vendurepos/app#537 on is deployed. That app is on @tallyui 5.3.0 and forwards connector-vendure's `discountsAreTaxedRows` to every "Needs attention" reader, so it lists a bridged sale only when the bridge is over ADR-048's tolerance T, with discounted lines counted.
