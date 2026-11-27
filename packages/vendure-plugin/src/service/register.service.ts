@@ -192,7 +192,7 @@ export class RegisterService {
         // expected and the cash paid in and out come from this one read of the movements, so they cannot disagree.
         const { id, status, expected, salesCount } = await this.liveSession(tx, live, state.status, moves);
         session = { id, status: status as 'open' | 'counting', openedAt: live.openedAt, openedBy: live.openedBy, deviceId: live.deviceId,
-          deviceName: live.deviceName, countedFloatMinor: live.countedFloatMinor, expected, salesCount,
+          deviceName: live.deviceName, openVersion: live.openVersion, countedFloatMinor: live.countedFloatMinor, expected, salesCount,
           ...countedMovements(moves.map(row => row.id), moves),
           movements: moves.map(row => ({ id: row.id, type: row.type, amountMinor: row.amountMinor, reason: row.reason, voids: row.voids,
             createdAt: row.createdAt, createdBy: row.createdBy })) };
@@ -240,7 +240,7 @@ export class RegisterService {
         const state = live ? await this.sessionState(tx, live) : undefined;
         items.push({ id: register.id, receivedAt: register.receivedAt.toISOString(), lastDeviceName: newest?.deviceName ?? null,
           session: live && state && !state.closed ? { status: state.status as 'open' | 'counting', openedAt: live.openedAt,
-            openedBy: live.openedBy, deviceName: live.deviceName } : null });
+            openedBy: live.openedBy, deviceName: live.deviceName, openVersion: live.openVersion } : null });
       }
       return items;
     });

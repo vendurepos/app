@@ -11,7 +11,9 @@ export type TallyRegisterRead = {
   counters: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
   session: null | {
     id: string; status: 'open' | 'counting'; openedAt: string; openedBy: string | null;
-    deviceId: string | null; deviceName: string | null; countedFloatMinor: number;
+    deviceId: string | null; deviceName: string | null;
+    /** #332: the register contract version of the open that created the session; null for a session stored before the plugin kept it, which the store treats as 1. Additive at version 1. */
+    openVersion: number | null; countedFloatMinor: number;
     /** 4.3c: `expected`, `paidInMinor` and `paidOutMinor` are omitted for a caller without ApproveTallyPosVariance. */
     expected?: Record<string, number>; salesCount: number;
     /** Every movement row of the session, oldest first by `createdAt` then `id`. `paidInMinor` and `paidOutMinor` follow the
@@ -48,7 +50,7 @@ export type TallyClosureRead = {
 /** One row of `GET /tally/v1/registers`. A register has no name of its own (the plugin's rows, not a Vendure entity): the app labels it by `lastDeviceName`. */
 export type TallyRegisterListItem = {
   id: string; receivedAt: string; lastDeviceName: string | null;
-  session: null | { status: 'open' | 'counting'; openedAt: string; openedBy: string | null; deviceName: string | null };
+  session: null | { status: 'open' | 'counting'; openedAt: string; openedBy: string | null; deviceName: string | null; openVersion: number | null };
 };
 
 type StatusResponse = { status(code: number): unknown };
