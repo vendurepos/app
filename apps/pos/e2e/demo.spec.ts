@@ -1903,7 +1903,7 @@ test('a discounted sale whose rounding line is inside the tolerance is not liste
       if (init?.method !== 'POST' || !url.endsWith('/tally/v1/commands') || !String(init.body).includes('"order.create"')) return response;
       const body = await response.json();
       for (const result of body.results) {
-        if (result.status === 'applied') result.warnings = [...result.warnings ?? [], { code: 'total_mismatch', expectedMinor: 4604, serverMinor: 4602, bridgeMinor: 2 }];
+        if (result.status === 'applied') result.warnings = [...result.warnings ?? [], { code: 'total_mismatch', expectedMinor: 4997, serverMinor: 4995, bridgeMinor: 2 }];
       }
       return new Response(JSON.stringify(body), { status: response.status, headers: response.headers });
     };
@@ -1912,14 +1912,17 @@ test('a discounted sale whose rounding line is inside the tolerance is not liste
   await expectSignedIn(page);
   await openRegister(page);
   await page.getByTestId('product-tile-Tally Fixture Mug').click();
-  await page.getByTestId('cart-line-TALLY-MUG').getByTestId('price-popover-trigger').click();
-  await page.getByTestId('price-discount-10').click();
-  await page.getByTestId('price-popover-apply').click();
   await page.getByTestId('product-tile-Canvas Apron').click();
-  await page.getByTestId('cart-line-APP-APRON').getByTestId('price-popover-trigger').click();
-  await page.getByTestId('price-discount-10').click();
-  await page.getByTestId('price-popover-apply').click();
+  // The order discount spreads across both lines, so both count as discounted; the price keypad sets a new unit price instead.
+  const cart = page.getByTestId('cart');
+  await cart.getByTestId('order-discount').click();
+  const form = cart.getByRole('group', { name: 'Order discount' });
+  await form.getByRole('button', { name: 'Amount' }).click();
+  await form.getByLabel('Discount value').fill('1.00');
+  await form.getByRole('button', { name: 'Apply' }).click();
+  await expect(form).toHaveCount(0);
   await checkout(page);
+  await expect(cart.getByTestId('cart-total')).toHaveText('€49.97');
   await typeAmount(page, '50.00');
   await takePayment(page);
   await page.getByTestId('tender-pane').getByTestId('tender-complete').click();
@@ -1929,7 +1932,7 @@ test('a discounted sale whose rounding line is inside the tolerance is not liste
   const panel = page.getByTestId('orders-panel');
   // Two discounted lines make T = ⌈(2 + 2)/2⌉ = 2 with the connector's discountsAreTaxedRows, against ⌈2/2⌉ = 1
   // without it, so a bridge of 2 is a notice only when the flag reaches the panel.
-  await expect(panel.getByText('Store calculated €46.02; a rounding line of +€0.02 brought it to €46.04', { exact: true })).toHaveCount(1);
+  await expect(panel.getByText('Store calculated €49.95; a rounding line of +€0.02 brought it to €49.97', { exact: true })).toHaveCount(1);
   await expect(panel.getByText('Needs attention', { exact: true })).toHaveCount(0);
   await expect(page.getByTestId('orders-scope-till-count')).toHaveCount(0);
 });
