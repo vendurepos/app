@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-11-27)
+
+**Version pairing:** serve 0.6.0 only once the VendurePOS app from vendurepos/app#537 on is deployed. That app is on @tallyui 5.3.0 and forwards connector-vendure's `discountsAreTaxedRows` to every "Needs attention" reader, so it lists a bridged sale only when the bridge is over ADR-048's tolerance T, with discounted lines counted.
+- A till on @tallyui 5.3.0 without app#537 lists every bridge over the T without discounted lines, ⌈(lines + fees + shipping)/2⌉.
+- A till on an older @tallyui lists every bridged sale under "Needs attention".
+- The plugin cannot tell which till is calling, so it cannot gate this. A till still running an older bundle sees the new `warnings` until it reloads the deployed app.
+- `order.create` replays from the ledger return the stored answer. A sale applied before the upgrade replays with its old `warnings`.
+
+### Upgrading
+
+- **From 0.5.0:** no migrations, no new permissions and no new options. The changes below apply as soon as 0.6.0 serves.
 
 ### Added
 
@@ -12,8 +22,20 @@
 
 ### Changed
 
-- `order.create` sends a bridged `total_mismatch` in `warnings` as well as in the deprecated `totalWarnings` (vendurepos/app#528). It has the same figures, and it comes before any `tax_rate_mismatch`, as in `totalWarnings`. `totalWarnings` is unchanged and will be removed in a later release.
-  - **Version pairing:** deploy the VendurePOS app from vendurepos/app#528 half 2 on (@tallyui 5.3.0, which forwards connector-vendure's `discountsAreTaxedRows`) before serving this release. That till lists a bridge only when it is over ADR-048's tolerance. An older till lists every bridged sale under "Needs attention".
+- `order.create` sends each `tax_rate_mismatch` in `warnings` as well as in `totalWarnings`. It is the same object (vendurepos/app#530). The till parses it, shows its notice, and lists the applied sale under "Needs attention".
+- `order.create` sends a bridged `total_mismatch` in `warnings` as well as in `totalWarnings` (vendurepos/app#537). It has the same figures, and it comes before any `tax_rate_mismatch`, as in `totalWarnings`. See the version pairing above.
+- The per-rate tolerance T for `tax_rate_mismatch` is now counted from the payload: ⌈(lines + fees + shipping + lines with `discountMinor` > 0)/2⌉ (vendurepos/app#532). This is the same T as TallyUI ADR-048 and @tallyui/pos `needsAttention`.
+  - Before, T counted the saved order's lines and surcharges. That added the TALLY-ROUNDING bridge row and Vendure's always-present shipping line.
+  - T is now lower on those orders, so a per-rate drift that used to pass silently can raise `tax_rate_mismatch`.
+  - The bridge bound (money P3 #7) keeps its own count.
+
+### Deprecated
+
+- `totalWarnings`. Read `warnings`, which now carries every entry in it. `totalWarnings` is still sent, unchanged, and will be removed in a later release.
+
+### Fixed
+
+- A refund that takes everything left on the lines is now refused, unstored, as `rounding_exceeds_rest` with `{ roundingMinor, restMinor }` when the order's negative rounding (TALLY-ROUNDING plus TALLY-CASH-ROUNDING) brings it to 0 or less (vendurepos/app#526, #469). Before, it was refused as `nothing_to_refund`, and the till told the cashier to pick an item. The till now says to refund the rest in Vendure admin. No figure changes.
 
 ## 0.5.0 (2026-11-26)
 
