@@ -312,13 +312,19 @@ describe('GET /tally/v1/registers/:id', () => {
       expect((await list(await tokenWith(['TallyPosSell']))).status).toBe(200);
     });
 
-    it('#332: each live session carries its open version', async () => {
-      const [registerA, registerB] = [uuid(), uuid()];
+    it('#332: each live session carries its open version, null for a session stored without one', async () => {
+      const [registerA, registerB, registerC, legacySession] = [uuid(), uuid(), uuid(), uuid()];
       await applied(open(uuid(), registerA, {}, 3));
       await applied(open(uuid(), registerB, {}, 1));
+      await applied(open(legacySession, registerC, {}, 2));
+      const channelId = String((await server.app.get(RequestContextService).create({ apiType: 'custom' })).channelId);
+      await server.app.get(TransactionalConnection).rawConnection.getRepository(TallyRegisterSession)
+        .update({ channelId, id: legacySession }, { openVersion: null });
+
       const { body } = await list();
       expect(body.items.find((item: { id: string }) => item.id === registerA).session.openVersion).toBe(3);
       expect(body.items.find((item: { id: string }) => item.id === registerB).session.openVersion).toBe(1);
+      expect(body.items.find((item: { id: string }) => item.id === registerC).session).toHaveProperty('openVersion', null);
     });
   });
 });
