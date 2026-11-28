@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { ConfigService, OrderHistoryEntry, TransactionalConnection } from '@vendure/core';
+import { ConfigService, TransactionalConnection } from '@vendure/core';
+import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';

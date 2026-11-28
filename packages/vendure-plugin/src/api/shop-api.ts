@@ -1,5 +1,6 @@
 import { Parent, ResolveField, Resolver } from '@nestjs/graphql';
-import { Ctx, OrderHistoryEntry, Payment, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
+import { Ctx, Payment, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
+import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 
 // The fixed refund reason a shopper sees in place of staff text.
 export const SHOP_REFUND_REASON = 'Refunded';
