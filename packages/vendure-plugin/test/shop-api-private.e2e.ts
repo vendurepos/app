@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ConfigService, TransactionalConnection } from '@vendure/core';
+import { ConfigService, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -8,9 +8,10 @@ import { SHOP_CANCEL_REASON, SHOP_REFUND_REASON } from '../src/api/shop-api';
 import { orderCustomFields, orderLineCustomFields } from '../src/config/custom-fields';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
+import { createStorefrontMethods, guestOrder } from './shop';
 
 describe('POS order custom field visibility', () => {
-  const environment = createPluginTestEnvironment();
+  const environment = createPluginTestEnvironment({ paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler] } });
   const { server, adminClient, shopClient, variantIds, run } = environment;
   let orderId: string;
   let code: string;
@@ -275,5 +276,68 @@ describe('POS order custom field visibility', () => {
     expect(updated.affected).toBe(1);
     const reread = await anonymousRead(code);
     assertCancelled(reread, reread.orderByCode, legacy);
+  });
+
+  async function adminRefundAndCancel(orderId: string, refundReason: string, cancelReason: string, amount?: number) {
+    const { order } = await adminClient.query(parse(`query Order($id: ID!) {
+      order(id: $id) { payments { id amount } }
+    }`), { id: orderId });
+    const [payment] = order.payments;
+    const { refundOrder } = await adminClient.query(parse(`mutation Refund($input: RefundOrderInput!) {
+      refundOrder(input: $input) { __typename ... on Refund { id total state } ... on ErrorResult { errorCode message } }
+    }`), { input: { paymentId: payment.id, amount: amount ?? payment.amount, shipping: 0, adjustment: 0, reason: refundReason } });
+    expect(refundOrder).toMatchObject({ __typename: 'Refund' });
+    const { cancelOrder } = await adminClient.query(parse(`mutation Cancel($input: CancelOrderInput!) {
+      cancelOrder(input: $input) { ... on Order { state } ... on ErrorResult { errorCode message } }
+    }`), { input: { orderId, reason: cancelReason, cancelShipping: true } });
+    expect(cancelOrder).toMatchObject({ state: 'Cancelled' });
+  }
+
+  it('P7: a storefront order keeps Vendure’s reasons on the Shop API', async () => {
+    const { standardShippingId, dummyPaymentCode } = await createStorefrontMethods(adminClient);
+    const shop = await guestOrder(shopClient, variantIds.mug[0], `p7-${randomUUID()}@customer.example`);
+    await shop.setShipping(standardShippingId);
+    await shop.arrangePayment();
+    const paid = await shop.pay(dummyPaymentCode);
+    expect(paid).toMatchObject({ state: 'PaymentSettled' });
+    const refundReason = `p7-refund-${randomUUID()}`;
+    const cancelReason = `p7-cancel-${randomUUID()}`;
+    await adminRefundAndCancel(paid.id!, refundReason, cancelReason);
+
+    const { orderByCode } = await anonymousRead(paid.code!);
+    expect(orderByCode.payments.flatMap(payment => payment.refunds.map(refund => refund.reason))).toEqual([refundReason]);
+    expect(orderByCode.history.items).toContainEqual({ type: 'ORDER_REFUND_TRANSITION', data: expect.objectContaining({ reason: refundReason }) });
+    expect(orderByCode.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: cancelReason }) });
+  });
+
+  it('P8: a POS order’s back-office refund and Admin cancel are neutral on the Shop API', async () => {
+    const sale = freshSale();
+    sale.payload.customer = { customerId: till.customerId };
+    const result = await run(sale);
+    expect(result.status).toBe('applied');
+    const { orderId: id, displayId: code } = result.serverRefs!;
+    const refundReason = `p8-refund-${randomUUID()}`;
+    const cancelReason = `p8-cancel-${randomUUID()}`;
+    await adminRefundAndCancel(id, refundReason, cancelReason, 300);
+
+    const anonymous = await anonymousRead(code);
+    const customer = await customerRead(code);
+    expect(customer.activeCustomer.orders.items).toHaveLength(1);
+    for (const [response, order] of [[anonymous, anonymous.orderByCode], [customer, customer.activeCustomer.orders.items[0]]] as const) {
+      const serialized = JSON.stringify(response);
+      expect(serialized).not.toContain(refundReason);
+      expect(serialized).not.toContain(cancelReason);
+      expect(order.payments.flatMap(payment => payment.refunds.map(refund => refund.reason))).toEqual([SHOP_REFUND_REASON]);
+      const transitions = order.history.items.filter(entry => entry.type === 'ORDER_REFUND_TRANSITION');
+      expect(transitions.length).toBeGreaterThan(0);
+      for (const entry of transitions) expect(entry.data.reason).toBe(SHOP_REFUND_REASON);
+      expect(order.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: SHOP_CANCEL_REASON }) });
+    }
+
+    const { order } = await adminClient.query(parse(`query Order($id: ID!) { order(id: $id) {
+      payments { refunds { reason } } history { items { type data } }
+    } }`), { id });
+    expect(order.payments[0].refunds).toEqual([{ reason: refundReason }]);
+    expect(order.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: cancelReason }) });
   });
 });
