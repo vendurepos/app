@@ -6,6 +6,14 @@
 
 - Every `tally…` order and order-line custom field is now `public: false`, so it is no longer on the Shop API. Until now an anonymous Shop API `orderByCode` of a POS sale within 2 hours of the sale, or the order's own customer at any time, could read the till's snapshot, payment list, cashier ref and register and session ids. The Admin API, where the VendurePOS app and connector-vendure read these fields, is unchanged. A storefront that selected any `tally…` field on the Shop API now gets a GraphQL validation error; with no other public custom field, the Shop API's `Order.customFields` and `OrderLine.customFields` become the `JSON` scalar and read `null`. No migration.
 - On the Shop API, `Refund.metadata` now keeps only its `public` key, as Vendure already does for `Payment.metadata`. Vendure returned it raw, so the same readers could read a till refund's cashier ref, register and session ids, client refund id and refunded lines. The rule applies to every refund on the Shop API, whichever payment method made it, and a refund with no metadata reads `{}`. The Admin API is unchanged.
+- Staff-typed text no longer reaches the Shop API (#546). Until now, the order's customer, and an anonymous `orderByCode` within 2 hours of the sale, could read three kinds of it in `Order.history` and on `Refund.reason`: a cashier's refund reason, an admin's rejection note (Vendure's public cancellation entry), and an admin's customer-change note. This applies to POS orders and till refunds, on the Shop API only:
+  - `Refund.reason` and the refund history entry's `data.reason` read `Refunded`.
+  - A cancellation entry's `data.reason` reads `Cancelled`.
+  - A customer-change entry has no `note`.
+  - The filter runs on read, so older orders are covered too. Stored data and the Admin API are unchanged.
+  - A storefront order keeps Vendure's reasons.
+  - A rejection of a `needs_admin` sale now cancels with the fixed reason, and keeps the admin's note in a private order note. The till still gets the note in the command result.
+  - The sale note (`order.create` version 7) stays a public order note: it is the note meant for the customer.
 
 ### Added
 

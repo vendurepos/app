@@ -30,7 +30,9 @@ until an admin resolves it through the Admin API. `tallyNeedsAdminCommands` list
 SuperAdmin; a rejection must be sent with the sale's channel token (`vendure-token`). Either resolution takes the leftover
 top-up back at the stock location recorded when it was made. Rejecting also cancels the POS
 payments and the order with Vendure's own cancellation, releases its client id (kept in
-`tallyRejectedClientOrderId`) and flags it `tallyRejected`; if a step fails, it is refused and
+`tallyRejectedClientOrderId`) and flags it `tallyRejected`. The cancellation's reason is the fixed
+`Cancelled`; the admin's note goes to the till and into a private order note (`Rejected by an admin: …`),
+never to the shopper; if a step fails, it is refused and
 changes nothing. **An order flagged `tallyRejected` counts as never placed**: leave it out of any
 register or sales figure; the till's Retry makes the sale that counts.
 
@@ -131,6 +133,17 @@ and session ids and the rest, all named `tally…`) are readonly and exist only 
 shopper reading a POS order through the Shop API, by its code or from their account, gets `customFields: null`.
 A till refund's metadata (its cashier ref, register and session ids, client refund id and lines) is Admin API only
 too: on the Shop API, every `Refund.metadata` keeps only its `public` key, as Vendure does for `Payment.metadata`.
+
+Text staff type never reaches a shopper. On the Shop API, for a POS order or a till refund:
+
+- `Refund.reason` reads `Refunded`, and the refund history entry's `data.reason` reads `Refunded`.
+- A cancellation history entry's `data.reason` reads `Cancelled`.
+- A customer-change history entry has no `note`.
+
+This happens when the Shop API is read; nothing stored changes. So it covers orders written before this release, and the Admin API
+(the dashboard, the VendurePOS app, connector-vendure) still reads the real text. A storefront order keeps Vendure's
+reasons. Private order notes stay off the Shop API, as in Vendure. The one note a shopper can see is the sale note
+(below), which is meant for the customer.
 
 ### The POS methods across channels
 
@@ -297,7 +310,8 @@ vendureDashboardPlugin({
 ### order.create versions 6 and 7: the sale note
 
 Version 7 adds the sale's `note` (at most 1000 characters). It is written to the order as one public order note,
-which the order's history in the Admin shows. Version 6's coupons and Any picks are refused as `invalid_payload`;
+which the order's history in the Admin shows. It is the note meant for the customer: the order's customer, and an
+anonymous `orderByCode` within 2 hours of the sale, read it in the order's Shop API history. Version 6's coupons and Any picks are refused as `invalid_payload`;
 its regular prices and line attributes are accepted for display and change no amount.
 
 ### Register version 2: resume, take-over and unknown sessions
