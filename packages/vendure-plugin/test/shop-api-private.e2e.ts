@@ -485,6 +485,27 @@ describe('POS order custom field visibility', () => {
     const stored = { fullName: 'Ada Lovelace', streetLine1: DE.address1, city: DE.city, postalCode: DE.postcode, countryCode: DE.country };
     expect((await adminClient.query(adminOrder, { id })).order).toEqual({ billingAddress: stored, shippingAddress: stored });
 
+    const money = parse(`query Money($id: ID!) { order(id: $id) {
+      currencyCode subTotal subTotalWithTax total totalWithTax
+      discounts { amount amountWithTax } promotions { id } lines { linePriceWithTax taxRate }
+    } }`);
+    const { order: before } = await adminClient.query(money, { id });
+    expect(before.promotions).toEqual([]);
+    let promotionId: string | undefined;
+    try {
+      const created = await adminClient.query(parse(`mutation Promotion($input: CreatePromotionInput!) {
+        createPromotion(input: $input) { ... on Promotion { id enabled couponCode } ... on ErrorResult { message } }
+      }`), { input: {
+        enabled: true, startsAt: '2020-01-01T00:00:00.000Z', endsAt: '2099-01-01T00:00:00.000Z',
+        translations: [{ languageCode: 'en', name: 'P12 order percentage discount', description: '' }],
+        conditions: [{ code: 'minimum_order_amount', arguments: [
+          { name: 'amount', value: '0' }, { name: 'taxInclusive', value: 'false' },
+        ] }],
+        actions: [{ code: 'order_percentage_discount', arguments: [{ name: 'discount', value: '10' }] }],
+      } });
+      promotionId = created.createPromotion.id;
+      expect(created.createPromotion, JSON.stringify(created)).toMatchObject({ enabled: true, couponCode: null });
+
     expect((await adminClient.query(moveOrder, { input: { orderId: id, customerId: till.customerId } })).setOrderCustomer.id).toBe(id);
     const empty = { fullName: null, streetLine1: null, city: null, postalCode: null, countryCode: null };
     const cleared = { billingAddress: empty, shippingAddress: empty };
@@ -508,6 +529,13 @@ describe('POS order custom field visibility', () => {
 
     expect((await adminClient.query(moveOrder, { input: { orderId: id, customerId: customerA.id } })).setOrderCustomer.id).toBe(id);
     expect((await adminClient.query(adminOrder, { id })).order).toEqual(cleared);
+      const { order: after } = await adminClient.query(money, { id });
+      expect(after).toEqual(before);
+    } finally {
+      if (promotionId) await adminClient.query(parse(`mutation Disable($input: UpdatePromotionInput!) {
+        updatePromotion(input: $input) { ... on Promotion { id enabled } }
+      }`), { input: { id: promotionId, enabled: false } });
+    }
   });
 
   it('P13: a storefront order moved to another customer keeps its address', async () => {
