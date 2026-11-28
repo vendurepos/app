@@ -1,6 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { Allow, ConfigService, Ctx, Permission, RequestContext, TransactionalConnection, ZoneService, idsAreEqual } from '@vendure/core';
-import { tallyPosSell } from '../config/permissions';
+import { tallyPosSell, tallyPosTaxExempt } from '../config/permissions';
 import { TALLY_RECEIPT_EMAIL } from './receipt-email.controller';
 import type { ReceiptEmailCaps } from './receipt-email.controller';
 import { DisplaySignallingService } from '../service/display-signalling.service';
@@ -63,7 +63,10 @@ export class TallyInfoController {
       maxShippingLines: MAX_SHIPPING_LINES, // ADR 0005 ruling (b): one shipping charge per order.
       lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
       customerDisplay: this.displays.advertisement(), paymentMethods: await this.paymentMethods.listed(ctx),
-      cashRounding: { v: 1 }, chargeTaxMode: { v: 1 }, ...TAX_EXEMPT_SUPPORT, permissions: sessionChannelPermissions(ctx),
+      cashRounding: { v: 1 }, chargeTaxMode: { v: 1 },
+      // Match the exemption gate for this channel and session (#542).
+      taxExempt: TAX_EXEMPT_SUPPORT.taxExempt && !ctx.channel.pricesIncludeTax && ctx.userHasPermissions([tallyPosTaxExempt.Permission]),
+      taxExemptCoupons: TAX_EXEMPT_SUPPORT.taxExemptCoupons, permissions: sessionChannelPermissions(ctx),
     };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };

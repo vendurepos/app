@@ -19,7 +19,8 @@
 
 - Register reads carry the live session's `openVersion` (VP-B). `GET /tally/v1/registers/:id` and `GET /tally/v1/registers` return it: the register contract version of the open that created the session, or `null` for a session stored before the plugin kept it, which the store treats as 1. After you set `registerApproval`, read it, then for every live session below 3 or `null`, take it over from another version 3 till or close it at version 3. The README's #332 known limit gives the order and what the reads cannot show: the list's cap of 100 registers, and a `closed` session whose closure is not yet submitted. This replaces the #332 limit "the register read does not show which live sessions opened below version 3". Additive at read version 1. No migration: the column has existed since `TallyPosRegisterOpenVersion`.
 - Tax-exempt sales (#540, TallyUI#1447):
-  - `/tally/v1/info` advertises `taxExempt: true` and `taxExemptCoupons: false` as bare booleans. Both come from `TAX_EXEMPT_SUPPORT`, the constant that `order.create`'s gate also reads.
+  - `/tally/v1/info` advertises `taxExempt: true` only for a session with `TallyPosTaxExempt` on a channel whose prices exclude tax. `taxExemptCoupons` stays false.
+  - New permission `TallyPosTaxExempt` (#542). An exempt `order.create` without it is refused, unstored, as `forbidden`. No existing role gains it; add it to the roles that may exempt.
   - `order.create` accepts `taxExempt: true` at every content version. The order is stored with zero tax: every line goes on the `POS no tax` category, and fees and shipping are untaxed.
   - An exempt sale is refused, unstored, as `invalid_payload` when `taxExempt` is not `true`, when it is in prices-include-tax mode, when it has an inclusive line, fee or shipping charge, when any tax figure is not 0, or when it carries coupons.
   - An exempt sale is refused, unstored, as `store_configuration` if `POS no tax` has a rate in the order's zone.

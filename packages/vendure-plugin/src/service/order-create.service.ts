@@ -7,6 +7,7 @@ import {
 } from '@vendure/core';
 import type { CurrencyCode } from '@vendure/core';
 import { In, IsNull } from 'typeorm';
+import { tallyPosTaxExempt } from '../config/permissions';
 import {
   TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingChecker,
@@ -172,7 +173,7 @@ export class OrderCreateService {
       const invalidValue = recorded ? undefined
         : loneSurrogateRefusal(command.id, command) ?? this.valueRefusal(command) ?? clientTimeRefusal(command.id,
           [['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]],
-          (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS);
+          (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS) ?? this.exemptPermissionRefusal(ctx, command);
       if (invalidValue) return invalidValue;
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       commandCtx = new RequestContext({
@@ -385,6 +386,13 @@ export class OrderCreateService {
     }
     return errors.length ? refuse(id, 'invalid_payload', errors.join('; ')) : undefined;
   }
+  // Front desk ruling #542: refuse a new exempt sale without permission, before the claim.
+  private exemptPermissionRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
+    if ((command.payload as { taxExempt?: unknown }).taxExempt === true && !ctx.userHasPermissions([tallyPosTaxExempt.Permission])) {
+      return refuse(command.id, 'forbidden', 'TallyPosTaxExempt is required to exempt a sale from tax');
+    }
+  }
+
   // ADR-038 #220 step 4: the payload's values, after the replay read and the collision lookup and before the claim:
   // an unstored invalid_payload (Front desk, matching precheckCommand).
   private valueRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {

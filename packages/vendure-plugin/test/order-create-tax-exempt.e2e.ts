@@ -1,20 +1,32 @@
-import { Order, TransactionalConnection } from '@vendure/core';
+import { ConfigService, Order, RequestContextService, TransactionalConnection, User } from '@vendure/core';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { markTallyRoute } from '../src/config/strategies';
+import { TallyCommand } from '../src/entities/tally-command.entity';
 import { TAX_EXEMPT_SUPPORT, TALLY_NO_TAX_CATEGORY } from '../src/service/constants';
+import { OrderCreateService } from '../src/service/order-create.service';
 import { strictShapeErrors } from '../src/service/strict-shape';
+import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
 import { createPluginTestEnvironment } from './env';
 import { orderCommand } from './payloads';
 
 describe('order.create per-sale tax exemption', () => {
   const environment = createPluginTestEnvironment();
-  const { server, adminClient, variantIds, decode, run } = environment;
+  const { server, adminClient, variantIds, decode, run: runAnonymous } = environment;
   let connection: TransactionalConnection;
+  let superAdmin: User;
   beforeAll(async () => {
     await environment.init();
     connection = server.app.get(TransactionalConnection);
+    const { identifier } = server.app.get(ConfigService).authOptions.superadminCredentials;
+    superAdmin = await connection.rawConnection.getRepository(User).findOneOrFail({ where: { identifier }, relations: ['roles', 'roles.channels'] });
   });
   afterAll(() => server.destroy());
+
+  async function run(command: CommandEnvelope<OrderCreatePayload>, channelToken?: string) {
+    const ctx = markTallyRoute(await server.app.get(RequestContextService).create({ apiType: 'custom', channelOrToken: channelToken, user: superAdmin }));
+    return server.app.get(OrderCreateService).create(ctx, command);
+  }
 
   function mug(version?: 2 | 3) {
     const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800, ratePpm: 0 }],
@@ -231,6 +243,36 @@ describe('order.create per-sale tax exemption', () => {
     const order = await readOrder(result.serverRefs!.orderId);
     expect(order.totalWithTax).toBe(order.total);
     expect(JSON.parse(order.customFields.tallySnapshot!)).not.toHaveProperty('taxExempt');
+  });
+
+  it('E15: /info answers taxExempt false on a prices-include-tax channel', async () => {
+    const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
+    const setMode = async (pricesIncludeTax: boolean) => {
+      const updated = await adminClient.query(parse(`mutation Mode($input: UpdateChannelInput!) {
+        updateChannel(input: $input) { ... on Channel { pricesIncludeTax } }
+      }`), { input: { id: activeChannel.id, pricesIncludeTax } });
+      expect(updated).toMatchObject({ updateChannel: { pricesIncludeTax } });
+    };
+    const info = async () => {
+      const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    try {
+      await setMode(true);
+      expect(await info()).toMatchObject({ taxExempt: false, taxExemptCoupons: false });
+    } finally {
+      await setMode(false);
+    }
+    expect(await info()).toMatchObject({ taxExempt: true });
+  });
+
+  it('E16: an exempt sale from a context without TallyPosTaxExempt is refused forbidden, unstored', async () => {
+    const command = mug();
+    expect(await runAnonymous(command)).toMatchObject({ status: 'rejected',
+      error: { code: 'forbidden', message: 'TallyPosTaxExempt is required to exempt a sale from tax' } });
+    expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id })).toBeNull();
+    expect(await run(command)).toMatchObject({ status: 'applied' });
   });
 
   it('C1: the order.create gate reads the supported argument, not its own constant', () => {
