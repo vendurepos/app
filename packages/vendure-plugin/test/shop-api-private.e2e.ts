@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { ConfigService, Order, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
+import { ConfigService, CustomerService, Order, OrderService, RequestContextService, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { parse } from 'graphql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, assert, beforeAll, describe, expect, it } from 'vitest';
 import { TallyCommand } from '../src';
 import { SHOP_CANCEL_REASON, SHOP_REFUND_REASON } from '../src/api/shop-api';
 import { orderCustomFields, orderLineCustomFields } from '../src/config/custom-fields';
@@ -467,28 +467,37 @@ describe('POS order custom field visibility', () => {
   const moveOrder = parse(`mutation Move($input: SetOrderCustomerInput!) {
     setOrderCustomer(input: $input) { id }
   }`);
+  const draft = parse(`mutation Draft($orderId: ID!, $customerId: ID!) {
+    setCustomerForDraftOrder(orderId: $orderId, customerId: $customerId) { ... on Order { id } ... on ErrorResult { errorCode message } }
+  }`);
+  const fields = 'fullName streetLine1 city postalCode countryCode';
+  const addresses = `billingAddress { ${fields} } shippingAddress { ${fields} }`;
+  const adminOrder = parse(`query Order($id: ID!) { order(id: $id) { ${addresses} } }`);
+  const money = parse(`query Money($id: ID!) { order(id: $id) {
+    currencyCode subTotal subTotalWithTax total totalWithTax
+    discounts { amount amountWithTax } promotions { id } lines { linePriceWithTax taxRate }
+  } }`);
+  const DE = { firstName: 'Ada', lastName: 'Lovelace', address1: `Hauptstr. ${randomUUID()}`, city: 'Berlin', postcode: '10115', country: 'DE' };
+  const empty = { fullName: null, streetLine1: null, city: null, postalCode: null, countryCode: null };
+  const cleared = { billingAddress: empty, shippingAddress: empty };
+
+  async function posSaleWithAddresses(customerEmail: string) {
+    const sale = freshSale();
+    const customer = { email: customerEmail, billing: DE, shipping: DE };
+    sale.payload.customer = customer;
+    const result = await run({ ...sale, version: 11 } as unknown as typeof sale);
+    expect(result.status, JSON.stringify(result)).toBe('applied');
+    const { orderId: id, displayId: code } = result.serverRefs!;
+    const stored = { fullName: 'Ada Lovelace', streetLine1: DE.address1, city: DE.city, postalCode: DE.postcode, countryCode: DE.country };
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual({ billingAddress: stored, shippingAddress: stored });
+    return { id, code, stored: { billingAddress: stored, shippingAddress: stored } };
+  }
 
   it("P12: a POS order moved to another customer keeps none of the earlier customer's addresses", async () => {
     const input = { firstName: 'Ada', lastName: 'Lovelace', emailAddress: `p12-${randomUUID()}@example.com` };
     const { createCustomer: customerA } = await adminClient.query(createCustomer, { input });
     expect(customerA).toMatchObject({ id: expect.any(String), emailAddress: input.emailAddress });
-    const DE = { firstName: 'Ada', lastName: 'Lovelace', address1: `Hauptstr. ${randomUUID()}`, city: 'Berlin', postcode: '10115', country: 'DE' };
-    const sale = freshSale();
-    const customer = { email: customerA.emailAddress, billing: DE, shipping: DE };
-    sale.payload.customer = customer;
-    const result = await run({ ...sale, version: 11 } as unknown as typeof sale);
-    expect(result.status, JSON.stringify(result)).toBe('applied');
-    const { orderId: id, displayId: code } = result.serverRefs!;
-    const fields = 'fullName streetLine1 city postalCode countryCode';
-    const addresses = `billingAddress { ${fields} } shippingAddress { ${fields} }`;
-    const adminOrder = parse(`query Order($id: ID!) { order(id: $id) { ${addresses} } }`);
-    const stored = { fullName: 'Ada Lovelace', streetLine1: DE.address1, city: DE.city, postalCode: DE.postcode, countryCode: DE.country };
-    expect((await adminClient.query(adminOrder, { id })).order).toEqual({ billingAddress: stored, shippingAddress: stored });
-
-    const money = parse(`query Money($id: ID!) { order(id: $id) {
-      currencyCode subTotal subTotalWithTax total totalWithTax
-      discounts { amount amountWithTax } promotions { id } lines { linePriceWithTax taxRate }
-    } }`);
+    const { id, code } = await posSaleWithAddresses(customerA.emailAddress);
     const { order: before } = await adminClient.query(money, { id });
     expect(before.promotions).toEqual([]);
     let promotionId: string | undefined;
@@ -507,8 +516,6 @@ describe('POS order custom field visibility', () => {
       expect(created.createPromotion, JSON.stringify(created)).toMatchObject({ enabled: true, couponCode: null });
 
     expect((await adminClient.query(moveOrder, { input: { orderId: id, customerId: till.customerId } })).setOrderCustomer.id).toBe(id);
-    const empty = { fullName: null, streetLine1: null, city: null, postalCode: null, countryCode: null };
-    const cleared = { billingAddress: empty, shippingAddress: empty };
     expect((await adminClient.query(adminOrder, { id })).order).toEqual(cleared);
 
     expect(await shopClient.asUserWithCredentials(till.email, till.password)).toMatchObject({ identifier: till.email });
@@ -555,9 +562,64 @@ describe('POS order custom field visibility', () => {
     const { createCustomer: target } = await adminClient.query(createCustomer, { input });
     expect(target).toMatchObject({ id: expect.any(String) });
     expect((await adminClient.query(moveOrder, { input: { orderId: paid.id, customerId: target.id } })).setOrderCustomer.id).toBe(paid.id);
-    const { order } = await adminClient.query(parse(`query Order($id: ID!) {
+    const shipping = parse(`query Order($id: ID!) {
       order(id: $id) { shippingAddress { streetLine1 } }
-    }`), { id: paid.id });
+    }`);
+    const { order } = await adminClient.query(shipping, { id: paid.id });
     expect(order.shippingAddress.streetLine1).toBe(streetLine1);
+    const { createCustomer: second } = await adminClient.query(createCustomer, { input: { ...input, emailAddress: `p13-${randomUUID()}@example.com` } });
+    expect((await adminClient.query(draft, { orderId: paid.id, customerId: second.id })).setCustomerForDraftOrder.id).toBe(paid.id);
+    expect((await adminClient.query(shipping, { id: paid.id })).order.shippingAddress.streetLine1).toBe(streetLine1);
+  });
+
+  it('P14: moving a placed POS sale through the draft mutation clears addresses without repricing', async () => {
+    const { id, code } = await posSaleWithAddresses(`p14-${randomUUID()}@example.com`);
+    const { order: before } = await adminClient.query(money, { id });
+    expect((await adminClient.query(draft, { orderId: id, customerId: till.customerId })).setCustomerForDraftOrder.id).toBe(id);
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual(cleared);
+    await shopClient.asAnonymousUser();
+    const anonymous = await shopClient.query(parse(`query Order($code: String!) { orderByCode(code: $code) { ${addresses} } }`), { code });
+    expect(anonymous.orderByCode).toEqual(cleared);
+    expect(JSON.stringify(anonymous)).not.toContain(DE.address1);
+    expect(JSON.stringify(anonymous)).not.toContain('Berlin');
+    expect((await adminClient.query(money, { id })).order).toEqual(before);
+  });
+
+  it('P15: setting the same customer through the draft mutation leaves the placed POS sale untouched', async () => {
+    const { id, stored } = await posSaleWithAddresses(`p15-${randomUUID()}@example.com`);
+    const details = parse(`query Order($id: ID!) { order(id: $id) { updatedAt customer { id } } }`);
+    const { order: before } = await adminClient.query(details, { id });
+    expect((await adminClient.query(draft, { orderId: id, customerId: before.customer.id })).setCustomerForDraftOrder.id).toBe(id);
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual(stored);
+    expect((await adminClient.query(details, { id })).order.updatedAt).toBe(before.updatedAt);
+  });
+
+  it('P16: removing the customer of a placed POS sale clears both addresses', async () => {
+    const { id } = await posSaleWithAddresses(`p16-${randomUUID()}@example.com`);
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    const connection = server.app.get(TransactionalConnection);
+    await connection.withTransaction(ctx, async tx => {
+      const orders = connection.getRepository(tx, Order);
+      const order = await server.app.get(OrderService).findOne(tx, environment.decode(id));
+      assert.isDefined(order);
+      Object.assign(order, { customer: null });
+      await orders.save(order, { reload: false });
+    });
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual(cleared);
+  });
+
+  it('P17: rolling back a placed POS customer change preserves the customer and addresses', async () => {
+    const { id, stored } = await posSaleWithAddresses(`p17-${randomUUID()}@example.com`);
+    const owner = parse(`query Order($id: ID!) { order(id: $id) { customer { id } } }`);
+    const { order: before } = await adminClient.query(owner, { id });
+    expect(before.customer.id).not.toBe(till.customerId);
+    const ctx = await server.app.get(RequestContextService).create({ apiType: 'admin' });
+    const tillCustomer = await server.app.get(CustomerService).findOne(ctx, environment.decode(till.customerId));
+    await expect(server.app.get(TransactionalConnection).withTransaction(ctx, async tx => {
+      await server.app.get(OrderService).addCustomerToOrder(tx, environment.decode(id), tillCustomer!);
+      throw new Error('p17 rollback');
+    })).rejects.toThrow('p17 rollback');
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual(stored);
+    expect((await adminClient.query(owner, { id })).order.customer.id).toBe(before.customer.id);
   });
 });
