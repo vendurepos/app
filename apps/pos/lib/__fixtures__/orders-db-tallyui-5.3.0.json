@@ -1,6 +1,6 @@
 {
   "tallyuiVersion": "5.3.0",
-  "_provenance": "Written by @tallyui/pos 5.3.0 and @tallyui/core 5.3.0 (rxdb 17.5.0, memory storage): finalizeOrder + insert as useOrderOutbox.record, sentVersion as the outbox stamps it, writeOrderDraft as park(). Generated once for the 5.6.1 pin PR; do not edit by hand.",
+  "_provenance": "Written by @tallyui/pos 5.3.0 and @tallyui/core 5.3.0 (rxdb 17.5.0, memory storage): finalizeOrder + insert as useOrderOutbox.record, sentVersion as the outbox stamps it, one order sent by createOrderOutbox to a fake transport answering applied, writeOrderDraft as park() (one cart part paid). Generated once for the 5.6.1 pin PR; do not edit by hand.",
   "posOrderSchema": {
     "additionalProperties": false,
     "encrypted": [],
@@ -1325,17 +1325,17 @@
   },
   "posOrders": [
     {
-      "id": "01a22111-53a9-7418-9c37-dcb5d3ad25aa",
-      "saleId": "1795851113383-1",
-      "createdAt": "2026-11-28T07:31:53.388Z",
-      "updatedAt": "2026-11-28T07:31:53.388Z",
-      "commandId": "01a22111-53ac-7387-bd15-0246bd77e0c5",
-      "syncStatus": "pending",
+      "id": "01a22134-25e2-7701-a3a9-af30a9576089",
+      "saleId": "1795853395424-1",
+      "createdAt": "2026-11-28T08:09:55.429Z",
+      "updatedAt": "2026-11-28T08:09:55.464Z",
+      "commandId": "01a22134-25e5-72b9-9ade-28c4c2504f40",
+      "syncStatus": "applied",
       "currency": "EUR",
       "pricesIncludeTax": false,
       "lines": [
         {
-          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ab",
+          "id": "01a22134-25e3-79e2-be3f-986d5e742b0c",
           "productId": "mug",
           "variantId": "11",
           "name": "Tally Fixture Mug",
@@ -1354,16 +1354,16 @@
       ],
       "payments": [
         {
-          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ae",
+          "id": "01a22134-25e3-79e2-be3f-986d5e742b0f",
           "method": "cash",
           "amountMinor": 1309,
-          "tenderedMinor": 1500,
-          "changeMinor": 191
+          "tenderedMinor": 2000,
+          "changeMinor": 691
         }
       ],
       "fees": [
         {
-          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ac",
+          "id": "01a22134-25e3-79e2-be3f-986d5e742b0d",
           "name": "Service",
           "amountMinor": 100,
           "taxStatus": "taxable",
@@ -1379,7 +1379,7 @@
       ],
       "shipping": [
         {
-          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ad",
+          "id": "01a22134-25e3-79e2-be3f-986d5e742b0e",
           "name": "Courier",
           "amountMinor": 200,
           "taxStatus": "taxable",
@@ -1411,7 +1411,7 @@
         "totalMinor": 1309,
         "lines": [
           {
-            "lineId": "01a22111-53a9-7418-9c37-dcb5d3ad25ab",
+            "lineId": "01a22134-25e3-79e2-be3f-986d5e742b0c",
             "amountMinor": 800,
             "discounts": []
           }
@@ -1419,14 +1419,141 @@
         "orderDiscountMinor": 0,
         "fees": [
           {
-            "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ac",
+            "id": "01a22134-25e3-79e2-be3f-986d5e742b0d",
             "name": "Service",
             "amountMinor": 100
           }
         ],
         "shipping": [
           {
-            "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ad",
+            "id": "01a22134-25e3-79e2-be3f-986d5e742b0e",
+            "name": "Courier",
+            "amountMinor": 200
+          }
+        ]
+      },
+      "taxByRate": [
+        {
+          "ratePpm": 190000,
+          "netMinor": 1100,
+          "amountMinor": 209,
+          "grossMinor": 1309
+        }
+      ],
+      "customer": null,
+      "note": "Synced on 5.3.0",
+      "registerId": "register-1",
+      "cashierRef": "cashier@example.com",
+      "sentVersion": 7,
+      "serverRefs": {
+        "orderId": "301",
+        "displayId": "POS-301",
+        "totalMinor": 1309
+      }
+    },
+    {
+      "id": "01a22134-2609-7a09-af2c-eab1b1ace97b",
+      "saleId": "1795853395465-6",
+      "createdAt": "2026-11-28T08:09:55.465Z",
+      "updatedAt": "2026-11-28T08:09:55.465Z",
+      "commandId": "01a22134-2609-7a09-af2c-eab1b1ace980",
+      "syncStatus": "pending",
+      "currency": "EUR",
+      "pricesIncludeTax": false,
+      "lines": [
+        {
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace97c",
+          "productId": "mug",
+          "variantId": "11",
+          "name": "Tally Fixture Mug",
+          "sku": "TALLY-MUG",
+          "quantity": 1,
+          "unitPriceMinor": 800,
+          "discountMinor": 0,
+          "netMinor": 800,
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "152000000"
+            }
+          ]
+        }
+      ],
+      "payments": [
+        {
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace97f",
+          "method": "cash",
+          "amountMinor": 1309,
+          "tenderedMinor": 1500,
+          "changeMinor": 191
+        }
+      ],
+      "fees": [
+        {
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace97d",
+          "name": "Service",
+          "amountMinor": 100,
+          "taxStatus": "taxable",
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "19000000"
+            }
+          ],
+          "netMinor": 100,
+          "taxMicros": "19000000"
+        }
+      ],
+      "shipping": [
+        {
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace97e",
+          "name": "Courier",
+          "amountMinor": 200,
+          "taxStatus": "taxable",
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "38000000"
+            }
+          ],
+          "netMinor": 200,
+          "taxMicros": "38000000"
+        }
+      ],
+      "subtotalMinor": 800,
+      "discountMinor": 0,
+      "taxMinor": 209,
+      "totalMinor": 1309,
+      "taxRounding": {
+        "granularity": "per_order",
+        "mode": "half_away_from_zero"
+      },
+      "display": {
+        "currency": "EUR",
+        "exponent": 2,
+        "taxInclusive": false,
+        "subtotalMinor": 800,
+        "discountMinor": 0,
+        "taxMinor": 209,
+        "totalMinor": 1309,
+        "lines": [
+          {
+            "lineId": "01a22134-2609-7a09-af2c-eab1b1ace97c",
+            "amountMinor": 800,
+            "discounts": []
+          }
+        ],
+        "orderDiscountMinor": 0,
+        "fees": [
+          {
+            "id": "01a22134-2609-7a09-af2c-eab1b1ace97d",
+            "name": "Service",
+            "amountMinor": 100
+          }
+        ],
+        "shipping": [
+          {
+            "id": "01a22134-2609-7a09-af2c-eab1b1ace97e",
             "name": "Courier",
             "amountMinor": 200
           }
@@ -1446,17 +1573,17 @@
       "cashierRef": "cashier@example.com"
     },
     {
-      "id": "01a22111-53bc-74eb-8aef-f1b8af65f81a",
-      "saleId": "1795851113404-6",
-      "createdAt": "2026-11-28T07:31:53.404Z",
-      "updatedAt": "2026-11-28T07:31:53.404Z",
-      "commandId": "01a22111-53bc-74eb-8aef-f1b8af65f81f",
+      "id": "01a22134-2609-7a09-af2c-eab1b1ace981",
+      "saleId": "1795853395465-11",
+      "createdAt": "2026-11-28T08:09:55.465Z",
+      "updatedAt": "2026-11-28T08:09:55.465Z",
+      "commandId": "01a22134-2609-7a09-af2c-eab1b1ace986",
       "syncStatus": "pending",
       "currency": "EUR",
       "pricesIncludeTax": false,
       "lines": [
         {
-          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81b",
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace982",
           "productId": "mug",
           "variantId": "11",
           "name": "Tally Fixture Mug",
@@ -1475,14 +1602,14 @@
       ],
       "payments": [
         {
-          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81e",
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace985",
           "method": "external",
           "amountMinor": 1309
         }
       ],
       "fees": [
         {
-          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81c",
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace983",
           "name": "Service",
           "amountMinor": 100,
           "taxStatus": "taxable",
@@ -1498,7 +1625,7 @@
       ],
       "shipping": [
         {
-          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81d",
+          "id": "01a22134-2609-7a09-af2c-eab1b1ace984",
           "name": "Courier",
           "amountMinor": 200,
           "taxStatus": "taxable",
@@ -1530,7 +1657,7 @@
         "totalMinor": 1309,
         "lines": [
           {
-            "lineId": "01a22111-53bc-74eb-8aef-f1b8af65f81b",
+            "lineId": "01a22134-2609-7a09-af2c-eab1b1ace982",
             "amountMinor": 800,
             "discounts": []
           }
@@ -1538,14 +1665,14 @@
         "orderDiscountMinor": 0,
         "fees": [
           {
-            "id": "01a22111-53bc-74eb-8aef-f1b8af65f81c",
+            "id": "01a22134-2609-7a09-af2c-eab1b1ace983",
             "name": "Service",
             "amountMinor": 100
           }
         ],
         "shipping": [
           {
-            "id": "01a22111-53bc-74eb-8aef-f1b8af65f81d",
+            "id": "01a22134-2609-7a09-af2c-eab1b1ace984",
             "name": "Courier",
             "amountMinor": 200
           }
@@ -1568,12 +1695,20 @@
   ],
   "orderDrafts": [
     {
-      "id": "1795851113404-11",
-      "data": "{\"id\":\"1795851113404-11\",\"status\":\"draft\",\"lineItems\":[{\"id\":\"1795851113404-12\",\"taxFromClass\":true,\"productId\":\"mug\",\"variantId\":\"11\",\"name\":\"Tally Fixture Mug\",\"sku\":\"TALLY-MUG\",\"unitPriceMinor\":800,\"quantity\":2,\"taxLines\":[{\"ratePpm\":190000,\"taxMicros\":\"304000000\"}],\"discounts\":[],\"discountMinor\":0,\"orderDiscountMinor\":0,\"netMinor\":1600,\"taxMicros\":\"304000000\",\"taxInclusive\":false}],\"discounts\":[],\"payments\":[],\"customer\":{\"id\":\"7\",\"name\":\"Ada Park\"},\"note\":\"Parked on 5.3.0\",\"subtotalMinor\":1600,\"discountMinor\":0,\"taxMinor\":304,\"totalMinor\":1904,\"display\":{\"taxInclusive\":false,\"subtotalMinor\":1600,\"discountMinor\":0,\"taxMinor\":304,\"totalMinor\":1904,\"lines\":[{\"lineId\":\"1795851113404-12\",\"amountMinor\":1600,\"discounts\":[]}],\"orderDiscountMinor\":0},\"paidMinor\":0,\"balanceDueMinor\":1904,\"changeDueMinor\":0,\"currency\":\"EUR\",\"pricesIncludeTax\":false,\"createdAt\":\"2026-11-28T07:31:53.404Z\",\"updatedAt\":\"2026-11-28T07:31:53.404Z\"}",
+      "id": "1795853395465-16",
+      "data": "{\"id\":\"1795853395465-16\",\"status\":\"draft\",\"lineItems\":[{\"id\":\"1795853395465-17\",\"taxFromClass\":true,\"productId\":\"mug\",\"variantId\":\"11\",\"name\":\"Tally Fixture Mug\",\"sku\":\"TALLY-MUG\",\"unitPriceMinor\":800,\"quantity\":2,\"taxLines\":[{\"ratePpm\":190000,\"taxMicros\":\"304000000\"}],\"discounts\":[],\"discountMinor\":0,\"orderDiscountMinor\":0,\"netMinor\":1600,\"taxMicros\":\"304000000\",\"taxInclusive\":false}],\"discounts\":[],\"payments\":[],\"customer\":{\"id\":\"7\",\"name\":\"Ada Park\"},\"note\":\"Parked on 5.3.0\",\"subtotalMinor\":1600,\"discountMinor\":0,\"taxMinor\":304,\"totalMinor\":1904,\"display\":{\"taxInclusive\":false,\"subtotalMinor\":1600,\"discountMinor\":0,\"taxMinor\":304,\"totalMinor\":1904,\"lines\":[{\"lineId\":\"1795853395465-17\",\"amountMinor\":1600,\"discounts\":[]}],\"orderDiscountMinor\":0},\"paidMinor\":0,\"balanceDueMinor\":1904,\"changeDueMinor\":0,\"currency\":\"EUR\",\"pricesIncludeTax\":false,\"createdAt\":\"2026-11-28T08:09:55.465Z\",\"updatedAt\":\"2026-11-28T08:09:55.465Z\"}",
       "customerName": "Ada Park",
       "itemCount": 1,
       "total": 1904,
-      "parkedAt": "2026-11-28T07:31:53.404Z"
+      "parkedAt": "2026-11-28T08:09:55.465Z"
+    },
+    {
+      "id": "1795853395467-18",
+      "data": "{\"id\":\"1795853395467-18\",\"status\":\"draft\",\"lineItems\":[{\"id\":\"1795853395467-19\",\"taxFromClass\":true,\"productId\":\"tote\",\"variantId\":\"12\",\"name\":\"Tote Bag\",\"sku\":\"TOTE\",\"unitPriceMinor\":1200,\"quantity\":1,\"taxLines\":[{\"ratePpm\":190000,\"taxMicros\":\"228000000\"}],\"discounts\":[],\"discountMinor\":0,\"orderDiscountMinor\":0,\"netMinor\":1200,\"taxMicros\":\"228000000\",\"taxInclusive\":false}],\"discounts\":[],\"payments\":[{\"method\":\"cash\",\"amountMinor\":500,\"tenderedMinor\":500,\"takenAt\":\"2026-11-28T08:00:00.000Z\",\"id\":\"1795853395467-20\"}],\"customer\":null,\"note\":\"Parked part paid on 5.3.0\",\"subtotalMinor\":1200,\"discountMinor\":0,\"taxMinor\":228,\"totalMinor\":1428,\"display\":{\"taxInclusive\":false,\"subtotalMinor\":1200,\"discountMinor\":0,\"taxMinor\":228,\"totalMinor\":1428,\"lines\":[{\"lineId\":\"1795853395467-19\",\"amountMinor\":1200,\"discounts\":[]}],\"orderDiscountMinor\":0},\"paidMinor\":500,\"balanceDueMinor\":928,\"changeDueMinor\":0,\"currency\":\"EUR\",\"pricesIncludeTax\":false,\"createdAt\":\"2026-11-28T08:09:55.467Z\",\"updatedAt\":\"2026-11-28T08:09:55.467Z\"}",
+      "customerName": "",
+      "itemCount": 1,
+      "total": 1428,
+      "parkedAt": "2026-11-28T08:09:55.467Z"
     }
   ]
 }
