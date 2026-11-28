@@ -48,29 +48,29 @@ importers:
         specifier: 3.53.4-build1
         version: 3.53.4-build1
       '@tallyui/components':
-        specifier: 5.3.0
-        version: 5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(@tallyui/primitives@5.3.0(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0)))(@tallyui/theme@5.3.0)(react-dom@19.1.0(react@19.1.0))(react-native-svg@15.12.1(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)(typescript@5.8.3)
+        specifier: 5.6.1
+        version: 5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(@tallyui/primitives@5.6.1(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0)))(@tallyui/theme@5.6.1)(react-dom@19.1.0(react@19.1.0))(react-native-svg@15.12.1(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)(typescript@5.8.3)
       '@tallyui/connector-vendure':
-        specifier: 5.3.0
-        version: 5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))
+        specifier: 5.6.1
+        version: 5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))
       '@tallyui/core':
-        specifier: 5.3.0
-        version: 5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+        specifier: 5.6.1
+        version: 5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
       '@tallyui/database':
-        specifier: 5.3.0
-        version: 5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)
+        specifier: 5.6.1
+        version: 5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)
       '@tallyui/pos':
-        specifier: 5.3.0
-        version: 5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+        specifier: 5.6.1
+        version: 5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
       '@tallyui/primitives':
-        specifier: 5.3.0
-        version: 5.3.0(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0))
+        specifier: 5.6.1
+        version: 5.6.1(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0))
       '@tallyui/storage-sqlite':
-        specifier: 5.3.0
-        version: 5.3.0(@sqlite.org/sqlite-wasm@3.53.4-build1)(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxdb-premium@17.5.0(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))
+        specifier: 5.6.1
+        version: 5.6.1(@sqlite.org/sqlite-wasm@3.53.4-build1)(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxdb-premium@17.5.0(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))
       '@tallyui/theme':
-        specifier: 5.3.0
-        version: 5.3.0
+        specifier: 5.6.1
+        version: 5.6.1
       expo:
         specifier: ~54.0.37
         version: 54.0.37(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(expo-router@6.0.24)(graphql@17.0.2)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.8.3)
@@ -1817,23 +1817,23 @@ packages:
     resolution: {integrity: sha512-krXjAikiaFSPaK/FkAQT5UTx3VormQaiZ5hBFlJZ9UFQGB/rwg1MZIhHAG9smMQRTdyJxP6Qt5MwMtdyU5FWrA==}
     engines: {node: '>= 20'}
 
-  '@tallyui/components@5.3.0':
-    resolution: {integrity: sha512-hP0cSJYH8ndKzoTLji2xZmQ6voF9TPcrDDvTzgw+M4rfckusCL8kV8uXsl8yYgn9+c5Ps7KmNBBKZMMbq1xMww==}
+  '@tallyui/components@5.6.1':
+    resolution: {integrity: sha512-L4FZm+7Mf0quAMvW2E3zZwT7c10D4qMC6O2fGR9u2wvNnsFlDuFRcDuhdVa8JC57d/KgK/S8vLLLJOHH6cL9qw==}
     peerDependencies:
-      '@tallyui/core': ^5.3.0
-      '@tallyui/primitives': ^5.3.0
-      '@tallyui/theme': ^5.3.0
+      '@tallyui/core': ^5.6.1
+      '@tallyui/primitives': ^5.6.1
+      '@tallyui/theme': ^5.6.1
       react: '>=18'
       react-native: '>=0.74'
       react-native-svg: '>=15'
 
-  '@tallyui/connector-vendure@5.3.0':
-    resolution: {integrity: sha512-SKPiob5H/Wrhn9eMFrsOqKwX5pBVp9ks5ZCzwGT3e5wotpTubUmRUXoZTX65zSRLacumoMONmvQlMOtkPLAN0g==}
+  '@tallyui/connector-vendure@5.6.1':
+    resolution: {integrity: sha512-NGXl/S1mK6D9Y741+TiCBiQoyaFKHDEai7oawoyOER90aw9WESZOJ5rs+ue7fO92ihZzDogD0HdeNky5Tsx9uQ==}
     peerDependencies:
-      '@tallyui/core': ^5.3.0
+      '@tallyui/core': ^5.6.1
 
-  '@tallyui/core@5.3.0':
-    resolution: {integrity: sha512-xXKFG2lnwA9vjG+NrhgOErwm3fQNJlVYj1j52L17f/cSlSdmZJmyDGou82CL1BAaB1pZ8TIFfDJ9z95QC2oBZg==}
+  '@tallyui/core@5.6.1':
+    resolution: {integrity: sha512-UdGzeTNhPHTa4BIvrzUba3RzYodD7ddhnsuuq6552smRE2GRgMXG9UUcA6X9pu11CbXRq/6WkrKyfO3j/7HTUw==}
     peerDependencies:
       react: '>=18'
       rxdb: '>=16'
@@ -1846,31 +1846,31 @@ packages:
       rxjs:
         optional: true
 
-  '@tallyui/database@5.3.0':
-    resolution: {integrity: sha512-9QgoOnJXLn2nqlVwCxKdrIdCpsiQ3yQlaHjjModQgAruc1qr3X+7CrREeYu/AeQF/gN+xGhuLh9sEQYE5Cb8Dw==}
+  '@tallyui/database@5.6.1':
+    resolution: {integrity: sha512-njIMv5Nzjow4l8DX/1iPGvJ9rFFO0NlmuJdWTaPBfgZ/EYdor4Xr6G1goXqiMmhmO6eiL5pcVgaEzRks1S0Lig==}
     peerDependencies:
-      '@tallyui/core': ^5.3.0
+      '@tallyui/core': ^5.6.1
 
-  '@tallyui/pos@5.3.0':
-    resolution: {integrity: sha512-i4qHw/vfto6NOlxG7p8NjrHFd9B38xwpoY59mjIFs+mf1XlrfoW7+ohKujGkUsBqIl2sLPZJZ/WMNfC7oUpRmg==}
+  '@tallyui/pos@5.6.1':
+    resolution: {integrity: sha512-GpgS2rbKiSgK02XRCzV6q8RlS5G0Vr249CzBaGUANacJXDcfrj8O1bNzDBqY7EtY7efHLAIakJWjK98FG3gUyA==}
     peerDependencies:
-      '@tallyui/core': ^5.3.0
+      '@tallyui/core': ^5.6.1
       react: '>=18'
       rxdb: ~17.5.0
       rxjs: '>=7'
 
-  '@tallyui/primitives@5.3.0':
-    resolution: {integrity: sha512-rnAcW4TMlBsiCrm0gsV8IQ7LGdneBYBi8wfkTqDdg56fjYXNmumQuxVwS2jKBYvX1N+d0QSTBeWvk/zPOn4kgg==}
+  '@tallyui/primitives@5.6.1':
+    resolution: {integrity: sha512-Aw83pa+oIDMcPTxdA97WWEgGZ/GmJGO4XpKaCP190i3ikapz74YwfwgP7WFBHmeKEdoyvIwUOD62oiK7GF9v+A==}
     peerDependencies:
       react: '>=18.0.0'
       react-native: '>=0.76.0'
 
-  '@tallyui/storage-sqlite@5.3.0':
-    resolution: {integrity: sha512-F1IJQgFb62EMrHlwwewvmrRd5pZQ5k6t2foM444lH+NnETQurgDmQskVmDRiMd4ZFX0AN6CkqDh8x2nTZLoADQ==}
+  '@tallyui/storage-sqlite@5.6.1':
+    resolution: {integrity: sha512-NXg24H1fj84diU2RiIuNLeUihBPhNtIoiG9LzEYIQh0NVYJEg/SnFzypkXsksfhFiE90FP+qjkM2gC65xjn/6w==}
     hasBin: true
     peerDependencies:
       '@sqlite.org/sqlite-wasm': ^3.53.4-build1
-      '@tallyui/core': ^5.3.0
+      '@tallyui/core': ^5.6.1
       expo-sqlite: '>=15.0.0'
       rxdb-premium: 17.5.0
     peerDependenciesMeta:
@@ -1879,8 +1879,8 @@ packages:
       expo-sqlite:
         optional: true
 
-  '@tallyui/theme@5.3.0':
-    resolution: {integrity: sha512-d423v1b+LSmBKs2s0WVSju2OTTCcy/maxCgS4+SInUM0AaYF63KRpVH7XmpMByo/ueocWH8Lqo58X6rbEITFUg==}
+  '@tallyui/theme@5.6.1':
+    resolution: {integrity: sha512-yBYf7SDZ/HwKEw+bhRKInv0pTwfTPj8OiCy9V2xeNVPJ10N9gNZ4hIuidrRPSVKy3pLQnUz6vbzKQmOhgyz3IQ==}
 
   '@tanstack/react-table@8.21.3':
     resolution: {integrity: sha512-5nNMTSETP4ykGegmVkhjcS8tTLW6Vl4axfEGQN3v0zdHYbK4UfoqfPChclTrJ4EoK9QynqAu9oUf8VEmrpZ5Ww==}
@@ -7980,12 +7980,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.3.3
       '@tailwindcss/oxide-win32-x64-msvc': 4.3.3
 
-  '@tallyui/components@5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(@tallyui/primitives@5.3.0(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0)))(@tallyui/theme@5.3.0)(react-dom@19.1.0(react@19.1.0))(react-native-svg@15.12.1(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)(typescript@5.8.3)':
+  '@tallyui/components@5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(@tallyui/primitives@5.6.1(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0)))(@tallyui/theme@5.6.1)(react-dom@19.1.0(react@19.1.0))(react-native-svg@15.12.1(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)(typescript@5.8.3)':
     dependencies:
-      '@tallyui/core': 5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
-      '@tallyui/pos': 5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
-      '@tallyui/primitives': 5.3.0(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0))
-      '@tallyui/theme': 5.3.0
+      '@tallyui/core': 5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/pos': 5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/primitives': 5.6.1(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0))
+      '@tallyui/theme': 5.6.1
       class-variance-authority: 0.7.1
       i18next: 26.7.2(typescript@5.8.3)
       react: 19.1.0
@@ -7998,19 +7998,19 @@ snapshots:
       - rxjs
       - typescript
 
-  '@tallyui/connector-vendure@5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))':
+  '@tallyui/connector-vendure@5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))':
     dependencies:
-      '@tallyui/core': 5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/core': 5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
 
-  '@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)':
+  '@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)':
     optionalDependencies:
       react: 19.1.0
       rxdb: 17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2)
       rxjs: 7.8.2
 
-  '@tallyui/database@5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)':
+  '@tallyui/database@5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)':
     dependencies:
-      '@tallyui/core': 5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/core': 5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
       rxdb: 17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2)
       rxjs: 7.8.2
     transitivePeerDependencies:
@@ -8027,9 +8027,9 @@ snapshots:
       - utf-8-validate
       - vue
 
-  '@tallyui/pos@5.3.0(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)':
+  '@tallyui/pos@5.6.1(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)':
     dependencies:
-      '@tallyui/core': 5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/core': 5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
       '@types/mustache': 4.2.6
       '@xmldom/xmldom': 0.9.12
       dompurify: 3.4.17
@@ -8038,7 +8038,7 @@ snapshots:
       rxdb: 17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2)
       rxjs: 7.8.2
 
-  '@tallyui/primitives@5.3.0(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0))':
+  '@tallyui/primitives@5.6.1(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(use-sync-external-store@1.7.0(react@19.1.0))':
     dependencies:
       '@tanstack/react-table': 8.21.3(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       react: 19.1.0
@@ -8050,9 +8050,9 @@ snapshots:
       - react-dom
       - use-sync-external-store
 
-  '@tallyui/storage-sqlite@5.3.0(@sqlite.org/sqlite-wasm@3.53.4-build1)(@tallyui/core@5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxdb-premium@17.5.0(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))':
+  '@tallyui/storage-sqlite@5.6.1(@sqlite.org/sqlite-wasm@3.53.4-build1)(@tallyui/core@5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxdb-premium@17.5.0(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2))':
     dependencies:
-      '@tallyui/core': 5.3.0(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/core': 5.6.1(react@19.1.0)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
       rxdb: 17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2)
       rxdb-premium: 17.5.0(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.1.0)(rxjs@7.8.2))(rxjs@7.8.2)
       rxjs: 7.8.2
@@ -8073,7 +8073,7 @@ snapshots:
       - utf-8-validate
       - vue
 
-  '@tallyui/theme@5.3.0':
+  '@tallyui/theme@5.6.1':
     dependencies:
       clsx: 2.1.1
       tailwind-merge: 3.7.0
