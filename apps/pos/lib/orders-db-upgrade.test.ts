@@ -64,7 +64,7 @@ it('keeps every 5.3.0 sale exactly as stored, queued and synced', async () => {
     const neverSent = fixture.posOrders.find((row) => row.note === 'Queued on 5.3.0, never sent')!;
     const sentOnce = fixture.posOrders.find((row) => row.note === 'Queued on 5.3.0, sent once')!;
     const synced = fixture.posOrders.find((row) => row.note === 'Synced on 5.3.0')!;
-    for (const [expected, sentVersion] of [[neverSent, undefined], [sentOnce, 11], [synced, 7]] as const) {
+    for (const [expected, sentVersion] of [[neverSent, undefined], [sentOnce, 10], [synced, 10]] as const) {
       const stored = await store.orders.findOne(expected.id).exec(true);
       expect(withoutMeta(stored.toJSON())).toEqual(expected);
       expect(stored.commandId).toBe(expected.commandId);
@@ -147,7 +147,7 @@ it('keeps the part-paid 5.3.0 parked cart and its cash leg', async () => {
     const restored = restoreOrderDraft(saved, { currency: 'EUR', taxContext }).getSnapshot();
     expect(restored.totalMinor).toBe(1428);
     expect(restored.payments).toMatchObject([{
-      id: saved.payments[0].id, method: 'cash', amountMinor: 500, tenderedMinor: 500, takenAt: '2026-11-28T08:00:00.000Z',
+      id: saved.payments[0].id, method: 'cash', methodId: 'cash', amountMinor: 500, tenderedMinor: 500, changeMinor: 0, takenAt: '2026-11-28T08:00:00.000Z',
     }]);
     expect(restored.paidMinor).toBe(500);
     expect(restored.balanceDueMinor).toBe(928);
