@@ -12,7 +12,7 @@ import { TallyInfoController } from './api/info.controller';
 import { TALLY_RECEIPT_EMAIL, TallyReceiptEmailController, receiptEmailCaps } from './api/receipt-email.controller';
 import { TallyRegistersController } from './api/registers.controller';
 import { TallyReportsController } from './api/reports.controller';
-import { TallyShopRefundResolver } from './api/shop-api';
+import { TallyShopHistoryEntryResolver, TallyShopRefundResolver } from './api/shop-api';
 import { TallyStockEditController } from './api/stock-edit.controller';
 import { orderCustomFields, orderLineCustomFields, registerOrderIndexes } from './config/custom-fields';
 import { tallyPosSell, tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund, tallyPosResetDisplayDevice } from './config/permissions';
@@ -118,7 +118,7 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
     { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],
   exports: [OrderCreateService, RegisterService, RefundService],
   adminApiExtensions: { schema: adminApiSchema, resolvers: [TallyAdminResolver] },
-  shopApiExtensions: { resolvers: [TallyShopRefundResolver] },
+  shopApiExtensions: { resolvers: [TallyShopRefundResolver, TallyShopHistoryEntryResolver] },
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
   // run this on arrays that setConfig shares with the caller's config.
   configuration: config => {

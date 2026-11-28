@@ -20,7 +20,7 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import {
   IN_STORE_COLLECTION, CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
-  TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, TAX_EXEMPT_SUPPORT, WALK_IN_EMAIL,
+  TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, TAX_EXEMPT_SUPPORT, WALK_IN_EMAIL, SHOP_CANCEL_REASON,
 } from './constants';
 import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRoundingUnexplained, withoutCashRounding } from './cash-rounding';
 import { classify } from './classification';
@@ -314,9 +314,10 @@ export class OrderCreateService {
             throw refuse(`payment ${payment.id} cannot be cancelled`);
           }
         }
+        await this.orders.addNoteToOrder(txCtx, { id: orderId, note: `Rejected by an admin: ${note}`, isPublic: false });
         // Idempotent: an order an admin already cancelled is left as it is. Vendure refuses an empty line selection.
         const cancelled = order.state === 'Cancelled' ? order : order.lines.length
-          ? await this.orders.cancelOrder(txCtx, { orderId, reason: note, cancelShipping: true })
+          ? await this.orders.cancelOrder(txCtx, { orderId, reason: SHOP_CANCEL_REASON, cancelShipping: true })
           : await this.orders.transitionToState(txCtx, orderId, 'Cancelled');
         if (isGraphQlErrorResult(cancelled)) {
           throw refuse(`order ${stored.serverRefs!.displayId} cannot be cancelled (${cancelled.errorCode}: ${cancelled.message})`);
