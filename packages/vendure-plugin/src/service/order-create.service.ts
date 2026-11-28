@@ -7,6 +7,7 @@ import {
 } from '@vendure/core';
 import type { CurrencyCode } from '@vendure/core';
 import { In, IsNull } from 'typeorm';
+import { SHOP_CANCEL_REASON } from '../api/shop-api';
 import {
   TALLY_PAYMENT_METHOD_CODE, TALLY_SHIPPING_METHOD_CODE, isTallyRoute, markTallyRoute, tallyPaymentChecker, tallyPaymentHandler,
   tallyShippingChecker,
@@ -314,9 +315,10 @@ export class OrderCreateService {
             throw refuse(`payment ${payment.id} cannot be cancelled`);
           }
         }
+        await this.orders.addNoteToOrder(txCtx, { id: orderId, note: `Rejected by an admin: ${note}`, isPublic: false });
         // Idempotent: an order an admin already cancelled is left as it is. Vendure refuses an empty line selection.
         const cancelled = order.state === 'Cancelled' ? order : order.lines.length
-          ? await this.orders.cancelOrder(txCtx, { orderId, reason: note, cancelShipping: true })
+          ? await this.orders.cancelOrder(txCtx, { orderId, reason: SHOP_CANCEL_REASON, cancelShipping: true })
           : await this.orders.transitionToState(txCtx, orderId, 'Cancelled');
         if (isGraphQlErrorResult(cancelled)) {
           throw refuse(`order ${stored.serverRefs!.displayId} cannot be cancelled (${cancelled.errorCode}: ${cancelled.message})`);
