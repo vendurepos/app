@@ -24,30 +24,30 @@ declare module '@vendure/core/dist/entity/custom-entity-fields' {
   }
 }
 
-// ADR 0002 §3: read-only in the Admin API; the plugin writes them directly. `unique` gives
+// ADR 0002 §3: read-only in the Admin API; the plugin writes them directly. Never on the Shop API (public: false): they hold the till's figures, payments, cashier and register ids. `unique` gives
 // tallyClientOrderId its index; registerOrderIndexes gives the register and session ids theirs.
 export const orderCustomFields: CustomFieldConfig[] = [
-  { name: 'tallyClientOrderId', type: 'string', unique: true, readonly: true, nullable: true },
-  { name: 'tallySaleAt', type: 'datetime', readonly: true, nullable: true },
-  { name: 'tallyRegisterId', type: 'string', readonly: true, nullable: true },
-  { name: 'tallySessionId', type: 'string', readonly: true, nullable: true },
-  { name: 'tallyCashierRef', type: 'string', readonly: true, nullable: true },
-  { name: 'tallyPayments', type: 'text', readonly: true, nullable: true },
+  { name: 'tallyClientOrderId', type: 'string', unique: true, readonly: true, public: false, nullable: true },
+  { name: 'tallySaleAt', type: 'datetime', readonly: true, public: false, nullable: true },
+  { name: 'tallyRegisterId', type: 'string', readonly: true, public: false, nullable: true },
+  { name: 'tallySessionId', type: 'string', readonly: true, public: false, nullable: true },
+  { name: 'tallyCashierRef', type: 'string', readonly: true, public: false, nullable: true },
+  { name: 'tallyPayments', type: 'text', readonly: true, public: false, nullable: true },
   // The v5 shipping charge as JSON, read by the tally-in-store calculator (ADR 0005).
-  { name: 'tallyShipping', type: 'text', readonly: true, nullable: true },
-  { name: 'tallySnapshot', type: 'text', readonly: true, nullable: true },
+  { name: 'tallyShipping', type: 'text', readonly: true, public: false, nullable: true },
+  { name: 'tallySnapshot', type: 'text', readonly: true, public: false, nullable: true },
   // Re-rulings 1 and 2: an admin-rejected order keeps its released client id here, and counts as never placed.
-  { name: 'tallyRejectedClientOrderId', type: 'string', readonly: true, nullable: true },
-  { name: 'tallyRejected', type: 'boolean', readonly: true, nullable: true },
+  { name: 'tallyRejectedClientOrderId', type: 'string', readonly: true, public: false, nullable: true },
+  { name: 'tallyRejected', type: 'boolean', readonly: true, public: false, nullable: true },
 ];
 
 export const orderLineCustomFields: CustomFieldConfig[] = [
-  { name: 'tallyUnitPrice', type: 'int', readonly: true, nullable: true },
-  { name: 'tallyClientLineId', type: 'string', readonly: true, nullable: true },
-  { name: 'tallyPriceIncludesTax', type: 'boolean', readonly: true, nullable: true },
+  { name: 'tallyUnitPrice', type: 'int', readonly: true, public: false, nullable: true },
+  { name: 'tallyClientLineId', type: 'string', readonly: true, public: false, nullable: true },
+  { name: 'tallyPriceIncludesTax', type: 'boolean', readonly: true, public: false, nullable: true },
   // A v5 custom line's name and SKU (ADR 0005 ruling (a); used from job 4).
-  { name: 'tallyCustomName', type: 'string', length: 255, readonly: true, nullable: true },
-  { name: 'tallyCustomSku', type: 'string', length: 64, readonly: true, nullable: true },
+  { name: 'tallyCustomName', type: 'string', length: 255, readonly: true, public: false, nullable: true },
+  { name: 'tallyCustomSku', type: 'string', length: 64, readonly: true, public: false, nullable: true },
 ];
 
 // Custom fields have no index option, so the plain indexes go on the CustomOrderFields embeddable
