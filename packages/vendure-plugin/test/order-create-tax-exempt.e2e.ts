@@ -245,14 +245,15 @@ describe('order.create per-sale tax exemption', () => {
     expect(JSON.parse(order.customFields.tallySnapshot!)).not.toHaveProperty('taxExempt');
   });
 
-  it('E15: /info answers taxExempt false on a prices-include-tax channel', async () => {
+  async function setMode(pricesIncludeTax: boolean) {
     const { activeChannel } = await adminClient.query<{ activeChannel: { id: string } }>(parse('query { activeChannel { id } }'));
-    const setMode = async (pricesIncludeTax: boolean) => {
-      const updated = await adminClient.query(parse(`mutation Mode($input: UpdateChannelInput!) {
-        updateChannel(input: $input) { ... on Channel { pricesIncludeTax } }
-      }`), { input: { id: activeChannel.id, pricesIncludeTax } });
-      expect(updated).toMatchObject({ updateChannel: { pricesIncludeTax } });
-    };
+    const updated = await adminClient.query(parse(`mutation Mode($input: UpdateChannelInput!) {
+      updateChannel(input: $input) { ... on Channel { pricesIncludeTax } }
+    }`), { input: { id: activeChannel.id, pricesIncludeTax } });
+    expect(updated).toMatchObject({ updateChannel: { pricesIncludeTax } });
+  }
+
+  it('E15: /info answers taxExempt false on a prices-include-tax channel', async () => {
     const info = async () => {
       const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } });
       expect(response.status).toBe(200);
@@ -273,6 +274,28 @@ describe('order.create per-sale tax exemption', () => {
       error: { code: 'forbidden', message: 'TallyPosTaxExempt is required to exempt a sale from tax' } });
     expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id })).toBeNull();
     expect(await run(command)).toMatchObject({ status: 'applied' });
+  });
+
+  it('E17: an exempt sale on a prices-include-tax channel is refused tax_exempt_prices_include_tax, unstored, whatever its payload mode', async () => {
+    const command = mug();
+    try {
+      await setMode(true);
+      expect(await run(command)).toMatchObject({ status: 'rejected', error: { code: 'tax_exempt_prices_include_tax',
+        message: 'Tax exemption is unavailable on a channel whose prices include tax' } });
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id })).toBeNull();
+    } finally {
+      await setMode(false);
+    }
+    expect(await run(command)).toMatchObject({ status: 'applied' });
+  });
+
+  it('E18: without TallyPosTaxExempt on a prices-include-tax channel, the channel refusal answers', async () => {
+    try {
+      await setMode(true);
+      expect(await runAnonymous(mug())).toMatchObject({ status: 'rejected', error: { code: 'tax_exempt_prices_include_tax' } });
+    } finally {
+      await setMode(false);
+    }
   });
 
   it('C1: the order.create gate reads the supported argument, not its own constant', () => {

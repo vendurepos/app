@@ -212,15 +212,22 @@ The refund that takes everything left on the order's lines returns the rounding;
 ### Tax-exempt sales
 
 `/tally/v1/info` answers `taxExempt: true` only when `TAX_EXEMPT_SUPPORT` allows it, the channel's prices exclude tax,
-and the session holds `TallyPosTaxExempt` on that channel. Only then does the till offer the tax-exempt switch.
-`taxExemptCoupons` stays false. An accepted exempt order carries zero tax.
+and the session holds `TallyPosTaxExempt` on that channel. No VendurePOS till offers the switch yet: the app keeps it
+off until a sale carries its exemption reason (order.create 13). An integrator reads a `taxExempt: false` answer
+together with `permissions` in the same answer. Without `TallyPosTaxExempt` there, the session may not exempt. With it,
+the channel's prices include tax, or this server does not support exemption. No `taxExempt` key at all means a plugin
+older than 0.7.0. `taxExemptCoupons` stays false. An accepted exempt order carries zero tax.
 
 An exempt `order.create` carries `taxExempt: true` at its usual content version. The plugin charges the till's amounts
 as sent and never works out a net. It moves every line onto the plugin's `POS no tax` tax category. It charges fees and
 shipping with no tax, whatever their `taxStatus`. The stored order's total is the untaxed subtotal.
 
-Without `TallyPosTaxExempt`, a new exempt sale is refused, unstored, as `forbidden`. A recorded sale replays as recorded.
-Like a refund, an offline exempt sale is refused at sync if the cashier has since lost the permission.
+On a channel whose prices include tax, a new exempt sale is refused, unstored, as `tax_exempt_prices_include_tax`,
+whatever the sale's own `pricesIncludeTax` says. Otherwise, without `TallyPosTaxExempt`, it is refused, unstored, as
+`forbidden`. A recorded sale replays as recorded, and a new command id for a `clientOrderId` already recorded is
+answered by that clientOrderId's recorded sale. Like a refund, an exempt sale rung offline is refused at sync if the
+cashier has since lost the permission. The till has already taken payment by then. The sale waits in Needs attention,
+and once the cashier's role holds `TallyPosTaxExempt` again, sending it again applies it under the same command id.
 
 The plugin refuses an exempt sale, unstored, as `invalid_payload` when:
 
@@ -238,6 +245,9 @@ An exempt order records the exemption in its `tallySnapshot` custom field as `"t
 `taxExempt` key. The field is readable in the Admin API (`order { customFields { tallySnapshot } }`), so a reprint,
 the till's order read or an accountant can see that the sale was exempt. Orders sold with plugin 0.6.0 or earlier
 were never exempt, since those versions refuse the field.
+
+Exempt sales below order.create 13 are provisional. Once 13 lands, an exempt sale without a reason is refused at every
+version.
 
 ### Merchant code inside the recipe
 

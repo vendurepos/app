@@ -168,12 +168,14 @@ export class OrderCreateService {
       const recorded = await this.recordedAnywhere(ctx, payload.clientOrderId);
       // 4. A lone surrogate (#515), then the value refusals (ruling 17's strict shape, amounts, quantities, v3 fiscal
       // figures): unstored. Then the client-time stage (TallyUI #337): the envelope's createdAt, then the payload's; its own
-      // refusal with only time messages; the clock is the request's, read once. A recorded sale skips all three: the
+      // refusal with only time messages; the clock is the request's, read once. The exempt channel and permission gates
+      // run last. A recorded sale skips these checks: the
       // collision guard answers it, and its claim row holds only the id, channel, clientOrderId, fingerprint and status.
       const invalidValue = recorded ? undefined
         : loneSurrogateRefusal(command.id, command) ?? this.valueRefusal(command) ?? clientTimeRefusal(command.id,
           [['createdAt', command.createdAt], ['payload.createdAt', command.payload.createdAt]],
-          (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS) ?? this.exemptPermissionRefusal(ctx, command);
+          (options?.requestTimeMs ?? Date.now()) + CREATED_AT_SKEW_MS) ?? this.exemptChannelRefusal(ctx, command)
+          ?? this.exemptPermissionRefusal(ctx, command);
       if (invalidValue) return invalidValue;
       // ADR 0002 "Currency": set before any line is added. A fresh context has no transaction.
       commandCtx = new RequestContext({
@@ -385,6 +387,13 @@ export class OrderCreateService {
       });
     }
     return errors.length ? refuse(id, 'invalid_payload', errors.join('; ')) : undefined;
+  }
+  // Front desk ruling #554 Q2: /info and order.create give the same answer; an exempt sale on a channel whose prices
+  // include tax is refused, unstored, whatever the payload's own mode says.
+  private exemptChannelRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
+    if ((command.payload as { taxExempt?: unknown }).taxExempt === true && ctx.channel.pricesIncludeTax) {
+      return refuse(command.id, 'tax_exempt_prices_include_tax', 'Tax exemption is unavailable on a channel whose prices include tax');
+    }
   }
   // Front desk ruling #542: refuse a new exempt sale without permission, before the claim.
   private exemptPermissionRefusal(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
