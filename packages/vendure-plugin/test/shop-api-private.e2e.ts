@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ConfigService, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
+import { ConfigService, Order, TransactionalConnection, dummyPaymentHandler } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
 import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -344,5 +344,70 @@ describe('POS order custom field visibility', () => {
     } }`), { id });
     expect(order.payments[0].refunds).toEqual([{ reason: refundReason }]);
     expect(order.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: cancelReason }) });
+  });
+
+  it('P9: a rejected POS order without a snapshot shows a neutral legacy cancellation reason', async () => {
+    const sale = freshSale();
+    sale.payload.customer = { customerId: till.customerId };
+    const result = await run(sale);
+    expect(result.status).toBe('applied');
+    const { orderId: id, displayId: code } = result.serverRefs!;
+    if (!code) throw new Error('no displayId');
+    const db = server.app.get(TransactionalConnection).rawConnection;
+    await db.getRepository(TallyCommand).update({ id: sale.id }, { status: 'needs_admin' });
+    const cleared = await db.getRepository(Order).update(environment.decode(id), { customFields: { tallySnapshot: null } });
+    expect(cleared.affected).toBe(1);
+    const note = `p9-admin-note-${randomUUID()}`;
+    const { tallyResolveNeedsAdmin } = await adminClient.query(parse(`mutation Reject($commandId: String!, $note: String!) {
+      tallyResolveNeedsAdmin(commandId: $commandId, resolution: rejected, note: $note) { id status }
+    }`), { commandId: sale.id, note });
+    expect(tallyResolveNeedsAdmin).toEqual({ id: sale.id, status: 'rejected' });
+
+    const { order } = await adminClient.query(parse(`query Order($id: ID!) { order(id: $id) { history { items { id type data } } } }`), { id });
+    const cancellation = order.history.items.find((entry: { type: string }) => entry.type === 'ORDER_CANCELLATION');
+    const legacy = `p9-legacy-${randomUUID()}`;
+    const updated = await db.getRepository(OrderHistoryEntry).update(environment.decode(cancellation.id), { data: { ...cancellation.data, reason: legacy } });
+    expect(updated.affected).toBe(1);
+
+    const anonymous = await anonymousRead(code);
+    const customer = await customerRead(code);
+    expect(customer.activeCustomer.orders.items).toHaveLength(1);
+    for (const [response, read] of [[anonymous, anonymous.orderByCode], [customer, customer.activeCustomer.orders.items[0]]] as const) {
+      const serialized = JSON.stringify(response);
+      expect(serialized).not.toContain(note);
+      expect(serialized).not.toContain(legacy);
+      expect(read.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: SHOP_CANCEL_REASON }) });
+    }
+  });
+
+  it('P10: a POS order resolved as applied without a snapshot shows neutral Admin refund and cancel reasons', async () => {
+    const sale = freshSale();
+    sale.payload.customer = { customerId: till.customerId };
+    const result = await run(sale);
+    expect(result.status).toBe('applied');
+    const { orderId: id, displayId: code } = result.serverRefs!;
+    if (!code) throw new Error('no displayId');
+    const db = server.app.get(TransactionalConnection).rawConnection;
+    await db.getRepository(TallyCommand).update({ id: sale.id }, { status: 'needs_admin' });
+    const cleared = await db.getRepository(Order).update(environment.decode(id), { customFields: { tallySnapshot: null } });
+    expect(cleared.affected).toBe(1);
+    const { tallyResolveNeedsAdmin } = await adminClient.query(parse(`mutation Apply($commandId: String!) {
+      tallyResolveNeedsAdmin(commandId: $commandId, resolution: applied, note: "checked the till") { id status }
+    }`), { commandId: sale.id });
+    expect(tallyResolveNeedsAdmin).toEqual({ id: sale.id, status: 'applied' });
+    const refundReason = `p10-refund-${randomUUID()}`;
+    const cancelReason = `p10-cancel-${randomUUID()}`;
+    await adminRefundAndCancel(id, refundReason, cancelReason, 300);
+
+    const anonymous = await anonymousRead(code);
+    const customer = await customerRead(code);
+    expect(customer.activeCustomer.orders.items).toHaveLength(1);
+    for (const [response, order] of [[anonymous, anonymous.orderByCode], [customer, customer.activeCustomer.orders.items[0]]] as const) {
+      const serialized = JSON.stringify(response);
+      expect(serialized).not.toContain(refundReason);
+      expect(serialized).not.toContain(cancelReason);
+      expect(order.payments.flatMap(payment => payment.refunds.map(refund => refund.reason))).toEqual([SHOP_REFUND_REASON]);
+      expect(order.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: SHOP_CANCEL_REASON }) });
+    }
   });
 });

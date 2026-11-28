@@ -1,13 +1,19 @@
 import { Parent, ResolveField, Resolver } from '@nestjs/graphql';
 import { Ctx, Payment, Refund, RequestContext, TransactionalConnection } from '@vendure/core';
 import { OrderHistoryEntry } from '@vendure/core/dist/entity/history-entry/order-history-entry.entity';
+import { SHOP_REFUND_REASON, SHOP_CANCEL_REASON } from '../service/constants';
 
-// The fixed refund reason a shopper sees in place of staff text.
-export const SHOP_REFUND_REASON = 'Refunded';
-// The fixed cancellation reason a shopper sees in place of staff text.
-export const SHOP_CANCEL_REASON = 'Cancelled';
+export { SHOP_REFUND_REASON, SHOP_CANCEL_REASON } from '../service/constants';
 
 type Scope = { posOrder: boolean; tillRefund: boolean };
+
+// A POS order is any order the plugin wrote: its first write sets tallyClientOrderId, a rejection swaps that for
+// tallyRejectedClientOrderId and tallyRejected, and tallySnapshot comes last. An order that cannot be loaded counts
+// as POS, so the Shop API shows the neutral reason rather than staff text (fail closed).
+export function isPosOrder(customFields: Record<string, unknown> | undefined | null): boolean {
+  return customFields == null || customFields.tallySnapshot != null || customFields.tallyClientOrderId != null ||
+    customFields.tallyRejectedClientOrderId != null || customFields.tallyRejected === true;
+}
 
 export function shopRefundReason(reason: string | null | undefined, scope: Scope): string | null | undefined {
   return typeof reason === 'string' && reason !== '' && (scope.posOrder || scope.tillRefund) ? SHOP_REFUND_REASON : reason;
@@ -42,7 +48,7 @@ export class TallyShopRefundResolver {
     let posOrder = false;
     if (refund.reason && !tillRefund) {
       const payment = await this.connection.getRepository(ctx, Payment).findOne({ where: { id: refund.paymentId }, relations: ['order'] });
-      posOrder = payment?.order.customFields.tallySnapshot != null;
+      posOrder = isPosOrder(payment?.order?.customFields as Parameters<typeof isPosOrder>[0]);
     }
     return shopRefundReason(refund.reason, { posOrder, tillRefund });
   }
@@ -56,8 +62,8 @@ export class TallyShopHistoryEntryResolver {
   async data(@Ctx() ctx: RequestContext, @Parent() entry: OrderHistoryEntry) {
     if (shopHistoryData(entry.type, entry.data, { posOrder: true, tillRefund: false }) === entry.data) return entry.data;
     const history = await this.connection.getRepository(ctx, OrderHistoryEntry).findOne({ where: { id: entry.id }, relations: ['order'] });
-    if (!history) return entry.data;
-    const posOrder = history.order.customFields.tallySnapshot != null;
+    if (!history) return shopHistoryData(entry.type, entry.data, { posOrder: true, tillRefund: false });
+    const posOrder = isPosOrder(history.order?.customFields as Parameters<typeof isPosOrder>[0]);
     let tillRefund = false;
     if (!posOrder && entry.type === 'ORDER_REFUND_TRANSITION' && entry.data.refundId != null) {
       const refund = await this.connection.getRepository(ctx, Refund).findOneBy({ id: entry.data.refundId });

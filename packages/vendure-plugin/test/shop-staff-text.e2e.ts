@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SHOP_CANCEL_REASON, SHOP_REFUND_REASON, shopHistoryData, shopRefundReason } from '../src/api/shop-api';
+import { SHOP_CANCEL_REASON, SHOP_REFUND_REASON, isPosOrder, shopHistoryData, shopRefundReason } from '../src/api/shop-api';
 
 describe('Shop staff text', () => {
   const pos = { posOrder: true, tillRefund: false };
@@ -45,5 +45,13 @@ describe('Shop staff text', () => {
   it('U10: preserves cancellation data without a reason', () => {
     const data = { lines: [] };
     expect(shopHistoryData('ORDER_CANCELLATION', data, pos)).toBe(data);
+  });
+  it.each([
+    [undefined, true], [null, true], [{}, false],
+    [{ tallySnapshot: null, tallyClientOrderId: null, tallyRejected: false }, false],
+    [{ tallySnapshot: '{}' }, true], [{ tallyClientOrderId: 'c' }, true],
+    [{ tallyRejectedClientOrderId: 'c' }, true], [{ tallyRejected: true }, true],
+  ] as const)('classifies custom fields %j as POS: %s', (customFields, expected) => {
+    expect(isPosOrder(customFields)).toBe(expected);
   });
 });

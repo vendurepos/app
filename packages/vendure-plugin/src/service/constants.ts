@@ -2,6 +2,11 @@
 // OrderCreateService share it without importing each other.
 export const WALK_IN_EMAIL = 'walk-in@vendurepos.invalid';
 
+// The fixed refund reason a shopper sees in place of staff text.
+export const SHOP_REFUND_REASON = 'Refunded';
+// The fixed cancellation reason a shopper sees in place of staff text.
+export const SHOP_CANCEL_REASON = 'Cancelled';
+
 // The name of the plugin's in-store shipping method (TALLY_SHIPPING_METHOD_CODE), also its calculator's description and the
 // fulfilment method recorded on every till order.
 export const IN_STORE_COLLECTION = 'In-store collection';
