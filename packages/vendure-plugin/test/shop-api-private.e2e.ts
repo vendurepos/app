@@ -306,7 +306,8 @@ describe('POS order custom field visibility', () => {
 
     const { orderByCode } = await anonymousRead(paid.code!);
     expect(orderByCode.payments.flatMap(payment => payment.refunds.map(refund => refund.reason))).toEqual([refundReason]);
-    expect(orderByCode.history.items).toContainEqual({ type: 'ORDER_REFUND_TRANSITION', data: expect.objectContaining({ reason: refundReason }) });
+    expect(orderByCode.payments.flatMap(payment => payment.refunds)).toMatchObject([{ state: 'Pending' }]);
+    expect(orderByCode.history.items.map(entry => entry.type)).not.toContain('ORDER_REFUND_TRANSITION');
     expect(orderByCode.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: cancelReason }) });
   });
 
