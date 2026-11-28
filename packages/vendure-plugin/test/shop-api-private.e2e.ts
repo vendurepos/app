@@ -410,4 +410,52 @@ describe('POS order custom field visibility', () => {
       expect(order.history.items).toContainEqual({ type: 'ORDER_CANCELLATION', data: expect.objectContaining({ reason: SHOP_CANCEL_REASON }) });
     }
   });
+
+  it('P11: a POS order moved between customers names none of them on the Shop API', async () => {
+    const customers = [];
+    for (const prefix of ['p11a', 'p11b']) {
+      const uuid = randomUUID();
+      const input = { firstName: `${prefix}-${uuid}`, lastName: `${prefix}-last-${uuid}`, emailAddress: `${prefix}-${uuid}@example.com` };
+      const { createCustomer } = await adminClient.query(parse(`mutation Customer($input: CreateCustomerInput!) {
+        createCustomer(input: $input) { ... on Customer { id } ... on ErrorResult { errorCode message } }
+      }`), { input });
+      expect(createCustomer).toMatchObject({ id: expect.any(String) });
+      customers.push({ id: createCustomer.id, ...input });
+    }
+    const [customerA, customerB] = customers;
+    const sale = freshSale();
+    sale.payload.customer = { customerId: customerA.id };
+    const result = await run(sale);
+    expect(result.status).toBe('applied');
+    const { orderId: id, displayId: code } = result.serverRefs!;
+    if (!code) throw new Error('no displayId');
+    for (const customerId of [customerB.id, till.customerId]) {
+      await adminClient.query(parse(`mutation Customer($input: SetOrderCustomerInput!) {
+        setOrderCustomer(input: $input) { id }
+      }`), { input: { orderId: id, customerId } });
+    }
+
+    const anonymous = await anonymousRead(code);
+    const customer = await customerRead(code);
+    expect(customer.activeCustomer.orders.items).toHaveLength(1);
+    for (const [response, order] of [[anonymous, anonymous.orderByCode], [customer, customer.activeCustomer.orders.items[0]]] as const) {
+      const serialized = JSON.stringify(response);
+      for (const { firstName, lastName, emailAddress } of customers) {
+        for (const value of [firstName, lastName, emailAddress]) expect(serialized).not.toContain(value);
+      }
+      const changes = order.history.items.filter(entry => entry.type === 'ORDER_CUSTOMER_UPDATED');
+      expect(changes).toHaveLength(2);
+      for (const entry of changes) expect(entry.data).toEqual({});
+    }
+
+    const { order } = await adminClient.query(parse(`query Order($id: ID!) {
+      order(id: $id) { history { items { type data } } }
+    }`), { id });
+    expect(order.history.items).toContainEqual({ type: 'ORDER_CUSTOMER_UPDATED', data: expect.objectContaining({
+      previousCustomerName: expect.stringContaining(customerA.firstName), newCustomerName: expect.stringContaining(customerB.firstName),
+    }) });
+    expect(order.history.items).toContainEqual({ type: 'ORDER_CUSTOMER_UPDATED', data: expect.objectContaining({
+      previousCustomerName: expect.stringContaining(customerB.firstName),
+    }) });
+  });
 });

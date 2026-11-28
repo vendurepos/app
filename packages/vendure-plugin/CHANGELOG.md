@@ -9,8 +9,8 @@
 - Staff-typed text no longer reaches the Shop API (#546). Until now, the order's customer, and an anonymous `orderByCode` within 2 hours of the sale, could read three kinds of it in `Order.history` and on `Refund.reason`: a cashier's refund reason, an admin's rejection note (Vendure's public cancellation entry), and an admin's customer-change note. This applies to POS orders and till refunds, on the Shop API only:
   - `Refund.reason` and the refund history entry's `data.reason` read `Refunded`.
   - A cancellation entry's `data.reason` reads `Cancelled`.
-  - A customer-change entry has no `note`.
-  - The filter runs on read, so older orders are covered too. Stored data and the Admin API are unchanged.
+  - A customer-change entry has empty `data` (#548): no `note`, and none of the previous or new customer's name and id. On a till order moved between customers, its new customer could read the earlier customers' names and ids.
+  - The filter runs on read, so older orders are covered too. Stored data and the Admin API are unchanged, and so is server-side code that reads the stored entities, such as a merchant's own email template printing `refund.reason` (#549).
   - A storefront order keeps Vendure's reasons.
   - A rejection of a `needs_admin` sale now cancels with the fixed reason, and keeps the admin's note in a private order note. The till still gets the note in the command result.
   - The sale note (`order.create` version 7) stays a public order note: it is the note meant for the customer.

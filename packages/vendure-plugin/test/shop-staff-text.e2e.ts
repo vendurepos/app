@@ -27,8 +27,14 @@ describe('Shop staff text', () => {
     const data = { refundId: '1', reason: 'x', from: 'Pending', to: 'Settled' };
     expect(shopHistoryData('ORDER_REFUND_TRANSITION', data, till)).toEqual({ ...data, reason: SHOP_REFUND_REASON });
   });
-  it('U7: omits the customer change note', () => {
-    expect(shopHistoryData('ORDER_CUSTOMER_UPDATED', { newCustomerName: 'A B', note: 'x' }, pos)).toEqual({ newCustomerName: 'A B' });
+  it('U7: drops every customer identity and the note from a customer change', () => {
+    const data = { previousCustomerId: '1', previousCustomerName: 'A A', newCustomerId: '2', newCustomerName: 'B B', note: 'x' };
+    expect(shopHistoryData('ORDER_CUSTOMER_UPDATED', data, pos)).toEqual({});
+    expect(shopHistoryData('ORDER_CUSTOMER_UPDATED', data, till)).toEqual({});
+  });
+  it('preserves an already empty POS customer change by reference', () => {
+    const data = {};
+    expect(shopHistoryData('ORDER_CUSTOMER_UPDATED', data, pos)).toBe(data);
   });
   it('U8: preserves all three storefront history entries', () => {
     const data = { reason: 'x', note: 'x' };

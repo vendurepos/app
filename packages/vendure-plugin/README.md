@@ -134,16 +134,22 @@ shopper reading a POS order through the Shop API, by its code or from their acco
 A till refund's metadata (its cashier ref, register and session ids, client refund id and lines) is Admin API only
 too: on the Shop API, every `Refund.metadata` keeps only its `public` key, as Vendure does for `Payment.metadata`.
 
-Text staff type never reaches a shopper. On the Shop API, for a POS order or a till refund:
+Text staff type never reaches a shopper, and neither do the customer names in an order's history. On the Shop API, for a
+POS order or a till refund:
 
 - `Refund.reason` reads `Refunded`, and the refund history entry's `data.reason` reads `Refunded`.
 - A cancellation history entry's `data.reason` reads `Cancelled`.
-- A customer-change history entry has no `note`.
+- A customer-change history entry has empty `data`: the shopper sees that the customer changed, not who. Vendure's
+  entry names the previous and the new customer and carries the admin's note, so on an order moved twice the last
+  customer would read both earlier customers' names and ids.
 
 This happens when the Shop API is read; nothing stored changes. So it covers orders written before this release, and the Admin API
 (the dashboard, the VendurePOS app, connector-vendure) still reads the real text. A storefront order keeps Vendure's
 reasons. Private order notes stay off the Shop API, as in Vendure. The one note a shopper can see is the sale note
 (below), which is meant for the customer.
+
+Only the Shop API is filtered. Server-side code that reads the stored entities, such as your own email template
+printing `refund.reason`, gets the text the cashier typed, not `Refunded`.
 
 ### The POS methods across channels
 
