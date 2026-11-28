@@ -134,7 +134,8 @@ shopper reading a POS order through the Shop API, by its code or from their acco
 A till refund's metadata (its cashier ref, register and session ids, client refund id and lines) is Admin API only
 too: on the Shop API, every `Refund.metadata` keeps only its `public` key, as Vendure does for `Payment.metadata`.
 
-Text staff type, and other shoppers' names, never reach a shopper. On the Shop API, for a POS order or a till refund:
+Text staff type never reaches a shopper, and neither do the customer names in an order's history. On the Shop API, for a
+POS order or a till refund:
 
 - `Refund.reason` reads `Refunded`, and the refund history entry's `data.reason` reads `Refunded`.
 - A cancellation history entry's `data.reason` reads `Cancelled`.
