@@ -21,10 +21,9 @@ export function shopRefundReason(reason: string | null | undefined, scope: Scope
 
 export function shopHistoryData(type: string, data: Record<string, unknown>, scope: Scope): Record<string, unknown> {
   if (!scope.posOrder && !scope.tillRefund) return data;
-  if (type === 'ORDER_CUSTOMER_UPDATED' && 'note' in data) {
-    const { note, ...rest } = data;
-    return rest;
-  }
+  // A customer change names other shoppers (previous and new customer, at every step of a chain of changes) and may carry
+  // an admin's note, so on a POS order the Shop API shows that the customer changed, not who.
+  if (type === 'ORDER_CUSTOMER_UPDATED') return Object.keys(data).length ? {} : data;
   if (typeof data.reason === 'string' && data.reason !== '') {
     if (type === 'ORDER_REFUND_TRANSITION') return { ...data, reason: SHOP_REFUND_REASON };
     if (type === 'ORDER_CANCELLATION') return { ...data, reason: SHOP_CANCEL_REASON };
