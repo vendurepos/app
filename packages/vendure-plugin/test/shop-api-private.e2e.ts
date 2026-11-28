@@ -48,7 +48,7 @@ describe('POS order custom field visibility', () => {
   it('P3: the Shop API rejects a tallySnapshot selection', async () => {
     await expect(shopClient.query(parse(`query Order($code: String!) {
       orderByCode(code: $code) { customFields { tallySnapshot } }
-    }`), { code })).rejects.toThrow();
+    }`), { code })).rejects.toThrow(/tallySnapshot|must not have a selection/);
   });
 
   it('P4: the Admin API can still select all tally fields', async () => {
