@@ -3,7 +3,7 @@
 export { TallyPosPlugin } from './plugin';
 export type { TallyPosPluginOptions } from './plugin';
 export { TallyReceiptEmailEvent } from './events/receipt-email.event';
-export { tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund, tallyPosResetDisplayDevice, tallyPosSell } from './config/permissions';
+export { tallyPosApproveVariance, tallyPosPairDisplay, tallyPosRefund, tallyPosResetDisplayDevice, tallyPosSell, tallyPosTaxExempt } from './config/permissions';
 export { POS_TILL_ROLE_CODE, POS_TILL_PERMISSIONS } from './config/pos-till-role';
 export { TallyPriceStrategy } from './config/strategies';
 export { TallyCommand } from './entities/tally-command.entity';

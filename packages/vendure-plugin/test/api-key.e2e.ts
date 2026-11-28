@@ -265,4 +265,34 @@ describe('POS till API keys', () => {
     const deleted = await fetch(`${base}/tally/v1/info`, { headers: keyHeaders(rotateApiKey.apiKey) });
     expect([401, 403]).toContain(deleted.status);
   });
+
+  it('K1: a device key needs TallyPosTaxExempt for an exempt sale, and /info follows its role', async () => {
+    const keyMutation = parse(`mutation Key($input: CreateApiKeyInput!) { createApiKey(input: $input) { apiKey } }`);
+    const { createApiKey: keyA } = await adminClient.query(keyMutation, {
+      input: { roleIds: [roleId], translations: [{ languageCode: 'en', name: 'POS till A' }] },
+    });
+    const { createRole } = await adminClient.query(parse(`mutation Role($input: CreateRoleInput!) { createRole(input: $input) { id } }`), {
+      input: { code: 'pos-till-exempt', description: 'VendurePOS till, tax exempt',
+        permissions: [...POS_TILL_PERMISSIONS, 'TallyPosTaxExempt'], channelIds: [channel.id] },
+    });
+    const { createApiKey: keyB } = await adminClient.query(keyMutation, {
+      input: { roleIds: [createRole.id], translations: [{ languageCode: 'en', name: 'POS till B' }] },
+    });
+    const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800, ratePpm: 0 }]);
+    Object.assign(command.payload, { taxExempt: true });
+    for (const [device, taxExempt] of [[keyA, false], [keyB, true]] as const) {
+      const headers = keyHeaders(device.apiKey);
+      const info = await fetch(`${base}/tally/v1/info`, { headers });
+      expect(info.status).toBe(200);
+      expect(await info.json()).toMatchObject({ taxExempt });
+      const response = await fetch(`${base}/tally/v1/commands`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', 'X-Tally-Protocol': '1' },
+        body: JSON.stringify({ commands: [command] }),
+      });
+      expect(response.status).toBe(200);
+      const { results } = await response.json();
+      expect(results).toMatchObject([taxExempt ? { id: command.id, status: 'applied' } : { id: command.id, status: 'rejected',
+        error: { code: 'forbidden', message: 'TallyPosTaxExempt is required to exempt a sale from tax' } }]);
+    }
+  });
 });

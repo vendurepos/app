@@ -7,7 +7,7 @@ command, with an idempotency ledger. The design is ADR 0002
 (`docs/spikes/s1-order-recipe.md`).
 
 The plugin serves `POST /tally/v1/commands` (`X-Tally-Protocol: 1`, 1–50
-commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough). `GET /tally/v1/info` holds `permissions`: the caller's own permissions on the active channel only, the same session list Vendure enforces, `[]` when the caller has none there. A device-key till reads its role there, since Vendure's Admin `me` refuses an API key (#487). The plugin also declares `ApproveTallyPosVariance` for managers who approve a close over the variance threshold. It opens neither route, and nothing checks it until the approval route lands. It also declares `TallyPosRefund`, which the coming `order.refund` command will check. It opens neither route either, and the till role preset leaves it out: a store grants refunds to the roles it chooses. `TallyPosResetDisplayDevice` lists a channel's customer-display devices and resets one through the Admin API; SuperAdmin holds it, and the till role preset leaves it out. medusapos ADR 0023's `UseTallyPos` is `TallyPosSell` (or `CreateOrder`) here. These permission names are public API once a role stores them, so they are never renamed.
+commands, a 1 MiB (1,048,576-byte) body (`COMMANDS_BODY_MAX_BYTES`)) and `GET /tally/v1/info`, both behind the plugin's `TallyPosSell` permission or `Permission.CreateOrder` (either is enough). `GET /tally/v1/info` holds `permissions`: the caller's own permissions on the active channel only, the same session list Vendure enforces, `[]` when the caller has none there. A device-key till reads its role there, since Vendure's Admin `me` refuses an API key (#487). The plugin also declares `ApproveTallyPosVariance` for managers who approve a close over the variance threshold. It opens neither route, and nothing checks it until the approval route lands. It also declares `TallyPosRefund`, which the coming `order.refund` command will check. It opens neither route either, and the till role preset leaves it out: a store grants refunds to the roles it chooses. `TallyPosTaxExempt` lets a session exempt a sale from tax. Without it, `order.create` refuses a new exempt sale and `/info` answers `taxExempt: false`. It opens neither route. The till role preset leaves it out, and SuperAdmin holds it. `TallyPosResetDisplayDevice` lists a channel's customer-display devices and resets one through the Admin API; SuperAdmin holds it, and the till role preset leaves it out. medusapos ADR 0023's `UseTallyPos` is `TallyPosSell` (or `CreateOrder`) here. These permission names are public API once a role stores them, so they are never renamed.
 
 **Rejections and events.** Every deterministic refusal is answered before the sale writes anything,
 so it emits no event. A command already in the ledger always replays its recorded answer first. A
@@ -211,14 +211,23 @@ The refund that takes everything left on the order's lines returns the rounding;
 
 ### Tax-exempt sales
 
-`/tally/v1/info` advertises `taxExempt: true` and `taxExemptCoupons: false`. The till then offers a tax-exempt switch on
-a sale. Both values come from one constant (`TAX_EXEMPT_SUPPORT` in `src/service/constants.ts`). `order.create`'s
-own gate reads the same constant, so the till is never offered something the plugin refuses (#540). `taxExempt: true`
-means, for good, that an accepted exempt order carries zero tax.
+`/tally/v1/info` answers `taxExempt: true` only when `TAX_EXEMPT_SUPPORT` allows it, the channel's prices exclude tax,
+and the session holds `TallyPosTaxExempt` on that channel. No VendurePOS till offers the switch yet: the app keeps it
+off until a sale carries its exemption reason (order.create 13). An integrator reads a `taxExempt: false` answer
+together with `permissions` in the same answer. Without `TallyPosTaxExempt` there, the session may not exempt. With it,
+the channel's prices include tax, or this server does not support exemption. No `taxExempt` key at all means a plugin
+0.6.0 or older. `taxExemptCoupons` stays false. An accepted exempt order carries zero tax.
 
 An exempt `order.create` carries `taxExempt: true` at its usual content version. The plugin charges the till's amounts
 as sent and never works out a net. It moves every line onto the plugin's `POS no tax` tax category. It charges fees and
 shipping with no tax, whatever their `taxStatus`. The stored order's total is the untaxed subtotal.
+
+On a channel whose prices include tax, a new exempt sale is refused, unstored, as `tax_exempt_prices_include_tax`,
+whatever the sale's own `pricesIncludeTax` says, before any check of the payload itself. Otherwise, without `TallyPosTaxExempt`, it is refused, unstored, as
+`forbidden`. A recorded sale replays as recorded, and a new command id for a `clientOrderId` already recorded is
+answered by that clientOrderId's recorded sale. Like a refund, an exempt sale rung offline is refused at sync if the
+cashier has since lost the permission. The till has already taken payment by then. The sale waits in Needs attention,
+and once the cashier's role holds `TallyPosTaxExempt` again, sending it again applies it under the same command id.
 
 The plugin refuses an exempt sale, unstored, as `invalid_payload` when:
 
@@ -236,6 +245,9 @@ An exempt order records the exemption in its `tallySnapshot` custom field as `"t
 `taxExempt` key. The field is readable in the Admin API (`order { customFields { tallySnapshot } }`), so a reprint,
 the till's order read or an accountant can see that the sale was exempt. Orders sold with plugin 0.6.0 or earlier
 were never exempt, since those versions refuse the field.
+
+Exempt sales below order.create 13 are provisional. Once 13 lands, an exempt sale without a reason is refused at every
+version.
 
 ### Merchant code inside the recipe
 
