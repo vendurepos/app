@@ -222,6 +222,17 @@ describe('order.create per-sale tax exemption', () => {
     }
   });
 
+  it('E14: a zero-tax sale that is not exempt stores no taxExempt marker', async () => {
+    const command = { ...orderCommand([
+      { custom: { name: 'Book', taxStatus: 'none' }, quantity: 1, unitPriceMinor: 1200, ratePpm: 0 },
+    ]), version: 11 } as unknown as ReturnType<typeof orderCommand>;
+    const result = await run(command);
+    expect(result).toMatchObject({ status: 'applied', serverRefs: { totalMinor: 1200 } });
+    const order = await readOrder(result.serverRefs!.orderId);
+    expect(order.totalWithTax).toBe(order.total);
+    expect(JSON.parse(order.customFields.tallySnapshot!)).not.toHaveProperty('taxExempt');
+  });
+
   it('C1: the order.create gate reads the supported argument, not its own constant', () => {
     const command = { ...cart(true) };
     expect(strictShapeErrors(command, 11, { taxExempt: false, taxExemptCoupons: false })).toContain('taxExempt: not supported by this server');
