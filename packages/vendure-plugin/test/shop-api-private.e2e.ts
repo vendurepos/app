@@ -246,6 +246,8 @@ describe('POS order custom field visibility', () => {
     const result = await run(sale);
     expect(result.status).toBe('applied');
     const { orderId: id, displayId: code } = result.serverRefs!;
+    expect(code).toEqual(expect.any(String));
+    if (!code) throw new Error('no displayId');
     const db = server.app.get(TransactionalConnection).rawConnection;
     await db.getRepository(TallyCommand).update({ id: sale.id }, { status: 'needs_admin' });
     const note = `p6-admin-note-${randomUUID()}`;
@@ -317,6 +319,8 @@ describe('POS order custom field visibility', () => {
     const result = await run(sale);
     expect(result.status).toBe('applied');
     const { orderId: id, displayId: code } = result.serverRefs!;
+    expect(code).toEqual(expect.any(String));
+    if (!code) throw new Error('no displayId');
     const refundReason = `p8-refund-${randomUUID()}`;
     const cancelReason = `p8-cancel-${randomUUID()}`;
     await adminRefundAndCancel(id, refundReason, cancelReason, 300);
