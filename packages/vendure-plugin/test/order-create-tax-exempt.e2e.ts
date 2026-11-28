@@ -147,6 +147,10 @@ describe('order.create per-sale tax exemption', () => {
       expect(await run(command)).toMatchObject({ status: 'rejected', error: { code: 'store_configuration',
         message: `Tax-exempt order ${command.payload.clientOrderId} would carry tax 80: the "${TALLY_NO_TAX_CATEGORY}" tax category has a rate in this zone` } });
     } finally {
+      const updated = await adminClient.query(parse(`mutation Disable($id: ID!) {
+        updateTaxRate(input: { id: $id, enabled: false }) { id enabled }
+      }`), { id: createTaxRate.id });
+      expect(updated).toMatchObject({ updateTaxRate: { enabled: false } });
       const deleted = await adminClient.query(parse(`mutation Delete($id: ID!) { deleteTaxRate(id: $id) { result } }`), { id: createTaxRate.id });
       expect(deleted).toMatchObject({ deleteTaxRate: { result: 'DELETED' } });
     }

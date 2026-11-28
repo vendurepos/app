@@ -1,3 +1,6 @@
+/** #540: an exempt order.create's own checks, as core's payloadShapeErrors makes them (the vendored copy predates taxExempt):
+ * `taxExempt` is true when present, and an exempt payload carries only tax-exclusive amounts and every tax figure 0, so the
+ * server charges the till's amounts as sent and never derives a net. [] when the payload is not exempt. */
 export function taxExemptPayloadErrors(payload: unknown): string[] {
   const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
   if (!isObject(payload) || !Object.hasOwn(payload, 'taxExempt')) return [];
