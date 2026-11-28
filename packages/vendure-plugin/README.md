@@ -126,6 +126,10 @@ On start, in the server process, the plugin gives every channel that lacks them 
 Both methods are closed to the Shop API. A channel created later is configured at the next
 start.
 
+The plugin's order and order-line custom fields (`tallySnapshot`, `tallyPayments`, `tallyCashierRef`, the register
+and session ids and the rest, all named `tally…`) are readonly and exist only on the Admin API (`public: false`). A
+shopper reading a POS order through the Shop API, by its code or from their account, gets `customFields: null`.
+
 ### The POS methods across channels
 
 Each method is created **once**, in the default channel, and assigned to every other channel.
