@@ -129,6 +129,8 @@ start.
 The plugin's order and order-line custom fields (`tallySnapshot`, `tallyPayments`, `tallyCashierRef`, the register
 and session ids and the rest, all named `tally…`) are readonly and exist only on the Admin API (`public: false`). A
 shopper reading a POS order through the Shop API, by its code or from their account, gets `customFields: null`.
+A till refund's metadata (its cashier ref, register and session ids, client refund id and lines) is Admin API only
+too: on the Shop API, `Refund.metadata` keeps only its `public` key, as Vendure does for `Payment.metadata`.
 
 ### The POS methods across channels
 

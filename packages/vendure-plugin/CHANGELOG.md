@@ -5,6 +5,7 @@
 ### Security
 
 - Every `tally…` order and order-line custom field is now `public: false`, so it is no longer on the Shop API. Until now an anonymous Shop API `orderByCode` of a POS sale within 2 hours of the sale, or the order's own customer at any time, could read the till's snapshot, payment list, cashier ref and register and session ids. The Admin API, where the VendurePOS app and connector-vendure read these fields, is unchanged. A storefront that selected any `tally…` field on the Shop API now gets a GraphQL validation error; with no other public custom field, the Shop API's `Order.customFields` and `OrderLine.customFields` become the `JSON` scalar and read `null`. No migration.
+- A till refund's `Refund.metadata` is now Admin API only. The Shop API returned it raw, so the same readers could read the refund's cashier ref, register and session ids, client refund id and refunded lines; on the Shop API it now keeps only its `public` key, as Vendure already does for `Payment.metadata`. The Admin API is unchanged.
 
 ### Added
 
