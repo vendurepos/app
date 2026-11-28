@@ -139,7 +139,9 @@ it('keeps the part-paid 5.3.0 parked cart and its cash leg', async () => {
     expect(withoutMeta(draft.toJSON())).toEqual(expected);
     const summaries = await firstValueFrom(parkedOrderSummaries$(drafts));
     expect(summaries.map(({ id }) => id).sort()).toEqual(fixture.orderDrafts.map(({ id }) => id).sort());
-    expect(summaries.find(({ id }) => id === expected.id)).toMatchObject({ customerName: '', itemCount: 1, totalMinor: 1428, source: 'local' });
+    const summary = summaries.find(({ id }) => id === expected.id);
+    expect(summary).toMatchObject({ itemCount: 1, totalMinor: 1428, source: 'local' });
+    expect(summary?.customerName).toBeUndefined();
     const saved: Order = JSON.parse(draft.data);
     const taxContext = { getTaxRatePpm: () => 190000, pricesIncludeTax: false };
     const restored = restoreOrderDraft(saved, { currency: 'EUR', taxContext }).getSnapshot();
