@@ -21,7 +21,7 @@
 - Tax-exempt sales (#540, TallyUI#1447):
   - `/tally/v1/info` advertises `taxExempt: true` only for a session with `TallyPosTaxExempt` on a channel whose prices exclude tax. `taxExemptCoupons` stays false.
   - New permission `TallyPosTaxExempt` (#542). An exempt `order.create` without it is refused, unstored, as `forbidden`. No existing role gains it except SuperAdmin; add it to the roles that may exempt.
-  - On a channel whose prices include tax, an exempt `order.create` is refused, unstored, as `tax_exempt_prices_include_tax`, whatever the payload's mode says, so it matches `/tally/v1/info`.
+  - On a channel whose prices include tax, an exempt `order.create` is refused, unstored, as `tax_exempt_prices_include_tax`, whatever the payload's mode says, so it matches `/tally/v1/info`. It answers before the payload checks below, so an inclusive-mode exempt payload gets this code too.
   - `order.create` accepts `taxExempt: true` at every content version. The order is stored with zero tax: every line goes on the `POS no tax` category, and fees and shipping are untaxed.
   - An exempt sale is refused, unstored, as `invalid_payload` when `taxExempt` is not `true`, when it is in prices-include-tax mode, when it has an inclusive line, fee or shipping charge, when any tax figure is not 0, or when it carries coupons.
   - An exempt sale is refused, unstored, as `store_configuration` if `POS no tax` has a rate in the order's zone.

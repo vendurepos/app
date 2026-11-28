@@ -216,14 +216,14 @@ and the session holds `TallyPosTaxExempt` on that channel. No VendurePOS till of
 off until a sale carries its exemption reason (order.create 13). An integrator reads a `taxExempt: false` answer
 together with `permissions` in the same answer. Without `TallyPosTaxExempt` there, the session may not exempt. With it,
 the channel's prices include tax, or this server does not support exemption. No `taxExempt` key at all means a plugin
-older than 0.7.0. `taxExemptCoupons` stays false. An accepted exempt order carries zero tax.
+0.6.0 or older. `taxExemptCoupons` stays false. An accepted exempt order carries zero tax.
 
 An exempt `order.create` carries `taxExempt: true` at its usual content version. The plugin charges the till's amounts
 as sent and never works out a net. It moves every line onto the plugin's `POS no tax` tax category. It charges fees and
 shipping with no tax, whatever their `taxStatus`. The stored order's total is the untaxed subtotal.
 
 On a channel whose prices include tax, a new exempt sale is refused, unstored, as `tax_exempt_prices_include_tax`,
-whatever the sale's own `pricesIncludeTax` says. Otherwise, without `TallyPosTaxExempt`, it is refused, unstored, as
+whatever the sale's own `pricesIncludeTax` says, before any check of the payload itself. Otherwise, without `TallyPosTaxExempt`, it is refused, unstored, as
 `forbidden`. A recorded sale replays as recorded, and a new command id for a `clientOrderId` already recorded is
 answered by that clientOrderId's recorded sale. Like a refund, an exempt sale rung offline is refused at sync if the
 cashier has since lost the permission. The till has already taken payment by then. The sale waits in Needs attention,

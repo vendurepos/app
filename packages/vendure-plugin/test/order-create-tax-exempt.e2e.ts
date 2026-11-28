@@ -283,6 +283,12 @@ describe('order.create per-sale tax exemption', () => {
       expect(await run(command)).toMatchObject({ status: 'rejected', error: { code: 'tax_exempt_prices_include_tax',
         message: 'Tax exemption is unavailable on a channel whose prices include tax' } });
       expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: command.id })).toBeNull();
+
+      const next = mug();
+      Object.assign(next.payload, { pricesIncludeTax: true });
+      expect(await run(next)).toMatchObject({ status: 'rejected', error: { code: 'tax_exempt_prices_include_tax',
+        message: 'Tax exemption is unavailable on a channel whose prices include tax' } });
+      expect(await connection.rawConnection.getRepository(TallyCommand).findOneBy({ id: next.id })).toBeNull();
     } finally {
       await setMode(false);
     }
