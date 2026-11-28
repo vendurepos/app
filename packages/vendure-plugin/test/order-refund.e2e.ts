@@ -22,7 +22,7 @@ type RefundCommand = Omit<OrderRefundEnvelope, 'version'> & { version: number };
 describe('order.refund v1', () => {
   // A non-Tally handler beside the plugin's, for (w)'s method that shares a Tally method's code.
   const environment = createPluginTestEnvironment({ paymentOptions: { paymentMethodHandlers: [dummyPaymentHandler] } });
-  const { server, adminClient, variantIds } = environment;
+  const { server, adminClient, shopClient, variantIds } = environment;
   let connection: TransactionalConnection;
   let base: string;
   let refunder: Record<string, string>;
@@ -142,6 +142,40 @@ describe('order.refund v1', () => {
     expect(after.lines[0].productVariant.stockOnHand).toBe(line.productVariant.stockOnHand + 1);
     expect(await post(command)).toEqual({ ...result, status: 'duplicate' });
     expect(await readOrder(order.id)).toEqual(after);
+  });
+
+  it('a till refund\'s metadata is Admin API only: the Shop API returns no tally key', async () => {
+    const sale = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }]);
+    sale.createdAt = new Date().toISOString();
+    sale.payload.createdAt = sale.createdAt;
+    const result = await post(sale);
+    expect(result.status).toBe('applied');
+    const order = await readOrder(result.serverRefs!.orderId);
+    const session = await openSession();
+    const command = refundFor(order, session);
+    expect(await post(command)).toMatchObject({ status: 'applied' });
+
+    const { order: { code } } = await adminClient.query<{ order: { code: string } }>(
+      parse('query Order($id: ID!) { order(id: $id) { code } }'), { id: order.id });
+    await shopClient.asAnonymousUser();
+    const response = await shopClient.query<{ orderByCode: { code: string; payments: Array<{
+      metadata: unknown; refunds: Array<{ metadata: unknown }>;
+    }> } }>(parse(`query Order($code: String!) {
+      orderByCode(code: $code) { code payments { metadata refunds { metadata } } }
+    }`), { code });
+    expect(response.orderByCode.code).toBe(code);
+    const refunds = response.orderByCode.payments.flatMap(payment => payment.refunds);
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0].metadata).toEqual({});
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain('tally');
+    expect(serialized).not.toContain(command.payload.cashierRef);
+    expect(serialized).not.toContain(session.registerId);
+
+    const after = await readOrder(order.id);
+    expect(after.payments[0].refunds[0].metadata).toMatchObject({
+      tallyClientRefundId: command.payload.clientRefundId, tallyCashierRef: command.payload.cashierRef,
+    });
   });
 
   it('restock false leaves stock alone, and an external refund to cash leaves as cash', async () => {

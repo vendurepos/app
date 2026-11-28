@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Security
+
+- Every `tally…` order and order-line custom field is now `public: false`, so it is no longer on the Shop API. Until now an anonymous Shop API `orderByCode` of a POS sale within 2 hours of the sale, or the order's own customer at any time, could read the till's snapshot, payment list, cashier ref and register and session ids. The Admin API, where the VendurePOS app and connector-vendure read these fields, is unchanged. A storefront that selected any `tally…` field on the Shop API now gets a GraphQL validation error; with no other public custom field, the Shop API's `Order.customFields` and `OrderLine.customFields` become the `JSON` scalar and read `null`. No migration.
+- On the Shop API, `Refund.metadata` now keeps only its `public` key, as Vendure already does for `Payment.metadata`. Vendure returned it raw, so the same readers could read a till refund's cashier ref, register and session ids, client refund id and refunded lines. The rule applies to every refund on the Shop API, whichever payment method made it, and a refund with no metadata reads `{}`. The Admin API is unchanged.
+
 ### Added
 
 - Register reads carry the live session's `openVersion` (VP-B). `GET /tally/v1/registers/:id` and `GET /tally/v1/registers` return it: the register contract version of the open that created the session, or `null` for a session stored before the plugin kept it, which the store treats as 1. After you set `registerApproval`, read it, then for every live session below 3 or `null`, take it over from another version 3 till or close it at version 3. The README's #332 known limit gives the order and what the reads cannot show: the list's cap of 100 registers, and a `closed` session whose closure is not yet submitted. This replaces the #332 limit "the register read does not show which live sessions opened below version 3". Additive at read version 1. No migration: the column has existed since `TallyPosRegisterOpenVersion`.
