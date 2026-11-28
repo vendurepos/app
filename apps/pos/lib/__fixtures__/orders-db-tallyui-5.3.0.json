@@ -1,0 +1,1579 @@
+{
+  "tallyuiVersion": "5.3.0",
+  "_provenance": "Written by @tallyui/pos 5.3.0 and @tallyui/core 5.3.0 (rxdb 17.5.0, memory storage): finalizeOrder + insert as useOrderOutbox.record, sentVersion as the outbox stamps it, writeOrderDraft as park(). Generated once for the 5.6.1 pin PR; do not edit by hand.",
+  "posOrderSchema": {
+    "additionalProperties": false,
+    "encrypted": [],
+    "indexes": [
+      [
+        "_deleted",
+        "createdAt",
+        "id"
+      ],
+      [
+        "_deleted",
+        "syncStatus",
+        "id"
+      ],
+      [
+        "_deleted",
+        "syncStatus",
+        "createdAt",
+        "id"
+      ],
+      [
+        "_deleted",
+        "sessionId",
+        "id"
+      ],
+      [
+        "_meta.lwt",
+        "id"
+      ]
+    ],
+    "keyCompression": false,
+    "primaryKey": "id",
+    "properties": {
+      "_attachments": {
+        "type": "object"
+      },
+      "_deleted": {
+        "type": "boolean"
+      },
+      "_meta": {
+        "additionalProperties": true,
+        "properties": {
+          "lwt": {
+            "maximum": 1000000000000000,
+            "minimum": 1,
+            "multipleOf": 0.01,
+            "type": "number"
+          }
+        },
+        "required": [
+          "lwt"
+        ],
+        "type": "object"
+      },
+      "_rev": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "attentionHandledFor": {
+        "maxLength": 36,
+        "type": "string"
+      },
+      "baseRevision": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "cashierRef": {
+        "type": "string"
+      },
+      "cashRoundings": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "minor": {
+              "type": "integer"
+            },
+            "paymentId": {
+              "maxLength": 36,
+              "type": "string"
+            }
+          },
+          "required": [
+            "paymentId",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "commandId": {
+        "maxLength": 36,
+        "type": "string"
+      },
+      "countedInClosureOf": {
+        "maxLength": 36,
+        "type": "string"
+      },
+      "coupons": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "carried": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "code": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "couponId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "discountMinor": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "discountTaxMinor": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "lines": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "amountMinor": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "discountMinor": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "discountTaxMinor": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "lineId": {
+                    "maxLength": 36,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "lineId",
+                  "discountMinor",
+                  "discountTaxMinor"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "code",
+            "couponId",
+            "discountMinor",
+            "discountTaxMinor"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "createdAt": {
+        "maxLength": 40,
+        "type": "string"
+      },
+      "currency": {
+        "type": "string"
+      },
+      "customer": {
+        "properties": {
+          "billing": {
+            "additionalProperties": false,
+            "properties": {
+              "address1": {
+                "type": "string"
+              },
+              "address2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              },
+              "firstName": {
+                "type": "string"
+              },
+              "lastName": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              },
+              "postcode": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "shipping": {
+            "additionalProperties": false,
+            "properties": {
+              "address1": {
+                "type": "string"
+              },
+              "address2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              },
+              "firstName": {
+                "type": "string"
+              },
+              "lastName": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              },
+              "postcode": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "taxIds": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "country": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "discountMinor": {
+        "type": "integer"
+      },
+      "display": {
+        "additionalProperties": false,
+        "properties": {
+          "coupons": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "amountMinor": {
+                  "type": "integer"
+                },
+                "code": {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "amountMinor"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "discountMinor": {
+            "type": "integer"
+          },
+          "exponent": {
+            "type": "integer"
+          },
+          "fees": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "amountMinor": {
+                  "type": "integer"
+                },
+                "id": {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "amountMinor"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "lines": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "amountMinor": {
+                  "type": "integer"
+                },
+                "discounts": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "amountMinor": {
+                        "type": "integer"
+                      },
+                      "discountId": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "discountId",
+                      "amountMinor"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "lineId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "lineId",
+                "amountMinor",
+                "discounts"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "orderDiscountMinor": {
+            "type": "integer"
+          },
+          "shipping": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "amountMinor": {
+                  "type": "integer"
+                },
+                "id": {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "amountMinor"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "subtotalMinor": {
+            "type": "integer"
+          },
+          "taxInclusive": {
+            "type": "boolean"
+          },
+          "taxMinor": {
+            "type": "integer"
+          },
+          "totalMinor": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency",
+          "exponent",
+          "taxInclusive",
+          "subtotalMinor",
+          "discountMinor",
+          "taxMinor",
+          "totalMinor",
+          "orderDiscountMinor",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "downgradedFrom": {
+        "maximum": 12,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "error": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "fees": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "amountMinor": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "entered": {
+              "additionalProperties": false,
+              "properties": {
+                "amountIncludesTax": {
+                  "type": "boolean"
+                },
+                "amountMinor": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "sent": {
+                  "enum": [
+                    true
+                  ],
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "amountMinor",
+                "amountIncludesTax"
+              ],
+              "type": "object"
+            },
+            "id": {
+              "maxLength": 36,
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "netMicros": {
+              "maxLength": 25,
+              "pattern": "^-?[0-9]{1,24}$",
+              "type": "string"
+            },
+            "netMinor": {
+              "type": "integer"
+            },
+            "storeLineId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "taxClass": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "taxLines": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  "compound": {
+                    "type": "boolean"
+                  },
+                  "rateId": {
+                    "type": "integer"
+                  },
+                  "ratePpm": {
+                    "type": "integer"
+                  },
+                  "taxMicros": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ratePpm",
+                  "taxMicros"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "taxMicros": {
+              "type": "string"
+            },
+            "taxStatus": {
+              "enum": [
+                "taxable",
+                "none"
+              ],
+              "type": "string"
+            },
+            "totalMinor": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "amountMinor",
+            "taxStatus",
+            "taxLines",
+            "netMinor",
+            "taxMicros"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "id": {
+        "maxLength": 36,
+        "type": "string"
+      },
+      "lateSessionId": {
+        "type": "string"
+      },
+      "lines": {
+        "items": {
+          "properties": {
+            "anyAttributes": {
+              "items": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "attributes": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "catalogueSku": {
+              "type": "string"
+            },
+            "custom": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sku": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "taxClass": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "taxStatus": {
+                  "enum": [
+                    "taxable",
+                    "none"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "taxStatus"
+              ],
+              "type": "object"
+            },
+            "discountMinor": {
+              "type": "integer"
+            },
+            "id": {
+              "maxLength": 36,
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "netMicros": {
+              "maxLength": 25,
+              "pattern": "^-?[0-9]{1,24}$",
+              "type": "string"
+            },
+            "netMinor": {
+              "type": "integer"
+            },
+            "productId": {
+              "type": "string"
+            },
+            "quantity": {
+              "type": "integer"
+            },
+            "regularUnitPriceMinor": {
+              "type": "integer"
+            },
+            "sku": {
+              "type": "string"
+            },
+            "storeLineId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "taxLines": {
+              "items": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "ratePpm": {
+                    "type": "integer"
+                  },
+                  "taxMicros": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ratePpm",
+                  "taxMicros"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "taxStatus": {
+              "enum": [
+                "taxable",
+                "none"
+              ],
+              "type": "string"
+            },
+            "unitPriceMinor": {
+              "type": "integer"
+            },
+            "variantId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "productId",
+            "name",
+            "sku",
+            "quantity",
+            "unitPriceMinor",
+            "discountMinor",
+            "netMinor",
+            "taxLines"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "localWarnings": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "field": {
+              "maxLength": 16,
+              "type": "string"
+            },
+            "paymentId": {
+              "maxLength": 36,
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "meta": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "note": {
+        "type": "string"
+      },
+      "payments": {
+        "items": {
+          "properties": {
+            "amountMinor": {
+              "type": "integer"
+            },
+            "changeMinor": {
+              "type": "integer"
+            },
+            "id": {
+              "maxLength": 36,
+              "type": "string"
+            },
+            "method": {
+              "enum": [
+                "cash",
+                "external"
+              ],
+              "type": "string"
+            },
+            "methodId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            },
+            "storePaymentId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "takenAt": {
+              "maxLength": 40,
+              "type": "string"
+            },
+            "tenderedMinor": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "amountMinor"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "pricesIncludeTax": {
+        "type": "boolean"
+      },
+      "refundDueMinor": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "registerId": {
+        "type": "string"
+      },
+      "reopenedAt": {
+        "maxLength": 40,
+        "type": "string"
+      },
+      "saleId": {
+        "maxLength": 36,
+        "type": "string"
+      },
+      "sentVersion": {
+        "maximum": 12,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "serverFailures": {
+        "additionalProperties": false,
+        "properties": {
+          "isolated": {
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "since": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "since",
+          "reason",
+          "isolated"
+        ],
+        "type": "object"
+      },
+      "serverRefs": {
+        "properties": {
+          "displayId": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "totalMinor": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orderId",
+          "totalMinor"
+        ],
+        "type": "object"
+      },
+      "sessionId": {
+        "maxLength": 36,
+        "type": "string"
+      },
+      "shipping": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "amountMinor": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "entered": {
+              "additionalProperties": false,
+              "properties": {
+                "amountIncludesTax": {
+                  "type": "boolean"
+                },
+                "amountMinor": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "sent": {
+                  "enum": [
+                    true
+                  ],
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "amountMinor",
+                "amountIncludesTax"
+              ],
+              "type": "object"
+            },
+            "id": {
+              "maxLength": 36,
+              "type": "string"
+            },
+            "methodId": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "netMicros": {
+              "maxLength": 25,
+              "pattern": "^-?[0-9]{1,24}$",
+              "type": "string"
+            },
+            "netMinor": {
+              "type": "integer"
+            },
+            "storeLineId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "taxClass": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "taxLines": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  "compound": {
+                    "type": "boolean"
+                  },
+                  "rateId": {
+                    "type": "integer"
+                  },
+                  "ratePpm": {
+                    "type": "integer"
+                  },
+                  "taxMicros": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ratePpm",
+                  "taxMicros"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "taxMicros": {
+              "type": "string"
+            },
+            "taxStatus": {
+              "enum": [
+                "taxable",
+                "none"
+              ],
+              "type": "string"
+            },
+            "totalMinor": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "amountMinor",
+            "taxStatus",
+            "taxLines",
+            "netMinor",
+            "taxMicros"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "storeOrderId": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "storeSettlement": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "attemptId": {
+            "maxLength": 36,
+            "type": "string"
+          },
+          "capturedMinor": {
+            "type": "integer"
+          },
+          "closeId": {
+            "maxLength": 36,
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "cancel",
+              "pay",
+              "reverse"
+            ],
+            "type": "string"
+          },
+          "legs": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "commandId": {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                "done": {
+                  "type": "boolean"
+                },
+                "paymentId": {
+                  "maxLength": 36,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "paymentId",
+                "commandId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payments": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "amountMinor": {
+                  "type": "integer"
+                },
+                "done": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "tenderedMinor": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "method",
+                "amountMinor"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "sending",
+              "done",
+              "changed",
+              "refused",
+              "gone"
+            ],
+            "type": "string"
+          },
+          "storeStatus": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "attemptId",
+          "at"
+        ],
+        "type": "object"
+      },
+      "subtotalMinor": {
+        "type": "integer"
+      },
+      "syncStatus": {
+        "enum": [
+          "pending",
+          "applied",
+          "rejected"
+        ],
+        "maxLength": 10,
+        "type": "string"
+      },
+      "taxAddress": {
+        "enum": [
+          "billing",
+          "shipping"
+        ],
+        "type": "string"
+      },
+      "taxByRate": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "amountMinor": {
+              "type": "integer"
+            },
+            "code": {
+              "type": "string"
+            },
+            "grossMinor": {
+              "type": "integer"
+            },
+            "label": {
+              "type": "string"
+            },
+            "netMinor": {
+              "type": "integer"
+            },
+            "ratePpm": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ratePpm",
+            "netMinor",
+            "amountMinor",
+            "grossMinor"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "taxMinor": {
+        "type": "integer"
+      },
+      "taxRounding": {
+        "additionalProperties": false,
+        "properties": {
+          "granularity": {
+            "enum": [
+              "per_order",
+              "per_line_items",
+              "per_rate_group_items",
+              "custom",
+              "woocommerce"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "half_away_from_zero",
+              "half_up"
+            ],
+            "type": "string"
+          },
+          "roundAtSubtotal": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "granularity"
+        ],
+        "type": "object"
+      },
+      "totalMinor": {
+        "type": "integer"
+      },
+      "updatedAt": {
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "createdAt",
+      "currency",
+      "pricesIncludeTax",
+      "lines",
+      "subtotalMinor",
+      "discountMinor",
+      "taxMinor",
+      "totalMinor",
+      "payments",
+      "customer",
+      "syncStatus",
+      "commandId",
+      "updatedAt",
+      "taxRounding",
+      "_deleted",
+      "_rev",
+      "_meta",
+      "_attachments"
+    ],
+    "type": "object",
+    "version": 23
+  },
+  "orderDraftSchema": {
+    "additionalProperties": false,
+    "encrypted": [],
+    "indexes": [
+      [
+        "_deleted",
+        "id"
+      ],
+      [
+        "_meta.lwt",
+        "id"
+      ]
+    ],
+    "keyCompression": false,
+    "primaryKey": "id",
+    "properties": {
+      "_attachments": {
+        "type": "object"
+      },
+      "_deleted": {
+        "type": "boolean"
+      },
+      "_meta": {
+        "additionalProperties": true,
+        "properties": {
+          "lwt": {
+            "maximum": 1000000000000000,
+            "minimum": 1,
+            "multipleOf": 0.01,
+            "type": "number"
+          }
+        },
+        "required": [
+          "lwt"
+        ],
+        "type": "object"
+      },
+      "_rev": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "customerName": {
+        "type": "string"
+      },
+      "data": {
+        "type": "string"
+      },
+      "id": {
+        "maxLength": 100,
+        "type": "string"
+      },
+      "itemCount": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "multipleOf": 1,
+        "type": "integer"
+      },
+      "parkedAt": {
+        "type": "string"
+      },
+      "total": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "id",
+      "data",
+      "_deleted",
+      "_rev",
+      "_meta",
+      "_attachments"
+    ],
+    "type": "object",
+    "version": 0
+  },
+  "posOrders": [
+    {
+      "id": "01a22111-53a9-7418-9c37-dcb5d3ad25aa",
+      "saleId": "1795851113383-1",
+      "createdAt": "2026-11-28T07:31:53.388Z",
+      "updatedAt": "2026-11-28T07:31:53.388Z",
+      "commandId": "01a22111-53ac-7387-bd15-0246bd77e0c5",
+      "syncStatus": "pending",
+      "currency": "EUR",
+      "pricesIncludeTax": false,
+      "lines": [
+        {
+          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ab",
+          "productId": "mug",
+          "variantId": "11",
+          "name": "Tally Fixture Mug",
+          "sku": "TALLY-MUG",
+          "quantity": 1,
+          "unitPriceMinor": 800,
+          "discountMinor": 0,
+          "netMinor": 800,
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "152000000"
+            }
+          ]
+        }
+      ],
+      "payments": [
+        {
+          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ae",
+          "method": "cash",
+          "amountMinor": 1309,
+          "tenderedMinor": 1500,
+          "changeMinor": 191
+        }
+      ],
+      "fees": [
+        {
+          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ac",
+          "name": "Service",
+          "amountMinor": 100,
+          "taxStatus": "taxable",
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "19000000"
+            }
+          ],
+          "netMinor": 100,
+          "taxMicros": "19000000"
+        }
+      ],
+      "shipping": [
+        {
+          "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ad",
+          "name": "Courier",
+          "amountMinor": 200,
+          "taxStatus": "taxable",
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "38000000"
+            }
+          ],
+          "netMinor": 200,
+          "taxMicros": "38000000"
+        }
+      ],
+      "subtotalMinor": 800,
+      "discountMinor": 0,
+      "taxMinor": 209,
+      "totalMinor": 1309,
+      "taxRounding": {
+        "granularity": "per_order",
+        "mode": "half_away_from_zero"
+      },
+      "display": {
+        "currency": "EUR",
+        "exponent": 2,
+        "taxInclusive": false,
+        "subtotalMinor": 800,
+        "discountMinor": 0,
+        "taxMinor": 209,
+        "totalMinor": 1309,
+        "lines": [
+          {
+            "lineId": "01a22111-53a9-7418-9c37-dcb5d3ad25ab",
+            "amountMinor": 800,
+            "discounts": []
+          }
+        ],
+        "orderDiscountMinor": 0,
+        "fees": [
+          {
+            "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ac",
+            "name": "Service",
+            "amountMinor": 100
+          }
+        ],
+        "shipping": [
+          {
+            "id": "01a22111-53a9-7418-9c37-dcb5d3ad25ad",
+            "name": "Courier",
+            "amountMinor": 200
+          }
+        ]
+      },
+      "taxByRate": [
+        {
+          "ratePpm": 190000,
+          "netMinor": 1100,
+          "amountMinor": 209,
+          "grossMinor": 1309
+        }
+      ],
+      "customer": null,
+      "note": "Queued on 5.3.0, never sent",
+      "registerId": "register-1",
+      "cashierRef": "cashier@example.com"
+    },
+    {
+      "id": "01a22111-53bc-74eb-8aef-f1b8af65f81a",
+      "saleId": "1795851113404-6",
+      "createdAt": "2026-11-28T07:31:53.404Z",
+      "updatedAt": "2026-11-28T07:31:53.404Z",
+      "commandId": "01a22111-53bc-74eb-8aef-f1b8af65f81f",
+      "syncStatus": "pending",
+      "currency": "EUR",
+      "pricesIncludeTax": false,
+      "lines": [
+        {
+          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81b",
+          "productId": "mug",
+          "variantId": "11",
+          "name": "Tally Fixture Mug",
+          "sku": "TALLY-MUG",
+          "quantity": 1,
+          "unitPriceMinor": 800,
+          "discountMinor": 0,
+          "netMinor": 800,
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "152000000"
+            }
+          ]
+        }
+      ],
+      "payments": [
+        {
+          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81e",
+          "method": "external",
+          "amountMinor": 1309
+        }
+      ],
+      "fees": [
+        {
+          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81c",
+          "name": "Service",
+          "amountMinor": 100,
+          "taxStatus": "taxable",
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "19000000"
+            }
+          ],
+          "netMinor": 100,
+          "taxMicros": "19000000"
+        }
+      ],
+      "shipping": [
+        {
+          "id": "01a22111-53bc-74eb-8aef-f1b8af65f81d",
+          "name": "Courier",
+          "amountMinor": 200,
+          "taxStatus": "taxable",
+          "taxLines": [
+            {
+              "ratePpm": 190000,
+              "taxMicros": "38000000"
+            }
+          ],
+          "netMinor": 200,
+          "taxMicros": "38000000"
+        }
+      ],
+      "subtotalMinor": 800,
+      "discountMinor": 0,
+      "taxMinor": 209,
+      "totalMinor": 1309,
+      "taxRounding": {
+        "granularity": "per_order",
+        "mode": "half_away_from_zero"
+      },
+      "display": {
+        "currency": "EUR",
+        "exponent": 2,
+        "taxInclusive": false,
+        "subtotalMinor": 800,
+        "discountMinor": 0,
+        "taxMinor": 209,
+        "totalMinor": 1309,
+        "lines": [
+          {
+            "lineId": "01a22111-53bc-74eb-8aef-f1b8af65f81b",
+            "amountMinor": 800,
+            "discounts": []
+          }
+        ],
+        "orderDiscountMinor": 0,
+        "fees": [
+          {
+            "id": "01a22111-53bc-74eb-8aef-f1b8af65f81c",
+            "name": "Service",
+            "amountMinor": 100
+          }
+        ],
+        "shipping": [
+          {
+            "id": "01a22111-53bc-74eb-8aef-f1b8af65f81d",
+            "name": "Courier",
+            "amountMinor": 200
+          }
+        ]
+      },
+      "taxByRate": [
+        {
+          "ratePpm": 190000,
+          "netMinor": 1100,
+          "amountMinor": 209,
+          "grossMinor": 1309
+        }
+      ],
+      "customer": null,
+      "note": "Queued on 5.3.0, sent once",
+      "registerId": "register-1",
+      "cashierRef": "cashier@example.com",
+      "sentVersion": 11
+    }
+  ],
+  "orderDrafts": [
+    {
+      "id": "1795851113404-11",
+      "data": "{\"id\":\"1795851113404-11\",\"status\":\"draft\",\"lineItems\":[{\"id\":\"1795851113404-12\",\"taxFromClass\":true,\"productId\":\"mug\",\"variantId\":\"11\",\"name\":\"Tally Fixture Mug\",\"sku\":\"TALLY-MUG\",\"unitPriceMinor\":800,\"quantity\":2,\"taxLines\":[{\"ratePpm\":190000,\"taxMicros\":\"304000000\"}],\"discounts\":[],\"discountMinor\":0,\"orderDiscountMinor\":0,\"netMinor\":1600,\"taxMicros\":\"304000000\",\"taxInclusive\":false}],\"discounts\":[],\"payments\":[],\"customer\":{\"id\":\"7\",\"name\":\"Ada Park\"},\"note\":\"Parked on 5.3.0\",\"subtotalMinor\":1600,\"discountMinor\":0,\"taxMinor\":304,\"totalMinor\":1904,\"display\":{\"taxInclusive\":false,\"subtotalMinor\":1600,\"discountMinor\":0,\"taxMinor\":304,\"totalMinor\":1904,\"lines\":[{\"lineId\":\"1795851113404-12\",\"amountMinor\":1600,\"discounts\":[]}],\"orderDiscountMinor\":0},\"paidMinor\":0,\"balanceDueMinor\":1904,\"changeDueMinor\":0,\"currency\":\"EUR\",\"pricesIncludeTax\":false,\"createdAt\":\"2026-11-28T07:31:53.404Z\",\"updatedAt\":\"2026-11-28T07:31:53.404Z\"}",
+      "customerName": "Ada Park",
+      "itemCount": 1,
+      "total": 1904,
+      "parkedAt": "2026-11-28T07:31:53.404Z"
+    }
+  ]
+}
