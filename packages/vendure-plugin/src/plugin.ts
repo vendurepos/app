@@ -113,7 +113,7 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
   controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController,
     TallyStockEditController, TallyCouponsController],
   providers: [OrderCreateService, PaymentMethodsService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService, ReceiptEmailLimits,
-    CouponPricingService, MovedOrderAddresses,
+    CouponPricingService,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
     { provide: TALLY_PLUGIN_OPTIONS, useFactory: () => TallyPosPlugin.options },
     { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],
@@ -123,6 +123,11 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
   // Idempotent: Vendure's starter runs runMigrations(config) and then bootstrap(config), and both
   // run this on arrays that setConfig shares with the caller's config.
   configuration: config => {
+    const { subscribers = [] } = config.dbConnectionOptions;
+    if (!Array.isArray(subscribers)) throw new Error('TallyPosPlugin needs dbConnectionOptions.subscribers to be an array');
+    if (!subscribers.includes(MovedOrderAddresses)) {
+      config.dbConnectionOptions = { ...config.dbConnectionOptions, subscribers: [...subscribers, MovedOrderAddresses] };
+    }
     const byName = (a: { name: string }, b: { name: string }) => a.name === b.name;
     const byCode = (a: { code: string }, b: { code: string }) => a.code === b.code;
     config.customFields.Order = withMissing(config.customFields.Order, orderCustomFields, byName);
