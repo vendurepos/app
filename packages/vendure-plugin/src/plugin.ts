@@ -30,6 +30,7 @@ import {
 } from './service/display-signalling.service';
 import type { CustomerDisplayOptions } from './service/display-signalling.service';
 import { loggerCtx } from './service/errors';
+import { MovedOrderAddresses } from './service/moved-order-addresses';
 import { OrderCreateService } from './service/order-create.service';
 import { PaymentMethodsService } from './service/payment-methods.service';
 import { ReceiptEmailLimits } from './service/receipt-email-limits.service';
@@ -112,7 +113,7 @@ export type TallyPosPluginOptions = { customerDisplay?: CustomerDisplayOptions;
   controllers: [TallyInfoController, TallyCommandsController, TallyRegistersController, TallyReportsController, TallyDisplaysController, TallyReceiptEmailController,
     TallyStockEditController, TallyCouponsController],
   providers: [OrderCreateService, PaymentMethodsService, RegisterService, RegisterApprovalService, RefundService, ReportService, StoreSetupService, DisplaySignallingService, ReceiptEmailLimits,
-    CouponPricingService,
+    CouponPricingService, MovedOrderAddresses,
     { provide: TALLY_DISPLAY_OPTIONS, useFactory: () => TallyPosPlugin.options.customerDisplay ?? {} },
     { provide: TALLY_PLUGIN_OPTIONS, useFactory: () => TallyPosPlugin.options },
     { provide: TALLY_RECEIPT_EMAIL, useFactory: () => receiptEmailCaps(TallyPosPlugin.options.receiptEmail) }],

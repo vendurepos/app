@@ -18,9 +18,11 @@ describe('POS order custom field visibility', () => {
   let clientOrderId: string;
 
   let till: Awaited<ReturnType<typeof setupTill>>;
+  let storefront: Awaited<ReturnType<typeof createStorefrontMethods>>;
   beforeAll(async () => {
     await environment.init();
     till = await setupTill();
+    storefront = await createStorefrontMethods(adminClient);
   });
   afterAll(() => server.destroy());
 
@@ -296,7 +298,7 @@ describe('POS order custom field visibility', () => {
   }
 
   it('P7: a storefront order keeps Vendure’s reasons on the Shop API', async () => {
-    const { standardShippingId, dummyPaymentCode } = await createStorefrontMethods(adminClient);
+    const { standardShippingId, dummyPaymentCode } = storefront;
     const shop = await guestOrder(shopClient, variantIds.mug[0], `p7-${randomUUID()}@customer.example`);
     await shop.setShipping(standardShippingId);
     await shop.arrangePayment();
@@ -457,5 +459,77 @@ describe('POS order custom field visibility', () => {
     expect(order.history.items).toContainEqual({ type: 'ORDER_CUSTOMER_UPDATED', data: expect.objectContaining({
       previousCustomerName: expect.stringContaining(customerB.firstName),
     }) });
+  });
+
+  const createCustomer = parse(`mutation Customer($input: CreateCustomerInput!) {
+    createCustomer(input: $input) { ... on Customer { id emailAddress } ... on ErrorResult { errorCode message } }
+  }`);
+  const moveOrder = parse(`mutation Move($input: SetOrderCustomerInput!) {
+    setOrderCustomer(input: $input) { id }
+  }`);
+
+  it("P12: a POS order moved to another customer keeps none of the earlier customer's addresses", async () => {
+    const input = { firstName: 'Ada', lastName: 'Lovelace', emailAddress: `p12-${randomUUID()}@example.com` };
+    const { createCustomer: customerA } = await adminClient.query(createCustomer, { input });
+    expect(customerA).toMatchObject({ id: expect.any(String), emailAddress: input.emailAddress });
+    const DE = { firstName: 'Ada', lastName: 'Lovelace', address1: `Hauptstr. ${randomUUID()}`, city: 'Berlin', postcode: '10115', country: 'DE' };
+    const sale = freshSale();
+    const customer = { email: customerA.emailAddress, billing: DE, shipping: DE };
+    sale.payload.customer = customer;
+    const result = await run({ ...sale, version: 11 } as unknown as typeof sale);
+    expect(result.status, JSON.stringify(result)).toBe('applied');
+    const { orderId: id, displayId: code } = result.serverRefs!;
+    const fields = 'fullName streetLine1 city postalCode countryCode';
+    const addresses = `billingAddress { ${fields} } shippingAddress { ${fields} }`;
+    const adminOrder = parse(`query Order($id: ID!) { order(id: $id) { ${addresses} } }`);
+    const stored = { fullName: 'Ada Lovelace', streetLine1: DE.address1, city: DE.city, postalCode: DE.postcode, countryCode: DE.country };
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual({ billingAddress: stored, shippingAddress: stored });
+
+    expect((await adminClient.query(moveOrder, { input: { orderId: id, customerId: till.customerId } })).setOrderCustomer.id).toBe(id);
+    const empty = { fullName: null, streetLine1: null, city: null, postalCode: null, countryCode: null };
+    const cleared = { billingAddress: empty, shippingAddress: empty };
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual(cleared);
+
+    expect(await shopClient.asUserWithCredentials(till.email, till.password)).toMatchObject({ identifier: till.email });
+    const own = await shopClient.query(parse(`query Orders($code: String!) {
+      activeCustomer { orders(options: { filter: { code: { eq: $code } } }) { items { ${addresses} } } }
+    }`), { code });
+    expect(own.activeCustomer.orders.items).toHaveLength(1);
+    await shopClient.asAnonymousUser();
+    const anonymous = await shopClient.query(parse(`query Order($code: String!) {
+      orderByCode(code: $code) { ${addresses} }
+    }`), { code });
+    for (const [response, order] of [[own, own.activeCustomer.orders.items[0]], [anonymous, anonymous.orderByCode]]) {
+      const serialized = JSON.stringify(response);
+      expect(serialized).not.toContain(DE.address1);
+      expect(serialized).not.toContain('Berlin');
+      expect(order).toEqual(cleared);
+    }
+
+    expect((await adminClient.query(moveOrder, { input: { orderId: id, customerId: customerA.id } })).setOrderCustomer.id).toBe(id);
+    expect((await adminClient.query(adminOrder, { id })).order).toEqual(cleared);
+  });
+
+  it('P13: a storefront order moved to another customer keeps its address', async () => {
+    const shop = await guestOrder(shopClient, variantIds.mug[0], `p13-${randomUUID()}@customer.example`);
+    const streetLine1 = `Hauptstr. ${randomUUID()}`;
+    const { setOrderShippingAddress } = await shopClient.query(parse(`mutation Address($street: String!) {
+      setOrderShippingAddress(input: { fullName: "Ada Lovelace", streetLine1: $street, city: "Berlin", postalCode: "10115", countryCode: "DE" }) {
+        ... on Order { shippingAddress { streetLine1 } } ... on ErrorResult { errorCode message }
+      }
+    }`), { street: streetLine1 });
+    expect(setOrderShippingAddress).toEqual({ shippingAddress: { streetLine1 } });
+    await shop.setShipping(storefront.standardShippingId);
+    await shop.arrangePayment();
+    const paid = await shop.pay(storefront.dummyPaymentCode);
+    expect(paid).toMatchObject({ state: 'PaymentSettled' });
+    const input = { firstName: 'New', lastName: 'Customer', emailAddress: `p13-${randomUUID()}@example.com` };
+    const { createCustomer: target } = await adminClient.query(createCustomer, { input });
+    expect(target).toMatchObject({ id: expect.any(String) });
+    expect((await adminClient.query(moveOrder, { input: { orderId: paid.id, customerId: target.id } })).setOrderCustomer.id).toBe(paid.id);
+    const { order } = await adminClient.query(parse(`query Order($id: ID!) {
+      order(id: $id) { shippingAddress { streetLine1 } }
+    }`), { id: paid.id });
+    expect(order.shippingAddress.streetLine1).toBe(streetLine1);
   });
 });
