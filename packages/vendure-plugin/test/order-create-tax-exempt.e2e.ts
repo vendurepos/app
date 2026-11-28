@@ -164,7 +164,7 @@ describe('order.create per-sale tax exemption', () => {
     expect(await run(command)).toEqual({ ...result, status: 'duplicate' });
   });
 
-  it('E11: /info declares the tax-exempt support constant', async () => {
+  it('E11: /info and the order.create gate both follow the tax-exempt support constant', async () => {
     const info = async () => {
       const response = await fetch(`${await server.app.getUrl()}/tally/v1/info`, { headers: { Authorization: `Bearer ${adminClient.getAuthToken()}` } });
       expect(response.status).toBe(200);
@@ -176,9 +176,35 @@ describe('order.create per-sale tax exemption', () => {
     try {
       Object.assign(TAX_EXEMPT_SUPPORT, { taxExempt: false });
       expect(await info()).toMatchObject(TAX_EXEMPT_SUPPORT);
+      expect(await run(mug())).toMatchObject({ status: 'rejected', error: { code: 'invalid_payload',
+        message: expect.stringContaining('taxExempt: not supported by this server') } });
     } finally {
       Object.assign(TAX_EXEMPT_SUPPORT, declared);
     }
+    expect(await run(mug())).toMatchObject({ status: 'applied' });
+  });
+
+  it("E12: an exempt sale with a cash rounding stores the till's total untaxed", async () => {
+    await adminClient.query(parse(`mutation Create($input: CreatePaymentMethodInput!) { createPaymentMethod(input: $input) { id } }`), { input: {
+      code: 'cash-5', enabled: true, translations: [{ languageCode: 'en', name: 'cash-5', description: '' }],
+      handler: { code: 'tally-pos', arguments: [
+        { name: 'tender', value: 'cash' }, { name: 'roundingIncrement', value: '5' }, { name: 'roundingMode', value: 'nearest' },
+      ] },
+    } });
+    const command = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 803, ratePpm: 0 }],
+      [{ method: 'cash', amountMinor: 805 }]);
+    const { payload } = command;
+    Object.assign(payload.payments[0], { methodId: 'cash-5' });
+    Object.assign(payload, { taxExempt: true, cashRoundings: [{ paymentId: payload.payments[0].clientPaymentId, minor: 2 }] });
+    payload.totalMinor = 805;
+    payload.display!.totalMinor = 805;
+    const result = await run({ ...command, version: 10 } as unknown as typeof command);
+    expect(result.status, JSON.stringify(result.error)).toBe('applied');
+    expect(result.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'cash_rounding_unexplained' }));
+    const order = await readOrder(result.serverRefs!.orderId);
+    expect(order.totalWithTax).toBe(805);
+    expect(order.total).toBe(805);
+    expect(order.surcharges.find(charge => charge.sku === 'TALLY-CASH-ROUNDING')).toMatchObject({ priceWithTax: 2, price: 2 });
   });
 
   it('C1: the order.create gate reads the supported argument, not its own constant', () => {
