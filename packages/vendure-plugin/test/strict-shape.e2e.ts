@@ -5,6 +5,7 @@ import { parse } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TallyCommand } from '../src';
 import * as bridgeBound from '../src/service/bridge-bound';
+import { TAX_EXEMPT_SUPPORT } from '../src/service/constants';
 import * as strictShape from '../src/service/strict-shape';
 import { strictShapeErrors } from '../src/service/strict-shape';
 import type { CommandEnvelope, OrderCreatePayload } from '../src/vendored/commands';
@@ -92,7 +93,7 @@ describe('ruling 17: order.create is validated strictly per version', () => {
   });
 
   it('fixture v3: the vendored ADR-065 fixture has no strict-shape error, and the v3 test payload is applied', async () => {
-    expect(strictShapeErrors(v3Fixture as unknown as Record<string, unknown>, 3)).toEqual([]);
+    expect(strictShapeErrors(v3Fixture as unknown as Record<string, unknown>, 3, TAX_EXEMPT_SUPPORT)).toEqual([]);
     const input = orderCommand([{ variantId: variantIds.mug[0], quantity: 1, unitPriceMinor: 800 }], undefined, { email: 'v3@example.com' });
     expect(await run(input)).toMatchObject({ id: input.id, status: 'applied' });
   });
@@ -196,7 +197,7 @@ describe('ruling 17: order.create is validated strictly per version', () => {
       bound?.mockRestore();
     }
     expect(applied).toMatchObject({ id: input.id, status: 'applied' });
-    expect(strictShapeErrors(input as unknown as Record<string, unknown>, 1)).not.toEqual([]);
+    expect(strictShapeErrors(input as unknown as Record<string, unknown>, 1, TAX_EXEMPT_SUPPORT)).not.toEqual([]);
     // The same id: the replay read answers with the recorded duplicate.
     expect(await run(structuredClone(input))).toMatchObject({ id: input.id, status: 'duplicate', serverRefs: applied.serverRefs });
     // A new id for the same clientOrderId: the collision guard stores and answers applied with the first sale's refs.

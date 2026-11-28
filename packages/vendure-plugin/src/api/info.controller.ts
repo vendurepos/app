@@ -5,7 +5,7 @@ import { TALLY_RECEIPT_EMAIL } from './receipt-email.controller';
 import type { ReceiptEmailCaps } from './receipt-email.controller';
 import { DisplaySignallingService } from '../service/display-signalling.service';
 import type { IceServer } from '../service/display-signalling.service';
-import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS } from '../service/constants';
+import { ADVERTISED_ORDER_CREATE_VERSIONS, MAX_SHIPPING_LINES, ORDER_REFUND_VERSIONS, REGISTER_VERSIONS, TAX_EXEMPT_SUPPORT } from '../service/constants';
 import { PaymentMethodsService } from '../service/payment-methods.service';
 import type { TenderMethod } from '../service/payment-methods.service';
 import { TALLY_PLUGIN_OPTIONS } from '../service/register.service';
@@ -26,7 +26,7 @@ export type TallyInfo = { contracts: { 'order.create': number[]; register: numbe
   /** TallyUI ADR-094: order.create accepts `cashRoundings` at every content version (docs/adr 0009). */
   cashRounding: { v: 1 };
   /** TallyUI 2.10b: fees[] and shipping[] may carry amountIncludesTax. */
-  chargeTaxMode: { v: 1 }; receiptEmail?: { v: 1 };
+  chargeTaxMode: { v: 1 }; taxExempt: boolean; taxExemptCoupons: boolean; receiptEmail?: { v: 1 };
   /** #332: only when the plugin's `registerApproval` option is set. */
   registerApproval?: { thresholdMinor: number };
   /** #487: the caller's own permissions on the active channel (a device-key till cannot read Admin `me`). */
@@ -63,7 +63,7 @@ export class TallyInfoController {
       maxShippingLines: MAX_SHIPPING_LINES, // ADR 0005 ruling (b): one shipping charge per order.
       lineTax: { none: true, classes: true }, // v5 contract §1b: Vendure honours taxStatus none and taxClass.
       customerDisplay: this.displays.advertisement(), paymentMethods: await this.paymentMethods.listed(ctx),
-      cashRounding: { v: 1 }, chargeTaxMode: { v: 1 }, permissions: sessionChannelPermissions(ctx),
+      cashRounding: { v: 1 }, chargeTaxMode: { v: 1 }, ...TAX_EXEMPT_SUPPORT, permissions: sessionChannelPermissions(ctx),
     };
     const name = await this.deviceName(ctx);
     if (name !== undefined) info.device = { name };
