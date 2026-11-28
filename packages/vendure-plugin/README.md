@@ -184,6 +184,29 @@ that sale's payments.
 
 The refund that takes everything left on the order's lines returns the rounding; no partial refund does.
 
+### Tax-exempt sales
+
+`/tally/v1/info` advertises `taxExempt: true` and `taxExemptCoupons: false`. The till then offers a tax-exempt switch on
+a sale. Both values come from one constant (`TAX_EXEMPT_SUPPORT` in `src/service/constants.ts`). `order.create`'s
+own gate reads the same constant, so the till is never offered something the plugin refuses (#540). `taxExempt: true`
+means, for good, that an accepted exempt order carries zero tax.
+
+An exempt `order.create` carries `taxExempt: true` at its usual content version. The plugin charges the till's amounts
+as sent and never works out a net. It moves every line onto the plugin's `POS no tax` tax category. It charges fees and
+shipping with no tax, whatever their `taxStatus`. The stored order's total is the untaxed subtotal.
+
+The plugin refuses an exempt sale, unstored, as `invalid_payload` when:
+
+- `taxExempt` is anything but `true`;
+- the sale has `pricesIncludeTax`;
+- a line has `taxInclusive`, or a fee or shipping charge has `amountIncludesTax`;
+- any tax figure is not 0;
+- the sale carries coupons. Coupons are refused on every sale, so `taxExemptCoupons` stays false.
+
+If the `POS no tax` category has a tax rate in the order's zone, the sale would still carry tax. The plugin refuses it
+as `store_configuration`, unstored. Vendure keeps active tax rates in a cache for about 30 seconds after a rate is
+deleted. Disable the rate first, then delete it.
+
 ### Merchant code inside the recipe
 
 Each command runs in one database transaction. A refusal found inside it (`underpaid`,

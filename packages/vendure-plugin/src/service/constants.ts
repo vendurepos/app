@@ -11,6 +11,12 @@ export const TALLY_CUSTOM_ITEM_SKU = 'TALLY-CUSTOM-ITEM';
 // ADR 0005 ruling (a): the plugin-owned category for untaxed custom lines.
 export const TALLY_NO_TAX_CATEGORY = 'POS no tax';
 
+/** #540, TallyUI#1447: the plugin's tax-exempt support, read by /info and by order.create's gate (strictShapeErrors), so the
+ * till is never offered what the gate refuses. Wire rule (Front desk, 2026-11-27): `taxExempt: true` means, for good, "an
+ * accepted exempt order carries zero tax"; a new meaning gets a new field name. taxExemptCoupons is typed false: order.create refuses coupons on every sale, so declaring it would offer what the gate refuses. */
+export type TaxExemptSupport = { taxExempt: boolean; taxExemptCoupons: false };
+export const TAX_EXEMPT_SUPPORT: TaxExemptSupport = { taxExempt: true, taxExemptCoupons: false };
+
 // The order.create versions the server accepts (the plugin's own list; nothing is vendored for it). 6 (ADR-077) is
 // accepted with coupons and Any picks refused and regular prices and line attributes display only; 7 (ADR-083) adds
 // the sale note, kept as a public Vendure order note (P2.11a). 8, 9 and 10 are accepted for their shape only (3.2a-1):

@@ -3,7 +3,7 @@
 // is an unstored invalid_payload in step 4 (after the replay read, so a stored answer wins), since a money field
 // accepted and ignored (v1 `discountMinor`) would charge the full price for a sale the till discounted. The contract
 // declares no free-form map inside order.create.
-import { MAX_SHIPPING_LINES } from './constants';
+import { MAX_SHIPPING_LINES, type TaxExemptSupport } from './constants';
 
 type Fields = Record<string, number>;
 // Each field with the version that introduced it, from src/vendored/commands.ts (`locationId`, declared unversioned, is refused below).
@@ -18,7 +18,7 @@ export function refundEnvelopeStrictErrors(command: Record<string, unknown>, ver
 const PAYLOAD = {
   ...since(1, 'clientOrderId createdAt currency pricesIncludeTax lines subtotalMinor taxMinor totalMinor payments customer registerId cashierRef locationId'),
   discountMinor: 2, ...since(3, 'display taxByRate sessionId'), ...since(5, 'fees shipping'), ...since(6, 'coupons'), note: 7, taxAddress: 8,
-  cashRoundings: 1,
+  cashRoundings: 1, taxExempt: 1,
 };
 const LINE = { ...since(1, 'clientLineId variantId title quantity unitPriceMinor taxInclusive'), discountMinor: 2, custom: 5,
   ...since(6, 'regularUnitPriceMinor attributes anyAttributes') };
@@ -44,7 +44,7 @@ const TAX_RATE = since(1, 'ratePpm code netMinor taxMinor grossMinor');
 /** Fields the command's version does not know, by full path, e.g. 'lines[2].discountMinr: unknown field in
  * order.create version 1' or 'discountMinor: requires order.create version 2, command is version 1'; [] when none.
  * Payload paths are relative to the payload, as in payloadShapeErrors; envelope fields read `envelope.<field>`. */
-export function strictShapeErrors(command: Record<string, unknown>, version: number): string[] {
+export function strictShapeErrors(command: Record<string, unknown>, version: number, supported: TaxExemptSupport): string[] {
   const errors: string[] = [];
   const full = () => errors.length >= 10; // The cap, for every push.
   const check = (value: unknown, fields: Fields, path: string): value is Record<string, unknown> => {
@@ -73,6 +73,10 @@ export function strictShapeErrors(command: Record<string, unknown>, version: num
   const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
   const unsupported = (path: string) => { if (!full()) errors.push(`${path}: not supported by this server`); };
   if (Object.hasOwn(payload, 'coupons')) unsupported('coupons');
+  if (Object.hasOwn(payload, 'taxExempt')) {
+    if (!supported.taxExempt) unsupported('taxExempt');
+    if (Object.hasOwn(payload, 'coupons') && !supported.taxExemptCoupons) unsupported('taxExempt with coupons');
+  }
   if (isObject(payload.display) && Object.hasOwn(payload.display, 'coupons')) unsupported('display.coupons');
   (Array.isArray(payload.lines) ? payload.lines : []).forEach((line, index) => {
     if (isObject(line) && Object.hasOwn(line, 'anyAttributes')) unsupported(`lines[${index}].anyAttributes`);

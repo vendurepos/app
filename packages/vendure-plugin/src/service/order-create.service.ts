@@ -20,7 +20,7 @@ import { payloadShapeErrors } from '../vendored/payload-shape';
 import { ratePpmFromPercent } from '../vendored/tax-exact';
 import {
   IN_STORE_COLLECTION, CUSTOMER_LOCK_NAMESPACE, ORDER_CREATE_VERSIONS, TALLY_CUSTOM_ITEM_SKU, TALLY_DISCOUNT_SKU, TALLY_FEE_SKU,
-  TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, WALK_IN_EMAIL,
+  TALLY_NO_TAX_CATEGORY, TALLY_CASH_ROUNDING_SKU, TALLY_ROUNDING_SKU, TAX_EXEMPT_SUPPORT, WALK_IN_EMAIL,
 } from './constants';
 import { cashRoundingPayloadErrors, cashRoundingRefusal, cashRoundingSum, cashRoundingUnexplained, withoutCashRounding } from './cash-rounding';
 import { classify } from './classification';
@@ -37,6 +37,7 @@ import type { MethodFallback } from './payment-methods.service';
 import { StoreSetupService } from './store-setup.service';
 import { strictShapeErrors } from './strict-shape';
 import { resolveTaxCategory } from './tax-class';
+import { taxExemptPayloadErrors } from './tax-exempt';
 import { taxRoundingFor, type TaxRounding } from './tax-rounding';
 import { MAX_INT4, maxMoneyMinor, valueRangeErrors } from './value-ranges';
 
@@ -388,10 +389,11 @@ export class OrderCreateService {
   private valueRefusal(command: CommandEnvelope<OrderCreatePayload>): OrderCreateResult | undefined {
     const maxMoney = maxMoneyMinor(this.config.entityOptions.moneyStrategy?.moneyColumnOptions.type);
     // Ruling 17: strict per version, by path; here, not in step 1, so a stored answer always wins (#36 review).
-    const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version);
+    const errors = strictShapeErrors(command as unknown as Record<string, unknown>, command.version, TAX_EXEMPT_SUPPORT);
     errors.push(...valueRangeErrors(command.payload, maxMoney, command.version));
     // TallyUI ADR-094: the vendored fiscal check predates cashRoundings, so it checks the goods figures.
     errors.push(...cashRoundingPayloadErrors(command.payload));
+    errors.push(...taxExemptPayloadErrors(command.payload));
     if (!errors.length && command.version >= 3) errors.push(...fiscalFiguresErrors(withoutCashRounding(command.payload)));
     return errors.length ? refuse(command.id, 'invalid_payload', errors.join('; ')) : undefined;
   }
@@ -599,6 +601,7 @@ export class OrderCreateService {
   // the refused-PaymentSettled mapping, id decoding and the live-shipping-method lookup.
   private async recipe(ctx: RequestContext, command: CommandEnvelope<OrderCreatePayload>, progress: SaleProgress, codes: string[], unexplained: Unexplained[]): Promise<SaleOutcome> {
     const payload = command.payload;
+    const exempt = (payload as { taxExempt?: unknown }).taxExempt === true;
     // ADR 0002 "Customer": a customerId unknown here is treated as absent, with a warning.
     // #43: one over CUSTOMER_ID_MAX never gets here; step 4 refuses it as invalid_payload.
     const given = payload.customer?.customerId;
@@ -755,6 +758,15 @@ export class OrderCreateService {
       await this.calculator.applyPriceAdjustments(ctx, order, [], customLines);
       await this.connection.getRepository(ctx, OrderLine).save(customLines);
     }
+    if (exempt) {
+      const category = await this.connection.getRepository(ctx, TaxCategory).findOneByOrFail({ name: TALLY_NO_TAX_CATEGORY });
+      for (const line of order.lines) {
+        line.taxCategory = category;
+        line.taxCategoryId = category.id;
+      }
+      await this.calculator.applyPriceAdjustments(ctx, order, [], order.lines);
+      await this.connection.getRepository(ctx, OrderLine).save(order.lines);
+    }
     const shipping = await this.connection.getRepository(ctx, ShippingMethod).findOneOrFail({
       where: { code: TALLY_SHIPPING_METHOD_CODE, deletedAt: IsNull(), channels: { id: ctx.channelId } },
     });
@@ -762,7 +774,7 @@ export class OrderCreateService {
     if (payload.shipping?.length === 1) {
       const { clientShippingId, name, methodId, amountMinor, taxStatus, taxClass } = payload.shipping[0];
       let taxRate = 0;
-      if (taxStatus === 'taxable') {
+      if (taxStatus === 'taxable' && !exempt) {
         const zones = await this.zoneService.getAllWithMembers(ctx);
         const zone = await this.config.taxOptions.taxZoneStrategy.determineTaxZone(ctx, zones, ctx.channel, order);
         const category = await resolveTaxCategory(ctx, this.connection, taxClass);
@@ -796,7 +808,7 @@ export class OrderCreateService {
       const zone = await this.config.taxOptions.taxZoneStrategy.determineTaxZone(ctx, zones, ctx.channel, order);
       for (const fee of payload.fees) {
         let taxLines: Surcharge['taxLines'] = [];
-        if (fee.taxStatus === 'taxable') {
+        if (fee.taxStatus === 'taxable' && !exempt) {
           const category = await resolveTaxCategory(ctx, this.connection, fee.taxClass);
           const rate = await this.taxRateService.getApplicableTaxRate(ctx, zone!, category!);
           taxLines = [{ taxRate: rate.value, description: rate.name }];
@@ -812,6 +824,9 @@ export class OrderCreateService {
     // calculateOrderTotals reads surcharge.price/priceWithTax; these getters compute tax
     // from taxLines. applyTaxes only visits product lines, so attach surcharges above.
     order = await this.calculator.applyPriceAdjustments(ctx, order, []);
+    if (exempt && order.totalWithTax !== order.total) {
+      throw new StoreConfigurationRefusal(`Tax-exempt order ${payload.clientOrderId} would carry tax ${order.totalWithTax - order.total}: the "${TALLY_NO_TAX_CATEGORY}" tax category has a rate in this zone`);
+    }
     const totalWarnings: TotalWarning[] = [];
     const serverMinor = order.totalWithTax;
     // TallyUI ADR-094: the bridge reaches the goods total; the cash rounding is its own surcharge, saved below.
