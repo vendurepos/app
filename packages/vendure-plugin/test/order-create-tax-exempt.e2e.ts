@@ -61,6 +61,7 @@ describe('order.create per-sale tax exemption', () => {
     expect(result.warnings ?? []).toEqual([]);
     expect(result.totalWarnings ?? []).toEqual([]);
     const order = await readOrder(result.serverRefs!.orderId);
+    expect(JSON.parse(order.customFields.tallySnapshot!)).toMatchObject({ taxExempt: true });
     expect(order.total).toBe(2752);
     expect(order.totalWithTax).toBe(2752);
     expect(order.lines).toHaveLength(2);
@@ -75,6 +76,7 @@ describe('order.create per-sale tax exemption', () => {
     const result = await run(cart(false));
     expect(result).toMatchObject({ status: 'applied' });
     const order = await readOrder(result.serverRefs!.orderId);
+    expect(JSON.parse(order.customFields.tallySnapshot!)).not.toHaveProperty('taxExempt');
     expect(order.totalWithTax - order.total).toBe(688);
     expect(order.totalWithTax).toBe(3440);
   });
@@ -85,6 +87,7 @@ describe('order.create per-sale tax exemption', () => {
       expect(result).toMatchObject({ status: 'applied', serverRefs: { totalMinor: 800 } });
       expect(result.warnings ?? []).toEqual([]);
       const order = await readOrder(result.serverRefs!.orderId);
+      expect(JSON.parse(order.customFields.tallySnapshot!).taxExempt).toBe(true);
       expect(order.totalWithTax).toBe(order.total);
     }
   });
@@ -205,6 +208,18 @@ describe('order.create per-sale tax exemption', () => {
     expect(order.totalWithTax).toBe(805);
     expect(order.total).toBe(805);
     expect(order.surcharges.find(charge => charge.sku === 'TALLY-CASH-ROUNDING')).toMatchObject({ priceWithTax: 2, price: 2 });
+  });
+
+  it('E13: the Admin API order read carries the exemption marker in tallySnapshot, and a taxed order carries none', async () => {
+    for (const exempt of [true, false]) {
+      const result = await run(cart(exempt));
+      expect(result).toMatchObject({ status: 'applied' });
+      const { order } = await adminClient.query<{ order: { id: string; customFields: { tallySnapshot: string | null } } }>(
+        parse('query Order($id: ID!) { order(id: $id) { id customFields { tallySnapshot } } }'), { id: result.serverRefs!.orderId });
+      const snapshot = JSON.parse(order.customFields.tallySnapshot!);
+      if (exempt) expect(snapshot.taxExempt).toBe(true);
+      else expect(snapshot).not.toHaveProperty('taxExempt');
+    }
   });
 
   it('C1: the order.create gate reads the supported argument, not its own constant', () => {

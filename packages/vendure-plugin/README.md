@@ -207,6 +207,11 @@ If the `POS no tax` category has a tax rate in the order's zone, the sale would 
 as `store_configuration`, unstored. Vendure keeps active tax rates in a cache for about 30 seconds after a rate is
 deleted. Disable the rate first, then delete it.
 
+An exempt order records the exemption in its `tallySnapshot` custom field as `"taxExempt": true`. A taxed order has no
+`taxExempt` key. The field is readable in the Admin API (`order { customFields { tallySnapshot } }`), so a reprint,
+the till's order read or an accountant can see that the sale was exempt. Orders sold with plugin 0.6.0 or earlier
+were never exempt, since those versions refuse the field.
+
 ### Merchant code inside the recipe
 
 Each command runs in one database transaction. A refusal found inside it (`underpaid`,

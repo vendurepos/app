@@ -10,7 +10,8 @@
   - `order.create` accepts `taxExempt: true` at every content version. The order is stored with zero tax: every line goes on the `POS no tax` category, and fees and shipping are untaxed.
   - An exempt sale is refused, unstored, as `invalid_payload` when `taxExempt` is not `true`, when it is in prices-include-tax mode, when it has an inclusive line, fee or shipping charge, when any tax figure is not 0, or when it carries coupons.
   - An exempt sale is refused, unstored, as `store_configuration` if `POS no tax` has a rate in the order's zone.
-  - Additive: there is no new version and no migration, and the order stores no exempt marker.
+  - The stored order records the exemption: an exempt order's `tallySnapshot` carries `"taxExempt": true`, and a taxed order's has no `taxExempt` key. connector-vendure reads `tallySnapshot` on its Admin API order read, so it can set `StoreOrder.taxExempt` from it.
+  - Additive: there is no new version, no migration and no new custom field.
 
 ## 0.6.0 (2026-11-27)
 

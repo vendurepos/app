@@ -958,10 +958,11 @@ export class OrderCreateService {
     // totalMinor is the total the tender cap used (ADR-039), and the register reads it.
     const wireEntries = unexplained.map(({ paymentId, minor, maxMinor }) => ({ paymentId, minor, maxMinor }));
     const unexplainedKey = wireEntries.length ? { cashRoundingUnexplained: wireEntries } : {}; // TallyUI ADR-094: only when warned.
+    const exemptKey = exempt ? { taxExempt: true as const } : {}; // #540: the stored exemption marker, TallyUI StoreOrder.taxExempt; absent on a taxed sale.
     if (command.version >= 3) {
-      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts, totalMinor: payload.totalMinor, ...unexplainedKey });
+      order.customFields.tallySnapshot = JSON.stringify({ display: payload.display, taxByRate: payload.taxByRate, lineDiscounts, totalMinor: payload.totalMinor, ...unexplainedKey, ...exemptKey });
     } else {
-      order.customFields.tallySnapshot = JSON.stringify({ ...(Object.keys(lineDiscounts).length ? { lineDiscounts } : {}), totalMinor: payload.totalMinor, ...unexplainedKey });
+      order.customFields.tallySnapshot = JSON.stringify({ ...(Object.keys(lineDiscounts).length ? { lineDiscounts } : {}), totalMinor: payload.totalMinor, ...unexplainedKey, ...exemptKey });
     }
     await this.connection.getRepository(ctx, Order).save(order);
     // P2.11a: order.create 7's sale note, as Vendure's own public order note, in the sale's transaction. A replay never
